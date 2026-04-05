@@ -7,6 +7,7 @@
 
 import Combine
 import SwiftUI
+import os.log
 
 struct ChatView: View {
     let sessionId: String
@@ -297,7 +298,11 @@ struct ChatView: View {
                         }
 
                         ForEach(history.reversed()) { item in
-                            MessageItemView(item: item, sessionId: sessionId)
+                            MessageItemView(
+                                item: item,
+                                sessionId: sessionId,
+                                onActivateSession: { focusTerminal() }
+                            )
                                 .padding(.horizontal, 16)
                                 .scaleEffect(x: 1, y: -1)
                                 .transition(.asymmetric(
@@ -435,15 +440,41 @@ struct ChatView: View {
                 Spacer(minLength: 0)
             }
 
-            SessionQuestionForm(
-                intervention: intervention,
-                submitLabel: "提交所有回答",
-                onSubmit: { payload in
-                    sessionMonitor.answerIntervention(sessionId: sessionId, answers: payload)
-                },
-                secondaryActionTitle: session.isInTmux ? "打开终端" : nil,
-                onSecondaryAction: session.isInTmux ? { focusTerminal() } : nil
-            )
+            if intervention.supportsInlineResponse {
+                SessionQuestionForm(
+                    intervention: intervention,
+                    submitLabel: "提交所有回答",
+                    onSubmit: { payload in
+                        sessionMonitor.answerIntervention(sessionId: sessionId, answers: payload)
+                    },
+                    secondaryActionTitle: session.isInTmux ? "打开终端" : nil,
+                    onSecondaryAction: session.isInTmux ? { focusTerminal() } : nil
+                )
+            } else {
+                HStack(spacing: 8) {
+                    Button("打开\(session.clientDisplayName)") {
+                        focusTerminal()
+                    }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.black)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 9)
+                    .background(Capsule().fill(Color.white.opacity(0.9)))
+
+                    if session.isInTmux {
+                        Button("打开终端") {
+                            focusTerminal()
+                        }
+                        .buttonStyle(.plain)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 9)
+                        .background(Capsule().fill(Color.white.opacity(0.1)))
+                    }
+                }
+            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
@@ -560,13 +591,14 @@ struct ChatView: View {
 struct MessageItemView: View {
     let item: ChatHistoryItem
     let sessionId: String
+    let onActivateSession: () -> Void
 
     var body: some View {
         switch item.type {
         case .user(let text):
-            UserMessageView(text: text)
+            UserMessageView(text: text, onTap: onActivateSession)
         case .assistant(let text):
-            AssistantMessageView(text: text)
+            AssistantMessageView(text: text, onTap: onActivateSession)
         case .toolCall(let tool):
             ToolCallView(tool: tool, sessionId: sessionId)
         case .thinking(let text):
@@ -581,6 +613,8 @@ struct MessageItemView: View {
 
 struct UserMessageView: View {
     let text: String
+    let onTap: () -> Void
+    private let logger = Logger(subsystem: "com.wudanwu.island", category: "ChatTap")
 
     var body: some View {
         HStack {
@@ -594,6 +628,11 @@ struct UserMessageView: View {
                         .fill(Color.white.opacity(0.15))
                 )
         }
+        .contentShape(Rectangle())
+        .simultaneousGesture(TapGesture().onEnded {
+            logger.debug("User message tapped")
+            onTap()
+        })
     }
 }
 
@@ -601,6 +640,8 @@ struct UserMessageView: View {
 
 struct AssistantMessageView: View {
     let text: String
+    let onTap: () -> Void
+    private let logger = Logger(subsystem: "com.wudanwu.island", category: "ChatTap")
 
     var body: some View {
         HStack(alignment: .top, spacing: 6) {
@@ -614,6 +655,11 @@ struct AssistantMessageView: View {
 
             Spacer(minLength: 60)
         }
+        .contentShape(Rectangle())
+        .simultaneousGesture(TapGesture().onEnded {
+            logger.debug("Assistant message tapped")
+            onTap()
+        })
     }
 }
 

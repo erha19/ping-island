@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import os.log
 
 /// Information about a process in the tree
 struct ProcessInfo: Sendable {
@@ -25,6 +26,7 @@ struct ProcessInfo: Sendable {
 /// Builds and queries the system process tree
 struct ProcessTreeBuilder: Sendable {
     nonisolated static let shared = ProcessTreeBuilder()
+    nonisolated static let logger = Logger(subsystem: "com.wudanwu.island", category: "ProcessTree")
 
     private nonisolated init() {}
 
@@ -80,6 +82,7 @@ struct ProcessTreeBuilder: Sendable {
             guard let info = tree[current] else { break }
 
             if TerminalAppRegistry.isTerminal(info.command) {
+                Self.logger.debug("Matched terminal via parent chain pid=\(pid, privacy: .public) terminalPid=\(current, privacy: .public) command=\(info.command, privacy: .public)")
                 return current
             }
 
@@ -87,7 +90,34 @@ struct ProcessTreeBuilder: Sendable {
             depth += 1
         }
 
+        Self.logger.debug("No terminal found in parent chain for pid=\(pid, privacy: .public)")
         return nil
+    }
+
+    /// Find the terminal app PID for the process group attached to a TTY.
+    /// This is more reliable than following a single child process when the
+    /// tool process is launched from an intermediate host such as Codex.
+    nonisolated func findTerminalPid(forTTY tty: String, tree: [Int: ProcessInfo]) -> Int? {
+        let normalizedTTY = tty.replacingOccurrences(of: "/dev/", with: "")
+        let candidates = candidateProcesses(forTTY: normalizedTTY, tree: tree)
+
+        let candidateSummary = candidates.map { "\($0.pid):\($0.command)" }.joined(separator: ", ")
+        Self.logger.debug("TTY lookup tty=\(normalizedTTY, privacy: .public) candidates=[\(candidateSummary, privacy: .public)]")
+
+        for candidate in candidates {
+            if let terminalPid = findTerminalPid(forProcess: candidate.pid, tree: tree) {
+                Self.logger.debug("TTY lookup matched tty=\(normalizedTTY, privacy: .public) candidatePid=\(candidate.pid, privacy: .public) terminalPid=\(terminalPid, privacy: .public)")
+                return terminalPid
+            }
+        }
+
+        Self.logger.debug("TTY lookup failed tty=\(normalizedTTY, privacy: .public)")
+        return nil
+    }
+
+    nonisolated func candidateProcessIDs(forTTY tty: String, tree: [Int: ProcessInfo]) -> [Int] {
+        let normalizedTTY = tty.replacingOccurrences(of: "/dev/", with: "")
+        return candidateProcesses(forTTY: normalizedTTY, tree: tree).map(\.pid)
     }
 
     /// Check if targetPid is a descendant of ancestorPid
@@ -141,5 +171,38 @@ struct ProcessTreeBuilder: Sendable {
         }
 
         return nil
+    }
+
+    private nonisolated func processSelectionScore(for command: String) -> Int {
+        let lower = command.lowercased()
+
+        if lower.contains("zsh") || lower.contains("bash") || lower.contains("fish") || lower.contains("/sh") {
+            return 4
+        }
+
+        if lower.contains("login") {
+            return 3
+        }
+
+        if lower.contains("claude") || lower.contains("codex") {
+            return 2
+        }
+
+        return 1
+    }
+
+    private nonisolated func candidateProcesses(forTTY normalizedTTY: String, tree: [Int: ProcessInfo]) -> [ProcessInfo] {
+        tree.values
+            .filter { $0.tty == normalizedTTY }
+            .sorted { lhs, rhs in
+                let lhsScore = processSelectionScore(for: lhs.command)
+                let rhsScore = processSelectionScore(for: rhs.command)
+
+                if lhsScore != rhsScore {
+                    return lhsScore > rhsScore
+                }
+
+                return lhs.pid > rhs.pid
+            }
     }
 }

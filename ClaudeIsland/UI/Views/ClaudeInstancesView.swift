@@ -28,11 +28,19 @@ struct ClaudeInstancesView: View {
                 .font(.system(size: 13, weight: .medium))
                 .foregroundColor(.white.opacity(0.4))
 
-            Text("Run Claude Code or Codex in terminal")
+            Text("Run Claude Code, Codex CLI, or Codex App")
                 .font(.system(size: 11))
                 .foregroundColor(.white.opacity(0.25))
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(
+            GeometryReader { geometry in
+                Color.clear.preference(
+                    key: OpenedPanelContentHeightPreferenceKey.self,
+                    value: geometry.size.height
+                )
+            }
+        )
     }
 
     // MARK: - Instances List
@@ -58,6 +66,14 @@ struct ClaudeInstancesView: View {
                 }
             }
             .padding(.vertical, 4)
+            .background(
+                GeometryReader { geometry in
+                    Color.clear.preference(
+                        key: OpenedPanelContentHeightPreferenceKey.self,
+                        value: geometry.size.height
+                    )
+                }
+            )
         }
         .scrollBounceBehavior(.basedOnSize)
     }
@@ -110,7 +126,7 @@ struct InstanceRow: View {
 
     /// Whether we're showing the approval UI
     private var isWaitingForApproval: Bool {
-        session.phase.isWaitingForApproval
+        session.needsApprovalResponse
     }
 
     /// Whether the pending tool requires interactive input (not just approve/deny)
@@ -123,11 +139,14 @@ struct InstanceRow: View {
     }
 
     private var providerLabel: String {
-        session.provider == .claude ? "Claude" : "Codex"
+        session.clientDisplayName
     }
 
     private var providerColor: Color {
-        session.provider == .claude ? claudeOrange : codexBlue
+        if session.clientInfo.brand == .qoder {
+            return Color(red: 0.12, green: 0.88, blue: 0.56)
+        }
+        return session.provider == .claude ? claudeOrange : codexBlue
     }
 
     private var titleFontSize: CGFloat {
@@ -149,7 +168,12 @@ struct InstanceRow: View {
             VStack(alignment: .trailing, spacing: 6) {
                 HStack(spacing: 6) {
                     metaBadge(providerLabel, tint: providerColor.opacity(0.2))
-                    metaBadge(timeLabel, tint: Color.white.opacity(0.1), foreground: .white.opacity(0.64))
+                    metaBadge(
+                        timeLabel,
+                        tint: Color.white.opacity(0.1),
+                        foreground: .white.opacity(0.64),
+                        fontDesign: .monospaced
+                    )
                 }
 
                 trailingActions
@@ -269,7 +293,10 @@ struct InstanceRow: View {
         if isWaitingForApproval {
             return .warning
         }
-        return .normal
+        if session.clientInfo.brand == .qoder {
+            return .qoder
+        }
+        return session.provider == .codex ? .codex : .claude
     }
 
     private var statusAccentColor: Color {
@@ -294,8 +321,7 @@ struct InstanceRow: View {
     }
 
     private var timeLabel: String {
-        let value = SessionPhaseHelpers.timeAgo(session.attentionRequestedAt ?? session.lastActivity)
-        return value == "now" ? "<1m" : value
+        SessionPhaseHelpers.timeBadgeLabel(for: session.attentionRequestedAt ?? session.lastActivity)
     }
 
     private var rowBackgroundColor: Color {
@@ -358,7 +384,7 @@ struct InstanceRow: View {
             lines.append(
                 QueuePreviewLine(
                     id: "assistant",
-                    prefix: providerLabel + "：",
+                    prefix: session.providerDisplayName + "：",
                     prefixColor: assistantPrefixColor,
                     text: assistantLine,
                     textColor: assistantTextColor
@@ -488,9 +514,15 @@ struct InstanceRow: View {
         }
     }
 
-    private func metaBadge(_ text: String, tint: Color, foreground: Color = .white.opacity(0.92)) -> some View {
+    private func metaBadge(
+        _ text: String,
+        tint: Color,
+        foreground: Color = .white.opacity(0.92),
+        fontDesign: Font.Design = .default
+    ) -> some View {
         Text(text)
-            .font(.system(size: 10, weight: .semibold))
+            .font(.system(size: 10, weight: .semibold, design: fontDesign))
+            .monospacedDigit()
             .foregroundColor(foreground)
             .padding(.horizontal, 8)
             .padding(.vertical, 4)

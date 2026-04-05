@@ -15,6 +15,14 @@ private let cornerRadiusInsets = (
     closed: (top: CGFloat(6), bottom: CGFloat(14))
 )
 
+struct OpenedPanelContentHeightPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
 struct NotchView: View {
     @ObservedObject var viewModel: NotchViewModel
     @StateObject private var sessionMonitor = ClaudeSessionMonitor()
@@ -22,6 +30,7 @@ struct NotchView: View {
     @ObservedObject private var updateManager = UpdateManager.shared
     @ObservedObject private var settings = AppSettings.shared
     @State private var previousPendingIds: Set<String> = []
+    @State private var previousApprovalIds: Set<String> = []
     @State private var previousQuestionIds: Set<String> = []
     @State private var previousWaitingForInputIds: Set<String> = []
     @State private var waitingForInputTimestamps: [String: Date] = [:]  // sessionId -> when it entered waitingForInput
@@ -46,7 +55,7 @@ struct NotchView: View {
 
     /// Whether any Claude session has a pending permission request
     private var hasPendingPermission: Bool {
-        sessionMonitor.instances.contains { $0.phase.isWaitingForApproval }
+        sessionMonitor.instances.contains { $0.needsApprovalResponse }
     }
 
     /// Whether any session needs explicit human intervention (for example multi-choice questions).
@@ -59,7 +68,7 @@ struct NotchView: View {
     /// Whether any session requires a user decision right now.
     private var hasManualAttentionIndicator: Bool {
         sessionMonitor.instances.contains {
-            $0.phase.isWaitingForApproval || $0.intervention != nil
+            $0.needsApprovalResponse || $0.intervention != nil
         }
     }
 
@@ -202,8 +211,9 @@ struct NotchView: View {
         .onAppear {
             sessionMonitor.startMonitoring()
             isVisible = !viewModel.areInteractionsSuppressed
-            viewModel.setHumanInterventionActive(hasHumanIntervention)
+            viewModel.setManualAttentionActive(hasManualAttentionIndicator)
             handleProcessingChange()
+            handleApprovalSessionsChange(sessionMonitor.instances)
         }
         .onChange(of: viewModel.status) { oldStatus, newStatus in
             handleStatusChange(from: oldStatus, to: newStatus)
@@ -212,17 +222,14 @@ struct NotchView: View {
             handlePendingSessionsChange(sessions)
         }
         .onChange(of: sessionMonitor.instances) { _, instances in
-            viewModel.setHumanInterventionActive(
-                instances.contains { $0.phase == .waitingForInput && $0.intervention != nil }
+            viewModel.setManualAttentionActive(
+                instances.contains { $0.needsApprovalResponse || $0.intervention != nil }
             )
             handleProcessingChange()
             handleSessionSoundTransitions(instances)
+            handleApprovalSessionsChange(instances)
             handleQuestionInterventionChange(instances)
             handleWaitingForInputChange(instances)
-            syncHoverPreviewSession()
-        }
-        .onChange(of: viewModel.isHovering) { _, _ in
-            syncHoverPreviewSession()
         }
         .onChange(of: viewModel.areInteractionsSuppressed) { _, suppressed in
             if suppressed {
@@ -231,18 +238,27 @@ struct NotchView: View {
                 handleProcessingChange()
             }
         }
+        .onPreferenceChange(OpenedPanelContentHeightPreferenceKey.self) { height in
+            guard viewModel.status == .opened else {
+                viewModel.updateOpenedMeasuredHeight(nil)
+                return
+            }
+
+            if case .instances = viewModel.contentType {
+                let measuredHeight = height > 0
+                    ? closedNotchSize.height + height + 12
+                    : nil
+                viewModel.updateOpenedMeasuredHeight(measuredHeight)
+            } else {
+                viewModel.updateOpenedMeasuredHeight(nil)
+            }
+        }
     }
 
     // MARK: - Notch Layout
 
     private var isProcessing: Bool {
         activityCoordinator.expandingActivity.show && activityCoordinator.expandingActivity.type == .claude
-    }
-
-    /// Priority: active (approval/processing/compacting) > waitingForInput > idle.
-    /// Secondary sort: most recent user activity first.
-    private var preferredHoverSession: SessionState? {
-        sortedHoverSessions.first
     }
 
     private var sortedHoverSessions: [SessionState] {
@@ -375,9 +391,7 @@ struct NotchView: View {
                 if viewModel.openReason == .hover {
                     SessionHoverDashboardView(
                         sessions: sortedHoverSessions,
-                        selectedSession: viewModel.hoverPreviewSession,
-                        sessionMonitor: sessionMonitor,
-                        viewModel: viewModel
+                        sessionMonitor: sessionMonitor
                     )
                 } else {
                     ClaudeInstancesView(
@@ -439,9 +453,7 @@ struct NotchView: View {
             if viewModel.openReason == .click || viewModel.openReason == .hover {
                 waitingForInputTimestamps.removeAll()
             }
-            syncHoverPreviewSession()
         case .closed:
-            viewModel.setHoverPreview(session: nil)
             isVisible = !viewModel.areInteractionsSuppressed
         }
     }
@@ -460,6 +472,35 @@ struct NotchView: View {
         }
 
         previousPendingIds = currentIds
+    }
+
+    private func handleApprovalSessionsChange(_ instances: [SessionState]) {
+        let approvalSessions = instances.filter { $0.needsApprovalResponse }
+        let currentApprovalIds = Set(approvalSessions.map(\.stableId))
+        let newApprovalIds = currentApprovalIds.subtracting(previousApprovalIds)
+
+        guard !newApprovalIds.isEmpty else {
+            previousApprovalIds = currentApprovalIds
+            return
+        }
+
+        let targetSession = approvalSessions
+            .filter { newApprovalIds.contains($0.stableId) }
+            .sorted {
+                let dateA = $0.attentionRequestedAt ?? $0.lastActivity
+                let dateB = $1.attentionRequestedAt ?? $1.lastActivity
+                return dateA > dateB
+            }
+            .first
+
+        if let targetSession {
+            if viewModel.status != .opened {
+                viewModel.notchOpen(reason: .notification)
+            }
+            viewModel.showChat(for: targetSession)
+        }
+
+        previousApprovalIds = currentApprovalIds
     }
 
     private func handleQuestionInterventionChange(_ instances: [SessionState]) {
@@ -547,7 +588,7 @@ struct NotchView: View {
             )
             previousAttentionSoundIds = Set(
                 instances
-                    .filter { $0.phase.isWaitingForApproval || ($0.phase == .waitingForInput && $0.intervention != nil) }
+                    .filter { $0.needsApprovalResponse || ($0.phase == .waitingForInput && $0.intervention != nil) }
                     .map(\.stableId)
             )
             previousCompletionSoundIds = Set(
@@ -573,7 +614,7 @@ struct NotchView: View {
             $0.phase == .processing || $0.phase == .compacting
         }
         let attentionSessions = instances.filter {
-            $0.phase.isWaitingForApproval || ($0.phase == .waitingForInput && $0.intervention != nil)
+            $0.needsApprovalResponse || ($0.phase == .waitingForInput && $0.intervention != nil)
         }
         let completedSessions = instances.filter {
             $0.phase == .waitingForInput && $0.intervention == nil
@@ -636,14 +677,6 @@ struct NotchView: View {
     private func openSettingsWindow() {
         updateManager.markUpdateSeen()
         SettingsWindowController.shared.present()
-    }
-
-    private func syncHoverPreviewSession() {
-        if viewModel.isHovering || (viewModel.status == .opened && viewModel.openReason == .hover) {
-            viewModel.setHoverPreview(session: preferredHoverSession)
-        } else if viewModel.status == .closed {
-            viewModel.setHoverPreview(session: nil)
-        }
     }
 
     /// Determine if notification sound should play for the given sessions
@@ -713,9 +746,9 @@ private struct SessionCountIndicator: View {
         PixelNumberView(
             value: count,
             color: .white.opacity(0.92),
-            pixelSize: count >= 10 ? 1.1 : 1.25,
-            pixelSpacing: 0.8,
-            digitSpacing: 1.2
+            fontSize: count >= 10 ? 8.8 : 9.6,
+            weight: .semibold,
+            tracking: count >= 10 ? -0.15 : -0.05
         )
         .frame(minWidth: 18)
     }

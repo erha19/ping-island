@@ -6,6 +6,7 @@
 //  Single source of truth - all state mutations flow through process().
 //
 
+import AppKit
 import Combine
 import Foundation
 import os.log
@@ -28,6 +29,11 @@ actor SessionStore {
 
     /// Sync debounce interval (100ms)
     private let syncDebounceNs: UInt64 = 100_000_000
+
+    /// Persisted session associations used to restore client routing across relaunches.
+    private var persistedAssociations: [String: PersistedSessionAssociation] = [:]
+    private var didLoadPersistedAssociations = false
+    private var pendingAssociationSave: Task<Void, Never>?
 
     // MARK: - Published State (for UI)
 
@@ -77,6 +83,9 @@ actor SessionStore {
         case .sessionEnded(let sessionId):
             await processSessionEnd(sessionId: sessionId)
 
+        case .sessionArchived(let sessionId):
+            await archiveSession(sessionId: sessionId)
+
         case .loadHistory(let sessionId, let cwd):
             await loadHistoryFromFile(sessionId: sessionId, cwd: cwd)
 
@@ -120,27 +129,42 @@ actor SessionStore {
     private func processHookEvent(_ event: HookEvent) async {
         let sessionId = event.sessionId
         var session = sessions[sessionId] ?? createSession(from: event)
+        let tree = (event.pid != nil || event.tty != nil) ? ProcessTreeBuilder.shared.buildTree() : [:]
 
+        session.provider = event.provider
+        session.clientInfo = session.clientInfo.merged(with: event.clientInfo)
+        session.clientInfo = normalizedClientInfo(session.clientInfo, provider: event.provider, sessionId: sessionId)
+        session.ingress = .hookBridge
         session.pid = event.pid
         if let pid = event.pid {
-            let tree = ProcessTreeBuilder.shared.buildTree()
             session.isInTmux = ProcessTreeBuilder.shared.isInTmux(pid: pid, tree: tree)
         }
         if let tty = event.tty {
             session.tty = tty.replacingOccurrences(of: "/dev/", with: "")
         }
+        if let runtimeClientInfo = await runtimeClientInfo(for: session, tree: tree) {
+            session.clientInfo = session.clientInfo.merged(with: runtimeClientInfo)
+            session.clientInfo = normalizedClientInfo(session.clientInfo, provider: event.provider, sessionId: sessionId)
+        }
         session.lastActivity = Date()
 
         if event.status == "ended" {
-            sessions.removeValue(forKey: sessionId)
-            cancelPendingSync(sessionId: sessionId)
+            markSessionEnded(&session)
+            sessions[sessionId] = session
+            publishState()
+            scheduleFinalSessionSync(for: session)
             return
         }
 
         let newPhase = event.determinePhase()
         let intervention = event.intervention
+        let shouldPreservePendingApproval = shouldPreservePendingApproval(for: event, session: session)
 
-        if session.phase.canTransition(to: newPhase) {
+        if shouldPreservePendingApproval {
+            Self.logger.debug(
+                "Preserving waitingForApproval for \(sessionId.prefix(8), privacy: .public) on \(event.event, privacy: .public)"
+            )
+        } else if session.phase.canTransition(to: newPhase) {
             session.phase = newPhase
         } else {
             Self.logger.debug("Invalid transition: \(String(describing: session.phase), privacy: .public) -> \(String(describing: newPhase), privacy: .public), ignoring")
@@ -157,7 +181,7 @@ actor SessionStore {
             updateToolStatus(in: &session, toolId: toolUseId, status: .waitingForApproval)
         }
 
-        processToolTracking(event: event, session: &session)
+        processToolTracking(event: event, session: &session, preservingPendingApproval: shouldPreservePendingApproval)
         processSubagentTracking(event: event, session: &session)
 
         if event.event == "Stop" {
@@ -168,16 +192,43 @@ actor SessionStore {
         publishState()
 
         if event.shouldSyncFile {
-            scheduleFileSync(sessionId: sessionId, cwd: event.cwd)
+            scheduleFileSync(
+                sessionId: sessionId,
+                cwd: event.cwd,
+                explicitFilePath: session.clientInfo.sessionFilePath
+            )
+        } else if event.provider == .codex,
+                  event.event != "SessionEnd",
+                  let sessionFilePath = session.clientInfo.sessionFilePath,
+                  !sessionFilePath.isEmpty {
+            scheduleCodexRolloutSync(
+                sessionId: sessionId,
+                clientInfo: session.clientInfo,
+                cwd: session.cwd
+            )
         }
     }
 
     private func createSession(from event: HookEvent) -> SessionState {
-        SessionState(
+        let restoredAssociation = persistedAssociation(for: event.provider, sessionId: event.sessionId)
+        let resolvedCwd = event.cwd.isEmpty ? (restoredAssociation?.cwd ?? "") : event.cwd
+        let projectName = restoredAssociation?.projectName
+            ?? Self.projectName(for: resolvedCwd, fallback: event.provider.displayName)
+        let restoredClientInfo = restoredAssociation?.clientInfo ?? SessionClientInfo.default(for: event.provider)
+        let resolvedClientInfo = normalizedClientInfo(
+            restoredClientInfo.merged(with: event.clientInfo),
+            provider: event.provider,
+            sessionId: event.sessionId
+        )
+
+        return SessionState(
             sessionId: event.sessionId,
-            cwd: event.cwd,
-            projectName: URL(fileURLWithPath: event.cwd).lastPathComponent,
-            provider: .claude,
+            cwd: resolvedCwd,
+            projectName: projectName,
+            provider: event.provider,
+            clientInfo: resolvedClientInfo,
+            ingress: .hookBridge,
+            sessionName: restoredAssociation?.sessionName,
             pid: event.pid,
             tty: event.tty?.replacingOccurrences(of: "/dev/", with: ""),
             isInTmux: false,  // Will be updated
@@ -186,6 +237,14 @@ actor SessionStore {
     }
 
     private func processToolTracking(event: HookEvent, session: inout SessionState) {
+        processToolTracking(event: event, session: &session, preservingPendingApproval: false)
+    }
+
+    private func processToolTracking(
+        event: HookEvent,
+        session: inout SessionState,
+        preservingPendingApproval: Bool
+    ) {
         switch event.event {
         case "PreToolUse":
             if let toolUseId = event.toolUseId, let toolName = event.tool {
@@ -231,6 +290,9 @@ actor SessionStore {
             }
 
         case "PostToolUse":
+            if preservingPendingApproval {
+                return
+            }
             if let toolUseId = event.toolUseId {
                 session.toolTracker.completeTool(id: toolUseId, success: true)
                 // Update chatItem status - tool completed (possibly approved via terminal)
@@ -253,6 +315,17 @@ actor SessionStore {
         default:
             break
         }
+    }
+
+    private func shouldPreservePendingApproval(for event: HookEvent, session: SessionState) -> Bool {
+        guard event.event == "PostToolUse",
+              let activePermission = session.activePermission,
+              let toolUseId = event.toolUseId
+        else {
+            return false
+        }
+
+        return activePermission.toolUseId == toolUseId
     }
 
     private func processSubagentTracking(event: HookEvent, session: inout SessionState) {
@@ -515,7 +588,8 @@ actor SessionStore {
         // Update conversationInfo from JSONL (summary, lastMessage, etc.)
         let conversationInfo = await ConversationParser.shared.parse(
             sessionId: payload.sessionId,
-            cwd: session.cwd
+            cwd: session.cwd,
+            explicitFilePath: session.clientInfo.sessionFilePath
         )
         session.conversationInfo = conversationInfo
 
@@ -644,6 +718,8 @@ actor SessionStore {
             cwd: payload.cwd,
             structuredResults: payload.structuredResults
         )
+
+        await applyQoderFallbackIntervention(to: &session)
 
         sessions[payload.sessionId] = session
 
@@ -874,8 +950,48 @@ actor SessionStore {
     // MARK: - Session End Processing
 
     private func processSessionEnd(sessionId: String) async {
+        guard var session = sessions[sessionId] else {
+            cancelPendingSync(sessionId: sessionId)
+            return
+        }
+
+        markSessionEnded(&session)
+        sessions[sessionId] = session
+        scheduleFinalSessionSync(for: session)
+    }
+
+    private func archiveSession(sessionId: String) async {
         sessions.removeValue(forKey: sessionId)
         cancelPendingSync(sessionId: sessionId)
+    }
+
+    private func markSessionEnded(_ session: inout SessionState) {
+        session.phase = .ended
+        session.intervention = nil
+        session.lastActivity = Date()
+    }
+
+    private func scheduleFinalSessionSync(for session: SessionState) {
+        if let sessionFilePath = session.clientInfo.sessionFilePath, !sessionFilePath.isEmpty {
+            if session.provider == .codex {
+                scheduleCodexRolloutSync(
+                    sessionId: session.sessionId,
+                    clientInfo: session.clientInfo,
+                    cwd: session.cwd
+                )
+            } else {
+                scheduleFileSync(
+                    sessionId: session.sessionId,
+                    cwd: session.cwd,
+                    explicitFilePath: sessionFilePath
+                )
+            }
+            return
+        }
+
+        if session.provider == .claude, !session.cwd.isEmpty {
+            scheduleFileSync(sessionId: session.sessionId, cwd: session.cwd)
+        }
     }
 
     // MARK: - History Loading
@@ -884,7 +1000,8 @@ actor SessionStore {
         // Parse file asynchronously
         let messages = await ConversationParser.shared.parseFullConversation(
             sessionId: sessionId,
-            cwd: cwd
+            cwd: cwd,
+            explicitFilePath: sessions[sessionId]?.clientInfo.sessionFilePath
         )
         let completedTools = await ConversationParser.shared.completedToolIds(for: sessionId)
         let toolResults = await ConversationParser.shared.toolResults(for: sessionId)
@@ -893,7 +1010,8 @@ actor SessionStore {
         // Also parse conversationInfo (summary, lastMessage, etc.)
         let conversationInfo = await ConversationParser.shared.parse(
             sessionId: sessionId,
-            cwd: cwd
+            cwd: cwd,
+            explicitFilePath: sessions[sessionId]?.clientInfo.sessionFilePath
         )
 
         // Process loaded history
@@ -945,12 +1063,14 @@ actor SessionStore {
         // Sort by timestamp
         session.chatItems.sort { $0.timestamp < $1.timestamp }
 
+        await applyQoderFallbackIntervention(to: &session)
+
         sessions[sessionId] = session
     }
 
     // MARK: - File Sync Scheduling
 
-    private func scheduleFileSync(sessionId: String, cwd: String) {
+    private func scheduleFileSync(sessionId: String, cwd: String, explicitFilePath: String? = nil) {
         // Cancel existing sync
         cancelPendingSync(sessionId: sessionId)
 
@@ -962,7 +1082,8 @@ actor SessionStore {
             // Parse incrementally - only get NEW messages since last call
             let result = await ConversationParser.shared.parseIncremental(
                 sessionId: sessionId,
-                cwd: cwd
+                cwd: cwd,
+                explicitFilePath: explicitFilePath
             )
 
             if result.clearDetected {
@@ -992,6 +1113,29 @@ actor SessionStore {
         pendingSyncs.removeValue(forKey: sessionId)
     }
 
+    private func scheduleCodexRolloutSync(
+        sessionId: String,
+        clientInfo: SessionClientInfo,
+        cwd: String
+    ) {
+        cancelPendingSync(sessionId: sessionId)
+
+        pendingSyncs[sessionId] = Task { [weak self, syncDebounceNs] in
+            try? await Task.sleep(nanoseconds: syncDebounceNs)
+            guard !Task.isCancelled else { return }
+
+            guard let snapshot = await CodexRolloutParser.shared.parseThread(
+                threadId: sessionId,
+                fallbackCwd: cwd,
+                clientInfo: clientInfo
+            ) else {
+                return
+            }
+
+            await self?.syncCodexThreadSnapshot(snapshot, ingress: .hookBridge)
+        }
+    }
+
     // MARK: - State Publishing
 
     private func publishState() {
@@ -1004,6 +1148,18 @@ actor SessionStore {
             }
             return lhs.lastActivity > rhs.lastActivity
         }
+
+        var shouldPersistAssociations = false
+        for session in sortedSessions {
+            if updatePersistedAssociationIfNeeded(from: session) {
+                shouldPersistAssociations = true
+            }
+        }
+
+        if shouldPersistAssociations {
+            scheduleAssociationSave()
+        }
+
         sessionsSubject.send(sortedSessions)
     }
 
@@ -1028,6 +1184,25 @@ actor SessionStore {
         Array(sessions.values)
     }
 
+    func requestFileSync(for sessionId: String) {
+        guard let session = sessions[sessionId] else { return }
+
+        if session.provider == .codex {
+            scheduleCodexRolloutSync(
+                sessionId: sessionId,
+                clientInfo: session.clientInfo,
+                cwd: session.cwd
+            )
+            return
+        }
+
+        scheduleFileSync(
+            sessionId: sessionId,
+            cwd: session.cwd,
+            explicitFilePath: session.clientInfo.sessionFilePath
+        )
+    }
+
     // MARK: - Codex Integration
 
     func upsertCodexSession(
@@ -1037,23 +1212,38 @@ actor SessionStore {
         cwd: String?,
         phase: SessionPhase,
         intervention: SessionIntervention?,
+        clientInfo: SessionClientInfo? = nil,
         metadata: [String: String] = [:]
     ) {
-        let initialCwd = cwd ?? sessions[sessionId]?.cwd ?? "/"
-        let initialProject = Self.projectName(for: initialCwd, fallback: name ?? "Codex")
+        let restoredAssociation = persistedAssociation(for: .codex, sessionId: sessionId)
+        let initialCwd = cwd ?? sessions[sessionId]?.cwd ?? restoredAssociation?.cwd ?? "/"
+        let initialProject = restoredAssociation?.projectName
+            ?? Self.projectName(for: initialCwd, fallback: name ?? "Codex")
+        let resolvedClientInfo = normalizedCodexClientInfo(
+            restored: restoredAssociation?.clientInfo,
+            incoming: clientInfo,
+            sessionId: sessionId
+        )
 
         var session = sessions[sessionId] ?? SessionState(
             sessionId: sessionId,
             cwd: initialCwd,
             projectName: initialProject,
             provider: .codex,
-            sessionName: name,
+            clientInfo: resolvedClientInfo,
+            ingress: .codexAppServer,
+            sessionName: name ?? restoredAssociation?.sessionName,
             previewText: preview,
             intervention: intervention,
             phase: phase
         )
 
         session.provider = .codex
+        session.clientInfo = normalizedClientInfo(
+            session.clientInfo.merged(with: resolvedClientInfo),
+            provider: .codex,
+            sessionId: sessionId
+        )
         if let cwd, !cwd.isEmpty {
             session.cwd = cwd
             session.projectName = Self.projectName(for: cwd, fallback: session.projectName)
@@ -1069,6 +1259,15 @@ actor SessionStore {
             session.phase = phase
         } else {
             session.phase = phase
+        }
+        let hasIntervention: Bool
+        if case .some = session.intervention {
+            hasIntervention = true
+        } else {
+            hasIntervention = false
+        }
+        if session.ingress != .hookBridge || (!session.phase.needsAttention && !hasIntervention) {
+            session.ingress = .codexAppServer
         }
         session.lastActivity = Date()
 
@@ -1094,22 +1293,41 @@ actor SessionStore {
         publishState()
     }
 
-    func syncCodexThreadSnapshot(_ snapshot: CodexThreadSnapshot) {
-        let fallbackCwd = snapshot.cwd.isEmpty ? (sessions[snapshot.threadId]?.cwd ?? "/") : snapshot.cwd
+    func syncCodexThreadSnapshot(
+        _ snapshot: CodexThreadSnapshot,
+        ingress: SessionIngress = .codexAppServer
+    ) {
+        let restoredAssociation = persistedAssociation(for: .codex, sessionId: snapshot.threadId)
+        let fallbackCwd = snapshot.cwd.isEmpty
+            ? (sessions[snapshot.threadId]?.cwd ?? restoredAssociation?.cwd ?? "/")
+            : snapshot.cwd
         let fallbackName = snapshot.name ?? snapshot.preview ?? "Codex"
-        let projectName = Self.projectName(for: fallbackCwd, fallback: fallbackName)
+        let projectName = restoredAssociation?.projectName
+            ?? Self.projectName(for: fallbackCwd, fallback: fallbackName)
+        let resolvedClientInfo = normalizedCodexClientInfo(
+            restored: restoredAssociation?.clientInfo,
+            incoming: snapshot.clientInfo,
+            sessionId: snapshot.threadId
+        )
 
         var session = sessions[snapshot.threadId] ?? SessionState(
             sessionId: snapshot.threadId,
             cwd: fallbackCwd,
             projectName: projectName,
             provider: .codex,
-            sessionName: snapshot.name,
+            clientInfo: resolvedClientInfo,
+            ingress: .codexAppServer,
+            sessionName: snapshot.name ?? restoredAssociation?.sessionName,
             previewText: snapshot.preview,
             phase: snapshot.phase
         )
 
         session.provider = .codex
+        session.clientInfo = normalizedClientInfo(
+            session.clientInfo.merged(with: resolvedClientInfo),
+            provider: .codex,
+            sessionId: snapshot.threadId
+        )
         session.cwd = fallbackCwd
         session.projectName = Self.projectName(for: fallbackCwd, fallback: session.projectName)
         if let name = snapshot.name, !name.isEmpty {
@@ -1124,6 +1342,19 @@ actor SessionStore {
         session.conversationInfo = snapshot.conversationInfo
         if case .none = session.intervention {
             session.phase = snapshot.phase
+        }
+        let hasIntervention: Bool
+        if case .some = session.intervention {
+            hasIntervention = true
+        } else {
+            hasIntervention = false
+        }
+        if ingress == .hookBridge {
+            if session.ingress != .codexAppServer {
+                session.ingress = .hookBridge
+            }
+        } else if session.ingress != .hookBridge || (!session.phase.needsAttention && !hasIntervention) {
+            session.ingress = .codexAppServer
         }
         session.lastActivity = snapshot.updatedAt
 
@@ -1143,5 +1374,212 @@ actor SessionStore {
     private nonisolated static func projectName(for cwd: String, fallback: String) -> String {
         let name = URL(fileURLWithPath: cwd).lastPathComponent
         return name.isEmpty ? fallback : name
+    }
+
+    private func persistedAssociation(for provider: SessionProvider, sessionId: String) -> PersistedSessionAssociation? {
+        ensurePersistedAssociationsLoaded()
+        return persistedAssociations[SessionAssociationStore.cacheKey(provider: provider, sessionId: sessionId)]
+    }
+
+    private func applyQoderFallbackIntervention(to session: inout SessionState) async {
+        guard session.clientInfo.brand == .qoder else { return }
+
+        let fallbackSource = "qoderConversationHistory"
+        let currentSource = session.intervention?.metadata["source"]
+
+        if currentSource != nil && currentSource != fallbackSource {
+            return
+        }
+
+        let hasResolvedQuestionTool = session.chatItems.contains { item in
+            guard case .toolCall(let tool) = item.type else { return false }
+            let normalizedName = tool.name
+                .lowercased()
+                .replacingOccurrences(of: "_", with: "")
+            guard normalizedName == "askuserquestion" else { return false }
+            switch tool.status {
+            case .success, .error, .interrupted:
+                return true
+            case .running, .waitingForApproval:
+                return false
+            }
+        }
+
+        if session.phase == .ended || hasResolvedQuestionTool {
+            if currentSource == fallbackSource {
+                session.intervention = nil
+            }
+            return
+        }
+
+        let fallbackIntervention = await ConversationParser.shared.qoderFallbackIntervention(sessionId: session.sessionId)
+
+        if let fallbackIntervention {
+            session.intervention = fallbackIntervention
+            session.phase = .waitingForInput
+            session.lastActivity = Date()
+            return
+        }
+
+        guard currentSource == fallbackSource else { return }
+
+        session.intervention = nil
+        if session.phase == .waitingForInput {
+            session.phase = .processing
+        }
+    }
+
+    private func ensurePersistedAssociationsLoaded() {
+        guard !didLoadPersistedAssociations else { return }
+        persistedAssociations = SessionAssociationStore.load()
+        didLoadPersistedAssociations = true
+    }
+
+    private func updatePersistedAssociationIfNeeded(from session: SessionState) -> Bool {
+        ensurePersistedAssociationsLoaded()
+        let key = SessionAssociationStore.cacheKey(provider: session.provider, sessionId: session.sessionId)
+        let updatedAssociation = PersistedSessionAssociation(session: session)
+        guard persistedAssociations[key] != updatedAssociation else {
+            return false
+        }
+
+        persistedAssociations[key] = updatedAssociation
+        return true
+    }
+
+    private func scheduleAssociationSave() {
+        let snapshot = persistedAssociations
+        pendingAssociationSave?.cancel()
+        pendingAssociationSave = Task.detached(priority: .utility) {
+            try? await Task.sleep(for: .milliseconds(150))
+            guard !Task.isCancelled else { return }
+            SessionAssociationStore.save(snapshot)
+        }
+    }
+
+    private func runtimeClientInfo(for session: SessionState, tree: [Int: ProcessInfo]) async -> SessionClientInfo? {
+        let resolvedTTY = session.tty?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let terminalPid =
+            resolvedTTY.flatMap { ProcessTreeBuilder.shared.findTerminalPid(forTTY: $0, tree: tree) }
+            ?? session.pid.flatMap { ProcessTreeBuilder.shared.findTerminalPid(forProcess: $0, tree: tree) }
+
+        guard let terminalPid,
+              let appIdentity = await runningApplicationIdentity(forProcess: terminalPid, tree: tree) else {
+            return nil
+        }
+
+        let normalizedBundleIdentifier = TerminalAppRegistry.normalizedHostBundleIdentifier(for: appIdentity.bundleIdentifier)
+        let appName = appIdentity.name
+        let workspaceLaunchURL = SessionClientInfo.appLaunchURL(
+            bundleIdentifier: normalizedBundleIdentifier,
+            workspacePath: session.cwd
+        )
+
+        var runtimeInfo = SessionClientInfo(
+            kind: session.clientInfo.kind,
+            launchURL: workspaceLaunchURL,
+            originator: appName,
+            threadSource: TerminalAppRegistry.isIDEBundle(normalizedBundleIdentifier)
+                ? (session.clientInfo.threadSource ?? "ide-terminal")
+                : session.clientInfo.threadSource,
+            terminalBundleIdentifier: normalizedBundleIdentifier
+        )
+
+        if session.provider == .codex,
+           isStandaloneCodexHost(bundleIdentifier: normalizedBundleIdentifier, name: appName) {
+            runtimeInfo = runtimeInfo.merged(with: SessionClientInfo(
+                kind: .codexApp,
+                name: appName,
+                bundleIdentifier: normalizedBundleIdentifier,
+                launchURL: SessionClientInfo.appLaunchURL(
+                    bundleIdentifier: normalizedBundleIdentifier,
+                    sessionId: session.sessionId,
+                    workspacePath: session.cwd
+                ),
+                origin: session.clientInfo.origin ?? "desktop",
+                originator: appName
+            ))
+        }
+
+        return runtimeInfo
+    }
+
+    private func normalizedClientInfo(
+        _ clientInfo: SessionClientInfo,
+        provider: SessionProvider,
+        sessionId: String
+    ) -> SessionClientInfo {
+        switch provider {
+        case .claude:
+            return clientInfo
+        case .codex:
+            return clientInfo.normalizedForCodexRouting(sessionId: sessionId)
+        }
+    }
+
+    private func normalizedCodexClientInfo(
+        restored: SessionClientInfo?,
+        incoming: SessionClientInfo?,
+        sessionId: String
+    ) -> SessionClientInfo {
+        let normalizedRestored = restored?.normalizedForCodexRouting(sessionId: sessionId)
+        let normalizedIncoming = incoming?.normalizedForCodexRouting(sessionId: sessionId)
+        let base: SessionClientInfo
+
+        if normalizedIncoming?.kind == .codexCLI || normalizedRestored?.kind == .codexCLI {
+            base = SessionClientInfo.codexCLI()
+        } else {
+            base = SessionClientInfo.codexApp(threadId: sessionId)
+        }
+
+        return base
+            .merged(with: normalizedRestored ?? base)
+            .merged(with: normalizedIncoming ?? base)
+            .normalizedForCodexRouting(sessionId: sessionId)
+    }
+
+    private func runningApplicationIdentity(
+        forProcess pid: Int,
+        tree: [Int: ProcessInfo]
+    ) async -> (bundleIdentifier: String, name: String)? {
+        var currentPid = pid
+        var depth = 0
+
+        while currentPid > 1 && depth < 20 {
+            let lookupPid = currentPid
+            if let identity = await MainActor.run(resultType: (bundleIdentifier: String, name: String)?.self, body: {
+                guard let app = NSRunningApplication(processIdentifier: pid_t(lookupPid)),
+                      let bundleIdentifier = app.bundleIdentifier else {
+                    return nil
+                }
+
+                let normalizedBundleIdentifier = TerminalAppRegistry.normalizedHostBundleIdentifier(for: bundleIdentifier)
+                let hostName = NSRunningApplication.runningApplications(withBundleIdentifier: normalizedBundleIdentifier)
+                    .first?
+                    .localizedName
+                return (
+                    bundleIdentifier: normalizedBundleIdentifier,
+                    name: hostName ?? app.localizedName ?? bundleIdentifier
+                )
+            }) {
+                return identity
+            }
+
+            guard let processInfo = tree[currentPid] else { break }
+            currentPid = processInfo.ppid
+            depth += 1
+        }
+
+        return nil
+    }
+
+    private func isStandaloneCodexHost(bundleIdentifier: String, name: String) -> Bool {
+        if TerminalAppRegistry.isTerminalBundle(bundleIdentifier) || TerminalAppRegistry.isIDEBundle(bundleIdentifier) {
+            return false
+        }
+
+        let loweredBundle = bundleIdentifier.lowercased()
+        let loweredName = name.lowercased()
+        return loweredBundle.contains("codex") || loweredName.contains("codex")
     }
 }

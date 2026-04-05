@@ -9,11 +9,33 @@ import Foundation
 
 /// Registry of known terminal application names and bundle identifiers
 struct TerminalAppRegistry: Sendable {
+    nonisolated static let ideBundleIdentifiers: Set<String> = [
+        "com.microsoft.VSCode",
+        "com.microsoft.VSCodeInsiders",
+        "com.todesktop.230313mzl4w4u92",
+        "com.exafunction.windsurf",
+        "dev.zed.Zed",
+        "com.trae.app",
+        "com.codebuddy.app"
+    ]
+
+    nonisolated static let helperBundleToHostBundle: [String: String] = [
+        "com.microsoft.VSCode.helper": "com.microsoft.VSCode",
+        "com.microsoft.VSCodeInsiders.helper": "com.microsoft.VSCodeInsiders",
+        "com.todesktop.230313mzl4w4u92.helper": "com.todesktop.230313mzl4w4u92",
+        "com.exafunction.windsurf.helper": "com.exafunction.windsurf",
+        "dev.zed.Zed.helper": "dev.zed.Zed",
+        "com.trae.app.helper": "com.trae.app",
+        "com.codebuddy.app.helper": "com.codebuddy.app",
+        "com.openai.codex.helper": "com.openai.codex"
+    ]
+
     /// Terminal app names for process matching
-    static let appNames: Set<String> = [
+    nonisolated static let appNames: Set<String> = [
         "Terminal",
         "iTerm2",
         "iTerm",
+        "Codex",
         "Ghostty",
         "Alacritty",
         "kitty",
@@ -31,13 +53,16 @@ struct TerminalAppRegistry: Sendable {
         "Code - Insiders",
         "Cursor",
         "Windsurf",
+        "Trae",
+        "CodeBuddy",
         "zed"
     ]
 
     /// Bundle identifiers for terminal apps (for window enumeration)
-    static let bundleIdentifiers: Set<String> = [
+    nonisolated static let bundleIdentifiers: Set<String> = [
         "com.apple.Terminal",
         "com.googlecode.iterm2",
+        "com.openai.codex",
         "com.mitchellh.ghostty",
         "io.alacritty",
         "org.alacritty",
@@ -49,11 +74,13 @@ struct TerminalAppRegistry: Sendable {
         "com.microsoft.VSCodeInsiders",
         "com.todesktop.230313mzl4w4u92",  // Cursor
         "com.exafunction.windsurf",
+        "com.trae.app",
+        "com.codebuddy.app",
         "dev.zed.Zed"
     ]
 
     /// Check if an app name or command path is a known terminal
-    static func isTerminal(_ appNameOrCommand: String) -> Bool {
+    nonisolated static func isTerminal(_ appNameOrCommand: String) -> Bool {
         let lower = appNameOrCommand.lowercased()
 
         // Check if any known app name is contained in the command (case-insensitive)
@@ -68,7 +95,15 @@ struct TerminalAppRegistry: Sendable {
     }
 
     /// Check if a bundle identifier is a known terminal
-    static func isTerminalBundle(_ bundleId: String) -> Bool {
+    nonisolated static func isTerminalBundle(_ bundleId: String) -> Bool {
         bundleIdentifiers.contains(bundleId)
+    }
+
+    nonisolated static func isIDEBundle(_ bundleId: String) -> Bool {
+        ideBundleIdentifiers.contains(normalizedHostBundleIdentifier(for: bundleId))
+    }
+
+    nonisolated static func normalizedHostBundleIdentifier(for bundleId: String) -> String {
+        helperBundleToHostBundle[bundleId] ?? bundleId
     }
 }

@@ -5,6 +5,7 @@ struct CodexThreadSnapshot: Equatable, Sendable {
     let name: String?
     let preview: String?
     let cwd: String
+    let clientInfo: SessionClientInfo?
     let createdAt: Date
     let updatedAt: Date
     let phase: SessionPhase

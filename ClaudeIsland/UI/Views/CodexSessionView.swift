@@ -39,6 +39,13 @@ struct CodexSessionView: View {
                     .foregroundColor(.white.opacity(0.5))
             }
 
+            if let summary = session.clientInfo.terminalContextSummary {
+                Text(summary)
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .foregroundColor(.white.opacity(0.45))
+                    .lineLimit(1)
+            }
+
             if let preview = session.previewText ?? session.lastMessage {
                 Text(preview)
                     .font(.system(size: 13))
@@ -123,7 +130,7 @@ struct CodexSessionView: View {
     }
 
     private var providerBadge: some View {
-        Text("CODEX")
+        Text(session.clientDisplayName.uppercased())
             .font(.system(size: 10, weight: .bold, design: .monospaced))
             .foregroundColor(TerminalColors.blue.opacity(0.95))
             .padding(.horizontal, 6)

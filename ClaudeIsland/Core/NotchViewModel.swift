@@ -43,7 +43,7 @@ class NotchViewModel: ObservableObject {
     @Published var openReason: NotchOpenReason = .unknown
     @Published var contentType: NotchContentType = .instances
     @Published var isHovering: Bool = false
-    @Published var hoverPreviewSession: SessionState?
+    @Published private(set) var openedMeasuredHeight: CGFloat?
     @Published private(set) var areInteractionsSuppressed = false
     @Published private(set) var isSettingsPopoverPresented = false
 
@@ -75,27 +75,40 @@ class NotchViewModel: ObservableObject {
 
     /// Dynamic opened size based on content type
     var openedSize: CGSize {
-        let maxPanelHeight = CGFloat(AppSettings.maxPanelHeight)
-
-        if openReason == .hover {
-            return CGSize(
-                width: min(screenRect.width - 64, 600),
-                height: min(screenRect.height - 120, max(460, maxPanelHeight - 60))
-            )
-        }
+        let maxAllowedHeight = maximumOpenedHeight
 
         switch contentType {
         case .chat:
             // Large size for chat view
             return CGSize(
                 width: min(screenRect.width - 64, 600),
-                height: min(screenRect.height - 120, maxPanelHeight)
+                height: maxAllowedHeight
             )
         case .instances:
+            let fallbackHeight: CGFloat = openReason == .hover ? 220 : 260
+            let measuredHeight = openedMeasuredHeight ?? fallbackHeight
             return CGSize(
-                width: min(screenRect.width * 0.4, 480),
-                height: 320
+                width: openReason == .hover
+                    ? min(screenRect.width - 64, 600)
+                    : min(screenRect.width * 0.4, 480),
+                height: min(maxAllowedHeight, max(closedHeight + 24, measuredHeight))
             )
+        }
+    }
+
+    private var maximumOpenedHeight: CGFloat {
+        let maxPanelHeight = CGFloat(AppSettings.maxPanelHeight)
+        let screenLimit = screenRect.height - 120
+
+        if openReason == .hover {
+            return min(screenLimit, maxPanelHeight)
+        }
+
+        switch contentType {
+        case .chat:
+            return min(screenLimit, maxPanelHeight)
+        case .instances:
+            return min(screenLimit, maxPanelHeight)
         }
     }
 
@@ -156,6 +169,7 @@ class NotchViewModel: ObservableObject {
 
     private func refreshInteractionSuppression() {
         let shouldSuppress = AppSettings.hideInFullscreen &&
+            !hasPhysicalNotch &&
             FullscreenAppDetector.isFullscreenAppActive(screenFrame: screenRect)
 
         guard shouldSuppress != areInteractionsSuppressed else { return }
@@ -311,9 +325,8 @@ class NotchViewModel: ObservableObject {
     func notchOpen(reason: NotchOpenReason = .unknown) {
         openReason = reason
         status = .opened
-
-        if reason != .hover {
-            hoverPreviewSession = nil
+        if case .instances = contentType {
+            openedMeasuredHeight = nil
         }
 
         // Don't restore chat on notification - show instances list instead
@@ -344,7 +357,7 @@ class NotchViewModel: ObservableObject {
         }
         status = .closed
         contentType = .instances
-        hoverPreviewSession = nil
+        openedMeasuredHeight = nil
     }
 
     func notchPop() {
@@ -362,8 +375,8 @@ class NotchViewModel: ObservableObject {
     }
 
     func showChat(for session: SessionState) {
-        hoverPreviewSession = nil
         currentChatSession = session
+        openedMeasuredHeight = nil
 
         // Avoid unnecessary updates only when the snapshot is already current.
         if case .chat(let current) = contentType, current == session {
@@ -376,16 +389,17 @@ class NotchViewModel: ObservableObject {
     func exitChat() {
         currentChatSession = nil
         contentType = .instances
+        openedMeasuredHeight = nil
     }
 
-    func setHoverPreview(session: SessionState?) {
-        if hoverPreviewSession?.sessionId == session?.sessionId {
-            return
-        }
-        hoverPreviewSession = session
+    func updateOpenedMeasuredHeight(_ height: CGFloat?) {
+        let sanitized = height.map { max(closedHeight, ceil($0)) }
+
+        guard sanitized != openedMeasuredHeight else { return }
+        openedMeasuredHeight = sanitized
     }
 
-    func setHumanInterventionActive(_ isActive: Bool) {
+    func setManualAttentionActive(_ isActive: Bool) {
         let targetWidth = isActive ? Self.manualAttentionClosedWidth : Self.defaultClosedWidth
         guard closedWidth != targetWidth else { return }
         closedWidth = targetWidth

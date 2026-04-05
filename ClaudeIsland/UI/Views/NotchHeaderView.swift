@@ -10,6 +10,9 @@ import SwiftUI
 
 enum NotchIndicatorTone: Equatable {
     case normal
+    case claude
+    case codex
+    case qoder
     case warning
     case intervention
 
@@ -17,6 +20,12 @@ enum NotchIndicatorTone: Equatable {
         switch self {
         case .normal:
             return TerminalColors.green
+        case .claude:
+            return Color(red: 0.98, green: 0.73, blue: 0.30)
+        case .codex:
+            return TerminalColors.blue
+        case .qoder:
+            return Color(red: 0.12, green: 0.88, blue: 0.56)
         case .warning:
             return Color(red: 1.0, green: 0.66, blue: 0.18)
         case .intervention:
@@ -37,6 +46,42 @@ enum NotchIndicatorTone: Equatable {
                 feature: Color(red: 0.58, green: 0.97, blue: 0.74),
                 glow: Color(red: 0.31, green: 0.95, blue: 0.63),
                 outerGlow: Color(red: 0.21, green: 0.83, blue: 0.50)
+            )
+        case .claude:
+            return NotchPetPalette(
+                primary: Color(red: 0.98, green: 0.76, blue: 0.34),
+                secondary: Color(red: 0.96, green: 0.67, blue: 0.28),
+                accent: Color(red: 0.89, green: 0.54, blue: 0.22),
+                shade: Color(red: 0.70, green: 0.37, blue: 0.14),
+                detail: Color(red: 0.49, green: 0.23, blue: 0.09),
+                highlight: Color(red: 1.00, green: 0.91, blue: 0.68),
+                feature: Color(red: 1.00, green: 0.82, blue: 0.47),
+                glow: Color(red: 0.99, green: 0.73, blue: 0.30),
+                outerGlow: Color(red: 0.94, green: 0.56, blue: 0.18)
+            )
+        case .codex:
+            return NotchPetPalette(
+                primary: Color(red: 0.42, green: 0.78, blue: 1.00),
+                secondary: Color(red: 0.34, green: 0.68, blue: 0.99),
+                accent: Color(red: 0.24, green: 0.56, blue: 0.96),
+                shade: Color(red: 0.16, green: 0.40, blue: 0.79),
+                detail: Color(red: 0.09, green: 0.24, blue: 0.53),
+                highlight: Color(red: 0.82, green: 0.94, blue: 1.00),
+                feature: Color(red: 0.58, green: 0.86, blue: 1.00),
+                glow: Color(red: 0.33, green: 0.67, blue: 1.00),
+                outerGlow: Color(red: 0.18, green: 0.49, blue: 0.90)
+            )
+        case .qoder:
+            return NotchPetPalette(
+                primary: Color(red: 0.22, green: 0.95, blue: 0.63),
+                secondary: Color(red: 0.17, green: 0.86, blue: 0.56),
+                accent: Color(red: 0.12, green: 0.73, blue: 0.47),
+                shade: Color(red: 0.08, green: 0.54, blue: 0.34),
+                detail: Color(red: 0.06, green: 0.35, blue: 0.22),
+                highlight: Color(red: 0.79, green: 1.00, blue: 0.88),
+                feature: Color(red: 0.48, green: 0.99, blue: 0.73),
+                glow: Color(red: 0.12, green: 0.88, blue: 0.56),
+                outerGlow: Color(red: 0.06, green: 0.69, blue: 0.43)
             )
         case .warning:
             return NotchPetPalette(
@@ -156,6 +201,10 @@ private extension NotchPetStyle {
             return (10, 8)
         case .owl:
             return (8, 8)
+        case .snowyOwl:
+            return (10, 8)
+        case .bee:
+            return (11, 8)
         case .roundBlob:
             return (8, 8)
         case .antennaBean:
@@ -215,6 +264,12 @@ private extension NotchPetStyle {
         switch tone {
         case .normal:
             return idleFrames
+        case .claude:
+            return idleFrames
+        case .codex:
+            return idleFrames
+        case .qoder:
+            return idleFrames
         case .warning:
             return warningFrames
         case .intervention:
@@ -234,6 +289,10 @@ private extension NotchPetStyle {
             return sittingCatIdleFrames
         case .owl:
             return owlIdleFrames
+        case .snowyOwl:
+            return snowyOwlIdleFrames
+        case .bee:
+            return beeIdleFrames
         case .roundBlob:
             return roundBlobIdleFrames
         case .antennaBean:
@@ -255,6 +314,10 @@ private extension NotchPetStyle {
             return sittingCatActiveFrames
         case .owl:
             return owlActiveFrames
+        case .snowyOwl:
+            return snowyOwlActiveFrames
+        case .bee:
+            return beeActiveFrames
         case .roundBlob:
             return roundBlobActiveFrames
         case .antennaBean:
@@ -716,6 +779,66 @@ private extension NotchPetStyle {
         ]
     }
 
+    private var snowyOwlIdleFrames: [[String]] {
+        [
+            [
+                "  HH  HH  ",
+                " MPPPPPPM ",
+                "MPHCCHCHPM",
+                "MPEDDDDEPM",
+                "MPPSSSSPPM",
+                " MPPCCPPM ",
+                "  MPMMPM  ",
+                " M      M "
+            ],
+            [
+                "  HH  HH  ",
+                " MPPPPPPM ",
+                "MPH  HCHPM",
+                "MPPCCCCPPM",
+                "MPPSSSSPPM",
+                " MPPCCPPM ",
+                "  MPPPPM  ",
+                "  M    M  "
+            ]
+        ]
+    }
+
+    private var snowyOwlActiveFrames: [[String]] {
+        [
+            [
+                "  HH  HH  ",
+                " MPPPPPPM ",
+                "MPHCCHCHPM",
+                "MPEDDDDEPM",
+                "MPPSSSSPPM",
+                " MPPCCPPM ",
+                "  MPMMPM  ",
+                " M      M "
+            ],
+            [
+                " HHH  HHH ",
+                "MPPPPPPPPM",
+                "MPHCCHCHPM",
+                "MPEDDDDEPM",
+                "MPPSSSSPPM",
+                "MSP    PSM",
+                "  MM  MM  ",
+                " M  MM  M "
+            ],
+            [
+                "   HHHH   ",
+                " MPPPPPPM ",
+                "MPH  HCHPM",
+                "MPPCCCCPPM",
+                "MPPSSSSPPM",
+                " MSPPSPM  ",
+                "  M MM M  ",
+                "  M    M  "
+            ]
+        ]
+    }
+
     private var roundBlobIdleFrames: [[String]] {
         [
             [
@@ -747,6 +870,66 @@ private extension NotchPetStyle {
                 "  MPPM  ",
                 "  MPPM  ",
                 " M    M "
+            ]
+        ]
+    }
+
+    private var beeIdleFrames: [[String]] {
+        [
+            [
+                "   HH      ",
+                "  HCCMH    ",
+                " MPPPPPM   ",
+                "MPHSSSHPMS ",
+                "MPPCDDCPMS ",
+                " MPPSSPPM  ",
+                "  M M  M   ",
+                " M   MM    "
+            ],
+            [
+                "    HH     ",
+                "  HCMCH    ",
+                " MPPPPPM   ",
+                "MPHSSSHPMS ",
+                "MPPCDDCPMS ",
+                " MPPSSPPM  ",
+                "   MM M    ",
+                " M  M  M   "
+            ]
+        ]
+    }
+
+    private var beeActiveFrames: [[String]] {
+        [
+            [
+                "   HH      ",
+                "  HCCMH    ",
+                " MPPPPPM   ",
+                "MPHSSSHPMS ",
+                "MPPCDDCPMS ",
+                " MPPSSPPM  ",
+                "  M M  M   ",
+                " M   MM    "
+            ],
+            [
+                "  HHH      ",
+                " HCCCMH    ",
+                "MPPPPPPM   ",
+                "MPHSSSHPMS ",
+                "MPPCDDCPMS ",
+                " MPPSSPPMM ",
+                "   MM MM   ",
+                " M    M    "
+            ],
+            [
+                "    HHH    ",
+                "  HCMCCH   ",
+                " MPPPPPM   ",
+                "MPHSSSHPMS ",
+                "MPPCDDCPMS ",
+                " MPPSSPPM  ",
+                "  MM  MM   ",
+                "  M M      "
             ]
         ]
     }

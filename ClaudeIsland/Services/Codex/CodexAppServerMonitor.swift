@@ -28,6 +28,8 @@ actor CodexAppServerMonitor {
     private var requestSequence = 0
     private var pendingResponses: [String: CheckedContinuation<[String: Any], Error>] = [:]
     private var pendingRequestsByThread: [String: PendingRequest] = [:]
+    private var resolvedClientBundleIdentifier: String?
+    private var resolvedClientName: String?
 
     private init() {}
 
@@ -44,6 +46,9 @@ actor CodexAppServerMonitor {
             logger.notice("Codex CLI not found; app-server monitor disabled")
             return
         }
+
+        resolvedClientBundleIdentifier = Self.bundleIdentifier(forCodexExecutable: executable)
+        resolvedClientName = Self.clientName(forCodexExecutable: executable)
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
@@ -318,7 +323,11 @@ actor CodexAppServerMonitor {
         case "thread/status/changed":
             let threadId = (params["threadId"] as? String) ?? ""
             guard !threadId.isEmpty else { return }
-            let phase = phaseFromCodexStatus(params["status"] as? [String: Any], intervention: pendingRequestsByThread[threadId]?.intervention)
+            let phase = phaseFromCodexStatus(
+                params["status"] as? [String: Any],
+                threadId: threadId,
+                intervention: pendingRequestsByThread[threadId]?.intervention
+            )
             await SessionStore.shared.upsertCodexSession(
                 sessionId: threadId,
                 name: nil,
@@ -575,8 +584,10 @@ actor CodexAppServerMonitor {
         let name = thread["name"] as? String
         let preview = thread["preview"] as? String
         let cwd = thread["cwd"] as? String
+        let clientInfo = makeClientInfo(from: thread, threadId: threadId)
         let phase = phaseFromCodexStatus(
             thread["status"] as? [String: Any],
+            threadId: threadId,
             intervention: pendingRequestsByThread[threadId]?.intervention
         )
 
@@ -586,7 +597,8 @@ actor CodexAppServerMonitor {
             preview: preview,
             cwd: cwd,
             phase: phase,
-            intervention: pendingRequestsByThread[threadId]?.intervention
+            intervention: pendingRequestsByThread[threadId]?.intervention,
+            clientInfo: clientInfo
         )
     }
 
@@ -596,7 +608,11 @@ actor CodexAppServerMonitor {
         let createdAt = date(fromUnixTimestamp: thread["createdAt"]) ?? Date()
         let updatedAt = date(fromUnixTimestamp: thread["updatedAt"]) ?? createdAt
         let status = thread["status"] as? [String: Any]
-        let phase = phaseFromCodexStatus(status, intervention: pendingRequestsByThread[threadId]?.intervention)
+        let phase = phaseFromCodexStatus(
+            status,
+            threadId: threadId,
+            intervention: pendingRequestsByThread[threadId]?.intervention
+        )
         let turns = thread["turns"] as? [[String: Any]] ?? []
 
         var historyItems: [ChatHistoryItem] = []
@@ -674,6 +690,7 @@ actor CodexAppServerMonitor {
             name: sanitizedText(thread["name"] as? String),
             preview: preview,
             cwd: (thread["cwd"] as? String) ?? "/",
+            clientInfo: makeClientInfo(from: thread, threadId: threadId),
             createdAt: createdAt,
             updatedAt: updatedAt,
             phase: phase,
@@ -686,7 +703,20 @@ actor CodexAppServerMonitor {
         )
     }
 
-    private func phaseFromCodexStatus(_ status: [String: Any]?, intervention: SessionIntervention?) -> SessionPhase {
+    private func phaseFromCodexStatus(
+        _ status: [String: Any]?,
+        threadId: String,
+        intervention: SessionIntervention?
+    ) -> SessionPhase {
+        if intervention?.kind == .approval {
+            return .waitingForApproval(PermissionContext(
+                toolUseId: intervention?.id ?? "codex-approval-\(threadId)",
+                toolName: intervention?.title ?? "approval",
+                toolInput: nil,
+                receivedAt: Date()
+            ))
+        }
+
         guard let type = status?["type"] as? String else {
             if intervention?.kind == .question {
                 return .waitingForInput
@@ -698,7 +728,7 @@ actor CodexAppServerMonitor {
             let flags = status?["activeFlags"] as? [String] ?? []
             if flags.contains("waitingOnApproval") {
                 return .waitingForApproval(PermissionContext(
-                    toolUseId: intervention?.id ?? UUID().uuidString,
+                    toolUseId: intervention?.id ?? "codex-approval-\(threadId)",
                     toolName: intervention?.title ?? "approval",
                     toolInput: nil,
                     receivedAt: Date()
@@ -742,6 +772,54 @@ actor CodexAppServerMonitor {
                 isSecret: question["isSecret"] as? Bool ?? false
             )
         }
+    }
+
+    private func makeClientInfo(from thread: [String: Any], threadId: String) -> SessionClientInfo {
+        let origin = sanitizedText(thread["origin"] as? String)
+            ?? sanitizedText(thread["clientOrigin"] as? String)
+        let originator = sanitizedText(thread["originator"] as? String)
+            ?? sanitizedText(thread["clientOriginator"] as? String)
+        let threadSource = sanitizedText(thread["threadSource"] as? String)
+            ?? sanitizedText(thread["source"] as? String)
+            ?? sanitizedText(thread["sessionStartSource"] as? String)
+        let sessionFilePath = sanitizedText(thread["rolloutPath"] as? String)
+            ?? sanitizedText(thread["sessionFilePath"] as? String)
+            ?? sanitizedText(thread["rollout_path"] as? String)
+
+        let resolvedOrigin = origin ?? "desktop"
+
+        let inferredKind: SessionClientKind
+        if resolvedOrigin.localizedCaseInsensitiveContains("cli") {
+            inferredKind = .codexCLI
+        } else {
+            inferredKind = .codexApp
+        }
+
+        let defaultInfo = inferredKind == .codexApp
+            ? SessionClientInfo(
+                kind: .codexApp,
+                profileID: "codex-app",
+                name: resolvedClientName ?? "Codex App",
+                bundleIdentifier: resolvedClientBundleIdentifier ?? "com.openai.codex",
+                launchURL: SessionClientInfo.appLaunchURL(
+                    bundleIdentifier: resolvedClientBundleIdentifier ?? "com.openai.codex",
+                    sessionId: threadId
+                ),
+                origin: "desktop"
+            )
+            : SessionClientInfo(kind: .codexCLI, profileID: "codex-cli", name: "Codex CLI")
+
+        return defaultInfo.merged(with: SessionClientInfo(
+            kind: inferredKind,
+            profileID: inferredKind == .codexApp ? "codex-app" : "codex-cli",
+            name: originator ?? defaultInfo.name,
+            bundleIdentifier: inferredKind == .codexApp ? defaultInfo.bundleIdentifier : nil,
+            launchURL: inferredKind == .codexApp ? defaultInfo.launchURL : nil,
+            origin: resolvedOrigin,
+            originator: originator,
+            threadSource: threadSource,
+            sessionFilePath: sessionFilePath
+        ))
     }
 
     private func permissionSummary(_ permissions: [String: Any]) -> String {
@@ -826,10 +904,57 @@ actor CodexAppServerMonitor {
             return bundled
         }
 
+        for searchRoot in [
+            "/Applications",
+            "\(NSHomeDirectory())/Applications"
+        ] {
+            guard let enumerator = FileManager.default.enumerator(
+                at: URL(fileURLWithPath: searchRoot),
+                includingPropertiesForKeys: [.isRegularFileKey],
+                options: [.skipsHiddenFiles, .skipsPackageDescendants]
+            ) else {
+                continue
+            }
+
+            for case let fileURL as URL in enumerator {
+                if fileURL.pathExtension == "app" {
+                    enumerator.skipDescendants()
+                    let candidate = fileURL
+                        .appendingPathComponent("Contents", isDirectory: true)
+                        .appendingPathComponent("Resources", isDirectory: true)
+                        .appendingPathComponent("codex")
+                    if FileManager.default.isExecutableFile(atPath: candidate.path) {
+                        return candidate.path
+                    }
+                }
+            }
+        }
+
         return Foundation.ProcessInfo.processInfo.environment["PATH"]?
             .split(separator: ":")
             .map(String.init)
             .map { "\($0)/codex" }
             .first(where: FileManager.default.isExecutableFile(atPath:))
+    }
+
+    private static func bundleIdentifier(forCodexExecutable executable: String) -> String? {
+        let executableURL = URL(fileURLWithPath: executable)
+        guard executableURL.path.contains(".app/") else { return nil }
+        let appPath = executableURL.path.components(separatedBy: "/Contents/").first ?? ""
+        guard !appPath.isEmpty else { return nil }
+        return Bundle(url: URL(fileURLWithPath: appPath))?.bundleIdentifier
+    }
+
+    private static func clientName(forCodexExecutable executable: String) -> String? {
+        let executableURL = URL(fileURLWithPath: executable)
+        guard executableURL.path.contains(".app/") else { return nil }
+        let appPath = executableURL.path.components(separatedBy: "/Contents/").first ?? ""
+        guard !appPath.isEmpty,
+              let bundle = Bundle(url: URL(fileURLWithPath: appPath)) else {
+            return nil
+        }
+
+        return bundle.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String
+            ?? bundle.object(forInfoDictionaryKey: "CFBundleName") as? String
     }
 }

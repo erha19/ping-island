@@ -73,6 +73,9 @@ enum SessionEvent: Sendable {
     /// Session has ended
     case sessionEnded(sessionId: String)
 
+    /// User explicitly archived a session from the UI
+    case sessionArchived(sessionId: String)
+
     /// Request to load initial history from file
     case loadHistory(sessionId: String, cwd: String)
 
@@ -148,6 +151,7 @@ extension HookEvent {
 
     nonisolated var intervention: SessionIntervention? {
         guard isAskUserQuestionRequest, let questions = questionPayloads else { return nil }
+        let providerName = provider.displayName
 
         let parsedQuestions = questions.enumerated().compactMap { index, question -> SessionInterventionQuestion? in
             let prompt = (question["question"] as? String)
@@ -188,8 +192,8 @@ extension HookEvent {
         guard !parsedQuestions.isEmpty else { return nil }
 
         let title = parsedQuestions.count == 1
-            ? "Claude 的提问"
-            : "Claude 的提问（\(parsedQuestions.count) 个问题）"
+            ? "\(providerName) 的提问"
+            : "\(providerName) 的提问（\(parsedQuestions.count) 个问题）"
         var metadata: [String: String] = ["toolName": "AskUserQuestion"]
         if let toolInputJSONObject,
            let data = try? JSONSerialization.data(withJSONObject: toolInputJSONObject, options: [.sortedKeys]),
@@ -201,7 +205,7 @@ extension HookEvent {
             id: toolUseId ?? UUID().uuidString,
             kind: .question,
             title: title,
-            message: "Claude 需要你补充回答，提交后会继续执行当前会话。",
+            message: "\(providerName) 需要你补充回答，提交后会继续执行当前会话。",
             options: [],
             questions: parsedQuestions,
             supportsSessionScope: false,
@@ -255,6 +259,8 @@ extension HookEvent {
 
     /// Whether this event should trigger a file sync
     nonisolated var shouldSyncFile: Bool {
+        guard provider == .claude else { return false }
+
         switch event {
         case "UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop":
             return true
@@ -287,6 +293,8 @@ extension SessionEvent: CustomStringConvertible {
             return "clearDetected(session: \(sessionId.prefix(8)))"
         case .sessionEnded(let sessionId):
             return "sessionEnded(session: \(sessionId.prefix(8)))"
+        case .sessionArchived(let sessionId):
+            return "sessionArchived(session: \(sessionId.prefix(8)))"
         case .loadHistory(let sessionId, _):
             return "loadHistory(session: \(sessionId.prefix(8)))"
         case .historyLoaded(let sessionId, let messages, _, _, _, _):

@@ -1,17 +1,21 @@
 import AppKit
 import SwiftUI
 
+final class SettingsPanelWindow: NSWindow {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { true }
+}
+
 @MainActor
 final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     static let shared = SettingsWindowController()
     private let fixedContentSize = NSSize(width: 648, height: 522)
-    private let frameBackdropView = NSVisualEffectView()
 
     private init() {
         let hostingController = NSHostingController(rootView: SettingsWindowView())
-        let window = NSWindow(
+        let window = SettingsPanelWindow(
             contentRect: NSRect(x: 0, y: 0, width: 648, height: 522),
-            styleMask: [.titled, .closable, .miniaturizable, .fullSizeContentView],
+            styleMask: [.borderless],
             backing: .buffered,
             defer: false
         )
@@ -23,7 +27,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         window.isMovableByWindowBackground = true
         window.isOpaque = false
         window.backgroundColor = .clear
-        window.hasShadow = true
+        window.hasShadow = false
         window.minSize = fixedContentSize
         window.maxSize = fixedContentSize
         window.setContentSize(fixedContentSize)
@@ -34,12 +38,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         window.collectionBehavior = [.fullScreenAuxiliary, .moveToActiveSpace]
         window.tabbingMode = .disallowed
         window.isReleasedWhenClosed = false
-        window.standardWindowButton(.zoomButton)?.isHidden = true
-        window.standardWindowButton(.toolbarButton)?.isHidden = true
 
         super.init(window: window)
 
-        configureFrameBackdrop()
         self.window?.delegate = self
     }
 
@@ -64,30 +65,5 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     func windowShouldClose(_ sender: NSWindow) -> Bool {
         sender.orderOut(nil)
         return false
-    }
-
-    private func configureFrameBackdrop() {
-        guard
-            let window,
-            let frameView = window.contentView?.superview
-        else {
-            return
-        }
-
-        frameBackdropView.translatesAutoresizingMaskIntoConstraints = false
-        frameBackdropView.material = .hudWindow
-        frameBackdropView.blendingMode = .withinWindow
-        frameBackdropView.state = .active
-        frameBackdropView.wantsLayer = true
-        frameBackdropView.layer?.backgroundColor = NSColor.clear.cgColor
-
-        frameView.addSubview(frameBackdropView, positioned: .below, relativeTo: nil)
-
-        NSLayoutConstraint.activate([
-            frameBackdropView.leadingAnchor.constraint(equalTo: frameView.leadingAnchor),
-            frameBackdropView.trailingAnchor.constraint(equalTo: frameView.trailingAnchor),
-            frameBackdropView.topAnchor.constraint(equalTo: frameView.topAnchor),
-            frameBackdropView.bottomAnchor.constraint(equalTo: frameView.bottomAnchor)
-        ])
     }
 }

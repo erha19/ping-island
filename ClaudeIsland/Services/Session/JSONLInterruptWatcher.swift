@@ -14,6 +14,7 @@ private let logger = Logger(subsystem: "com.claudeisland", category: "Interrupt"
 
 protocol JSONLInterruptWatcherDelegate: AnyObject {
     func didDetectInterrupt(sessionId: String)
+    func didObserveFileChange(sessionId: String)
 }
 
 /// Watches a session's JSONL file for interrupt patterns in real-time
@@ -37,11 +38,20 @@ class JSONLInterruptWatcher {
         "[Request interrupted by user"
     ]
 
-    init(sessionId: String, cwd: String) {
+    init(sessionId: String, cwd: String, explicitFilePath: String? = nil) {
         self.sessionId = sessionId
-        let projectDir = cwd.replacingOccurrences(of: "/", with: "-")
-                            .replacingOccurrences(of: ".", with: "-")
-        self.filePath = NSHomeDirectory() + "/.claude/projects/" + projectDir + "/" + sessionId + ".jsonl"
+        if let explicitFilePath, !explicitFilePath.isEmpty {
+            self.filePath = explicitFilePath
+        } else {
+            let projectDir = cwd.replacingOccurrences(of: "/", with: "-")
+                                .replacingOccurrences(of: ".", with: "-")
+            let qoderPath = NSHomeDirectory() + "/.qoder/projects/" + projectDir + "/transcript/" + sessionId + ".jsonl"
+            if FileManager.default.fileExists(atPath: qoderPath) {
+                self.filePath = qoderPath
+            } else {
+                self.filePath = NSHomeDirectory() + "/.claude/projects/" + projectDir + "/" + sessionId + ".jsonl"
+            }
+        }
     }
 
     /// Start watching the JSONL file for interrupts
@@ -116,6 +126,11 @@ class JSONLInterruptWatcher {
 
         lastOffset = currentSize
 
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            self.delegate?.didObserveFileChange(sessionId: self.sessionId)
+        }
+
         let lines = newContent.components(separatedBy: "\n")
         for line in lines where !line.isEmpty {
             if isInterruptLine(line) {
@@ -185,10 +200,10 @@ class InterruptWatcherManager {
 
     private init() {}
 
-    func startWatching(sessionId: String, cwd: String) {
+    func startWatching(sessionId: String, cwd: String, explicitFilePath: String? = nil) {
         guard watchers[sessionId] == nil else { return }
 
-        let watcher = JSONLInterruptWatcher(sessionId: sessionId, cwd: cwd)
+        let watcher = JSONLInterruptWatcher(sessionId: sessionId, cwd: cwd, explicitFilePath: explicitFilePath)
         watcher.delegate = delegate
         watcher.start()
         watchers[sessionId] = watcher

@@ -6,6 +6,7 @@
 //
 
 import AppKit
+import ApplicationServices
 import Foundation
 import os.log
 
@@ -17,15 +18,61 @@ actor SessionLauncher {
     private init() {}
 
     func activate(_ session: SessionState) async -> Bool {
+        Self.logger.debug("Activate request session=\(session.sessionId, privacy: .public) provider=\(String(describing: session.provider), privacy: .public) client=\(session.clientDisplayName, privacy: .public) pid=\(String(describing: session.pid), privacy: .public) tty=\(String(describing: session.tty), privacy: .public) inTmux=\(session.isInTmux)")
+        let allowsAppFallback = allowsAppFallback(for: session)
+
+        if shouldPrioritizeAppNavigation(for: session),
+           await activatePreferredAppNavigation(for: session) {
+            return true
+        }
+
         if session.isInTmux, await activateTmuxSession(session) {
+            Self.logger.debug("Activated tmux session \(session.sessionId, privacy: .public)")
+            return true
+        }
+
+        if !session.isInTmux,
+           let tty = session.tty,
+           await activateTerminal(forTTY: tty) {
+            Self.logger.debug("Activated session \(session.sessionId, privacy: .public) via tty \(tty, privacy: .public)")
             return true
         }
 
         if let pid = session.pid, await activateTerminal(forProcess: pid) {
+            Self.logger.debug("Activated session \(session.sessionId, privacy: .public) via process pid \(pid, privacy: .public)")
             return true
         }
 
-        if session.provider == .codex, await activateApplication(bundleIdentifier: "com.openai.codex") {
+        if session.tty == nil,
+           session.pid == nil,
+           await activateIDEChatSession(session) {
+            Self.logger.debug("Activated session \(session.sessionId, privacy: .public) via IDE session focus")
+            return true
+        }
+
+        if allowsAppFallback,
+           await activatePreferredAppNavigation(for: session) {
+            return true
+        }
+
+        if let terminalBundleIdentifier = session.clientInfo.terminalBundleIdentifier,
+           await activateApplication(bundleIdentifier: terminalBundleIdentifier) {
+            Self.logger.debug("Activated session \(session.sessionId, privacy: .public) via terminal bundle \(terminalBundleIdentifier, privacy: .public)")
+            return true
+        }
+
+        if allowsAppFallback,
+           let bundleIdentifier = session.clientInfo.bundleIdentifier,
+           bundleIdentifier != "com.openai.codex",
+           await activateApplication(bundleIdentifier: bundleIdentifier) {
+            Self.logger.debug("Activated session \(session.sessionId, privacy: .public) via fallback bundle \(bundleIdentifier, privacy: .public)")
+            return true
+        }
+
+        if allowsAppFallback,
+           session.provider == .codex,
+           await activateApplication(bundleIdentifier: "com.openai.codex") {
+            Self.logger.debug("Activated Codex bundle for session \(session.sessionId, privacy: .public)")
             return true
         }
 
@@ -71,12 +118,96 @@ actor SessionLauncher {
         return false
     }
 
+    private func shouldPrioritizeAppNavigation(for session: SessionState) -> Bool {
+        guard session.clientInfo.prefersAppNavigation else { return false }
+        return session.clientInfo.kind == .codexApp
+    }
+
+    private func allowsAppFallback(for session: SessionState) -> Bool {
+        session.clientInfo.kind != .codexCLI
+    }
+
+    private func activatePreferredAppNavigation(for session: SessionState) async -> Bool {
+        guard session.clientInfo.prefersAppNavigation else { return false }
+
+        let resolvedLaunchURL = session.clientInfo.launchURL
+            ?? session.clientInfo.bundleIdentifier.flatMap {
+                SessionClientInfo.appLaunchURL(
+                    bundleIdentifier: $0,
+                    sessionId: session.sessionId,
+                    workspacePath: session.cwd
+                )
+            }
+
+        if let launchURL = resolvedLaunchURL,
+           await activateURL(launchURL) {
+            Self.logger.debug("Activated session \(session.sessionId, privacy: .public) via launch URL")
+
+            if let bundleIdentifier = session.clientInfo.bundleIdentifier {
+                _ = await activateApplication(bundleIdentifier: bundleIdentifier)
+            }
+
+            return true
+        }
+
+        if let bundleIdentifier = session.clientInfo.bundleIdentifier,
+           await activateApplication(bundleIdentifier: bundleIdentifier) {
+            Self.logger.debug("Activated session \(session.sessionId, privacy: .public) via bundle \(bundleIdentifier, privacy: .public)")
+            return true
+        }
+
+        return false
+    }
+
     private func activateTerminal(forProcess pid: Int) async -> Bool {
         let tree = ProcessTreeBuilder.shared.buildTree()
         guard let terminalPid = ProcessTreeBuilder.shared.findTerminalPid(forProcess: pid, tree: tree) else {
+            Self.logger.debug("activateTerminal(forProcess:) failed to resolve terminal pid for process \(pid, privacy: .public)")
             return false
         }
 
+        Self.logger.debug("activateTerminal(forProcess:) process \(pid, privacy: .public) -> terminalPid \(terminalPid, privacy: .public)")
+
+        let resolvedTTY = tree[pid]?.tty ?? tree[terminalPid]?.tty
+        let candidateProcessIDs: [Int]
+        if let resolvedTTY {
+            candidateProcessIDs = ProcessTreeBuilder.shared.candidateProcessIDs(forTTY: resolvedTTY, tree: tree)
+        } else {
+            candidateProcessIDs = Array(Set([pid, terminalPid])).sorted()
+        }
+
+        if await TerminalSessionFocuser.shared.focusSession(
+            terminalPid: terminalPid,
+            tty: resolvedTTY,
+            candidateProcessIDs: candidateProcessIDs
+        ) {
+            Self.logger.debug("PID-focused terminal session pid=\(pid, privacy: .public) terminalPid=\(terminalPid, privacy: .public)")
+            return true
+        }
+
+        return await activateApplication(processIdentifier: terminalPid)
+    }
+
+    private func activateTerminal(forTTY tty: String) async -> Bool {
+        let tree = ProcessTreeBuilder.shared.buildTree()
+        let candidateProcessIDs = ProcessTreeBuilder.shared.candidateProcessIDs(forTTY: tty, tree: tree)
+        guard let terminalPid = ProcessTreeBuilder.shared.findTerminalPid(forTTY: tty, tree: tree) else {
+            Self.logger.debug("activateTerminal(forTTY:) failed tty=\(tty, privacy: .public)")
+            return false
+        }
+
+        Self.logger.debug("activateTerminal(forTTY:) tty=\(tty, privacy: .public) -> terminalPid \(terminalPid, privacy: .public)")
+
+        if await TerminalSessionFocuser.shared.focusSession(
+            terminalPid: terminalPid,
+            tty: tty,
+            candidateProcessIDs: candidateProcessIDs
+        ) {
+            Self.logger.debug("TTY-focused terminal session tty=\(tty, privacy: .public) terminalPid=\(terminalPid, privacy: .public)")
+            return true
+        }
+
+        Self.logger.debug("Falling back to app activation for tty=\(tty, privacy: .public) terminalPid=\(terminalPid, privacy: .public)")
         return await activateApplication(processIdentifier: terminalPid)
     }
 
@@ -123,27 +254,47 @@ actor SessionLauncher {
         return nil
     }
 
-    private func activateApplication(processIdentifier pid: Int) async -> Bool {
-        await MainActor.run {
+    private func activateApplication(processIdentifier pid: Int, activateAllWindows: Bool = true) async -> Bool {
+        if let bundleIdentifier = await MainActor.run(body: {
+            NSRunningApplication(processIdentifier: pid_t(pid))?.bundleIdentifier
+        }) {
+            let normalizedBundleIdentifier = TerminalAppRegistry.normalizedHostBundleIdentifier(for: bundleIdentifier)
+            if normalizedBundleIdentifier != bundleIdentifier {
+                Self.logger.debug("activateApplication(processIdentifier:) remapping helper bundle \(bundleIdentifier, privacy: .public) -> \(normalizedBundleIdentifier, privacy: .public)")
+                return await activateApplication(
+                    bundleIdentifier: normalizedBundleIdentifier,
+                    activateAllWindows: activateAllWindows
+                )
+            }
+        }
+
+        return await MainActor.run {
             guard let app = NSRunningApplication(processIdentifier: pid_t(pid)) else {
+                Self.logger.debug("activateApplication(processIdentifier:) missing app for pid \(pid, privacy: .public)")
                 return false
             }
 
-            return app.activate(options: [.activateAllWindows])
+            let success = activateRunningApplication(app, activateAllWindows: activateAllWindows)
+            Self.logger.debug("activateApplication(processIdentifier:) pid=\(pid, privacy: .public) bundle=\(app.bundleIdentifier ?? "unknown", privacy: .public) success=\(success)")
+            return success
         }
     }
 
-    private func activateApplication(bundleIdentifier: String) async -> Bool {
+    private func activateApplication(bundleIdentifier: String, activateAllWindows: Bool = true) async -> Bool {
+        let normalizedBundleIdentifier = TerminalAppRegistry.normalizedHostBundleIdentifier(for: bundleIdentifier)
+
         if await MainActor.run(body: {
-            NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifier)
-                .first?
-                .activate(options: [.activateAllWindows]) ?? false
+            guard let app = NSRunningApplication.runningApplications(withBundleIdentifier: normalizedBundleIdentifier).first else {
+                return false
+            }
+
+            return activateRunningApplication(app, activateAllWindows: activateAllWindows)
         }) {
             return true
         }
 
         guard let appURL = await MainActor.run(body: {
-            NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleIdentifier)
+            NSWorkspace.shared.urlForApplication(withBundleIdentifier: normalizedBundleIdentifier)
         }) else {
             return false
         }
@@ -154,15 +305,150 @@ actor SessionLauncher {
                 configuration.activates = true
                 NSWorkspace.shared.openApplication(at: appURL, configuration: configuration) { app, error in
                     if let error {
-                        Self.logger.error("Failed to open \(bundleIdentifier, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                        Self.logger.error("Failed to open \(normalizedBundleIdentifier, privacy: .public): \(error.localizedDescription, privacy: .public)")
                         continuation.resume(returning: false)
                         return
                     }
 
-                    let didActivate = app?.activate(options: [.activateAllWindows]) ?? true
-                    continuation.resume(returning: didActivate)
+                    Task { @MainActor in
+                        let didActivate: Bool
+                        if let app {
+                            didActivate = self.activateRunningApplication(
+                                app,
+                                activateAllWindows: activateAllWindows
+                            )
+                        } else {
+                            didActivate = true
+                        }
+                        continuation.resume(returning: didActivate)
+                    }
                 }
             }
+        }
+    }
+
+    @MainActor
+    private func activateRunningApplication(_ app: NSRunningApplication, activateAllWindows: Bool = true) -> Bool {
+        if app.isHidden {
+            app.unhide()
+        }
+
+        if activateAllWindows {
+            restoreMiniaturizedWindows(for: app)
+            return app.activate(options: [.activateAllWindows])
+        }
+
+        return app.activate(options: [])
+    }
+
+    @MainActor
+    private func restoreMiniaturizedWindows(for app: NSRunningApplication) {
+        guard AXIsProcessTrusted() else {
+            Self.logger.debug("Skipping minimized-window restore for \(app.bundleIdentifier ?? "unknown", privacy: .public): accessibility not granted")
+            return
+        }
+
+        let appElement = AXUIElementCreateApplication(app.processIdentifier)
+        var windowsValue: CFTypeRef?
+        let copyResult = AXUIElementCopyAttributeValue(appElement, kAXWindowsAttribute as CFString, &windowsValue)
+
+        guard copyResult == .success,
+              let windows = windowsValue as? [AXUIElement] else {
+            return
+        }
+
+        var restoredWindowCount = 0
+
+        for window in windows {
+            guard isWindowMiniaturized(window) else { continue }
+
+            let result = AXUIElementSetAttributeValue(
+                window,
+                kAXMinimizedAttribute as CFString,
+                kCFBooleanFalse
+            )
+
+            if result == .success {
+                restoredWindowCount += 1
+            }
+        }
+
+        if restoredWindowCount > 0 {
+            Self.logger.debug("Restored \(restoredWindowCount, privacy: .public) minimized window(s) for \(app.bundleIdentifier ?? "unknown", privacy: .public)")
+        }
+    }
+
+    @MainActor
+    private func isWindowMiniaturized(_ window: AXUIElement) -> Bool {
+        var minimizedValue: CFTypeRef?
+        let result = AXUIElementCopyAttributeValue(window, kAXMinimizedAttribute as CFString, &minimizedValue)
+
+        guard result == .success else { return false }
+
+        if let boolValue = minimizedValue as? Bool {
+            return boolValue
+        }
+
+        if let numberValue = minimizedValue as? NSNumber {
+            return numberValue.boolValue
+        }
+
+        return false
+    }
+
+    private func activateIDEChatSession(_ session: SessionState) async -> Bool {
+        guard session.clientInfo.isQoderFamily else { return false }
+
+        let bundleIdentifier = session.clientInfo.bundleIdentifier ?? session.clientInfo.terminalBundleIdentifier
+        let appName = session.clientInfo.name ?? session.clientDisplayName
+        guard let profile = ClientProfileRegistry.ideExtensionProfile(
+            bundleIdentifier: bundleIdentifier,
+            appName: appName
+        ),
+        profile.supportsSessionHistoryFocus,
+        IDEExtensionInstaller.isInstalled(profile),
+        let url = IDEExtensionInstaller.makeURI(
+            profile: profile,
+            path: "/session",
+            queryItems: [URLQueryItem(name: "sessionId", value: session.sessionId)]
+        ) else {
+            return false
+        }
+
+        let candidateBundleIdentifiers = [
+            session.clientInfo.bundleIdentifier,
+            session.clientInfo.terminalBundleIdentifier
+        ]
+        .compactMap { $0 }
+        + profile.localAppBundleIdentifiers
+
+        for candidateBundleIdentifier in Set(candidateBundleIdentifiers) {
+            if await activateApplication(
+                bundleIdentifier: candidateBundleIdentifier,
+                activateAllWindows: false
+            ) {
+                break
+            }
+        }
+
+        // Give Qoder a brief moment to foreground its last active window before the URI is handled.
+        try? await Task.sleep(nanoseconds: 250_000_000)
+
+        return await MainActor.run {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
+    private func activateURL(_ string: String) async -> Bool {
+        guard let url = URL(string: string) else {
+            Self.logger.debug("activateURL failed to parse \(string, privacy: .public)")
+            return false
+        }
+
+        return await MainActor.run {
+            let success = NSWorkspace.shared.open(url)
+            Self.logger.debug("activateURL url=\(string, privacy: .public) success=\(success)")
+            return success
         }
     }
 }

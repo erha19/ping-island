@@ -1,26 +1,29 @@
 #!/usr/bin/env python3
 """
-Island Hook
-- Sends session state to Island.app via Unix socket
-- For PermissionRequest: waits for user decision from the app
+Island Claude bridge hook.
+
+This script speaks a single bridge protocol:
+- request: bridge envelope JSON over the Island Unix socket
+- response: bridge response JSON from the app
 """
+
 import json
 import os
 import socket
+import subprocess
 import sys
+import time
+import uuid
 
-SOCKET_PATH = "/tmp/island.sock"
-TIMEOUT_SECONDS = 300  # 5 minutes for permission decisions
+SOCKET_PATH = os.environ.get("ISLAND_SOCKET_PATH", "/tmp/island.sock")
+TIMEOUT_SECONDS = 300
+FOUNDATION_REFERENCE_UNIX = 978307200
 
 
 def get_tty():
-    """Get the TTY of the Claude process (parent)"""
-    import subprocess
-
-    # Get parent PID (Claude process)
+    """Get the TTY of the Claude parent process."""
     ppid = os.getppid()
 
-    # Try to get TTY from ps command for the parent process
     try:
         result = subprocess.run(
             ["ps", "-p", str(ppid), "-o", "tty="],
@@ -30,54 +33,318 @@ def get_tty():
         )
         tty = result.stdout.strip()
         if tty and tty != "??" and tty != "-":
-            # ps returns just "ttys001", we need "/dev/ttys001"
-            if not tty.startswith("/dev/"):
-                tty = "/dev/" + tty
-            return tty
+            return tty if tty.startswith("/dev/") else f"/dev/{tty}"
     except Exception:
         pass
 
-    # Fallback: try current process stdin/stdout
-    try:
-        return os.ttyname(sys.stdin.fileno())
-    except (OSError, AttributeError):
-        pass
-    try:
-        return os.ttyname(sys.stdout.fileno())
-    except (OSError, AttributeError):
-        pass
+    for handle in (sys.stdin, sys.stdout):
+        try:
+            return os.ttyname(handle.fileno())
+        except (OSError, AttributeError):
+            continue
+
     return None
 
 
-def send_event(state):
-    """Send event to app, return response if any"""
+def get_process_name(pid):
+    try:
+        result = subprocess.run(
+            ["ps", "-p", str(pid), "-o", "comm="],
+            capture_output=True,
+            text=True,
+            timeout=2
+        )
+        name = result.stdout.strip()
+        return name or None
+    except Exception:
+        return None
+
+
+def foundation_now():
+    return time.time() - FOUNDATION_REFERENCE_UNIX
+
+
+def compact_json(value):
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def detect_ide_context(env):
+    term_program = (env.get("TERM_PROGRAM") or "").lower()
+    hint_values = []
+    for key in (
+        "TERM_PROGRAM",
+        "TERM_PROGRAM_VERSION",
+        "VSCODE_GIT_IPC_HANDLE",
+        "VSCODE_IPC_HOOK_CLI",
+        "VSCODE_GIT_ASKPASS_MAIN",
+        "VSCODE_CWD",
+        "CURSOR_TRACE_ID",
+        "CURSOR_AGENT",
+        "CURSOR_GIT_ASKPASS_MAIN",
+        "WINDSURF_TRACE_ID",
+        "TRAE_TRACE_ID",
+        "TRAE_AGENT",
+        "CODEBUDDY_TRACE_ID",
+        "CODEBUDDY_AGENT",
+        "ZED_CHANNEL",
+    ):
+        value = env.get(key)
+        if value:
+            hint_values.append(value.lower())
+
+    hints = " ".join(hint_values)
+
+    if "cursor" in hints or any(key.startswith("CURSOR_") for key in env):
+        return ("Cursor", "com.todesktop.230313mzl4w4u92")
+    if "windsurf" in hints or any(key.startswith("WINDSURF_") for key in env):
+        return ("Windsurf", "com.exafunction.windsurf")
+    if "trae" in hints or any(key.startswith("TRAE_") for key in env):
+        return ("Trae", "com.trae.app")
+    if "codebuddy" in hints or any(key.startswith("CODEBUDDY_") for key in env):
+        return ("CodeBuddy", "com.codebuddy.app")
+    if "zed" in hints or any(key.startswith("ZED_") for key in env):
+        return ("Zed", "dev.zed.Zed")
+    if term_program == "vscode" or any(key.startswith("VSCODE_") for key in env):
+        return ("VS Code", "com.microsoft.VSCode")
+
+    return (None, None)
+
+
+def detect_remote_context(env):
+    authority = (
+        env.get("VSCODE_CLI_REMOTE_AUTHORITY")
+        or env.get("VSCODE_REMOTE_AUTHORITY")
+        or env.get("REMOTE_CONTAINERS_IPC")
+    )
+    ssh_connection = env.get("SSH_CONNECTION") or env.get("SSH_CLIENT")
+
+    if authority and "ssh-remote+" in authority:
+        return ("ssh-remote", authority.split("ssh-remote+", 1)[1] or None)
+
+    if ssh_connection:
+        ssh_parts = ssh_connection.split()
+        if len(ssh_parts) >= 3:
+            return ("ssh", ssh_parts[2])
+        return ("ssh", env.get("SSH_TTY"))
+
+    return (None, None)
+
+
+def build_terminal_context(cwd, tty):
+    env = os.environ
+    program = env.get("TERM_PROGRAM")
+    bundle_id = env.get("__CFBundleIdentifier")
+    ide_name = None
+    ide_bundle_id = None
+
+    if not bundle_id:
+        if program == "iTerm.app":
+            bundle_id = "com.googlecode.iterm2"
+        elif program in {"Apple_Terminal", "Terminal.app"}:
+            bundle_id = "com.apple.Terminal"
+        else:
+            ide_name, ide_bundle_id = detect_ide_context(env)
+            bundle_id = ide_bundle_id
+    else:
+        ide_name, ide_bundle_id = detect_ide_context(env)
+
+    transport, remote_host = detect_remote_context(env)
+
+    return {
+        "terminalProgram": program,
+        "terminalBundleID": bundle_id,
+        "ideName": ide_name,
+        "ideBundleID": ide_bundle_id,
+        "iTermSessionID": env.get("ITERM_SESSION_ID"),
+        "terminalSessionID": env.get("TERM_SESSION_ID") or env.get("ITERM_SESSION_ID"),
+        "tty": tty,
+        "currentDirectory": cwd or env.get("PWD"),
+        "transport": transport,
+        "remoteHost": remote_host,
+        "tmuxSession": env.get("TMUX"),
+        "tmuxPane": env.get("TMUX_PANE"),
+    }
+
+
+def build_metadata(data, event, cwd, pid, tool_input, terminal_context):
+    metadata = {
+        "session_id": data.get("session_id", "unknown"),
+        "hook_event_name": event,
+        "cwd": cwd or "",
+        "pid": str(pid),
+        "client_kind": "claude_code",
+        "client_name": "Claude Code",
+    }
+
+    if terminal_context.get("terminalBundleID"):
+        metadata["terminal_bundle_id"] = terminal_context["terminalBundleID"]
+    if terminal_context.get("terminalProgram"):
+        metadata["terminal_program"] = terminal_context["terminalProgram"]
+    if terminal_context.get("ideName"):
+        metadata["client_originator"] = terminal_context["ideName"]
+    if terminal_context.get("transport"):
+        metadata["connection_transport"] = terminal_context["transport"]
+    if terminal_context.get("remoteHost"):
+        metadata["remote_host"] = terminal_context["remoteHost"]
+
+    process_name = get_process_name(pid)
+    if process_name:
+        metadata["source_process_name"] = process_name
+
+    for key in (
+        "tool_name",
+        "tool_use_id",
+        "notification_type",
+        "message",
+        "transcript_path",
+        "reason",
+    ):
+        value = data.get(key)
+        if value is not None and value != "":
+            metadata[key] = str(value)
+
+    if tool_input:
+        metadata["tool_input_json"] = compact_json(tool_input)
+
+    return metadata
+
+
+def event_status_kind(event, tool_name, tool_input, notification_type):
+    if event == "UserPromptSubmit":
+        return "thinking"
+    if event == "PreToolUse":
+        if tool_name == "AskUserQuestion" and tool_input.get("questions"):
+            return "waitingForInput"
+        return "runningTool"
+    if event == "PostToolUse":
+        return "active"
+    if event == "PermissionRequest":
+        return "waitingForApproval"
+    if event == "Notification":
+        if notification_type == "idle_prompt":
+            return "waitingForInput"
+        return "notification"
+    if event in {"Stop", "SubagentStop", "SessionStart"}:
+        return "waitingForInput"
+    if event == "SessionEnd":
+        return "completed"
+    if event == "PreCompact":
+        return "compacting"
+    return "active"
+
+
+def event_preview(event, tool_name, tool_input, message):
+    if message:
+        return message
+    if tool_name:
+        if tool_input:
+            return f"{tool_name} {compact_json(tool_input)}"
+        return tool_name
+    return event
+
+
+def event_title(event, tool_name):
+    return tool_name or event
+
+
+def expects_response(event, tool_name, tool_input):
+    return (
+        event == "PermissionRequest"
+        or (event == "PreToolUse" and tool_name == "AskUserQuestion" and tool_input.get("questions"))
+    )
+
+
+def build_envelope(data):
+    session_id = data.get("session_id", "unknown")
+    event = data.get("hook_event_name", "")
+    cwd = data.get("cwd") or os.environ.get("PWD") or ""
+    tool_name = data.get("tool_name")
+    tool_input = data.get("tool_input", {}) or {}
+    notification_type = data.get("notification_type")
+    message = data.get("message")
+    pid = os.getppid()
+    tty = get_tty()
+    terminal_context = build_terminal_context(cwd, tty)
+
+    return {
+        "id": str(uuid.uuid4()),
+        "provider": "claude",
+        "eventType": event,
+        "sessionKey": f"claude:{session_id}",
+        "title": event_title(event, tool_name),
+        "preview": event_preview(event, tool_name, tool_input, message),
+        "cwd": cwd,
+        "status": {
+            "kind": event_status_kind(event, tool_name, tool_input, notification_type)
+        },
+        "terminalContext": terminal_context,
+        "expectsResponse": expects_response(event, tool_name, tool_input),
+        "metadata": build_metadata(data, event, cwd, pid, tool_input, terminal_context),
+        "sentAt": foundation_now(),
+    }
+
+
+def send_event(envelope):
     try:
         sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         sock.settimeout(TIMEOUT_SECONDS)
         sock.connect(SOCKET_PATH)
-        sock.sendall(json.dumps(state).encode())
+        sock.sendall(compact_json(envelope).encode())
+        sock.shutdown(socket.SHUT_WR)
 
-        should_wait = (
-            state.get("status") == "waiting_for_approval"
-            or (
-                state.get("event") == "PreToolUse"
-                and state.get("tool") == "AskUserQuestion"
-                and state.get("tool_input", {}).get("questions")
-            )
-        )
-
-        # For interactive requests, wait for response
-        if should_wait:
-            response = sock.recv(4096)
+        if envelope.get("expectsResponse"):
+            response = sock.recv(65536)
             sock.close()
             if response:
                 return json.loads(response.decode())
         else:
             sock.close()
-
         return None
     except (socket.error, OSError, json.JSONDecodeError):
         return None
+
+
+def claude_permission_output(response):
+    decision = response.get("decision")
+    reason = response.get("reason", "")
+
+    if decision in {"approve", "approveForSession"}:
+        return {
+            "hookSpecificOutput": {
+                "hookEventName": "PermissionRequest",
+                "decision": {"behavior": "allow"},
+            }
+        }
+
+    if decision == "deny":
+        return {
+            "hookSpecificOutput": {
+                "hookEventName": "PermissionRequest",
+                "decision": {
+                    "behavior": "deny",
+                    "message": reason or "Denied by user via Island",
+                },
+            }
+        }
+
+    return None
+
+
+def claude_question_output(response):
+    if response.get("decision") != "answer":
+        return None
+
+    updated_input = response.get("updatedInput")
+    if not isinstance(updated_input, dict):
+        return None
+
+    return {
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "allow",
+            "updatedInput": updated_input,
+        }
+    }
 
 
 def main():
@@ -86,146 +353,26 @@ def main():
     except json.JSONDecodeError:
         sys.exit(1)
 
-    session_id = data.get("session_id", "unknown")
     event = data.get("hook_event_name", "")
-    cwd = data.get("cwd", "")
-    tool_input = data.get("tool_input", {})
+    notification_type = data.get("notification_type")
 
-    # Get process info
-    claude_pid = os.getppid()
-    tty = get_tty()
-
-    # Build state object
-    state = {
-        "session_id": session_id,
-        "cwd": cwd,
-        "event": event,
-        "pid": claude_pid,
-        "tty": tty,
-    }
-
-    # Map events to status
-    if event == "UserPromptSubmit":
-        # User just sent a message - Claude is now processing
-        state["status"] = "processing"
-
-    elif event == "PreToolUse":
-        state["tool"] = data.get("tool_name")
-        state["tool_input"] = tool_input
-        # Send tool_use_id to Swift for caching
-        tool_use_id_from_event = data.get("tool_use_id")
-        if tool_use_id_from_event:
-            state["tool_use_id"] = tool_use_id_from_event
-
-        if state["tool"] == "AskUserQuestion" and tool_input.get("questions"):
-            state["status"] = "waiting_for_input"
-            response = send_event(state)
-
-            if response:
-                decision = response.get("decision", "ask")
-                updated_input = response.get("updatedInput")
-
-                if decision == "answer" and updated_input:
-                    output = {
-                        "hookSpecificOutput": {
-                            "hookEventName": "PreToolUse",
-                            "permissionDecision": "allow",
-                            "updatedInput": updated_input,
-                        }
-                    }
-                    print(json.dumps(output))
-                    sys.exit(0)
-
-            sys.exit(0)
-
-        state["status"] = "running_tool"
-
-    elif event == "PostToolUse":
-        state["status"] = "processing"
-        state["tool"] = data.get("tool_name")
-        state["tool_input"] = tool_input
-        # Send tool_use_id so Swift can cancel the specific pending permission
-        tool_use_id_from_event = data.get("tool_use_id")
-        if tool_use_id_from_event:
-            state["tool_use_id"] = tool_use_id_from_event
-
-    elif event == "PermissionRequest":
-        # This is where we can control the permission
-        state["status"] = "waiting_for_approval"
-        state["tool"] = data.get("tool_name")
-        state["tool_input"] = tool_input
-        # tool_use_id lookup handled by Swift-side cache from PreToolUse
-
-        # Send to app and wait for decision
-        response = send_event(state)
-
-        if response:
-            decision = response.get("decision", "ask")
-            reason = response.get("reason", "")
-
-            if decision == "allow":
-                # Output JSON to approve
-                output = {
-                    "hookSpecificOutput": {
-                        "hookEventName": "PermissionRequest",
-                        "decision": {"behavior": "allow"},
-                    }
-                }
-                print(json.dumps(output))
-                sys.exit(0)
-
-            elif decision == "deny":
-                # Output JSON to deny
-                output = {
-                    "hookSpecificOutput": {
-                        "hookEventName": "PermissionRequest",
-                        "decision": {
-                            "behavior": "deny",
-                            "message": reason or "Denied by user via Island",
-                        },
-                    }
-                }
-                print(json.dumps(output))
-                sys.exit(0)
-
-        # No response or "ask" - let Claude Code show its normal UI
+    if event == "Notification" and notification_type == "permission_prompt":
         sys.exit(0)
 
-    elif event == "Notification":
-        notification_type = data.get("notification_type")
-        # Skip permission_prompt - PermissionRequest hook handles this with better info
-        if notification_type == "permission_prompt":
-            sys.exit(0)
-        elif notification_type == "idle_prompt":
-            state["status"] = "waiting_for_input"
-        else:
-            state["status"] = "notification"
-        state["notification_type"] = notification_type
-        state["message"] = data.get("message")
+    envelope = build_envelope(data)
+    response = send_event(envelope)
 
-    elif event == "Stop":
-        state["status"] = "waiting_for_input"
+    if event == "PreToolUse" and data.get("tool_name") == "AskUserQuestion":
+        output = claude_question_output(response or {})
+        if output is not None:
+            print(json.dumps(output))
+        sys.exit(0)
 
-    elif event == "SubagentStop":
-        # SubagentStop fires when a subagent completes - usually means back to waiting
-        state["status"] = "waiting_for_input"
-
-    elif event == "SessionStart":
-        # New session starts waiting for user input
-        state["status"] = "waiting_for_input"
-
-    elif event == "SessionEnd":
-        state["status"] = "ended"
-
-    elif event == "PreCompact":
-        # Context is being compacted (manual or auto)
-        state["status"] = "compacting"
-
-    else:
-        state["status"] = "unknown"
-
-    # Send to socket (fire and forget for non-permission events)
-    send_event(state)
+    if event == "PermissionRequest":
+        output = claude_permission_output(response or {})
+        if output is not None:
+            print(json.dumps(output))
+        sys.exit(0)
 
 
 if __name__ == "__main__":

@@ -90,3 +90,25 @@ func previewFallsBackToStructuredToolInput() throws {
 
     #expect(envelope.preview == #"Bash {"command":"npm test"}"#)
 }
+
+@Test
+func qoderClientMetadataCanBeInjectedFromBridgeArguments() throws {
+    let payload = """
+    {
+      "hook_event_name": "UserPromptSubmit",
+      "session_id": "qoder-123"
+    }
+    """.data(using: .utf8)!
+
+    let envelope = HookPayloadMapper.makeEnvelope(
+        source: .claude,
+        arguments: ["island-bridge", "--source", "claude", "--client-kind", "qoder", "--client-name", "Qoder"],
+        environment: ["PWD": "/tmp/demo"],
+        stdinData: payload
+    )
+
+    #expect(envelope.provider == .claude)
+    #expect(envelope.metadata["client_kind"] == "qoder")
+    #expect(envelope.metadata["client_name"] == "Qoder")
+    #expect(envelope.sessionKey == "claude:qoder-123")
+}

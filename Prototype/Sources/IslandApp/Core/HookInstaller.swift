@@ -61,6 +61,109 @@ struct HookInstaller {
         try writeJSON(updated, to: fileURL)
     }
 
+    func installCodeBuddyAssets() throws {
+        try installClaudeCompatibleAssets(
+            relativePath: ".codebuddy/settings.json",
+            clientKind: "codebuddy",
+            clientName: "CodeBuddy",
+            clientOriginator: "CodeBuddy"
+        )
+    }
+
+    func installTraeAssets() throws {
+        try installClaudeCompatibleAssets(
+            relativePath: "Library/Application Support/Trae/User/settings.json",
+            clientKind: "trae",
+            clientName: "Trae",
+            clientOriginator: "Trae"
+        )
+    }
+
+    func installCursorAssets() throws {
+        try installClaudeCompatibleAssets(
+            relativePath: "Library/Application Support/Cursor/User/settings.json",
+            clientKind: "cursor",
+            clientName: "Cursor",
+            clientOriginator: "Cursor"
+        )
+    }
+
+    func installQoderAssets() throws {
+        try ensureSupportFiles()
+        let fileURL = homeDirectory.appending(path: ".qoder/settings.json")
+        let current = try readJSON(fileURL) ?? [:]
+        var updated = current
+        var hooks = current["hooks"] as? [String: Any] ?? [:]
+
+        let wildcardEvents = ["PreToolUse", "PostToolUse", "PostToolUseFailure"]
+        for event in ["UserPromptSubmit", "Stop"] {
+            hooks[event] = installHookArray(existing: hooks[event], command: bridgeCommand(source: "claude", extraArguments: ["--client-kind", "qoder"]), matcher: nil)
+        }
+        for event in wildcardEvents {
+            hooks[event] = installHookArray(existing: hooks[event], command: bridgeCommand(source: "claude", extraArguments: ["--client-kind", "qoder"]), matcher: "*")
+        }
+
+        updated["hooks"] = hooks
+        try writeJSON(updated, to: fileURL)
+    }
+
+    private func installClaudeCompatibleAssets(
+        relativePath: String,
+        clientKind: String,
+        clientName: String,
+        clientOriginator: String
+    ) throws {
+        try ensureSupportFiles()
+        let fileURL = homeDirectory.appending(path: relativePath)
+        let current = try readJSON(fileURL) ?? [:]
+        var updated = current
+        var hooks = current["hooks"] as? [String: Any] ?? [:]
+
+        let plainEvents = ["UserPromptSubmit", "Stop", "SubagentStop", "SessionStart", "SessionEnd"]
+        let wildcardEvents = ["PreToolUse", "PostToolUse", "PermissionRequest", "Notification"]
+        let compactEvents = ["PreCompact": ["auto", "manual"]]
+        let command = bridgeCommand(
+            source: "claude",
+            extraArguments: [
+                "--client-kind", clientKind,
+                "--client-name", clientName,
+                "--client-originator", clientOriginator
+            ]
+        )
+
+        for event in plainEvents {
+            hooks[event] = installHookArray(
+                existing: hooks[event],
+                command: command,
+                matcher: nil
+            )
+        }
+
+        for event in wildcardEvents {
+            hooks[event] = installHookArray(
+                existing: hooks[event],
+                command: command,
+                timeout: event == "PermissionRequest" ? 86_400 : nil,
+                matcher: "*"
+            )
+        }
+
+        for (event, matchers) in compactEvents {
+            var entries = hooks[event] as? [[String: Any]]
+            for matcher in matchers {
+                entries = installHookArray(
+                    existing: entries,
+                    command: command,
+                    matcher: matcher
+                )
+            }
+            hooks[event] = entries
+        }
+
+        updated["hooks"] = hooks
+        try writeJSON(updated, to: fileURL)
+    }
+
     func installStatusLineScript() throws {
         try ensureBinDirectory()
         let scriptURL = appSupportDirectory.appending(path: "bin/island-statusline")
@@ -109,8 +212,10 @@ struct HookInstaller {
         return executable ?? "/Users/wudanwu/Island/.build/debug/IslandBridge"
     }
 
-    private func bridgeCommand(source: String) -> String {
-        "\(appSupportDirectory.appending(path: "bin/island-bridge").path()) --source \(source)"
+    private func bridgeCommand(source: String, extraArguments: [String] = []) -> String {
+        let base = "\(appSupportDirectory.appending(path: "bin/island-bridge").path()) --source \(source)"
+        guard !extraArguments.isEmpty else { return base }
+        return ([base] + extraArguments).joined(separator: " ")
     }
 
     private func statusLineCommand() -> String {
@@ -123,8 +228,23 @@ struct HookInstaller {
         return result
     }
 
-    private func installHookArray(existing: Any?, command: String, timeout: Int? = nil) -> [[String: Any]] {
-        var hooks = existing as? [[String: Any]] ?? []
+    private func installHookArray(
+        existing: Any?,
+        command: String,
+        timeout: Int? = nil,
+        matcher: String? = "*"
+    ) -> [[String: Any]] {
+        var hooks = (existing as? [[String: Any]] ?? []).filter { hook in
+            guard let hookCommands = hook["hooks"] as? [[String: Any]] else {
+                return true
+            }
+
+            return !hookCommands.contains { entry in
+                let existingCommand = entry["command"] as? String ?? ""
+                return Self.isIslandManagedHookCommand(existingCommand)
+            }
+        }
+
         var commandBody: [String: Any] = [
             "type": "command",
             "command": command
@@ -132,10 +252,10 @@ struct HookInstaller {
         if let timeout {
             commandBody["timeout"] = timeout
         }
-        let hookBody: [String: Any] = [
-            "hooks": [commandBody],
-            "matcher": "*"
-        ]
+        var hookBody: [String: Any] = ["hooks": [commandBody]]
+        if let matcher {
+            hookBody["matcher"] = matcher
+        }
         let existingCommands = hooks.compactMap { hook -> String? in
             ((hook["hooks"] as? [[String: Any]])?.first?["command"] as? String)
         }
@@ -163,6 +283,13 @@ struct HookInstaller {
             return updatedHook
         }
         return hooks
+    }
+
+    private static func isIslandManagedHookCommand(_ command: String) -> Bool {
+        let normalized = command.lowercased()
+        return normalized.contains("/.island/bin/island-bridge")
+            || normalized.contains("/.vibe-island/bin/vibe-island-bridge")
+            || normalized.contains("island-state.py")
     }
 
     private func readJSON(_ fileURL: URL) throws -> [String: Any]? {

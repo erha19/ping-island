@@ -2,22 +2,23 @@
 //  HookSocketServer.swift
 //  ClaudeIsland
 //
-//  Unix domain socket server for real-time hook events
-//  Supports request/response for permission decisions
+//  Unix domain socket server for Claude bridge hook events.
+//  The external hook protocol is the bridge envelope format only.
 //
 
 import Foundation
 import os.log
 
-/// Logger for hook socket server
 private let logger = Logger(subsystem: "com.wudanwu.island", category: "Hooks")
 
-/// Event received from Claude Code hooks
-struct HookEvent: Codable, Sendable {
+/// Event received from Claude hooks after bridge-envelope mapping.
+struct HookEvent: Sendable {
     let sessionId: String
     let cwd: String
     let event: String
     let status: String
+    let provider: SessionProvider
+    let clientInfo: SessionClientInfo
     let pid: Int?
     let tty: String?
     let tool: String?
@@ -26,21 +27,27 @@ struct HookEvent: Codable, Sendable {
     let notificationType: String?
     let message: String?
 
-    enum CodingKeys: String, CodingKey {
-        case sessionId = "session_id"
-        case cwd, event, status, pid, tty, tool
-        case toolInput = "tool_input"
-        case toolUseId = "tool_use_id"
-        case notificationType = "notification_type"
-        case message
-    }
-
-    /// Create a copy with updated toolUseId
-    init(sessionId: String, cwd: String, event: String, status: String, pid: Int?, tty: String?, tool: String?, toolInput: [String: AnyCodable]?, toolUseId: String?, notificationType: String?, message: String?) {
+    init(
+        sessionId: String,
+        cwd: String,
+        event: String,
+        status: String,
+        provider: SessionProvider,
+        clientInfo: SessionClientInfo,
+        pid: Int?,
+        tty: String?,
+        tool: String?,
+        toolInput: [String: AnyCodable]?,
+        toolUseId: String?,
+        notificationType: String?,
+        message: String?
+    ) {
         self.sessionId = sessionId
         self.cwd = cwd
         self.event = event
         self.status = status
+        self.provider = provider
+        self.clientInfo = clientInfo
         self.pid = pid
         self.tty = tty
         self.tool = tool
@@ -57,8 +64,6 @@ struct HookEvent: Codable, Sendable {
 
         switch status {
         case "waiting_for_approval":
-            // Note: Full PermissionContext is constructed by SessionStore, not here
-            // This is just for quick phase checks
             return .waitingForApproval(PermissionContext(
                 toolUseId: toolUseId ?? "",
                 toolName: tool ?? "unknown",
@@ -76,37 +81,383 @@ struct HookEvent: Codable, Sendable {
         }
     }
 
-    /// Whether this event expects a response (permission request)
     nonisolated var expectsResponse: Bool {
         (event == "PermissionRequest" && status == "waiting_for_approval")
             || (event == "PreToolUse" && tool == "AskUserQuestion" && toolInput?["questions"] != nil)
     }
 }
 
-/// Response to send back to the hook
-struct HookResponse: Codable {
-    let decision: String // "allow", "deny", or "ask"
-    let reason: String?
-    let updatedInput: [String: AnyCodable]?
+private enum BridgeProvider: String, Codable, Sendable {
+    case claude
+    case codex
 }
 
-/// Pending permission request waiting for user decision
+private enum BridgeStatusKind: String, Codable, Sendable {
+    case idle
+    case active
+    case thinking
+    case runningTool
+    case waitingForApproval
+    case waitingForInput
+    case compacting
+    case completed
+    case interrupted
+    case notification
+    case error
+}
+
+private struct BridgeStatus: Codable, Sendable {
+    let kind: BridgeStatusKind
+    let detail: String?
+}
+
+private struct BridgeTerminalContext: Codable, Sendable {
+    let terminalProgram: String?
+    let terminalBundleID: String?
+    let ideName: String?
+    let ideBundleID: String?
+    let iTermSessionID: String?
+    let terminalSessionID: String?
+    let tty: String?
+    let currentDirectory: String?
+    let transport: String?
+    let remoteHost: String?
+    let tmuxSession: String?
+    let tmuxPane: String?
+}
+
+private struct BridgeEnvelope: Codable, Sendable {
+    let id: UUID
+    let provider: BridgeProvider
+    let eventType: String
+    let sessionKey: String
+    let title: String?
+    let preview: String?
+    let cwd: String?
+    let status: BridgeStatus?
+    let terminalContext: BridgeTerminalContext
+    let expectsResponse: Bool
+    let metadata: [String: String]
+    let sentAt: Date
+}
+
+private enum BridgeDecision: String, Codable, Sendable {
+    case approve
+    case approveForSession
+    case deny
+    case cancel
+    case answer
+}
+
+private struct BridgeResponse: Codable, Sendable {
+    let requestID: UUID
+    let decision: BridgeDecision?
+    let reason: String?
+    let updatedInput: [String: AnyCodable]?
+    let errorMessage: String?
+}
+
+private extension BridgeEnvelope {
+    var resolvedSessionID: String {
+        let sessionId = metadata["session_id"]
+            ?? metadata["thread_id"]
+            ?? metadata["threadId"]
+            ?? sessionKey.components(separatedBy: ":").dropFirst().joined(separator: ":")
+        return sessionId.isEmpty ? sessionKey : sessionId
+    }
+
+    var hookEvent: HookEvent {
+        let metadata = self.metadata
+        let toolInput = Self.decodeToolInput(from: metadata["tool_input_json"])
+        let sessionId = resolvedSessionID
+
+        return HookEvent(
+            sessionId: sessionId,
+            cwd: cwd ?? terminalContext.currentDirectory ?? metadata["cwd"] ?? "",
+            event: eventType,
+            status: Self.mapStatus(eventType: eventType, status: status?.kind, notificationType: metadata["notification_type"]),
+            provider: provider.sessionProvider,
+            clientInfo: Self.makeClientInfo(
+                provider: provider,
+                sessionId: sessionId,
+                terminalContext: terminalContext,
+                metadata: metadata
+            ),
+            pid: Int(metadata["pid"] ?? ""),
+            tty: terminalContext.tty,
+            tool: metadata["tool_name"],
+            toolInput: toolInput,
+            toolUseId: metadata["tool_use_id"],
+            notificationType: metadata["notification_type"],
+            message: metadata["message"] ?? preview
+        )
+    }
+
+    private static func mapStatus(
+        eventType: String,
+        status: BridgeStatusKind?,
+        notificationType: String?
+    ) -> String {
+        if eventType == "Notification", notificationType == "idle_prompt" {
+            return "waiting_for_input"
+        }
+
+        switch status {
+        case .waitingForApproval:
+            return "waiting_for_approval"
+        case .waitingForInput:
+            return "waiting_for_input"
+        case .runningTool:
+            return "running_tool"
+        case .compacting:
+            return "compacting"
+        case .completed:
+            return "ended"
+        case .notification:
+            return "notification"
+        case .interrupted:
+            return "waiting_for_input"
+        case .idle:
+            return "idle"
+        case .thinking, .active, .error, .none:
+            break
+        }
+
+        switch eventType {
+        case "SessionEnd":
+            return "ended"
+        case "SessionStart", "Stop", "SubagentStop":
+            return "waiting_for_input"
+        case "UserPromptSubmit", "PostToolUse":
+            return "processing"
+        case "PreToolUse":
+            return "running_tool"
+        case "PreCompact":
+            return "compacting"
+        case "Notification":
+            return "notification"
+        default:
+            return "processing"
+        }
+    }
+
+    private static func decodeToolInput(from json: String?) -> [String: AnyCodable]? {
+        guard let json, let data = json.data(using: .utf8) else {
+            return nil
+        }
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        return object.mapValues { AnyCodable($0) }
+    }
+
+    private static func makeClientInfo(
+        provider: BridgeProvider,
+        sessionId: String,
+        terminalContext: BridgeTerminalContext,
+        metadata: [String: String]
+    ) -> SessionClientInfo {
+        let explicitKind = (
+            metadata["client_kind"]
+                ?? metadata["client_type"]
+                ?? metadata["client"]
+        )?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let explicitName = firstNonEmpty(
+            metadata["client_name"],
+            metadata["client_title"],
+            metadata["client"]
+        )
+        let explicitBundleID = firstNonEmpty(
+            metadata["client_bundle_id"],
+            metadata["source_bundle_id"]
+        )
+        let terminalBundleID = firstNonEmpty(
+            terminalContext.ideBundleID,
+            terminalContext.terminalBundleID
+        )
+        let explicitOrigin = firstNonEmpty(
+            metadata["client_origin"],
+            metadata["origin"],
+            metadata["_source"]
+        )
+        let explicitOriginator = firstNonEmpty(
+            metadata["client_originator"],
+            metadata["originator"],
+            metadata["source_title"],
+            terminalContext.ideName
+        )
+        let explicitThreadSource = firstNonEmpty(
+            metadata["thread_source"],
+            metadata["session_start_source"],
+            metadata["codex_session_start_source"]
+        )
+        let explicitTransport = firstNonEmpty(
+            metadata["connection_transport"],
+            terminalContext.transport
+        )
+        let remoteHost = firstNonEmpty(
+            metadata["remote_host"],
+            terminalContext.remoteHost
+        )
+        let sessionFilePath = firstNonEmpty(
+            metadata["session_file_path"],
+            metadata["rollout_path"],
+            metadata["transcript_path"]
+        )
+        let launchURL = firstNonEmpty(
+            metadata["launch_url"],
+            metadata["deeplink"],
+            metadata["deep_link"]
+        )
+        let processName = firstNonEmpty(
+            metadata["source_process_name"],
+            metadata["process_name"]
+        )
+        let hasExplicitNonTerminalBundle = explicitBundleID.map { !TerminalAppRegistry.isTerminalBundle($0) } ?? false
+        let providerKind = provider.sessionProvider
+        let matchedProfile = ClientProfileRegistry.matchRuntimeProfile(
+            provider: providerKind,
+            explicitKind: explicitKind,
+            explicitName: explicitName,
+            explicitBundleIdentifier: explicitBundleID,
+            terminalBundleIdentifier: terminalBundleID,
+            origin: explicitOrigin,
+            originator: explicitOriginator,
+            threadSource: explicitThreadSource,
+            processName: processName
+        )
+
+        let kind: SessionClientKind
+        switch provider {
+        case .claude:
+            if let matchedProfile {
+                kind = matchedProfile.kind
+            } else if explicitName != nil || hasExplicitNonTerminalBundle {
+                kind = .custom
+            } else {
+                kind = .claudeCode
+            }
+        case .codex:
+            if let matchedProfile {
+                kind = matchedProfile.kind
+            } else if explicitKind?.contains("app") == true
+                || explicitKind?.contains("desktop") == true
+                || hasExplicitNonTerminalBundle
+                || explicitBundleID == "com.openai.codex" {
+                kind = .codexApp
+            } else if explicitKind?.contains("cli") == true
+                || terminalContext.tty != nil
+                || terminalContext.terminalProgram != nil
+                || terminalContext.terminalBundleID != nil {
+                kind = .codexCLI
+            } else if explicitName != nil {
+                kind = .custom
+            } else {
+                kind = .codexApp
+            }
+        }
+
+        let resolvedBundleID: String?
+        if kind == .codexApp {
+            resolvedBundleID = explicitBundleID
+                ?? terminalBundleID
+                ?? matchedProfile?.defaultBundleIdentifier
+                ?? "com.openai.codex"
+        } else {
+            resolvedBundleID = explicitBundleID
+        }
+
+        let resolvedName: String?
+        if let explicitName {
+            resolvedName = explicitName
+        } else {
+            resolvedName = matchedProfile?.displayName
+                ?? (kind == .claudeCode ? "Claude Code" : nil)
+        }
+
+        let resolvedLaunchURL: String?
+        if let launchURL {
+            resolvedLaunchURL = launchURL
+        } else if kind == .codexApp {
+            resolvedLaunchURL = SessionClientInfo.appLaunchURL(
+                bundleIdentifier: resolvedBundleID ?? "com.openai.codex",
+                sessionId: sessionId,
+                workspacePath: terminalContext.currentDirectory
+            )
+        } else if let workspaceLaunchURL = terminalBundleID.flatMap({
+            SessionClientInfo.appLaunchURL(
+                bundleIdentifier: $0,
+                workspacePath: terminalContext.currentDirectory
+            )
+        }) {
+            resolvedLaunchURL = workspaceLaunchURL
+        } else {
+            resolvedLaunchURL = nil
+        }
+
+        let resolvedOrigin: String?
+        if let explicitOrigin {
+            resolvedOrigin = explicitOrigin
+        } else if provider == .codex {
+            resolvedOrigin = matchedProfile?.defaultOrigin ?? (kind == .codexCLI ? "cli" : "desktop")
+        } else {
+            resolvedOrigin = nil
+        }
+
+        return SessionClientInfo(
+            kind: kind,
+            profileID: matchedProfile?.id,
+            name: resolvedName,
+            bundleIdentifier: resolvedBundleID,
+            launchURL: resolvedLaunchURL,
+            origin: resolvedOrigin,
+            originator: explicitOriginator,
+            threadSource: explicitThreadSource,
+            transport: explicitTransport,
+            remoteHost: remoteHost,
+            sessionFilePath: sessionFilePath,
+            terminalBundleIdentifier: terminalBundleID,
+            terminalProgram: terminalContext.terminalProgram,
+            terminalSessionIdentifier: terminalContext.terminalSessionID,
+            iTermSessionIdentifier: terminalContext.iTermSessionID,
+            tmuxSessionIdentifier: terminalContext.tmuxSession,
+            tmuxPaneIdentifier: terminalContext.tmuxPane,
+            processName: processName
+        )
+    }
+
+    private static func firstNonEmpty(_ values: String?...) -> String? {
+        values.compactMap { value -> String? in
+            guard let value else { return nil }
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }.first
+    }
+}
+
+private extension BridgeProvider {
+    var sessionProvider: SessionProvider {
+        switch self {
+        case .claude:
+            return .claude
+        case .codex:
+            return .codex
+        }
+    }
+}
+
 struct PendingPermission: Sendable {
     let sessionId: String
     let toolUseId: String
+    let requestId: UUID
     let clientSocket: Int32
     let event: HookEvent
     let receivedAt: Date
 }
 
-/// Callback for hook events
 typealias HookEventHandler = @Sendable (HookEvent) -> Void
-
-/// Callback for permission response failures (socket died)
 typealias PermissionFailureHandler = @Sendable (_ sessionId: String, _ toolUseId: String) -> Void
 
-/// Unix domain socket server that receives events from Claude Code hooks
-/// Uses GCD DispatchSource for non-blocking I/O
 class HookSocketServer {
     static let shared = HookSocketServer()
     static let socketPath = "/tmp/island.sock"
@@ -117,19 +468,14 @@ class HookSocketServer {
     private var permissionFailureHandler: PermissionFailureHandler?
     private let queue = DispatchQueue(label: "com.wudanwu.island.socket", qos: .userInitiated)
 
-    /// Pending permission requests indexed by toolUseId
     private var pendingPermissions: [String: PendingPermission] = [:]
     private let permissionsLock = NSLock()
 
-    /// Cache tool_use_id from PreToolUse to correlate with PermissionRequest
-    /// Key: "sessionId:toolName:serializedInput" -> Queue of tool_use_ids (FIFO)
-    /// PermissionRequest events don't include tool_use_id, so we cache from PreToolUse
     private var toolUseIdCache: [String: [String]] = [:]
     private let cacheLock = NSLock()
 
     private init() {}
 
-    /// Start the socket server
     func start(onEvent: @escaping HookEventHandler, onPermissionFailure: PermissionFailureHandler? = nil) {
         queue.async { [weak self] in
             self?.startServer(onEvent: onEvent, onPermissionFailure: onPermissionFailure)
@@ -200,7 +546,6 @@ class HookSocketServer {
         acceptSource?.resume()
     }
 
-    /// Stop the socket server
     func stop() {
         acceptSource?.cancel()
         acceptSource = nil
@@ -214,21 +559,18 @@ class HookSocketServer {
         permissionsLock.unlock()
     }
 
-    /// Respond to a pending permission request by toolUseId
     func respondToPermission(toolUseId: String, decision: String, reason: String? = nil) {
         queue.async { [weak self] in
             self?.sendHookResponse(toolUseId: toolUseId, decision: decision, reason: reason, updatedInput: nil)
         }
     }
 
-    /// Respond to permission by sessionId (finds the most recent pending for that session)
     func respondToPermissionBySession(sessionId: String, decision: String, reason: String? = nil) {
         queue.async { [weak self] in
             self?.sendPermissionResponseBySession(sessionId: sessionId, decision: decision, reason: reason)
         }
     }
 
-    /// Respond to an interactive intervention by toolUseId.
     func respondToIntervention(toolUseId: String, decision: String, updatedInput: [String: Any]? = nil, reason: String? = nil) {
         queue.async { [weak self] in
             let encodedInput = updatedInput?.mapValues { AnyCodable($0) }
@@ -236,21 +578,18 @@ class HookSocketServer {
         }
     }
 
-    /// Cancel all pending permissions for a session (when Claude stops waiting)
     func cancelPendingPermissions(sessionId: String) {
         queue.async { [weak self] in
             self?.cleanupPendingPermissions(sessionId: sessionId)
         }
     }
 
-    /// Check if there's a pending permission request for a session
     func hasPendingPermission(sessionId: String) -> Bool {
         permissionsLock.lock()
         defer { permissionsLock.unlock() }
         return pendingPermissions.values.contains { $0.sessionId == sessionId }
     }
 
-    /// Get the pending permission details for a session (if any)
     func getPendingPermission(sessionId: String) -> (toolName: String?, toolId: String?, toolInput: [String: AnyCodable]?)? {
         permissionsLock.lock()
         defer { permissionsLock.unlock() }
@@ -260,7 +599,6 @@ class HookSocketServer {
         return (pending.event.tool, pending.toolUseId, pending.event.toolInput)
     }
 
-    /// Cancel a specific pending permission by toolUseId (when tool completes via terminal approval)
     func cancelPendingPermission(toolUseId: String) {
         queue.async { [weak self] in
             self?.cleanupSpecificPermission(toolUseId: toolUseId)
@@ -290,16 +628,12 @@ class HookSocketServer {
         permissionsLock.unlock()
     }
 
-    // MARK: - Tool Use ID Cache
-
-    /// Encoder with sorted keys for deterministic cache keys
     private static let sortedEncoder: JSONEncoder = {
         let encoder = JSONEncoder()
         encoder.outputFormatting = .sortedKeys
         return encoder
     }()
 
-    /// Generate cache key from event properties
     private func cacheKey(sessionId: String, toolName: String?, toolInput: [String: AnyCodable]?) -> String {
         let inputStr: String
         if let input = toolInput,
@@ -312,7 +646,6 @@ class HookSocketServer {
         return "\(sessionId):\(toolName ?? "unknown"):\(inputStr)"
     }
 
-    /// Cache tool_use_id from PreToolUse event (FIFO queue per key)
     private func cacheToolUseId(event: HookEvent) {
         guard let toolUseId = event.toolUseId else { return }
 
@@ -328,7 +661,6 @@ class HookSocketServer {
         logger.debug("Cached tool_use_id for \(event.sessionId.prefix(8), privacy: .public) tool:\(event.tool ?? "?", privacy: .public) id:\(toolUseId.prefix(12), privacy: .public)")
     }
 
-    /// Pop and return cached tool_use_id for PermissionRequest (FIFO)
     private func popCachedToolUseId(event: HookEvent) -> String? {
         let key = cacheKey(sessionId: event.sessionId, toolName: event.tool, toolInput: event.toolInput)
 
@@ -351,7 +683,6 @@ class HookSocketServer {
         return toolUseId
     }
 
-    /// Clean up cache entries for a session (on session end)
     private func cleanupCache(sessionId: String) {
         cacheLock.lock()
         let keysToRemove = toolUseIdCache.keys.filter { $0.hasPrefix("\(sessionId):") }
@@ -364,8 +695,6 @@ class HookSocketServer {
             logger.debug("Cleaned up \(keysToRemove.count) cache entries for session \(sessionId.prefix(8), privacy: .public)")
         }
     }
-
-    // MARK: - Private
 
     private func acceptConnection() {
         let clientSocket = accept(serverSocket, nil, nil)
@@ -413,15 +742,15 @@ class HookSocketServer {
             return
         }
 
-        let data = allData
-
-        guard let event = try? JSONDecoder().decode(HookEvent.self, from: data) else {
-            logger.warning("Failed to parse event: \(String(data: data, encoding: .utf8) ?? "?", privacy: .public)")
+        let decoder = JSONDecoder()
+        guard let envelope = try? decoder.decode(BridgeEnvelope.self, from: allData) else {
+            logger.warning("Failed to parse bridge envelope: \(String(data: allData, encoding: .utf8) ?? "?", privacy: .public)")
             close(clientSocket)
             return
         }
 
-        logger.debug("Received: \(event.event, privacy: .public) for \(event.sessionId.prefix(8), privacy: .public)")
+        let event = envelope.hookEvent
+        logger.debug("Received bridge envelope provider=\(envelope.provider.rawValue, privacy: .public) event=\(envelope.eventType, privacy: .public) session=\(event.sessionId.prefix(8), privacy: .public)")
 
         if event.event == "PreToolUse" {
             cacheToolUseId(event: event)
@@ -431,31 +760,32 @@ class HookSocketServer {
             cleanupCache(sessionId: event.sessionId)
         }
 
-        if event.expectsResponse {
+        let expectsResponse = envelope.expectsResponse || event.expectsResponse
+        if expectsResponse {
             let toolUseId: String
             if let eventToolUseId = event.toolUseId {
                 toolUseId = eventToolUseId
             } else if let cachedToolUseId = popCachedToolUseId(event: event) {
                 toolUseId = cachedToolUseId
             } else {
-                logger.warning("Permission request missing tool_use_id for \(event.sessionId.prefix(8), privacy: .public) - no cache hit")
+                logger.warning("Bridge event missing tool_use_id for \(event.sessionId.prefix(8), privacy: .public) - no cache hit")
                 close(clientSocket)
                 eventHandler?(event)
                 return
             }
-
-            logger.debug("Permission request - keeping socket open for \(event.sessionId.prefix(8), privacy: .public) tool:\(toolUseId.prefix(12), privacy: .public)")
 
             let updatedEvent = HookEvent(
                 sessionId: event.sessionId,
                 cwd: event.cwd,
                 event: event.event,
                 status: event.status,
+                provider: event.provider,
+                clientInfo: event.clientInfo,
                 pid: event.pid,
                 tty: event.tty,
                 tool: event.tool,
                 toolInput: event.toolInput,
-                toolUseId: toolUseId,  // Use resolved toolUseId
+                toolUseId: toolUseId,
                 notificationType: event.notificationType,
                 message: event.message
             )
@@ -463,6 +793,7 @@ class HookSocketServer {
             let pending = PendingPermission(
                 sessionId: event.sessionId,
                 toolUseId: toolUseId,
+                requestId: envelope.id,
                 clientSocket: clientSocket,
                 event: updatedEvent,
                 receivedAt: Date()
@@ -471,13 +802,30 @@ class HookSocketServer {
             pendingPermissions[toolUseId] = pending
             permissionsLock.unlock()
 
+            logger.debug("Keeping socket open for \(event.sessionId.prefix(8), privacy: .public) tool:\(toolUseId.prefix(12), privacy: .public)")
             eventHandler?(updatedEvent)
             return
-        } else {
-            close(clientSocket)
         }
 
+        close(clientSocket)
         eventHandler?(event)
+    }
+
+    private func bridgeDecision(for decision: String) -> BridgeDecision? {
+        switch decision {
+        case "allow", "approve":
+            return .approve
+        case "approveForSession", "allow_for_session":
+            return .approveForSession
+        case "deny":
+            return .deny
+        case "cancel", "ask":
+            return .cancel
+        case "answer":
+            return .answer
+        default:
+            return nil
+        }
     }
 
     private func sendHookResponse(toolUseId: String, decision: String, reason: String?, updatedInput: [String: AnyCodable]?) {
@@ -489,15 +837,23 @@ class HookSocketServer {
         }
         permissionsLock.unlock()
 
-        let response = HookResponse(decision: decision, reason: reason, updatedInput: updatedInput)
+        let response = BridgeResponse(
+            requestID: pending.requestId,
+            decision: bridgeDecision(for: decision),
+            reason: reason,
+            updatedInput: updatedInput,
+            errorMessage: nil
+        )
         guard let data = try? JSONEncoder().encode(response) else {
             close(pending.clientSocket)
+            permissionFailureHandler?(pending.sessionId, pending.toolUseId)
             return
         }
 
         let age = Date().timeIntervalSince(pending.receivedAt)
-        logger.info("Sending response: \(decision, privacy: .public) for \(pending.sessionId.prefix(8), privacy: .public) tool:\(toolUseId.prefix(12), privacy: .public) (age: \(String(format: "%.1f", age), privacy: .public)s)")
+        logger.info("Sending bridge response: \(decision, privacy: .public) for \(pending.sessionId.prefix(8), privacy: .public) tool:\(toolUseId.prefix(12), privacy: .public) (age: \(String(format: "%.1f", age), privacy: .public)s)")
 
+        var writeSuccess = false
         data.withUnsafeBytes { bytes in
             guard let baseAddress = bytes.baseAddress else {
                 logger.error("Failed to get data buffer address")
@@ -508,10 +864,15 @@ class HookSocketServer {
                 logger.error("Write failed with errno: \(errno)")
             } else {
                 logger.debug("Write succeeded: \(result) bytes")
+                writeSuccess = true
             }
         }
 
         close(pending.clientSocket)
+
+        if !writeSuccess {
+            permissionFailureHandler?(pending.sessionId, pending.toolUseId)
+        }
     }
 
     private func sendPermissionResponseBySession(sessionId: String, decision: String, reason: String?) {
@@ -530,7 +891,13 @@ class HookSocketServer {
         pendingPermissions.removeValue(forKey: pending.toolUseId)
         permissionsLock.unlock()
 
-        let response = HookResponse(decision: decision, reason: reason, updatedInput: nil)
+        let response = BridgeResponse(
+            requestID: pending.requestId,
+            decision: bridgeDecision(for: decision),
+            reason: reason,
+            updatedInput: nil,
+            errorMessage: nil
+        )
         guard let data = try? JSONEncoder().encode(response) else {
             close(pending.clientSocket)
             permissionFailureHandler?(sessionId, pending.toolUseId)
@@ -538,7 +905,7 @@ class HookSocketServer {
         }
 
         let age = Date().timeIntervalSince(pending.receivedAt)
-        logger.info("Sending response: \(decision, privacy: .public) for \(sessionId.prefix(8), privacy: .public) tool:\(pending.toolUseId.prefix(12), privacy: .public) (age: \(String(format: "%.1f", age), privacy: .public)s)")
+        logger.info("Sending bridge response: \(decision, privacy: .public) for \(sessionId.prefix(8), privacy: .public) tool:\(pending.toolUseId.prefix(12), privacy: .public) (age: \(String(format: "%.1f", age), privacy: .public)s)")
 
         var writeSuccess = false
         data.withUnsafeBytes { bytes in
@@ -563,20 +930,13 @@ class HookSocketServer {
     }
 }
 
-// MARK: - AnyCodable for tool_input
-
-/// Type-erasing codable wrapper for heterogeneous values
-/// Used to decode JSON objects with mixed value types
 struct AnyCodable: Codable, @unchecked Sendable {
-    /// The underlying value (nonisolated(unsafe) because Any is not Sendable)
     nonisolated(unsafe) let value: Any
 
-    /// Initialize with any value
     init(_ value: Any) {
         self.value = value
     }
 
-    /// Decode from JSON
     init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
 
@@ -599,7 +959,6 @@ struct AnyCodable: Codable, @unchecked Sendable {
         }
     }
 
-    /// Encode to JSON
     func encode(to encoder: Encoder) throws {
         var container = encoder.singleValueContainer()
 

@@ -42,9 +42,11 @@ class ChatHistoryManager: ObservableObject {
     }
 
     func syncFromFile(sessionId: String, cwd: String) async {
+        let session = await SessionStore.shared.session(for: sessionId)
         let messages = await ConversationParser.shared.parseFullConversation(
             sessionId: sessionId,
-            cwd: cwd
+            cwd: cwd,
+            explicitFilePath: session?.clientInfo.sessionFilePath
         )
         let completedTools = await ConversationParser.shared.completedToolIds(for: sessionId)
         let toolResults = await ConversationParser.shared.toolResults(for: sessionId)
@@ -67,7 +69,7 @@ class ChatHistoryManager: ObservableObject {
         loadedSessions.remove(sessionId)
         histories.removeValue(forKey: sessionId)
         Task {
-            await SessionStore.shared.process(.sessionEnded(sessionId: sessionId))
+            await SessionStore.shared.process(.sessionArchived(sessionId: sessionId))
         }
     }
 

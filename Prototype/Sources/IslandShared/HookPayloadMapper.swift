@@ -12,6 +12,7 @@ public enum HookPayloadMapper {
         let terminalContext = makeTerminalContext(environment: environment, payload: payload)
         let sessionKey = detectSessionKey(payload: payload, environment: environment, provider: source)
         let status = detectStatus(eventType: eventType, payload: payload)
+        let metadata = mergedMetadata(arguments: arguments, payload: payload)
         let intervention = detectIntervention(
             provider: source,
             eventType: eventType,
@@ -30,7 +31,7 @@ public enum HookPayloadMapper {
             terminalContext: terminalContext,
             intervention: intervention,
             expectsResponse: intervention != nil,
-            metadata: flattenMetadata(payload: payload)
+            metadata: metadata
         )
     }
 
@@ -256,6 +257,40 @@ public enum HookPayloadMapper {
             ],
             rawContext: flattenMetadata(payload: payload)
         )
+    }
+
+    private static func mergedMetadata(arguments: [String], payload: [String: Any]) -> [String: String] {
+        var metadata = flattenMetadata(payload: payload)
+        for (key, value) in argumentMetadata(arguments: arguments) where metadata[key] == nil {
+            metadata[key] = value
+        }
+        return metadata
+    }
+
+    private static func argumentMetadata(arguments: [String]) -> [String: String] {
+        let mappings: [String: String] = [
+            "--client-kind": "client_kind",
+            "--client-name": "client_name",
+            "--client-bundle-id": "client_bundle_id",
+            "--client-origin": "client_origin",
+            "--client-originator": "client_originator",
+            "--thread-source": "thread_source",
+            "--launch-url": "launch_url"
+        ]
+
+        var metadata: [String: String] = [:]
+        for (flag, key) in mappings {
+            guard let index = arguments.firstIndex(of: flag), arguments.indices.contains(index + 1) else {
+                continue
+            }
+
+            let value = arguments[index + 1].trimmingCharacters(in: .whitespacesAndNewlines)
+            if !value.isEmpty {
+                metadata[key] = value
+            }
+        }
+
+        return metadata
     }
 
     private static func flattenMetadata(payload: [String: Any]) -> [String: String] {

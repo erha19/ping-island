@@ -2,20 +2,137 @@
 //  HookInstaller.swift
 //  ClaudeIsland
 //
-//  Auto-installs Claude Code hooks on app launch
+//  Installs and manages hook integrations for supported clients.
 //
 
 import Foundation
 
 struct HookInstaller {
+    private static let preferredTargetsDefaultsKey = "HookInstaller.preferredTargets.v1"
+    private static let qoderMigrationDefaultsKey = "HookInstaller.preferredTargets.qoder-default.v1"
+    private static var defaultPreferredTargets: Set<String> {
+        Set(
+            ClientProfileRegistry.managedHookProfiles
+                .filter { $0.defaultEnabled && canManage($0) }
+                .map(\.id)
+        )
+    }
 
-    /// Install hook script and update settings.json on app launch
+    /// Install managed hooks for preferred clients on app launch.
     static func installIfNeeded() {
-        let claudeDir = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".claude")
-        let hooksDir = claudeDir.appendingPathComponent("hooks")
-        let pythonScript = hooksDir.appendingPathComponent("island-state.py")
-        let settings = claudeDir.appendingPathComponent("settings.json")
+        let preferredTargets = preferredTargets()
+        installBridgeLauncherIfNeeded()
+
+        for profile in ClientProfileRegistry.managedHookProfiles {
+            if preferredTargets.contains(profile.id) && canManage(profile) {
+                install(profile, persistPreference: false)
+            } else {
+                uninstall(profile, persistPreference: false)
+            }
+        }
+    }
+
+    static func install(_ profile: ManagedHookClientProfile) {
+        install(profile, persistPreference: true)
+    }
+
+    static func reinstall(_ profile: ManagedHookClientProfile) {
+        uninstall(profile, persistPreference: false)
+        install(profile, persistPreference: true)
+    }
+
+    static func uninstall(_ profile: ManagedHookClientProfile) {
+        uninstall(profile, persistPreference: true)
+    }
+
+    /// Check if any managed hooks are currently installed.
+    static func isInstalled() -> Bool {
+        ClientProfileRegistry.managedHookProfiles.contains { isInstalled($0) }
+    }
+
+    static func isInstalled(_ profile: ManagedHookClientProfile) -> Bool {
+        profile.configurationURLs.contains { containsManagedHooks(at: $0) }
+    }
+
+    /// Uninstall hooks for all managed targets.
+    static func uninstall() {
+        for profile in ClientProfileRegistry.managedHookProfiles {
+            uninstall(profile, persistPreference: false)
+        }
+        persistPreferredTargets(Set<String>())
+    }
+
+    private static func install(_ profile: ManagedHookClientProfile, persistPreference: Bool) {
+        if persistPreference {
+            var targets = preferredTargets()
+            targets.insert(profile.id)
+            persistPreferredTargets(targets)
+        }
+
+        guard canManage(profile) else {
+            return
+        }
+
+        if profile.installsClaudePythonScript {
+            installClaudeScriptIfNeeded()
+        }
+
+        installBridgeLauncherIfNeeded()
+        for url in installationTargets(for: profile) {
+            updateHooks(at: url, profile: profile)
+        }
+    }
+
+    private static func uninstall(_ profile: ManagedHookClientProfile, persistPreference: Bool) {
+        if persistPreference {
+            var targets = preferredTargets()
+            targets.remove(profile.id)
+            persistPreferredTargets(targets)
+        }
+
+        if profile.installsClaudePythonScript {
+            try? FileManager.default.removeItem(at: claudePythonScriptURL())
+        }
+
+        for url in profile.configurationURLs {
+            removeManagedHooks(at: url)
+        }
+    }
+
+    private static func canManage(_ profile: ManagedHookClientProfile) -> Bool {
+        profile.alwaysVisibleInSettings
+            || ClientAppLocator.isInstalled(bundleIdentifiers: profile.localAppBundleIdentifiers)
+    }
+
+    private static func preferredTargets() -> Set<String> {
+        guard let values = UserDefaults.standard.array(forKey: preferredTargetsDefaultsKey) as? [String] else {
+            return defaultPreferredTargets
+        }
+
+        var targets = Set(values.compactMap { value in
+            ClientProfileRegistry.managedHookProfile(id: value)?.id
+        })
+
+        if !UserDefaults.standard.bool(forKey: qoderMigrationDefaultsKey) {
+            if let qoderProfile = ClientProfileRegistry.managedHookProfile(id: "qoder-hooks"),
+               canManage(qoderProfile) {
+                targets.insert(qoderProfile.id)
+                persistPreferredTargets(targets)
+            }
+            UserDefaults.standard.set(true, forKey: qoderMigrationDefaultsKey)
+        }
+
+        return targets.isEmpty ? [] : targets
+    }
+
+    private static func persistPreferredTargets(_ targets: Set<String>) {
+        let values = targets.sorted()
+        UserDefaults.standard.set(values, forKey: preferredTargetsDefaultsKey)
+    }
+
+    private static func installClaudeScriptIfNeeded() {
+        let hooksDir = claudeHooksDirectoryURL()
+        let pythonScript = claudePythonScriptURL()
 
         try? FileManager.default.createDirectory(
             at: hooksDir,
@@ -30,114 +147,30 @@ struct HookInstaller {
                 ofItemAtPath: pythonScript.path
             )
         }
-
-        updateSettings(at: settings)
     }
 
-    private static func updateSettings(at settingsURL: URL) {
-        var json: [String: Any] = [:]
-        if let data = try? Data(contentsOf: settingsURL),
-           let existing = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-            json = existing
+    private static func installationTargets(for profile: ManagedHookClientProfile) -> [URL] {
+        let existingTargets = profile.configurationURLs.filter { url in
+            let fileManager = FileManager.default
+            return fileManager.fileExists(atPath: url.path)
+                || fileManager.fileExists(atPath: url.deletingLastPathComponent().path)
         }
 
-        let python = detectPython()
-        let command = "\(python) ~/.claude/hooks/island-state.py"
-        let hookEntry: [[String: Any]] = [["type": "command", "command": command]]
-        let hookEntryWithTimeout: [[String: Any]] = [["type": "command", "command": command, "timeout": 86400]]
-        let withMatcher: [[String: Any]] = [["matcher": "*", "hooks": hookEntry]]
-        let withMatcherAndTimeout: [[String: Any]] = [["matcher": "*", "hooks": hookEntryWithTimeout]]
-        let withoutMatcher: [[String: Any]] = [["hooks": hookEntry]]
-        let preCompactConfig: [[String: Any]] = [
-            ["matcher": "auto", "hooks": hookEntry],
-            ["matcher": "manual", "hooks": hookEntry]
-        ]
-
-        var hooks = json["hooks"] as? [String: Any] ?? [:]
-
-        let hookEvents: [(String, [[String: Any]])] = [
-            ("UserPromptSubmit", withoutMatcher),
-            ("PreToolUse", withMatcher),
-            ("PostToolUse", withMatcher),
-            ("PermissionRequest", withMatcherAndTimeout),
-            ("Notification", withMatcher),
-            ("Stop", withoutMatcher),
-            ("SubagentStop", withoutMatcher),
-            ("SessionStart", withoutMatcher),
-            ("SessionEnd", withoutMatcher),
-            ("PreCompact", preCompactConfig),
-        ]
-
-        for (event, config) in hookEvents {
-            if var existingEvent = hooks[event] as? [[String: Any]] {
-                let hasOurHook = existingEvent.contains { entry in
-                    if let entryHooks = entry["hooks"] as? [[String: Any]] {
-                        return entryHooks.contains { h in
-                            let cmd = h["command"] as? String ?? ""
-                            return cmd.contains("island-state.py")
-                        }
-                    }
-                    return false
-                }
-                if !hasOurHook {
-                    existingEvent.append(contentsOf: config)
-                    hooks[event] = existingEvent
-                }
-            } else {
-                hooks[event] = config
-            }
-        }
-
-        json["hooks"] = hooks
-
-        if let data = try? JSONSerialization.data(
-            withJSONObject: json,
-            options: [.prettyPrinted, .sortedKeys]
-        ) {
-            try? data.write(to: settingsURL)
-        }
+        return existingTargets.isEmpty ? [profile.primaryConfigurationURL] : existingTargets
     }
 
-    /// Check if hooks are currently installed
-    static func isInstalled() -> Bool {
-        let claudeDir = FileManager.default.homeDirectoryForCurrentUser
+    private static func claudeHooksDirectoryURL() -> URL {
+        FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".claude")
-        let settings = claudeDir.appendingPathComponent("settings.json")
-
-        guard let data = try? Data(contentsOf: settings),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let hooks = json["hooks"] as? [String: Any] else {
-            return false
-        }
-
-        for (_, value) in hooks {
-            if let entries = value as? [[String: Any]] {
-                for entry in entries {
-                    if let entryHooks = entry["hooks"] as? [[String: Any]] {
-                        for hook in entryHooks {
-                            if let cmd = hook["command"] as? String,
-                               cmd.contains("island-state.py") {
-                                return true
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        return false
+            .appendingPathComponent("hooks")
     }
 
-    /// Uninstall hooks from settings.json and remove script
-    static func uninstall() {
-        let claudeDir = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".claude")
-        let hooksDir = claudeDir.appendingPathComponent("hooks")
-        let pythonScript = hooksDir.appendingPathComponent("island-state.py")
-        let settings = claudeDir.appendingPathComponent("settings.json")
+    private static func claudePythonScriptURL() -> URL {
+        claudeHooksDirectoryURL().appendingPathComponent("island-state.py")
+    }
 
-        try? FileManager.default.removeItem(at: pythonScript)
-
-        guard let data = try? Data(contentsOf: settings),
+    private static func removeManagedHooks(at url: URL) {
+        guard let data = try? Data(contentsOf: url),
               var json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               var hooks = json["hooks"] as? [String: Any] else {
             return
@@ -149,7 +182,7 @@ struct HookInstaller {
                     if let entryHooks = entry["hooks"] as? [[String: Any]] {
                         return entryHooks.contains { hook in
                             let cmd = hook["command"] as? String ?? ""
-                            return cmd.contains("island-state.py")
+                            return isIslandManagedHookCommand(cmd)
                         }
                     }
                     return false
@@ -168,13 +201,51 @@ struct HookInstaller {
         } else {
             json["hooks"] = hooks
         }
+        writeJSONObject(json, to: url)
+    }
 
-        if let data = try? JSONSerialization.data(
-            withJSONObject: json,
-            options: [.prettyPrinted, .sortedKeys]
-        ) {
-            try? data.write(to: settings)
+    private static func installBridgeLauncherIfNeeded() {
+        let launcherURL = islandSupportDirectory()
+            .appendingPathComponent("bin", isDirectory: true)
+            .appendingPathComponent("island-bridge")
+
+        guard !FileManager.default.fileExists(atPath: launcherURL.path) else {
+            return
         }
+
+        try? FileManager.default.createDirectory(
+            at: launcherURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+
+        let bundleBridge = (Bundle.main.executableURL?
+            .deletingLastPathComponent()
+            .appendingPathComponent("IslandBridge")
+            .path) ?? ""
+
+        let script = """
+        #!/bin/zsh
+        SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+        candidates=(
+          "$SCRIPT_DIR/IslandBridge"
+          "\(bundleBridge)"
+        )
+
+        for candidate in "${candidates[@]}"; do
+          if [ -n "$candidate" ] && [ -x "$candidate" ]; then
+            exec "$candidate" "$@"
+          fi
+        done
+
+        echo "IslandBridge binary not found" >&2
+        exit 127
+        """
+
+        try? Data(script.utf8).write(to: launcherURL, options: .atomic)
+        try? FileManager.default.setAttributes(
+            [.posixPermissions: 0o755],
+            ofItemAtPath: launcherURL.path
+        )
     }
 
     private static func detectPython() -> String {
@@ -193,5 +264,132 @@ struct HookInstaller {
         } catch {}
 
         return "python"
+    }
+
+    private static func normalizedHookEntries(
+        _ existingEntries: [[String: Any]]?,
+        preferred: [[String: Any]]
+    ) -> [[String: Any]] {
+        let preservedEntries = (existingEntries ?? []).filter { entry in
+            guard let entryHooks = entry["hooks"] as? [[String: Any]] else {
+                return true
+            }
+
+            return !entryHooks.contains { hook in
+                let command = hook["command"] as? String ?? ""
+                return isIslandManagedHookCommand(command)
+            }
+        }
+
+        return preservedEntries + preferred
+    }
+
+    private static func updateHooks(at url: URL, profile: ManagedHookClientProfile) {
+        var json: [String: Any] = [:]
+        if let data = try? Data(contentsOf: url),
+           let existing = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            json = existing
+        }
+
+        let command: String
+        if profile.installsClaudePythonScript {
+            let python = detectPython()
+            command = "\(python) ~/.claude/hooks/island-state.py"
+        } else {
+            command = bridgeCommand(source: profile.bridgeSource, extraArguments: profile.bridgeExtraArguments)
+        }
+
+        var hooks = json["hooks"] as? [String: Any] ?? [:]
+        for event in profile.events {
+            let existingEvent = hooks[event.name] as? [[String: Any]]
+            hooks[event.name] = normalizedHookEntries(
+                existingEvent,
+                preferred: makeHookEntries(command: command, event: event)
+            )
+        }
+
+        json["hooks"] = hooks
+        writeJSONObject(json, to: url)
+    }
+
+    private static func makeHookEntries(command: String, event: HookInstallEventDescriptor) -> [[String: Any]] {
+        var hookCommand: [String: Any] = [
+            "type": "command",
+            "command": command
+        ]
+        if let timeout = event.timeout {
+            hookCommand["timeout"] = timeout
+        }
+
+        return event.templates.map { template in
+            switch template {
+            case .plain:
+                return ["hooks": [hookCommand]]
+            case .matcher(let matcher):
+                return [
+                    "matcher": matcher,
+                    "hooks": [hookCommand]
+                ]
+            }
+        }
+    }
+
+    private static func islandSupportDirectory() -> URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".island", isDirectory: true)
+    }
+
+    private static func bridgeCommand(source: String, extraArguments: [String] = []) -> String {
+        let base = islandSupportDirectory()
+            .appendingPathComponent("bin", isDirectory: true)
+            .appendingPathComponent("island-bridge")
+            .path + " --source \(source)"
+        guard !extraArguments.isEmpty else { return base }
+        return ([base] + extraArguments).joined(separator: " ")
+    }
+
+    private static func containsManagedHooks(at url: URL) -> Bool {
+        guard let data = try? Data(contentsOf: url),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let hooks = json["hooks"] as? [String: Any] else {
+            return false
+        }
+
+        for (_, value) in hooks {
+            if let entries = value as? [[String: Any]] {
+                for entry in entries {
+                    if let entryHooks = entry["hooks"] as? [[String: Any]] {
+                        for hook in entryHooks {
+                            if let cmd = hook["command"] as? String,
+                               isIslandManagedHookCommand(cmd) {
+                                return true
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return false
+    }
+
+    private static func isIslandManagedHookCommand(_ command: String) -> Bool {
+        let normalized = command.lowercased()
+        return normalized.contains("island-state.py")
+            || normalized.contains("/.island/bin/island-bridge")
+            || normalized.contains("/.vibe-island/bin/vibe-island-bridge")
+    }
+
+    private static func writeJSONObject(_ json: [String: Any], to url: URL) {
+        try? FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+
+        if let data = try? JSONSerialization.data(
+            withJSONObject: json,
+            options: [.prettyPrinted, .sortedKeys]
+        ) {
+            try? data.write(to: url)
+        }
     }
 }

@@ -51,4 +51,9 @@ struct SessionPhaseHelpers {
         if seconds < 86400 { return "\(seconds / 3600)h" }
         return "\(seconds / 86400)d"
     }
+
+    static func timeBadgeLabel(for date: Date, now: Date = Date()) -> String {
+        let value = timeAgo(date, now: now)
+        return value == "now" ? "<1m" : value
+    }
 }

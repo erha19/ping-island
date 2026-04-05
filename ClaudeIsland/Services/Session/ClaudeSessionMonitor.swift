@@ -39,18 +39,31 @@ class ClaudeSessionMonitor: ObservableObject {
             onEvent: { event in
                 Task {
                     await SessionStore.shared.process(.hookReceived(event))
-                }
 
-                if event.sessionPhase == .processing {
-                    Task { @MainActor in
-                        InterruptWatcherManager.shared.startWatching(
-                            sessionId: event.sessionId,
-                            cwd: event.cwd
-                        )
+                    if event.event == "PostToolUse",
+                       let toolUseId = event.toolUseId,
+                       let session = await SessionStore.shared.session(for: event.sessionId),
+                       session.activePermission?.toolUseId != toolUseId {
+                        await MainActor.run {
+                            HookSocketServer.shared.cancelPendingPermission(toolUseId: toolUseId)
+                        }
                     }
                 }
 
-                if event.status == "ended" {
+                if event.provider == .claude, event.sessionPhase == .processing {
+                    Task {
+                        let session = await SessionStore.shared.session(for: event.sessionId)
+                        await MainActor.run {
+                            InterruptWatcherManager.shared.startWatching(
+                                sessionId: event.sessionId,
+                                cwd: event.cwd,
+                                explicitFilePath: session?.clientInfo.sessionFilePath
+                            )
+                        }
+                    }
+                }
+
+                if event.provider == .claude, event.status == "ended" {
                     Task { @MainActor in
                         InterruptWatcherManager.shared.stopWatching(sessionId: event.sessionId)
                     }
@@ -60,9 +73,6 @@ class ClaudeSessionMonitor: ObservableObject {
                     HookSocketServer.shared.cancelPendingPermissions(sessionId: event.sessionId)
                 }
 
-                if event.event == "PostToolUse", let toolUseId = event.toolUseId {
-                    HookSocketServer.shared.cancelPendingPermission(toolUseId: toolUseId)
-                }
             },
             onPermissionFailure: { sessionId, toolUseId in
                 Task {
@@ -94,7 +104,7 @@ class ClaudeSessionMonitor: ObservableObject {
                 return
             }
 
-            if session.provider == .codex {
+            if session.ingress == .codexAppServer {
                 await CodexAppServerMonitor.shared.approve(threadId: sessionId, forSession: forSession)
                 return
             }
@@ -118,7 +128,7 @@ class ClaudeSessionMonitor: ObservableObject {
                 return
             }
 
-            if session.provider == .codex {
+            if session.ingress == .codexAppServer {
                 await CodexAppServerMonitor.shared.deny(threadId: sessionId)
                 return
             }
@@ -143,14 +153,14 @@ class ClaudeSessionMonitor: ObservableObject {
                 return
             }
 
-            if session.provider == .codex {
+            if session.ingress == .codexAppServer {
                 await CodexAppServerMonitor.shared.answer(threadId: sessionId, answers: answers)
                 return
             }
 
             guard let intervention = session.intervention,
                   intervention.kind == .question,
-                  let updatedInput = updatedClaudeToolInput(for: intervention, answers: answers)
+                  let updatedInput = updatedHookToolInput(for: intervention, answers: answers)
             else {
                 return
             }
@@ -168,7 +178,32 @@ class ClaudeSessionMonitor: ObservableObject {
     }
 
     func loadCodexThread(sessionId: String) async throws -> CodexThreadSnapshot {
-        try await CodexAppServerMonitor.shared.readThread(threadId: sessionId, includeTurns: true)
+        let session = await SessionStore.shared.session(for: sessionId)
+
+        do {
+            let snapshot = try await CodexAppServerMonitor.shared.readThread(
+                threadId: sessionId,
+                includeTurns: true
+            )
+            if !snapshot.historyItems.isEmpty || session?.clientInfo.sessionFilePath == nil {
+                return snapshot
+            }
+        } catch {
+            if let fallback = await loadCodexRolloutFallback(sessionId: sessionId, session: session) {
+                return fallback
+            }
+            throw error
+        }
+
+        if let fallback = await loadCodexRolloutFallback(sessionId: sessionId, session: session) {
+            return fallback
+        }
+
+        throw NSError(
+            domain: "ClaudeIsland.Codex",
+            code: 404,
+            userInfo: [NSLocalizedDescriptionKey: "No Codex thread details available yet."]
+        )
     }
 
     func continueCodexThread(sessionId: String, expectedTurnId: String, text: String) async throws {
@@ -182,7 +217,7 @@ class ClaudeSessionMonitor: ObservableObject {
     /// Archive (remove) a session from the instances list
     func archiveSession(sessionId: String) {
         Task {
-            await SessionStore.shared.process(.sessionEnded(sessionId: sessionId))
+            await SessionStore.shared.process(.sessionArchived(sessionId: sessionId))
         }
     }
 
@@ -202,7 +237,7 @@ class ClaudeSessionMonitor: ObservableObject {
         }
     }
 
-    private func updatedClaudeToolInput(for intervention: SessionIntervention, answers: [String: [String]]) -> [String: Any]? {
+    private func updatedHookToolInput(for intervention: SessionIntervention, answers: [String: [String]]) -> [String: Any]? {
         guard let rawJSON = intervention.metadata["toolInputJSON"],
               let data = rawJSON.data(using: .utf8),
               let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
@@ -233,6 +268,25 @@ class ClaudeSessionMonitor: ObservableObject {
         updated["answers"] = encodedAnswers
         return updated
     }
+
+    private func loadCodexRolloutFallback(
+        sessionId: String,
+        session: SessionState?
+    ) async -> CodexThreadSnapshot? {
+        guard let session else { return nil }
+
+        let snapshot = await CodexRolloutParser.shared.parseThread(
+            threadId: sessionId,
+            fallbackCwd: session.cwd,
+            clientInfo: session.clientInfo
+        )
+
+        if let snapshot {
+            await SessionStore.shared.syncCodexThreadSnapshot(snapshot, ingress: .hookBridge)
+        }
+
+        return snapshot
+    }
 }
 
 // MARK: - Interrupt Watcher Delegate
@@ -245,6 +299,12 @@ extension ClaudeSessionMonitor: JSONLInterruptWatcherDelegate {
 
         Task { @MainActor in
             InterruptWatcherManager.shared.stopWatching(sessionId: sessionId)
+        }
+    }
+
+    nonisolated func didObserveFileChange(sessionId: String) {
+        Task {
+            await SessionStore.shared.requestFileSync(for: sessionId)
         }
     }
 }

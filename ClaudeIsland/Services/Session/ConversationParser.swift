@@ -71,9 +71,8 @@ actor ConversationParser {
 
     /// Parse a JSONL file to extract conversation info
     /// Uses caching based on file modification time
-    func parse(sessionId: String, cwd: String) -> ConversationInfo {
-        let projectDir = cwd.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ".", with: "-")
-        let sessionFile = NSHomeDirectory() + "/.claude/projects/" + projectDir + "/" + sessionId + ".jsonl"
+    func parse(sessionId: String, cwd: String, explicitFilePath: String? = nil) -> ConversationInfo {
+        let sessionFile = Self.sessionFilePath(sessionId: sessionId, cwd: cwd, explicitFilePath: explicitFilePath)
 
         let fileManager = FileManager.default
         guard fileManager.fileExists(atPath: sessionFile),
@@ -262,8 +261,8 @@ actor ConversationParser {
     // MARK: - Full Conversation Parsing
 
     /// Parse full conversation history for chat view (returns ALL messages - use sparingly)
-    func parseFullConversation(sessionId: String, cwd: String) -> [ChatMessage] {
-        let sessionFile = Self.sessionFilePath(sessionId: sessionId, cwd: cwd)
+    func parseFullConversation(sessionId: String, cwd: String, explicitFilePath: String? = nil) -> [ChatMessage] {
+        let sessionFile = Self.sessionFilePath(sessionId: sessionId, cwd: cwd, explicitFilePath: explicitFilePath)
 
         guard FileManager.default.fileExists(atPath: sessionFile) else {
             return []
@@ -287,8 +286,8 @@ actor ConversationParser {
     }
 
     /// Parse only NEW messages since last call (efficient incremental updates)
-    func parseIncremental(sessionId: String, cwd: String) -> IncrementalParseResult {
-        let sessionFile = Self.sessionFilePath(sessionId: sessionId, cwd: cwd)
+    func parseIncremental(sessionId: String, cwd: String, explicitFilePath: String? = nil) -> IncrementalParseResult {
+        let sessionFile = Self.sessionFilePath(sessionId: sessionId, cwd: cwd, explicitFilePath: explicitFilePath)
 
         guard FileManager.default.fileExists(atPath: sessionFile) else {
             return IncrementalParseResult(
@@ -458,9 +457,143 @@ actor ConversationParser {
     }
 
     /// Build session file path
-    private static func sessionFilePath(sessionId: String, cwd: String) -> String {
+    private static func sessionFilePath(sessionId: String, cwd: String, explicitFilePath: String? = nil) -> String {
+        if let explicitFilePath, !explicitFilePath.isEmpty {
+            return explicitFilePath
+        }
+
         let projectDir = cwd.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ".", with: "-")
-        return NSHomeDirectory() + "/.claude/projects/" + projectDir + "/" + sessionId + ".jsonl"
+        let qoderPath = NSHomeDirectory() + "/.qoder/projects/" + projectDir + "/transcript/" + sessionId + ".jsonl"
+        if FileManager.default.fileExists(atPath: qoderPath) {
+            return qoderPath
+        }
+
+        let claudePath = NSHomeDirectory() + "/.claude/projects/" + projectDir + "/" + sessionId + ".jsonl"
+        if FileManager.default.fileExists(atPath: claudePath) {
+            return claudePath
+        }
+
+        return claudePath
+    }
+
+    func qoderFallbackIntervention(sessionId: String) -> SessionIntervention? {
+        guard let historyPath = Self.qoderConversationHistoryPath(sessionId: sessionId),
+              let content = try? String(contentsOfFile: historyPath, encoding: .utf8) else {
+            return nil
+        }
+
+        return Self.parseQoderConversationHistory(content)
+    }
+
+    private static func qoderConversationHistoryPath(sessionId: String) -> String? {
+        let shortSessionId = String(sessionId.prefix(8))
+        let rootURL = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".qoder/cache/projects", isDirectory: true)
+
+        guard let enumerator = FileManager.default.enumerator(
+            at: rootURL,
+            includingPropertiesForKeys: [.contentModificationDateKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return nil
+        }
+
+        var newestMatch: URL?
+        var newestDate = Date.distantPast
+
+        for case let fileURL as URL in enumerator {
+            guard fileURL.lastPathComponent == "\(shortSessionId).txt",
+                  fileURL.path.contains("/conversation-history/") else {
+                continue
+            }
+
+            let modifiedAt = (try? fileURL.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate)
+                ?? Date.distantPast
+            if newestMatch == nil || modifiedAt > newestDate {
+                newestMatch = fileURL
+                newestDate = modifiedAt
+            }
+        }
+
+        return newestMatch?.path
+    }
+
+    private static func parseQoderConversationHistory(_ content: String) -> SessionIntervention? {
+        struct RequestSection {
+            let requestId: String
+            let lines: [String]
+        }
+
+        let allLines = content.components(separatedBy: .newlines)
+        var sections: [RequestSection] = []
+        var currentRequestId: String?
+        var currentLines: [String] = []
+
+        for line in allLines {
+            if line.hasPrefix("--- Request: "), line.hasSuffix(" ---") {
+                if let currentRequestId {
+                    sections.append(RequestSection(requestId: currentRequestId, lines: currentLines))
+                }
+
+                let requestId = line
+                    .replacingOccurrences(of: "--- Request: ", with: "")
+                    .replacingOccurrences(of: " ---", with: "")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                currentRequestId = requestId
+                currentLines = []
+                continue
+            }
+
+            if currentRequestId != nil {
+                currentLines.append(line)
+            }
+        }
+
+        if let currentRequestId {
+            sections.append(RequestSection(requestId: currentRequestId, lines: currentLines))
+        }
+
+        guard let latestSection = sections.last else {
+            return nil
+        }
+
+        let hasAskUserQuestion = latestSection.lines.contains { line in
+            line.trimmingCharacters(in: .whitespacesAndNewlines) == "[Tool call] ask_user_question"
+        }
+        guard hasAskUserQuestion else {
+            return nil
+        }
+
+        let questionCount = latestSection.lines
+            .compactMap { line -> Int? in
+                let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard trimmed.hasPrefix("questions: ["),
+                      let start = trimmed.firstIndex(of: "["),
+                      let end = trimmed[start...].firstIndex(of: " ") else {
+                    return nil
+                }
+                return Int(trimmed[trimmed.index(after: start)..<end])
+            }
+            .first ?? 1
+
+        let title = questionCount == 1
+            ? "Qoder 的提问"
+            : "Qoder 的提问（\(questionCount) 个问题）"
+
+        return SessionIntervention(
+            id: "qoder-question-\(latestSection.requestId)",
+            kind: .question,
+            title: title,
+            message: "Qoder 已在 IDE 内弹出问题，请回到 Qoder 完成回答。Island 会继续保留提醒，直到会话继续推进。",
+            options: [],
+            questions: [],
+            supportsSessionScope: false,
+            metadata: [
+                "responseMode": "external_only",
+                "source": "qoderConversationHistory",
+                "requestId": latestSection.requestId
+            ]
+        )
     }
 
     private func parseMessageLine(_ json: [String: Any], seenToolIds: inout Set<String>, toolIdToName: inout [String: String]) -> ChatMessage? {

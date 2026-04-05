@@ -2,6 +2,7 @@ import AppKit
 import Combine
 import ServiceManagement
 import SwiftUI
+import UniformTypeIdentifiers
 
 private enum SettingsCategory: String, CaseIterable, Identifiable {
     case general
@@ -27,7 +28,7 @@ private enum SettingsCategory: String, CaseIterable, Identifiable {
         case .general: return "系统与基础行为"
         case .display: return "显示器与位置"
         case .sound: return "通知与提示音"
-        case .integration: return "Claude Code 集成"
+        case .integration: return "Hooks 与 IDE 扩展"
         case .about: return "版本与更新"
         }
     }
@@ -56,12 +57,30 @@ private enum SettingsCategory: String, CaseIterable, Identifiable {
 @MainActor
 final class SettingsPanelViewModel: ObservableObject {
     @Published var launchAtLogin = false
-    @Published var hooksInstalled = false
+    @Published private(set) var hookInstallationStates: [String: Bool] = [:]
+    @Published private(set) var ideExtensionInstallationStates: [String: Bool] = [:]
     @Published var accessibilityEnabled = false
+    @Published var isExportingLogs = false
+    @Published var logExportStatus = "导出最近 6 小时的 Island 诊断日志与配置"
+
+    var visibleHookProfiles: [ManagedHookClientProfile] {
+        ClientProfileRegistry.managedHookProfiles.filter { profile in
+            profile.alwaysVisibleInSettings
+                || ClientAppLocator.isInstalled(bundleIdentifiers: profile.localAppBundleIdentifiers)
+        }
+    }
+
+    var visibleIDEExtensionProfiles: [ManagedIDEExtensionProfile] {
+        ClientProfileRegistry.ideExtensionProfiles.filter { profile in
+            profile.alwaysVisibleInSettings
+                || ClientAppLocator.isInstalled(bundleIdentifiers: profile.localAppBundleIdentifiers)
+        }
+    }
 
     func refresh() {
         launchAtLogin = SMAppService.mainApp.status == .enabled
-        hooksInstalled = HookInstaller.isInstalled()
+        refreshHookInstallationStates()
+        refreshIDEExtensionInstallationStates()
         accessibilityEnabled = AXIsProcessTrusted()
         ScreenSelector.shared.refreshScreens()
         SoundPackCatalog.shared.refresh()
@@ -80,13 +99,46 @@ final class SettingsPanelViewModel: ObservableObject {
         }
     }
 
-    func setHooksInstalled(_ enabled: Bool) {
-        if enabled {
-            HookInstaller.installIfNeeded()
-        } else {
-            HookInstaller.uninstall()
-        }
-        hooksInstalled = HookInstaller.isInstalled()
+    func isHookInstalled(_ profile: ManagedHookClientProfile) -> Bool {
+        hookInstallationStates[profile.id] ?? false
+    }
+
+    func isIDEExtensionInstalled(_ profile: ManagedIDEExtensionProfile) -> Bool {
+        ideExtensionInstallationStates[profile.id] ?? false
+    }
+
+    func installHooks(for profile: ManagedHookClientProfile) {
+        HookInstaller.install(profile)
+        refreshHookInstallationStates()
+    }
+
+    func reinstallHooks(for profile: ManagedHookClientProfile) {
+        HookInstaller.reinstall(profile)
+        refreshHookInstallationStates()
+    }
+
+    func uninstallHooks(for profile: ManagedHookClientProfile) {
+        HookInstaller.uninstall(profile)
+        refreshHookInstallationStates()
+    }
+
+    func installIDEExtension(for profile: ManagedIDEExtensionProfile) {
+        IDEExtensionInstaller.install(profile)
+        refreshIDEExtensionInstallationStates()
+    }
+
+    func reinstallIDEExtension(for profile: ManagedIDEExtensionProfile) {
+        IDEExtensionInstaller.reinstall(profile)
+        refreshIDEExtensionInstallationStates()
+    }
+
+    func uninstallIDEExtension(for profile: ManagedIDEExtensionProfile) {
+        IDEExtensionInstaller.uninstall(profile)
+        refreshIDEExtensionInstallationStates()
+    }
+
+    func authorizeIDEExtension(for profile: ManagedIDEExtensionProfile) {
+        _ = IDEExtensionInstaller.authorize(profile)
     }
 
     func openAccessibilitySettings() {
@@ -94,6 +146,61 @@ final class SettingsPanelViewModel: ObservableObject {
             return
         }
         NSWorkspace.shared.open(url)
+    }
+
+    func exportLogs() {
+        guard !isExportingLogs else { return }
+
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.zip]
+        panel.canCreateDirectories = true
+        panel.isExtensionHidden = false
+        panel.nameFieldStringValue = "ClaudeIsland-Diagnostics-\(Self.archiveTimestamp()).zip"
+
+        guard panel.runModal() == .OK, let destinationURL = panel.url else { return }
+
+        isExportingLogs = true
+        logExportStatus = "正在导出日志…"
+
+        Task {
+            do {
+                let result = try await DiagnosticsExporter.shared.exportArchive(to: destinationURL)
+                await MainActor.run {
+                    if result.warnings.isEmpty {
+                        logExportStatus = "已导出到 \(result.archiveURL.lastPathComponent)"
+                    } else {
+                        logExportStatus = "已导出，附带 \(result.warnings.count) 条警告"
+                    }
+                    isExportingLogs = false
+                }
+            } catch {
+                await MainActor.run {
+                    logExportStatus = "导出失败：\(error.localizedDescription)"
+                    isExportingLogs = false
+                }
+            }
+        }
+    }
+
+    private static func archiveTimestamp() -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = .current
+        formatter.dateFormat = "yyyyMMdd-HHmmss"
+        return formatter.string(from: Date())
+    }
+
+    private func refreshHookInstallationStates() {
+        hookInstallationStates = ClientProfileRegistry.managedHookProfiles.reduce(into: [:]) { result, profile in
+            result[profile.id] = HookInstaller.isInstalled(profile)
+        }
+    }
+
+    private func refreshIDEExtensionInstallationStates() {
+        ideExtensionInstallationStates = ClientProfileRegistry.ideExtensionProfiles.reduce(into: [:]) { result, profile in
+            result[profile.id] = IDEExtensionInstaller.isInstalled(profile)
+        }
     }
 }
 
@@ -134,11 +241,9 @@ private enum SettingsPanelMetrics {
     static let popoverSize = CGSize(width: 760, height: 620)
     static let windowSidebarWidth: CGFloat = 236
     static let popoverSidebarWidth: CGFloat = 212
-    static let windowTitlebarHeight: CGFloat = 34
-    static let windowContentTopInset: CGFloat = 46
-    static let popoverTitlebarHeight: CGFloat = 0
+    static let windowContentTopInset: CGFloat = 0
     static let popoverContentTopInset: CGFloat = 0
-    static let outerPadding: CGFloat = 10
+    static let outerPadding: CGFloat = 0
 }
 
 private struct SettingsPanelContentView: View {
@@ -153,39 +258,10 @@ private struct SettingsPanelContentView: View {
 
     var body: some View {
         ZStack {
-            SettingsGlassSurface(material: .hudWindow, blendingMode: .behindWindow)
-                .overlay {
-                    LinearGradient(
-                        colors: [
-                            Color.white.opacity(0.09),
-                            Color.white.opacity(0.03),
-                            Color.black.opacity(0.12)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                }
-                .overlay {
-                    LinearGradient(
-                        colors: [
-                            Color(red: 0.26, green: 0.28, blue: 0.32).opacity(0.62),
-                            Color(red: 0.15, green: 0.16, blue: 0.19).opacity(0.72)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                }
-                .ignoresSafeArea()
-
-            if presentation == .window {
-                titlebarBackground
-                    .frame(maxHeight: .infinity, alignment: .top)
-                    .ignoresSafeArea()
-            }
-
             HStack(spacing: 0) {
                 sidebar
                     .frame(width: sidebarWidth)
+                    .frame(maxHeight: .infinity, alignment: .top)
 
                 detail
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -268,15 +344,6 @@ private struct SettingsPanelContentView: View {
         .clear
     }
 
-    private var titlebarHeight: CGFloat {
-        switch presentation {
-        case .window:
-            return SettingsPanelMetrics.windowTitlebarHeight
-        case .popover:
-            return SettingsPanelMetrics.popoverTitlebarHeight
-        }
-    }
-
     private var contentTopInset: CGFloat {
         switch presentation {
         case .window:
@@ -284,35 +351,6 @@ private struct SettingsPanelContentView: View {
         case .popover:
             return SettingsPanelMetrics.popoverContentTopInset
         }
-    }
-
-    private var titlebarBackground: some View {
-        ZStack {
-            SettingsGlassSurface(material: .headerView, blendingMode: .withinWindow)
-
-            Rectangle()
-                .fill(Color(red: 0.19, green: 0.24, blue: 0.31).opacity(0.68))
-
-            LinearGradient(
-                colors: [
-                    Color.white.opacity(0.14),
-                    Color.white.opacity(0.04),
-                    Color.clear
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-
-            LinearGradient(
-                colors: [
-                    Color(red: 0.30, green: 0.38, blue: 0.49).opacity(0.34),
-                    Color(red: 0.12, green: 0.15, blue: 0.20).opacity(0.18)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-        }
-        .frame(height: titlebarHeight)
     }
 
     private var sidebarSections: [SettingsSidebarSection] {
@@ -326,7 +364,11 @@ private struct SettingsPanelContentView: View {
 
     private var sidebar: some View {
         ScrollView(.vertical, showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 18) {
+                if presentation == .window {
+                    sidebarWindowControls
+                }
+
                 ForEach(sidebarSections) { section in
                     VStack(alignment: .leading, spacing: 8) {
                         if let title = section.title {
@@ -353,31 +395,94 @@ private struct SettingsPanelContentView: View {
                 }
                 Spacer(minLength: 0)
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 12)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 14)
         }
-        .padding(.leading, 8)
-        .padding(.trailing, 6)
-        .padding(.top, 6)
-        .padding(.bottom, 10)
+        .padding(8)
         .background(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(Color.white.opacity(0.04))
+            UnevenRoundedRectangle(
+                topLeadingRadius: 24,
+                bottomLeadingRadius: 24,
+                bottomTrailingRadius: 0,
+                topTrailingRadius: 0,
+                style: .continuous
+            )
+                .fill(Color.white.opacity(0.055))
                 .overlay {
                     SettingsGlassSurface(material: .sidebar, blendingMode: .withinWindow)
-                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                        .opacity(0.82)
+                        .clipShape(
+                            UnevenRoundedRectangle(
+                                topLeadingRadius: 24,
+                                bottomLeadingRadius: 24,
+                                bottomTrailingRadius: 0,
+                                topTrailingRadius: 0,
+                                style: .continuous
+                            )
+                        )
+                        .opacity(0.94)
+                }
+                .overlay {
+                    LinearGradient(
+                        colors: [
+                            Color.white.opacity(0.12),
+                            Color.white.opacity(0.04),
+                            Color.black.opacity(0.10)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                    .clipShape(
+                        UnevenRoundedRectangle(
+                            topLeadingRadius: 24,
+                            bottomLeadingRadius: 24,
+                            bottomTrailingRadius: 0,
+                            topTrailingRadius: 0,
+                            style: .continuous
+                        )
+                    )
+                }
+                .overlay(alignment: .topTrailing) {
+                    Circle()
+                        .fill(Color.white.opacity(0.16))
+                        .frame(width: 120, height: 120)
+                        .blur(radius: 36)
+                        .offset(x: 28, y: -26)
                 }
         )
+        .overlay(
+            UnevenRoundedRectangle(
+                topLeadingRadius: 24,
+                bottomLeadingRadius: 24,
+                bottomTrailingRadius: 0,
+                topTrailingRadius: 0,
+                style: .continuous
+            )
+                .strokeBorder(Color.white.opacity(0.10), lineWidth: 1)
+        )
+        .shadow(color: Color.black.opacity(0.20), radius: 24, y: 14)
+    }
+
+    private var sidebarWindowControls: some View {
+        HStack(spacing: 10) {
+            WindowControlButton(color: Color(red: 1.0, green: 0.37, blue: 0.36)) {
+                currentWindow?.performClose(nil)
+            }
+
+            WindowControlButton(color: Color(red: 1.0, green: 0.74, blue: 0.18)) {
+                currentWindow?.miniaturize(nil)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 8)
+        .padding(.bottom, 2)
     }
 
     @ViewBuilder
     private var detail: some View {
         ScrollView(.vertical, showsIndicators: false) {
             VStack(alignment: .leading, spacing: 22) {
-                header
-
-                switch selectedCategory ?? .general {
+                switch currentCategory {
                 case .general:
                     generalContent
                 case .display:
@@ -390,34 +495,73 @@ private struct SettingsPanelContentView: View {
                     aboutContent
                 }
             }
-            .padding(.horizontal, 18)
-            .padding(.top, 18)
-            .padding(.bottom, 20)
+            .padding(.horizontal, 22)
+            .padding(.top, 24)
+            .padding(.bottom, 24)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .background(
-            LinearGradient(
-                colors: [
-                    Color.white.opacity(0.025),
-                    Color.white.opacity(0.008),
-                    Color.black.opacity(0.035)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
+            UnevenRoundedRectangle(
+                topLeadingRadius: 0,
+                bottomLeadingRadius: 0,
+                bottomTrailingRadius: 26,
+                topTrailingRadius: 26,
+                style: .continuous
             )
+                .fill(Color.white.opacity(0.035))
+                .overlay {
+                    SettingsGlassSurface(material: .hudWindow, blendingMode: .withinWindow)
+                        .clipShape(
+                            UnevenRoundedRectangle(
+                                topLeadingRadius: 0,
+                                bottomLeadingRadius: 0,
+                                bottomTrailingRadius: 26,
+                                topTrailingRadius: 26,
+                                style: .continuous
+                            )
+                        )
+                        .opacity(0.96)
+                }
+                .overlay {
+                    LinearGradient(
+                        colors: [
+                            Color.white.opacity(0.11),
+                            Color.white.opacity(0.03),
+                            Color.black.opacity(0.05)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                    .clipShape(
+                        UnevenRoundedRectangle(
+                            topLeadingRadius: 0,
+                            bottomLeadingRadius: 0,
+                            bottomTrailingRadius: 26,
+                            topTrailingRadius: 26,
+                            style: .continuous
+                        )
+                    )
+                }
         )
+        .overlay(
+            UnevenRoundedRectangle(
+                topLeadingRadius: 0,
+                bottomLeadingRadius: 0,
+                bottomTrailingRadius: 26,
+                topTrailingRadius: 26,
+                style: .continuous
+            )
+                .strokeBorder(Color.white.opacity(0.10), lineWidth: 1)
+        )
+        .shadow(color: Color.black.opacity(0.16), radius: 24, y: 14)
     }
 
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text((selectedCategory ?? .general).title)
-                .font(.system(size: 19, weight: .bold))
-                .foregroundColor(.white)
+    private var currentCategory: SettingsCategory {
+        selectedCategory ?? .general
+    }
 
-            Text((selectedCategory ?? .general).subtitle)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundColor(.white.opacity(0.58))
-        }
+    private var currentWindow: NSWindow? {
+        NSApp.keyWindow ?? NSApp.mainWindow
     }
 
     private var generalContent: some View {
@@ -441,7 +585,7 @@ private struct SettingsPanelContentView: View {
             SettingsSectionCard(title: "行为") {
                 SettingsToggleLine(
                     title: "全屏时隐藏",
-                    subtitle: "当前台应用进入全屏时，暂停 Island 的展开与悬停交互",
+                    subtitle: "仅在无刘海屏的全屏空间里隐藏 Island，刘海屏顶部会继续展示",
                     isOn: $settings.hideInFullscreen
                 )
                 SettingsLineDivider()
@@ -638,16 +782,45 @@ private struct SettingsPanelContentView: View {
 
     private var integrationContent: some View {
         VStack(alignment: .leading, spacing: 18) {
-            SettingsSectionCard(title: "Claude Hooks") {
-                SettingsToggleLine(
-                    title: "启用 Hooks",
-                    subtitle: "在 Claude Code 中安装 Island 所需的 hook 脚本"
-                        ,
-                    isOn: Binding(
-                        get: { viewModel.hooksInstalled },
-                        set: { viewModel.setHooksInstalled($0) }
-                    )
-                )
+            let hookProfiles = viewModel.visibleHookProfiles
+            if !hookProfiles.isEmpty {
+                SettingsSectionCard(title: "Hooks 管理") {
+                    let profiles = hookProfiles
+                    ForEach(Array(profiles.enumerated()), id: \.element.id) { index, profile in
+                        HookManagementLine(
+                            profile: profile,
+                            isInstalled: viewModel.isHookInstalled(profile),
+                            installAction: { viewModel.installHooks(for: profile) },
+                            reinstallAction: { viewModel.reinstallHooks(for: profile) },
+                            uninstallAction: { viewModel.uninstallHooks(for: profile) }
+                        )
+
+                        if index < profiles.count - 1 {
+                            SettingsLineDivider()
+                        }
+                    }
+                }
+            }
+
+            let ideProfiles = viewModel.visibleIDEExtensionProfiles
+            if !ideProfiles.isEmpty {
+                SettingsSectionCard(title: "IDE 扩展") {
+                    let profiles = ideProfiles
+                    ForEach(Array(profiles.enumerated()), id: \.element.id) { index, profile in
+                        IDEExtensionManagementLine(
+                            profile: profile,
+                            isInstalled: viewModel.isIDEExtensionInstalled(profile),
+                            installAction: { viewModel.installIDEExtension(for: profile) },
+                            reinstallAction: { viewModel.reinstallIDEExtension(for: profile) },
+                            authorizeAction: { viewModel.authorizeIDEExtension(for: profile) },
+                            uninstallAction: { viewModel.uninstallIDEExtension(for: profile) }
+                        )
+
+                        if index < profiles.count - 1 {
+                            SettingsLineDivider()
+                        }
+                    }
+                }
             }
 
             SettingsSectionCard(title: "系统权限") {
@@ -693,6 +866,25 @@ private struct SettingsPanelContentView: View {
                     Image(systemName: "arrow.up.right.square")
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundColor(.white.opacity(0.5))
+                }
+
+                SettingsLineDivider()
+
+                SettingsActionLine(
+                    title: "导出诊断日志",
+                    subtitle: viewModel.logExportStatus
+                ) {
+                    viewModel.exportLogs()
+                } accessory: {
+                    if viewModel.isExportingLogs {
+                        ProgressView()
+                            .controlSize(.small)
+                            .tint(.white.opacity(0.8))
+                    } else {
+                        Image(systemName: "square.and.arrow.up")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(.white.opacity(0.5))
+                    }
                 }
             }
         }
@@ -894,29 +1086,73 @@ private struct SidebarItemView: View {
                 .frame(width: 24, height: 24)
                 .background(
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(isSelected ? Color.white.opacity(0.22) : category.tint.opacity(0.86))
+                        .fill(
+                            isSelected
+                            ? LinearGradient(
+                                colors: [
+                                    category.tint.opacity(0.95),
+                                    category.tint.opacity(0.60)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                            : LinearGradient(
+                                colors: [
+                                    category.tint.opacity(0.92),
+                                    category.tint.opacity(0.74)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
                 )
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
 
-            Text(category.title)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(.white.opacity(isSelected ? 0.92 : 0.55))
-                .lineLimit(1)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(category.title)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(.white.opacity(isSelected ? 0.94 : 0.80))
+                    .lineLimit(1)
+
+                Text(category.subtitle)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundColor(.white.opacity(isSelected ? 0.60 : 0.42))
+                    .lineLimit(1)
+            }
 
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 8)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 9)
         .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(isSelected ? Color.white.opacity(0.12) : Color.clear)
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(isSelected ? Color.white.opacity(0.12) : Color.white.opacity(0.02))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(Color.white.opacity(isSelected ? 0.08 : 0), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(Color.white.opacity(isSelected ? 0.10 : 0.04), lineWidth: 1)
         )
-        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .shadow(color: isSelected ? category.tint.opacity(0.18) : .clear, radius: 14, y: 8)
+        .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+}
+
+private struct WindowControlButton: View {
+    let color: Color
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Circle()
+                .fill(color)
+                .frame(width: 12, height: 12)
+                .overlay(
+                    Circle()
+                        .strokeBorder(Color.black.opacity(0.18), lineWidth: 0.5)
+                )
+        }
+        .buttonStyle(.plain)
     }
 }
 
@@ -971,6 +1207,255 @@ private struct SettingsLineDivider: View {
         Divider()
             .overlay(Color.white.opacity(0.10))
             .padding(.horizontal, 18)
+    }
+}
+
+private struct HookManagementLine: View {
+    let profile: ManagedHookClientProfile
+    let isInstalled: Bool
+    let installAction: () -> Void
+    let reinstallAction: () -> Void
+    let uninstallAction: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .center, spacing: 14) {
+                HookManagementIcon(profile: profile)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.white)
+
+                    Text(subtitle)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(.white.opacity(0.58))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 12)
+
+                Text(isInstalled ? "已安装" : "未安装")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundColor(isInstalled ? tint : .white.opacity(0.65))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(
+                        Capsule(style: .continuous)
+                            .fill((isInstalled ? tint : .white).opacity(isInstalled ? 0.18 : 0.08))
+                    )
+                    .overlay(
+                        Capsule(style: .continuous)
+                            .strokeBorder((isInstalled ? tint : .white).opacity(isInstalled ? 0.28 : 0.12), lineWidth: 1)
+                    )
+            }
+
+            HStack(spacing: 10) {
+                if isInstalled {
+                    HookManagementButton(title: "重新安装", tint: tint, action: reinstallAction)
+                    HookManagementButton(title: "卸载", tint: TerminalColors.amber, action: uninstallAction)
+                } else {
+                    HookManagementButton(title: "安装", tint: tint, action: installAction)
+                }
+            }
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var title: String {
+        profile.title
+    }
+
+    private var subtitle: String {
+        profile.subtitle
+    }
+
+    private var tint: Color {
+        brandTint(profile.brand)
+    }
+}
+
+private struct HookManagementIcon: View {
+    let profile: ManagedHookClientProfile
+
+    var body: some View {
+        if let appIcon = resolvedAppIcon {
+            Image(nsImage: appIcon)
+                .resizable()
+                .interpolation(.high)
+                .scaledToFit()
+                .frame(width: 34, height: 34)
+                .shadow(color: Color.black.opacity(0.18), radius: 8, y: 3)
+        } else if let logoAssetName = profile.logoAssetName {
+            Image(logoAssetName)
+                .resizable()
+                .interpolation(.high)
+                .scaledToFit()
+                .frame(width: 34, height: 34)
+                .shadow(color: Color.black.opacity(0.18), radius: 8, y: 3)
+        } else {
+            Image(systemName: profile.iconSymbolName)
+                .font(.system(size: 18, weight: .bold))
+                .foregroundColor(.white)
+                .frame(width: 34, height: 34)
+                .background(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(Color.white.opacity(0.08))
+                )
+        }
+    }
+
+    private var resolvedAppIcon: NSImage? {
+        ClientAppLocator.icon(bundleIdentifiers: profile.localAppBundleIdentifiers)
+    }
+}
+
+private struct IDEExtensionManagementLine: View {
+    let profile: ManagedIDEExtensionProfile
+    let isInstalled: Bool
+    let installAction: () -> Void
+    let reinstallAction: () -> Void
+    let authorizeAction: () -> Void
+    let uninstallAction: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .center, spacing: 14) {
+                IDEExtensionManagementIcon(profile: profile)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(profile.title)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.white)
+
+                    Text(profile.subtitle)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(.white.opacity(0.58))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 12)
+
+                Text(isInstalled ? "已安装" : "未安装")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundColor(isInstalled ? tint : .white.opacity(0.65))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(
+                        Capsule(style: .continuous)
+                            .fill((isInstalled ? tint : .white).opacity(isInstalled ? 0.18 : 0.08))
+                    )
+                    .overlay(
+                        Capsule(style: .continuous)
+                            .strokeBorder((isInstalled ? tint : .white).opacity(isInstalled ? 0.28 : 0.12), lineWidth: 1)
+                    )
+            }
+
+            HStack(spacing: 10) {
+                if isInstalled {
+                    HookManagementButton(title: "重新安装", tint: tint, action: reinstallAction)
+                    HookManagementButton(title: "授权", tint: TerminalColors.blue, action: authorizeAction)
+                    HookManagementButton(title: "卸载", tint: TerminalColors.amber, action: uninstallAction)
+                } else {
+                    HookManagementButton(title: "安装", tint: tint, action: installAction)
+                }
+            }
+
+            if !isInstalled {
+                Text("安装完成后，如编辑器尚未识别扩展，请重启对应 IDE 再点击“授权”。")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.white.opacity(0.44))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var tint: Color {
+        ideTint(profile.id)
+    }
+}
+
+private struct IDEExtensionManagementIcon: View {
+    let profile: ManagedIDEExtensionProfile
+
+    var body: some View {
+        if let appIcon = ClientAppLocator.icon(bundleIdentifiers: profile.localAppBundleIdentifiers) {
+            Image(nsImage: appIcon)
+                .resizable()
+                .interpolation(.high)
+                .scaledToFit()
+                .frame(width: 34, height: 34)
+                .shadow(color: Color.black.opacity(0.18), radius: 8, y: 3)
+        } else {
+            Image(systemName: profile.iconSymbolName)
+                .font(.system(size: 18, weight: .bold))
+                .foregroundColor(.white)
+                .frame(width: 34, height: 34)
+                .background(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(Color.white.opacity(0.08))
+                )
+        }
+    }
+}
+
+private func brandTint(_ brand: SessionClientBrand) -> Color {
+    switch brand {
+    case .claude:
+        return Color(red: 0.95, green: 0.67, blue: 0.28)
+    case .codex:
+        return TerminalColors.blue
+    case .qoder:
+        return Color(red: 0.12, green: 0.88, blue: 0.56)
+    case .neutral:
+        return Color.white.opacity(0.72)
+    }
+}
+
+private func ideTint(_ profileID: String) -> Color {
+    switch profileID {
+    case "vscode-extension":
+        return Color(red: 0.15, green: 0.55, blue: 0.96)
+    case "cursor-extension":
+        return Color(red: 0.30, green: 0.72, blue: 0.98)
+    case "trae-extension":
+        return Color(red: 0.29, green: 0.84, blue: 0.63)
+    case "codebuddy-extension":
+        return Color(red: 0.98, green: 0.61, blue: 0.28)
+    case "qoder-extension":
+        return Color(red: 0.12, green: 0.88, blue: 0.56)
+    default:
+        return Color.white.opacity(0.72)
+    }
+}
+
+private struct HookManagementButton: View {
+    let title: String
+    let tint: Color
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 11, weight: .bold))
+                .foregroundColor(.white)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(tint.opacity(0.22))
+                )
+                .overlay(
+                    Capsule(style: .continuous)
+                        .strokeBorder(tint.opacity(0.34), lineWidth: 1)
+                )
+        }
+        .buttonStyle(.plain)
     }
 }
 

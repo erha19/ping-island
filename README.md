@@ -20,7 +20,8 @@
 - **Live Session Monitoring** — Track multiple Claude Code sessions in real-time
 - **Permission Approvals** — Approve or deny tool executions directly from the notch
 - **Chat History** — View full conversation history with markdown rendering
-- **Auto-Setup** — Hooks install automatically on first launch
+- **Hook Management** — Install or reinstall hooks for Claude Code, Codex, and compatible clients from settings
+- **IDE Terminal Jump** — Optional VS Code-compatible extension lets Island jump to the matching terminal tab in Cursor, VS Code, Trae, and CodeBuddy
 
 ## Requirements
 
@@ -37,7 +38,7 @@ xcodebuild -scheme ClaudeIsland -configuration Release build
 
 ## How It Works
 
-Claude Island installs hooks into `~/.claude/hooks/` that communicate session state via a Unix socket. The app listens for events and displays them in the notch overlay.
+Claude Island installs hooks for Claude Code, Codex, and compatible Claude-hook clients such as CodeBuddy and Trae. Those hooks communicate session state via a Unix socket, and the app listens for events to display them in the notch overlay.
 
 When Claude needs permission to run a tool, the notch expands with approve/deny buttons—no need to switch to the terminal.
 

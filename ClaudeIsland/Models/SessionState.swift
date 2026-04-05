@@ -17,6 +17,8 @@ struct SessionState: Equatable, Identifiable, Sendable {
     var cwd: String
     var projectName: String
     var provider: SessionProvider
+    var clientInfo: SessionClientInfo
+    var ingress: SessionIngress
     var sessionName: String?
     var previewText: String?
     var intervention: SessionIntervention?
@@ -77,6 +79,8 @@ struct SessionState: Equatable, Identifiable, Sendable {
         cwd: String,
         projectName: String? = nil,
         provider: SessionProvider = .claude,
+        clientInfo: SessionClientInfo? = nil,
+        ingress: SessionIngress = .hookBridge,
         sessionName: String? = nil,
         previewText: String? = nil,
         intervention: SessionIntervention? = nil,
@@ -100,6 +104,8 @@ struct SessionState: Equatable, Identifiable, Sendable {
         self.cwd = cwd
         self.projectName = projectName ?? URL(fileURLWithPath: cwd).lastPathComponent
         self.provider = provider
+        self.clientInfo = clientInfo ?? SessionClientInfo.default(for: provider)
+        self.ingress = ingress
         self.sessionName = sessionName
         self.previewText = previewText
         self.intervention = intervention
@@ -150,6 +156,16 @@ struct SessionState: Equatable, Identifiable, Sendable {
     /// Display title: summary > first user message > project name
     nonisolated var displayTitle: String {
         sessionName ?? conversationInfo.summary ?? conversationInfo.firstUserMessage ?? projectName
+    }
+
+    /// Provider label for message prefixes and generic copy.
+    nonisolated var providerDisplayName: String {
+        clientInfo.assistantLabel(for: provider)
+    }
+
+    /// Client label for badges and source-aware copy.
+    nonisolated var clientDisplayName: String {
+        clientInfo.badgeLabel(for: provider)
     }
 
     /// Best hint for matching window title
@@ -210,6 +226,11 @@ struct SessionState: Equatable, Identifiable, Sendable {
     /// Whether the session is waiting on a question-like intervention
     nonisolated var needsQuestionResponse: Bool {
         intervention?.kind == .question
+    }
+
+    /// Whether the session is waiting on an approval-like decision.
+    nonisolated var needsApprovalResponse: Bool {
+        phase.isWaitingForApproval || intervention?.kind == .approval
     }
 
     /// Timestamp used when sorting sessions that need manual attention.
