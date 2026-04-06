@@ -11,6 +11,10 @@ import Foundation
 /// Complete state for a single tracked session
 /// This is the single source of truth - all state reads and writes go through SessionStore
 struct SessionState: Equatable, Identifiable, Sendable {
+    private nonisolated static let minimalCompactDelay: TimeInterval = 10 * 60
+    private nonisolated static let autoArchiveDelay: TimeInterval = 30 * 60
+    private nonisolated static let codexContinuationPlaceholderHideWindow: TimeInterval = 10 * 60
+
     // MARK: - Identity
 
     let sessionId: String
@@ -158,7 +162,180 @@ struct SessionState: Equatable, Identifiable, Sendable {
 
     /// Display title: summary > first user message > project name
     nonisolated var displayTitle: String {
-        sessionName ?? conversationInfo.summary ?? conversationInfo.firstUserMessage ?? projectName
+        sessionName
+            ?? SessionTextSanitizer.sanitizedDisplayText(conversationInfo.summary)
+            ?? SessionTextSanitizer.sanitizedDisplayText(conversationInfo.firstUserMessage)
+            ?? projectName
+    }
+
+    /// Safety net for ghost Codex sessions that have no rollout, no history, and no visible content.
+    nonisolated var shouldHideFromPrimaryUI: Bool {
+        if shouldAutoArchiveFromPrimaryUI {
+            return true
+        }
+
+        return isLikelyEmptyCodexPlaceholderForUI
+    }
+
+    /// Codex placeholder sessions can be created before a richer thread record is available.
+    /// We treat sessions with no rollout path, no visible content, and no live interaction state
+    /// as empty placeholders so they can be hidden or deduplicated in UI-facing collections.
+    nonisolated var isLikelyEmptyCodexPlaceholderForUI: Bool {
+        guard provider == .codex else { return false }
+        guard chatItems.isEmpty else { return false }
+        guard case .none = intervention else { return false }
+        guard clientInfo.sessionFilePath?.isEmpty != false else { return false }
+        if hasOnlyTransientCodexProgressContent {
+            return true
+        }
+        guard compactHookMessage == nil else { return false }
+        return !hasMeaningfulCodexDisplayContent
+    }
+
+    nonisolated var hasMeaningfulCodexDisplayContent: Bool {
+        !chatItems.isEmpty
+            || intervention != nil
+            || (compactHookMessage != nil && !hasOnlyTransientCodexProgressContent)
+            || (clientInfo.sessionFilePath?.isEmpty == false)
+            || (sessionName?.isEmpty == false)
+            || (SessionTextSanitizer.sanitizedDisplayText(previewText) != nil && !hasOnlyTransientCodexProgressContent)
+            || (conversationInfo.summary?.isEmpty == false)
+            || (conversationInfo.firstUserMessage?.isEmpty == false)
+            || (conversationInfo.lastMessage?.isEmpty == false)
+    }
+
+    /// Some Codex App continuation updates briefly appear as a new thread ID with only a shallow
+    /// status preview (for example "working..."), but without any rollout path or durable history.
+    /// We treat those as continuation placeholders so they can be rebound onto the richer thread.
+    nonisolated var isLikelyTransientCodexContinuationPlaceholder: Bool {
+        guard provider == .codex else { return false }
+        guard chatItems.isEmpty else { return false }
+        guard intervention == nil else { return false }
+        guard clientInfo.sessionFilePath?.isEmpty != false else { return false }
+        guard sessionName?.isEmpty != false else { return false }
+        guard conversationInfo.summary?.isEmpty != false else { return false }
+        guard conversationInfo.firstUserMessage?.isEmpty != false else { return false }
+        guard conversationInfo.lastMessage?.isEmpty != false else { return false }
+        if let compactHookMessage, !Self.isLikelyGenericCodexProgressText(compactHookMessage) {
+            return false
+        }
+        return hasOnlyTransientCodexProgressContent || isLikelyEmptyCodexPlaceholderForUI
+    }
+
+    nonisolated var hasDurableCodexThreadIdentity: Bool {
+        !chatItems.isEmpty
+            || intervention != nil
+            || compactHookMessage != nil
+            || (clientInfo.sessionFilePath?.isEmpty == false)
+            || (sessionName?.isEmpty == false)
+            || (conversationInfo.summary?.isEmpty == false)
+            || (conversationInfo.firstUserMessage?.isEmpty == false)
+            || (conversationInfo.lastMessage?.isEmpty == false)
+    }
+
+    nonisolated func shouldRebindToExistingCodexThread(
+        comparedTo other: SessionState,
+        maximumRecencyGap: TimeInterval
+    ) -> Bool {
+        guard sessionId != other.sessionId else { return false }
+        guard isLikelyTransientCodexContinuationPlaceholder else { return false }
+        guard other.provider == .codex else { return false }
+        guard other.hasDurableCodexThreadIdentity else { return false }
+        guard normalizedWorkspacePath == other.normalizedWorkspacePath else { return false }
+
+        let recencyGap = abs(lastActivity.timeIntervalSince(other.lastActivity))
+        guard recencyGap <= maximumRecencyGap else { return false }
+        return true
+    }
+
+    nonisolated func shouldHideAsDuplicateCodexPlaceholder(comparedTo other: SessionState) -> Bool {
+        guard sessionId != other.sessionId else { return false }
+        guard isLikelyEmptyCodexPlaceholderForUI || isLikelyTransientCodexContinuationPlaceholder else { return false }
+        guard other.provider == .codex else { return false }
+        guard other.hasDurableCodexThreadIdentity else { return false }
+        guard normalizedWorkspacePath == other.normalizedWorkspacePath else { return false }
+
+        let sharedIdentity = !codexSurfaceIdentityTokens.isDisjoint(with: other.codexSurfaceIdentityTokens)
+        if sharedIdentity {
+            return true
+        }
+
+        let recencyGap = abs(lastActivity.timeIntervalSince(other.lastActivity))
+        if isLikelyTransientCodexContinuationPlaceholder {
+            return recencyGap <= Self.codexContinuationPlaceholderHideWindow
+        }
+
+        guard other.clientInfo.sessionFilePath?.isEmpty == false else { return false }
+        return recencyGap <= 120
+    }
+
+    private nonisolated var hasOnlyTransientCodexProgressContent: Bool {
+        guard provider == .codex else { return false }
+        guard chatItems.isEmpty else { return false }
+        guard intervention == nil else { return false }
+        guard clientInfo.sessionFilePath?.isEmpty != false else { return false }
+        guard sessionName?.isEmpty != false else { return false }
+        guard conversationInfo.summary?.isEmpty != false else { return false }
+        guard conversationInfo.firstUserMessage?.isEmpty != false else { return false }
+        guard conversationInfo.lastMessage?.isEmpty != false else { return false }
+
+        let visibleTexts = [
+            SessionTextSanitizer.sanitizedDisplayText(previewText),
+            compactHookMessage
+        ].compactMap { $0 }
+
+        guard !visibleTexts.isEmpty else { return false }
+        return visibleTexts.allSatisfy(Self.isLikelyGenericCodexProgressText(_:))
+    }
+
+    private nonisolated static func isLikelyGenericCodexProgressText(_ text: String) -> Bool {
+        let normalized = text
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: #"^codex\s*:\s*"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"[….]+"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+
+        guard !normalized.isEmpty else { return false }
+
+        let exactMatches: Set<String> = [
+            "working",
+            "working on it",
+            "processing",
+            "thinking",
+            "loading",
+            "starting",
+            "running",
+            "busy",
+            "work in progress",
+            "codex is still working",
+            "工作中",
+            "处理中",
+            "正在处理",
+            "思考中",
+            "加载中",
+            "准备中",
+            "运行中",
+            "正在压缩上下文"
+        ]
+        if exactMatches.contains(normalized) {
+            return true
+        }
+
+        let containsMatches = [
+            "still working",
+            "working",
+            "processing",
+            "thinking",
+            "loading",
+            "compacting context",
+            "工作中",
+            "处理中",
+            "正在处理",
+            "思考中",
+            "压缩上下文"
+        ]
+        return containsMatches.contains { normalized.contains($0) }
     }
 
     /// Provider label for message prefixes and generic copy.
@@ -169,6 +346,11 @@ struct SessionState: Equatable, Identifiable, Sendable {
     /// Client label for badges and source-aware copy.
     nonisolated var clientDisplayName: String {
         clientInfo.badgeLabel(for: provider)
+    }
+
+    /// Human-facing actor for questions/approvals. Prefer the IDE host when present.
+    nonisolated var interactionDisplayName: String {
+        clientInfo.interactionLabel(for: provider)
     }
 
     /// Optional IDE-host badge when the terminal is hosted inside an editor.
@@ -198,7 +380,9 @@ struct SessionState: Equatable, Identifiable, Sendable {
 
     /// Last message content
     nonisolated var lastMessage: String? {
-        conversationInfo.lastMessage ?? previewText ?? intervention?.summaryText
+        SessionTextSanitizer.sanitizedDisplayText(conversationInfo.lastMessage)
+            ?? SessionTextSanitizer.sanitizedDisplayText(previewText)
+            ?? SessionTextSanitizer.sanitizedDisplayText(intervention?.summaryText)
     }
 
     /// Latest hook bridge message formatted for compact notch display.
@@ -207,6 +391,9 @@ struct SessionState: Equatable, Identifiable, Sendable {
         let normalized = latestHookMessage
             .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
+        if normalized.caseInsensitiveCompare("Stop") == .orderedSame {
+            return nil
+        }
         return normalized.isEmpty ? nil : normalized
     }
 
@@ -266,12 +453,24 @@ struct SessionState: Equatable, Identifiable, Sendable {
         lastUserMessageDate ?? lastActivity
     }
 
+    /// Sessions with no new activity for long enough should disappear from the primary list
+    /// until a new event or message refreshes `lastActivity`.
+    nonisolated var shouldAutoArchiveFromPrimaryUI: Bool {
+        if needsManualAttention {
+            return false
+        }
+        return Date().timeIntervalSince(lastActivity) >= Self.autoArchiveDelay
+    }
+
     /// Older background sessions collapse to a header-only presentation in compact surfaces.
     nonisolated var shouldUseMinimalCompactPresentation: Bool {
+        if shouldAutoArchiveFromPrimaryUI {
+            return false
+        }
         if phase.isActive || needsManualAttention {
             return false
         }
-        return Date().timeIntervalSince(lastActivity) >= 10 * 60
+        return Date().timeIntervalSince(lastActivity) >= Self.minimalCompactDelay
     }
 
     nonisolated func shouldSortBeforeInQueue(_ other: SessionState) -> Bool {
@@ -317,6 +516,45 @@ struct SessionState: Equatable, Identifiable, Sendable {
         case .waitingForInput, .waitingForApproval:
             return 0
         }
+    }
+
+    private nonisolated var normalizedWorkspacePath: String? {
+        let trimmed = cwd.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed != "/" else { return nil }
+        return URL(fileURLWithPath: trimmed).standardizedFileURL.path.lowercased()
+    }
+
+    private nonisolated var codexSurfaceIdentityTokens: Set<String> {
+        func normalized(_ value: String?) -> String? {
+            let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let trimmed, !trimmed.isEmpty else { return nil }
+            return trimmed.lowercased()
+        }
+
+        func normalizedClientName(_ value: String?) -> String? {
+            guard let normalized = normalized(value) else { return nil }
+            switch normalized {
+            case "codex", "codex app", "codex cli":
+                return nil
+            default:
+                return normalized
+            }
+        }
+
+        return Set([
+            normalizedClientName(clientInfo.name).map { "name:\($0)" },
+            normalizedClientName(clientInfo.originator).map { "originator:\($0)" },
+            normalized(clientInfo.threadSource).map { "threadSource:\($0)" },
+            normalized(clientInfo.terminalBundleIdentifier).map { "terminalBundle:\($0)" },
+            normalized(clientInfo.terminalProgram).map { "terminalProgram:\($0)" },
+            normalized(clientInfo.transport).map { "transport:\($0)" },
+            normalized(clientInfo.remoteHost).map { "remoteHost:\($0)" },
+            normalized(clientInfo.terminalSessionIdentifier).map { "terminalSession:\($0)" },
+            normalized(clientInfo.iTermSessionIdentifier).map { "itermSession:\($0)" },
+            normalized(clientInfo.tmuxSessionIdentifier).map { "tmuxSession:\($0)" },
+            normalized(clientInfo.tmuxPaneIdentifier).map { "tmuxPane:\($0)" },
+            normalized(clientInfo.processName).map { "process:\($0)" }
+        ].compactMap { $0 })
     }
 }
 

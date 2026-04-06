@@ -270,20 +270,63 @@ private struct BridgeEnvelope: Codable, Sendable {
     }
 }
 
-private enum BridgeDecision: String, Codable, Sendable {
+enum BridgeDecision: Encodable, Sendable {
     case approve
     case approveForSession
     case deny
     case cancel
-    case answer
+    case answer([String: String])
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: BridgeDecisionCodingKey.self)
+
+        switch self {
+        case .approve:
+            try container.encode(EmptyBridgeDecisionPayload(), forKey: BridgeDecisionCodingKey("approve"))
+        case .approveForSession:
+            try container.encode(EmptyBridgeDecisionPayload(), forKey: BridgeDecisionCodingKey("approveForSession"))
+        case .deny:
+            try container.encode(EmptyBridgeDecisionPayload(), forKey: BridgeDecisionCodingKey("deny"))
+        case .cancel:
+            try container.encode(EmptyBridgeDecisionPayload(), forKey: BridgeDecisionCodingKey("cancel"))
+        case .answer(let answers):
+            try container.encode(
+                BridgeAnswerDecisionPayload(_0: answers),
+                forKey: BridgeDecisionCodingKey("answer")
+            )
+        }
+    }
 }
 
-private struct BridgeResponse: Codable, Sendable {
+struct BridgeResponse: Encodable, Sendable {
     let requestID: UUID
     let decision: BridgeDecision?
     let reason: String?
     let updatedInput: [String: AnyCodable]?
     let errorMessage: String?
+}
+
+private struct BridgeDecisionCodingKey: CodingKey {
+    let stringValue: String
+    let intValue: Int? = nil
+
+    init(_ stringValue: String) {
+        self.stringValue = stringValue
+    }
+
+    init?(stringValue: String) {
+        self.stringValue = stringValue
+    }
+
+    init?(intValue: Int) {
+        return nil
+    }
+}
+
+private struct EmptyBridgeDecisionPayload: Encodable {}
+
+private struct BridgeAnswerDecisionPayload: Encodable {
+    let _0: [String: String]
 }
 
 private extension BridgeEnvelope {
@@ -585,6 +628,81 @@ private extension BridgeProvider {
     }
 }
 
+struct CodexAuxiliaryHookFilter {
+    private static let titleGenerationPromptPrefix =
+        "You are a helpful assistant. You will be presented with a user prompt"
+    private static let titleGenerationPromptMarker =
+        "Generate a concise UI title (18-36 characters) for this task."
+    private static let titleGenerationPromptReturnMarker =
+        "Return only the title. No quotes or trailing punctuation."
+
+    private let sessionRetention: TimeInterval
+    private var ignoredSessionIDs: [String: Date] = [:]
+
+    init(sessionRetention: TimeInterval = 10 * 60) {
+        self.sessionRetention = sessionRetention
+    }
+
+    mutating func shouldIgnore(
+        provider: SessionProvider,
+        sessionId: String,
+        eventType: String,
+        title: String?,
+        preview: String?,
+        metadata: [String: String],
+        now: Date = Date()
+    ) -> Bool {
+        pruneExpiredSessions(referenceDate: now)
+
+        guard provider == .codex else { return false }
+
+        if ignoredSessionIDs[sessionId] != nil {
+            if eventType == "Stop" || eventType == "SessionEnd" {
+                ignoredSessionIDs.removeValue(forKey: sessionId)
+            } else {
+                ignoredSessionIDs[sessionId] = now
+            }
+            return true
+        }
+
+        let prompt = firstNonEmpty(
+            metadata["prompt"],
+            metadata["message"],
+            preview,
+            title
+        )
+        guard Self.isCodexTitleGenerationPrompt(prompt) else { return false }
+
+        ignoredSessionIDs[sessionId] = now
+        return true
+    }
+
+    static func isCodexTitleGenerationPrompt(_ prompt: String?) -> Bool {
+        guard let prompt = prompt?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !prompt.isEmpty else {
+            return false
+        }
+
+        return prompt.contains(titleGenerationPromptPrefix)
+            && prompt.contains(titleGenerationPromptMarker)
+            && prompt.contains(titleGenerationPromptReturnMarker)
+    }
+
+    private mutating func pruneExpiredSessions(referenceDate: Date) {
+        ignoredSessionIDs = ignoredSessionIDs.filter { _, seenAt in
+            referenceDate.timeIntervalSince(seenAt) < sessionRetention
+        }
+    }
+
+    private func firstNonEmpty(_ values: String?...) -> String? {
+        values.compactMap { value -> String? in
+            guard let value else { return nil }
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }.first
+    }
+}
+
 struct PendingPermission: Sendable {
     let sessionId: String
     let toolUseId: String
@@ -607,11 +725,13 @@ class HookSocketServer {
     private var permissionFailureHandler: PermissionFailureHandler?
     private let queue = DispatchQueue(label: "com.wudanwu.pingisland.socket", qos: .userInitiated)
 
-    private var pendingPermissions: [String: PendingPermission] = [:]
+    private var pendingPermissions: [String: [PendingPermission]] = [:]
     private let permissionsLock = NSLock()
+    private var recentInterventionResponses = RecentInterventionResponseStore()
 
     private var toolUseIdCache: [String: [String]] = [:]
     private let cacheLock = NSLock()
+    private var codexAuxiliaryHookFilter = CodexAuxiliaryHookFilter()
 
     private init() {}
 
@@ -691,8 +811,10 @@ class HookSocketServer {
         unlink(Self.socketPath)
 
         permissionsLock.lock()
-        for (_, pending) in pendingPermissions {
-            close(pending.clientSocket)
+        for (_, pendings) in pendingPermissions {
+            for pending in pendings {
+                close(pending.clientSocket)
+            }
         }
         pendingPermissions.removeAll()
         permissionsLock.unlock()
@@ -726,13 +848,18 @@ class HookSocketServer {
     func hasPendingPermission(sessionId: String) -> Bool {
         permissionsLock.lock()
         defer { permissionsLock.unlock() }
-        return pendingPermissions.values.contains { $0.sessionId == sessionId }
+        return pendingPermissions.values
+            .flatMap { $0 }
+            .contains { $0.sessionId == sessionId }
     }
 
     func getPendingPermission(sessionId: String) -> (toolName: String?, toolId: String?, toolInput: [String: AnyCodable]?)? {
         permissionsLock.lock()
         defer { permissionsLock.unlock() }
-        guard let pending = pendingPermissions.values.first(where: { $0.sessionId == sessionId }) else {
+        guard let pending = pendingPermissions.values
+            .flatMap({ $0 })
+            .sorted(by: { $0.receivedAt > $1.receivedAt })
+            .first(where: { $0.sessionId == sessionId }) else {
             return nil
         }
         return (pending.event.tool, pending.toolUseId, pending.event.toolInput)
@@ -746,22 +873,28 @@ class HookSocketServer {
 
     private func cleanupSpecificPermission(toolUseId: String) {
         permissionsLock.lock()
-        guard let pending = pendingPermissions.removeValue(forKey: toolUseId) else {
+        guard let pendings = pendingPermissions.removeValue(forKey: toolUseId), !pendings.isEmpty else {
             permissionsLock.unlock()
             return
         }
         permissionsLock.unlock()
 
-        logger.debug("Tool completed externally, closing socket for \(pending.sessionId.prefix(8), privacy: .public) tool:\(toolUseId.prefix(12), privacy: .public)")
-        close(pending.clientSocket)
+        for pending in pendings {
+            logger.debug("Tool completed externally, closing socket for \(pending.sessionId.prefix(8), privacy: .public) tool:\(toolUseId.prefix(12), privacy: .public)")
+            close(pending.clientSocket)
+        }
     }
 
     private func cleanupPendingPermissions(sessionId: String) {
         permissionsLock.lock()
-        let matching = pendingPermissions.filter { $0.value.sessionId == sessionId }
-        for (toolUseId, pending) in matching {
-            logger.debug("Cleaning up stale permission for \(sessionId.prefix(8), privacy: .public) tool:\(toolUseId.prefix(12), privacy: .public)")
-            close(pending.clientSocket)
+        let matching = pendingPermissions.filter { _, pendings in
+            pendings.contains { $0.sessionId == sessionId }
+        }
+        for (toolUseId, pendings) in matching {
+            for pending in pendings where pending.sessionId == sessionId {
+                logger.debug("Cleaning up stale permission for \(sessionId.prefix(8), privacy: .public) tool:\(toolUseId.prefix(12), privacy: .public)")
+                close(pending.clientSocket)
+            }
             pendingPermissions.removeValue(forKey: toolUseId)
         }
         permissionsLock.unlock()
@@ -783,6 +916,54 @@ class HookSocketServer {
             inputStr = "{}"
         }
         return "\(sessionId):\(toolName ?? "unknown"):\(inputStr)"
+    }
+
+    private func matchingPendingToolUseId(for event: HookEvent) -> String? {
+        permissionsLock.lock()
+        defer { permissionsLock.unlock() }
+
+        let matching = pendingPermissions
+            .compactMap { toolUseId, pendings -> PendingPermission? in
+                guard let latestPending = pendings.max(by: { $0.receivedAt < $1.receivedAt }) else {
+                    return nil
+                }
+                guard eventsLikelyReferToSameIntervention(latestPending.event, event) else { return nil }
+                return PendingPermission(
+                    sessionId: latestPending.sessionId,
+                    toolUseId: toolUseId,
+                    requestId: latestPending.requestId,
+                    clientSocket: latestPending.clientSocket,
+                    event: latestPending.event,
+                    receivedAt: latestPending.receivedAt
+                )
+            }
+            .sorted(by: { $0.receivedAt > $1.receivedAt })
+
+        return matching.first?.toolUseId
+    }
+
+    private func eventsLikelyReferToSameIntervention(_ lhs: HookEvent, _ rhs: HookEvent) -> Bool {
+        guard lhs.sessionId == rhs.sessionId else { return false }
+
+        let normalizedLhsTool = lhs.tool?
+            .lowercased()
+            .replacingOccurrences(of: "_", with: "")
+        let normalizedRhsTool = rhs.tool?
+            .lowercased()
+            .replacingOccurrences(of: "_", with: "")
+        guard normalizedLhsTool == normalizedRhsTool else { return false }
+
+        let exactKeyMatch = cacheKey(sessionId: lhs.sessionId, toolName: lhs.tool, toolInput: lhs.toolInput)
+            == cacheKey(sessionId: rhs.sessionId, toolName: rhs.tool, toolInput: rhs.toolInput)
+        if exactKeyMatch {
+            return true
+        }
+
+        guard let lhsSignature = RecentInterventionResponseStore.questionSignature(from: lhs.toolInput),
+              let rhsSignature = RecentInterventionResponseStore.questionSignature(from: rhs.toolInput) else {
+            return false
+        }
+        return lhsSignature == rhsSignature
     }
 
     private func cacheToolUseId(event: HookEvent) {
@@ -888,6 +1069,21 @@ class HookSocketServer {
             return
         }
 
+        if codexAuxiliaryHookFilter.shouldIgnore(
+            provider: envelope.provider.sessionProvider,
+            sessionId: envelope.resolvedSessionID,
+            eventType: envelope.eventType,
+            title: envelope.title,
+            preview: envelope.preview,
+            metadata: envelope.metadata
+        ) {
+            logger.debug(
+                "Ignoring auxiliary Codex hook event=\(envelope.eventType, privacy: .public) session=\(envelope.resolvedSessionID.prefix(8), privacy: .public)"
+            )
+            close(clientSocket)
+            return
+        }
+
         let expectsResponse = envelope.expectsResponse || envelope.hookEvent.expectsResponse
         var event = envelope.hookEvent
         logger.debug("Received bridge envelope provider=\(envelope.provider.rawValue, privacy: .public) event=\(envelope.eventType, privacy: .public) session=\(event.sessionId.prefix(8), privacy: .public)")
@@ -911,7 +1107,28 @@ class HookSocketServer {
         }
 
         if expectsResponse {
+            if let replay = recentInterventionResponses.response(for: event) {
+                let replayToolUseId = event.toolUseId ?? "replay-\(envelope.id.uuidString)"
+                logger.info("Replaying recent bridge response: \(replay.decision, privacy: .public) for \(event.sessionId.prefix(8), privacy: .public) tool:\(replayToolUseId.prefix(12), privacy: .public)")
+                let response = BridgeResponse(
+                    requestID: envelope.id,
+                    decision: bridgeDecision(for: replay.decision, updatedInput: replay.updatedInput),
+                    reason: replay.reason,
+                    updatedInput: replay.updatedInput,
+                    errorMessage: nil
+                )
+                writeBridgeResponse(
+                    response,
+                    to: clientSocket,
+                    sessionId: event.sessionId,
+                    toolUseId: replayToolUseId,
+                    receivedAt: Date()
+                )
+                return
+            }
+
             let toolUseId = event.toolUseId
+                ?? matchingPendingToolUseId(for: event)
                 ?? popCachedToolUseId(event: event)
                 ?? "bridge-\(envelope.id.uuidString)"
             let updatedEvent = event.toolUseId == toolUseId ? event : event.withToolUseId(toolUseId)
@@ -925,7 +1142,7 @@ class HookSocketServer {
                 receivedAt: Date()
             )
             permissionsLock.lock()
-            pendingPermissions[toolUseId] = pending
+            pendingPermissions[toolUseId, default: []].append(pending)
             permissionsLock.unlock()
 
             logger.debug("Keeping socket open for \(event.sessionId.prefix(8), privacy: .public) tool:\(toolUseId.prefix(12), privacy: .public)")
@@ -937,7 +1154,7 @@ class HookSocketServer {
         eventHandler?(event)
     }
 
-    private func bridgeDecision(for decision: String) -> BridgeDecision? {
+    private func bridgeDecision(for decision: String, updatedInput: [String: AnyCodable]? = nil) -> BridgeDecision? {
         switch decision {
         case "allow", "approve":
             return .approve
@@ -948,7 +1165,7 @@ class HookSocketServer {
         case "cancel", "ask":
             return .cancel
         case "answer":
-            return .answer
+            return .answer(Self.answerDecisionPayload(from: updatedInput))
         default:
             return nil
         }
@@ -956,54 +1173,48 @@ class HookSocketServer {
 
     private func sendHookResponse(toolUseId: String, decision: String, reason: String?, updatedInput: [String: AnyCodable]?) {
         permissionsLock.lock()
-        guard let pending = pendingPermissions.removeValue(forKey: toolUseId) else {
+        guard let pendings = pendingPermissions.removeValue(forKey: toolUseId), !pendings.isEmpty else {
             permissionsLock.unlock()
             logger.debug("No pending permission for toolUseId: \(toolUseId.prefix(12), privacy: .public)")
             return
         }
         permissionsLock.unlock()
 
-        let response = BridgeResponse(
-            requestID: pending.requestId,
-            decision: bridgeDecision(for: decision),
-            reason: reason,
-            updatedInput: updatedInput,
-            errorMessage: nil
-        )
-        guard let data = try? JSONEncoder().encode(response) else {
-            close(pending.clientSocket)
-            permissionFailureHandler?(pending.sessionId, pending.toolUseId)
-            return
-        }
-
-        let age = Date().timeIntervalSince(pending.receivedAt)
-        logger.info("Sending bridge response: \(decision, privacy: .public) for \(pending.sessionId.prefix(8), privacy: .public) tool:\(toolUseId.prefix(12), privacy: .public) (age: \(String(format: "%.1f", age), privacy: .public)s)")
-
-        var writeSuccess = false
-        data.withUnsafeBytes { bytes in
-            guard let baseAddress = bytes.baseAddress else {
-                logger.error("Failed to get data buffer address")
-                return
+        for pending in pendings {
+            recentInterventionResponses.record(
+                event: pending.event,
+                decision: decision,
+                reason: reason,
+                updatedInput: updatedInput
+            )
+            let response = BridgeResponse(
+                requestID: pending.requestId,
+                decision: bridgeDecision(for: decision, updatedInput: updatedInput),
+                reason: reason,
+                updatedInput: updatedInput,
+                errorMessage: nil
+            )
+            guard let data = try? JSONEncoder().encode(response) else {
+                close(pending.clientSocket)
+                permissionFailureHandler?(pending.sessionId, pending.toolUseId)
+                continue
             }
-            let result = write(pending.clientSocket, baseAddress, data.count)
-            if result < 0 {
-                logger.error("Write failed with errno: \(errno)")
-            } else {
-                logger.debug("Write succeeded: \(result) bytes")
-                writeSuccess = true
-            }
-        }
 
-        close(pending.clientSocket)
-
-        if !writeSuccess {
-            permissionFailureHandler?(pending.sessionId, pending.toolUseId)
+            writeBridgeResponse(
+                data,
+                to: pending.clientSocket,
+                sessionId: pending.sessionId,
+                toolUseId: pending.toolUseId,
+                receivedAt: pending.receivedAt,
+                decision: decision
+            )
         }
     }
 
     private func sendPermissionResponseBySession(sessionId: String, decision: String, reason: String?) {
         permissionsLock.lock()
         let matchingPending = pendingPermissions.values
+            .flatMap { $0 }
             .filter { $0.sessionId == sessionId }
             .sorted { $0.receivedAt > $1.receivedAt }
             .first
@@ -1013,25 +1224,84 @@ class HookSocketServer {
             logger.debug("No pending permission for session: \(sessionId.prefix(8), privacy: .public)")
             return
         }
-
-        pendingPermissions.removeValue(forKey: pending.toolUseId)
         permissionsLock.unlock()
+        sendHookResponse(toolUseId: pending.toolUseId, decision: decision, reason: reason, updatedInput: nil)
+    }
 
-        let response = BridgeResponse(
-            requestID: pending.requestId,
-            decision: bridgeDecision(for: decision),
-            reason: reason,
-            updatedInput: nil,
-            errorMessage: nil
-        )
+    private func writeBridgeResponse(
+        _ response: BridgeResponse,
+        to clientSocket: Int32,
+        sessionId: String,
+        toolUseId: String,
+        receivedAt: Date
+    ) {
         guard let data = try? JSONEncoder().encode(response) else {
-            close(pending.clientSocket)
-            permissionFailureHandler?(sessionId, pending.toolUseId)
+            close(clientSocket)
+            permissionFailureHandler?(sessionId, toolUseId)
             return
         }
+        let decision: String
+        switch response.decision {
+        case .approve:
+            decision = "approve"
+        case .approveForSession:
+            decision = "approveForSession"
+        case .deny:
+            decision = "deny"
+        case .cancel:
+            decision = "cancel"
+        case .answer:
+            decision = "answer"
+        case nil:
+            decision = "none"
+        }
+        writeBridgeResponse(
+            data,
+            to: clientSocket,
+            sessionId: sessionId,
+            toolUseId: toolUseId,
+            receivedAt: receivedAt,
+            decision: decision
+        )
+    }
 
-        let age = Date().timeIntervalSince(pending.receivedAt)
-        logger.info("Sending bridge response: \(decision, privacy: .public) for \(sessionId.prefix(8), privacy: .public) tool:\(pending.toolUseId.prefix(12), privacy: .public) (age: \(String(format: "%.1f", age), privacy: .public)s)")
+    private static func answerDecisionPayload(from updatedInput: [String: AnyCodable]?) -> [String: String] {
+        guard let rawAnswers = updatedInput?["answers"]?.value else {
+            return [:]
+        }
+
+        if let answers = rawAnswers as? [String: String] {
+            return answers
+        }
+
+        guard let answers = rawAnswers as? [String: Any] else {
+            return [:]
+        }
+
+        return answers.reduce(into: [:]) { partial, pair in
+            switch pair.value {
+            case let string as String:
+                partial[pair.key] = string
+            case let strings as [String]:
+                partial[pair.key] = strings.joined(separator: ", ")
+            case let number as NSNumber:
+                partial[pair.key] = number.stringValue
+            default:
+                break
+            }
+        }
+    }
+
+    private func writeBridgeResponse(
+        _ data: Data,
+        to clientSocket: Int32,
+        sessionId: String,
+        toolUseId: String,
+        receivedAt: Date,
+        decision: String
+    ) {
+        let age = Date().timeIntervalSince(receivedAt)
+        logger.info("Sending bridge response: \(decision, privacy: .public) for \(sessionId.prefix(8), privacy: .public) tool:\(toolUseId.prefix(12), privacy: .public) (age: \(String(format: "%.1f", age), privacy: .public)s)")
 
         var writeSuccess = false
         data.withUnsafeBytes { bytes in
@@ -1039,7 +1309,7 @@ class HookSocketServer {
                 logger.error("Failed to get data buffer address")
                 return
             }
-            let result = write(pending.clientSocket, baseAddress, data.count)
+            let result = write(clientSocket, baseAddress, data.count)
             if result < 0 {
                 logger.error("Write failed with errno: \(errno)")
             } else {
@@ -1048,10 +1318,10 @@ class HookSocketServer {
             }
         }
 
-        close(pending.clientSocket)
+        close(clientSocket)
 
         if !writeSuccess {
-            permissionFailureHandler?(sessionId, pending.toolUseId)
+            permissionFailureHandler?(sessionId, toolUseId)
         }
     }
 }

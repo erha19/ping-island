@@ -32,6 +32,8 @@ This file is a routing layer for coding agents working in this repo. Keep it sho
 - Client profile registry: installable hook clients and runtime client branding / recognition are centralized in `PingIsland/Models/ClientProfile.swift`
 - VS Code-compatible IDE focus extension install / URI launch: `PingIsland/Services/Window/IDEExtensionInstaller.swift`, `PingIsland/Services/Window/TerminalSessionFocuser.swift`
 - Session list UI: `PingIsland/UI/Views/SessionListView.swift`
+- App updates and release notes: `PingIsland/Services/Update/`, `PingIsland/UI/Views/ReleaseNotesWindowView.swift`, `PingIsland/UI/Window/ReleaseNotesWindowController.swift`
+- Sparkle build configuration: `Config/App.xcconfig`, `Config/LocalSecrets.xcconfig`, `docs/sparkle-release.md`
 
 ## Repo Map
 
@@ -39,11 +41,14 @@ This file is a routing layer for coding agents working in this repo. Keep it sho
 - `PingIsland/Core`: notch geometry, shared state, app settings, selectors
 - `PingIsland/Models`: domain models for sessions, events, tools, phases
 - `PingIsland/Services`: ingestion, socket handling, state management, tmux, windows, updates
-- `PingIsland/Services/Window/IDEExtensionInstaller.swift`: installs the VS Code-compatible terminal-focus extension used by Cursor / VS Code / CodeBuddy / Qoder style IDE hosts
+- `PingIsland/Services/Update`: Sparkle updater bridge, appcast/release-notes loading, update state publishing
+- `PingIsland/Services/Window/IDEExtensionInstaller.swift`: installs the VS Code-compatible terminal-focus extension used by Cursor / VS Code / CodeBuddy / Qoder style IDE hosts (`QoderWork` is hook-only, not an IDE extension host)
 - `PingIsland/UI`: SwiftUI views, reusable components, AppKit-backed window controllers
 - `PingIsland/Resources`: hook assets, entitlements, bundled fonts
 - `Prototype`: Swift package prototype and testbed
+- `Prototype/Tests`: logic-level unit tests plus process/socket e2e coverage for `IslandBridge`, hook mapping, and install flows
 - `scripts`: release, signing, and packaging automation
+- `Config`: checked-in build configuration defaults plus optional local-only secrets overrides
 
 ## Change Routing
 
@@ -55,25 +60,41 @@ This file is a routing layer for coding agents working in this repo. Keep it sho
   - the affected UI under `PingIsland/UI/`
 - If you change provider/client detection or click-through behavior, trace through `HookSocketServer`, `SessionStore`, `SessionState`, `SessionLauncher`, and the session list / hover UI so labels and launch targets stay in sync.
 - If you add a Claude-compatible hook client, start in `PingIsland/Models/ClientProfile.swift` and wire any truly client-specific behavior from there before adding new ad-hoc switches elsewhere.
+  - Qoder-family hook installs currently cover both `~/.qoder/settings.json` and `~/.qoderwork/settings.json`; keep their event lists and bridge arguments aligned unless the clients diverge on protocol.
+  - `QoderWork` should not be added to `ideExtensionProfiles` unless it actually ships VS Code-compatible extension support in the future.
 - If you change how sessions are associated across relaunches or between hook/app-server ingress paths, inspect both `SessionStore` and `SessionAssociationStore` so cached client metadata stays compatible.
 - If you change session lifecycle or transitions, start in `SessionStore`. Avoid ad-hoc state mutation elsewhere.
   - Current rule: provider-originated end events should preserve the session in `.ended` so it stays visible in the list; only explicit user archive/removal should delete it from `SessionStore`.
+  - Primary list rule: sessions with no new activity for 30 minutes should auto-hide from the primary list until fresh hook/file/app-server activity updates `lastActivity`; sessions that need manual attention should stay visible.
 - If you change notch sizing, opening behavior, or visibility, inspect both `NotchViewModel` and `NotchView`.
+- If you change completion-result popup behavior, trace through `SessionStore`, `SessionMonitor`, `PingIsland/UI/Views/NotchView.swift`, and `PingIsland/UI/Views/SessionCompletionNotificationView.swift` so completion detection, queueing, and auto-dismiss timing stay aligned.
 - If you change tmux or terminal focusing, trace through `Services/Tmux`, `Services/Window`, and `TerminalVisibilityDetector`.
 - If you change IDE terminal jump behavior, inspect both `TerminalSessionFocuser` and `IDEExtensionInstaller`, plus the integration settings UI so install state and URI schemes stay aligned.
 - If you change Codex behavior, verify both the monitor layer under `PingIsland/Services/Codex/` and the UI under `PingIsland/UI/Views/CodexSessionView.swift`.
+- If you change app updates or release notes, trace through `PingIsland/Services/Update/`, `PingIsland/Info.plist`, the settings UI, and `scripts/create-release.sh` so appcast assets, runtime config, and update messaging stay aligned.
+- If you change Sparkle configuration keys or hosting assumptions, update `Config/App.xcconfig`, `Config/LocalSecrets.example.xcconfig`, `scripts/generate-keys.sh`, and `docs/sparkle-release.md` together.
 - If you only need logic-level confidence, prefer adding or updating tests under `Prototype/Tests`.
 
 ## Build And Test
 
+- Full repo regression:
+  - `./scripts/test.sh`
 - App debug build:
   - `xcodebuild -project PingIsland.xcodeproj -scheme PingIsland -configuration Debug build`
 - App release build:
   - `xcodebuild -project PingIsland.xcodeproj -scheme PingIsland -configuration Release build`
+- Root Xcode unit tests:
+  - `xcodebuild -project PingIsland.xcodeproj -scheme PingIsland -configuration Debug CODE_SIGNING_ALLOWED=NO test -only-testing:PingIslandTests`
+- Root Xcode UI tests:
+  - `xcodebuild -project PingIsland.xcodeproj -scheme PingIsland -configuration Debug CODE_SIGN_IDENTITY=- test -only-testing:PingIslandUITests`
+  - macOS may block the UI test runner until a valid local signing identity is available; if `PingIslandUITests-Runner` stays launch-suspended, inspect `amfid` and `AppleSystemPolicy` logs before treating it as an app regression
 - Prototype tests:
   - `swift test --package-path Prototype`
+- Bridge-focused e2e slice:
+  - `swift test --package-path Prototype --filter IslandBridgeE2ETests`
 - Release automation:
   - `./scripts/build.sh`
+  - `./scripts/package-unsigned.sh`
   - `./scripts/create-release.sh`
   - `./scripts/generate-keys.sh`
 - Release scripts assume local signing and notarization tooling. They may modify `build/`, `releases/`, and `.sparkle-keys/`.
@@ -102,6 +123,7 @@ This file is a routing layer for coding agents working in this repo. Keep it sho
 - If the change is a major feature or refactor, was `AGENTS.md` reviewed and updated to reflect the new structure, ownership, entrypoints, or verification steps?
 - If session ingestion changed, do both Claude and Codex sessions still appear and update?
 - If session lifecycle changed, do ended sessions remain visible until the user archives them, and do final Claude/Codex messages still land before the row settles into `.ended`?
+- If idle-session visibility changed, do sessions auto-hide after 30 minutes of inactivity and reappear when a new message or hook/app-server event arrives?
 - If approval or intervention flows changed, do approve, deny, and answer paths still resolve cleanly?
 - If focus logic changed, does tmux and non-tmux behavior still degrade safely?
 - If release tooling changed, avoid running notarization or signing steps unless the task explicitly requires them.
@@ -109,5 +131,6 @@ This file is a routing layer for coding agents working in this repo. Keep it sho
 ## Current Reality
 
 - The main shipping target is the Xcode project, not the Swift package under `Prototype/`.
-- `Prototype/Tests` exists, but there is no parallel Xcode app test target in the root project today.
+- The root project now includes `PingIslandTests` and `PingIslandUITests` targets for app-level state and settings-window coverage.
+- `Prototype/Tests` remains the fastest place for logic-level unit tests plus process/socket e2e coverage.
 - The worktree may already be dirty. Check `git status` before broad edits.

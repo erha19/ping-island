@@ -14,10 +14,24 @@
     <string>$(MARKETING_VERSION)</string>
     <key>LSUIElement</key>
     <true/>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>Ping Island uses Apple Events to focus the matching iTerm or Terminal window for a session.</string>
     <key>NSHumanReadableCopyright</key>
     <string>Copyright 2025. All rights reserved.</string>
 
+    <key>SUAllowsAutomaticUpdates</key>
+    <true/>
+    <key>SUAutomaticallyUpdate</key>
+    <true/>
     <key>SUEnableAutomaticChecks</key>
+    <true/>
+    <key>SUFeedURL</key>
+    <string>$(SPARKLE_APPCAST_URL)</string>
+    <key>SUPublicEDKey</key>
+    <string>$(SPARKLE_PUBLIC_ED_KEY)</string>
+    <key>SUScheduledCheckInterval</key>
+    <real>86400</real>
+    <key>SUShowReleaseNotes</key>
     <false/>
 </dict>
 </plist>

@@ -18,7 +18,8 @@ struct TerminalAppRegistry: Sendable {
         "com.trae.app",
         "com.codebuddy.app",
         "com.tencent.codebuddy",
-        "com.qoder.ide"
+        "com.qoder.ide",
+        "com.qoder.work"
     ]
 
     nonisolated static let helperBundleToHostBundle: [String: String] = [
@@ -31,6 +32,7 @@ struct TerminalAppRegistry: Sendable {
         "com.codebuddy.app.helper": "com.codebuddy.app",
         "com.tencent.codebuddy.helper": "com.tencent.codebuddy",
         "com.qoder.ide.helper": "com.qoder.ide",
+        "com.qoder.work.helper": "com.qoder.work",
         "com.openai.codex.helper": "com.openai.codex"
     ]
 
@@ -60,6 +62,7 @@ struct TerminalAppRegistry: Sendable {
         "Trae",
         "CodeBuddy",
         "Qoder",
+        "QoderWork",
         "zed"
     ]
 
@@ -83,6 +86,7 @@ struct TerminalAppRegistry: Sendable {
         "com.codebuddy.app",
         "com.tencent.codebuddy",
         "com.qoder.ide",
+        "com.qoder.work",
         "dev.zed.Zed"
     ]
 

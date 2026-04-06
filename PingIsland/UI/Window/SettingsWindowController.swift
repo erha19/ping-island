@@ -33,6 +33,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         window.minSize = fixedContentSize
         window.maxSize = fixedContentSize
         window.setContentSize(fixedContentSize)
+        window.identifier = NSUserInterfaceItemIdentifier("settings.window")
         window.center()
         window.toolbar = nil
         window.showsToolbarButton = false

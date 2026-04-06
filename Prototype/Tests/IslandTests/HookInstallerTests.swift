@@ -113,10 +113,31 @@ func installerReplacesLegacyIslandHooksButKeepsUnrelatedHooks() throws {
     """
     try Data(qoderExisting.utf8).write(to: qoderSettingsURL)
 
+    let qoderWorkSettingsURL = root.appending(path: ".qoderwork/settings.json")
+    try FileManager.default.createDirectory(at: qoderWorkSettingsURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+    let qoderWorkExisting = """
+    {
+      "hooks": {
+        "PostToolUseFailure": [
+          {
+            "hooks": [{"type": "command", "command": "/Users/test/.vibe-island/bin/vibe-island-bridge --source claude"}],
+            "matcher": "*"
+          },
+          {
+            "hooks": [{"type": "command", "command": "/usr/bin/printf qoderwork-keep"}],
+            "matcher": "*"
+          }
+        ]
+      }
+    }
+    """
+    try Data(qoderWorkExisting.utf8).write(to: qoderWorkSettingsURL)
+
     let installer = HookInstaller(homeDirectory: root)
     try installer.installClaudeAssets()
     try installer.installCodexAssets()
     try installer.installQoderAssets()
+    try installer.installQoderWorkAssets()
 
     let claudeData = try Data(contentsOf: claudeSettingsURL)
     let claudeJSON = try #require(JSONSerialization.jsonObject(with: claudeData) as? [String: Any])
@@ -150,13 +171,38 @@ func installerReplacesLegacyIslandHooksButKeepsUnrelatedHooks() throws {
         ((hook["hooks"] as? [[String: Any]])?.first?["command"] as? String)
     }
     #expect(qoderCommands.contains("/usr/bin/printf qoder-keep"))
-    #expect(qoderCommands.contains { $0.contains("/.island/bin/island-bridge --source claude --client-kind qoder") })
+    #expect(qoderCommands.contains { $0.contains("/.island/bin/island-bridge --source claude --client-kind qoder --client-name Qoder") })
     #expect(!qoderCommands.contains { $0.contains("/.vibe-island/bin/vibe-island-bridge") })
-    #expect(qoderCommands.filter { $0.contains("/.island/bin/island-bridge --source claude --client-kind qoder") }.count == 1)
+    #expect(qoderCommands.filter { $0.contains("/.island/bin/island-bridge --source claude --client-kind qoder --client-name Qoder") }.count == 1)
     #expect(qoderHooks["UserPromptSubmit"] != nil)
     #expect(qoderHooks["PermissionRequest"] != nil)
     #expect(qoderHooks["Notification"] != nil)
     #expect(qoderHooks["Stop"] != nil)
+
+    let qoderWorkData = try Data(contentsOf: qoderWorkSettingsURL)
+    let qoderWorkJSON = try #require(JSONSerialization.jsonObject(with: qoderWorkData) as? [String: Any])
+    let qoderWorkHooks = try #require(qoderWorkJSON["hooks"] as? [String: Any])
+    let qoderWorkPostToolUseFailure = try #require(qoderWorkHooks["PostToolUseFailure"] as? [[String: Any]])
+    let qoderWorkCommands = qoderWorkPostToolUseFailure.compactMap { hook in
+        ((hook["hooks"] as? [[String: Any]])?.first?["command"] as? String)
+    }
+    #expect(qoderWorkCommands.contains("/usr/bin/printf qoderwork-keep"))
+    #expect(qoderWorkCommands.contains { $0.contains("/.island/bin/island-bridge --source claude --client-kind qoderwork --client-name QoderWork") })
+    #expect(!qoderWorkCommands.contains { $0.contains("/.vibe-island/bin/vibe-island-bridge") })
+    #expect(qoderWorkCommands.filter { $0.contains("/.island/bin/island-bridge --source claude --client-kind qoderwork --client-name QoderWork") }.count == 1)
+    #expect(qoderWorkHooks["UserPromptSubmit"] != nil)
+    #expect(qoderWorkHooks["PermissionRequest"] != nil)
+    #expect(qoderWorkHooks["Notification"] != nil)
+    #expect(qoderWorkHooks["Stop"] != nil)
+    let qoderWorkPreToolUse = try #require(qoderWorkHooks["PreToolUse"] as? [[String: Any]])
+    let qoderWorkManagedPreToolUse = try #require(
+        qoderWorkPreToolUse.first {
+            (((($0["hooks"] as? [[String: Any]])?.first)?["command"] as? String) ?? "")
+                .contains("/.island/bin/island-bridge --source claude --client-kind qoderwork --client-name QoderWork")
+        }
+    )
+    let qoderWorkManagedPreToolUseHook = try #require((qoderWorkManagedPreToolUse["hooks"] as? [[String: Any]])?.first)
+    #expect(qoderWorkManagedPreToolUseHook["timeout"] as? Int == 86_400)
 }
 
 @Test

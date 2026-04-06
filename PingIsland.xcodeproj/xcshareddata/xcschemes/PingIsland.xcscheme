@@ -21,6 +21,34 @@
                ReferencedContainer = "container:PingIsland.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
+         <BuildActionEntry
+            buildForTesting = "YES"
+            buildForRunning = "NO"
+            buildForProfiling = "NO"
+            buildForArchiving = "NO"
+            buildForAnalyzing = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "A1000000000000000000000F"
+               BuildableName = "PingIslandTests.xctest"
+               BlueprintName = "PingIslandTests"
+               ReferencedContainer = "container:PingIsland.xcodeproj">
+            </BuildableReference>
+         </BuildActionEntry>
+         <BuildActionEntry
+            buildForTesting = "YES"
+            buildForRunning = "NO"
+            buildForProfiling = "NO"
+            buildForArchiving = "NO"
+            buildForAnalyzing = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "A10000000000000000000010"
+               BuildableName = "PingIslandUITests.xctest"
+               BlueprintName = "PingIslandUITests"
+               ReferencedContainer = "container:PingIsland.xcodeproj">
+            </BuildableReference>
+         </BuildActionEntry>
       </BuildActionEntries>
    </BuildAction>
    <TestAction
@@ -29,6 +57,39 @@
       selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
       shouldUseLaunchSchemeArgsEnv = "YES"
       shouldAutocreateTestPlan = "YES">
+      <Testables>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "A1000000000000000000000F"
+               BuildableName = "PingIslandTests.xctest"
+               BlueprintName = "PingIslandTests"
+               ReferencedContainer = "container:PingIsland.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "A10000000000000000000010"
+               BuildableName = "PingIslandUITests.xctest"
+               BlueprintName = "PingIslandUITests"
+               ReferencedContainer = "container:PingIsland.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
+      </Testables>
+      <MacroExpansion>
+         <BuildableReference
+            BuildableIdentifier = "primary"
+            BlueprintIdentifier = "FD33FD5C2EDF32D7002A6548"
+            BuildableName = "Ping Island.app"
+            BlueprintName = "PingIsland"
+            ReferencedContainer = "container:PingIsland.xcodeproj">
+         </BuildableReference>
+      </MacroExpansion>
    </TestAction>
    <LaunchAction
       buildConfiguration = "Debug"

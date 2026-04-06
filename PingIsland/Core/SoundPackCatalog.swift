@@ -29,11 +29,11 @@ enum NotificationEvent: String, CaseIterable, Identifiable {
     var subtitle: String {
         switch self {
         case .processingStarted:
-            return "Claude 开始思考、运行工具或进入 compacting。"
+            return "会话开始处理、运行工具或进入阶段切换。"
         case .attentionRequired:
             return "等待审批、回答问题或其他需要你接手的时刻。"
         case .taskCompleted:
-            return "Claude 处理完成，回到等待你下一步输入。"
+            return "当前处理结束，回到等待你下一步输入。"
         case .taskError:
             return "工具或子代理执行失败。"
         case .resourceLimit:
@@ -48,7 +48,7 @@ enum NotificationEvent: String, CaseIterable, Identifiable {
         case .attentionRequired:
             return .glass
         case .taskCompleted:
-            return .sosumi
+            return .blow
         case .taskError:
             return .basso
         case .resourceLimit:

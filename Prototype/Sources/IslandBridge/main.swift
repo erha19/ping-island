@@ -18,6 +18,12 @@ struct IslandBridgeMain {
                 environment: environment,
                 stdinData: stdinData
             )
+            try? BridgeDebugLogger.logIfNeeded(
+                envelope: envelope,
+                arguments: CommandLine.arguments,
+                environment: environment,
+                stdinData: stdinData
+            )
 
             let response = try sendEnvelopeIfPossible(
                 envelope: envelope,
@@ -97,6 +103,147 @@ struct IslandBridgeMain {
             return nil
         }
     }
+}
+
+private enum BridgeDebugLogger {
+    private static let interestingEnvironmentKeys: Set<String> = [
+        "PWD",
+        "TERM",
+        "TERM_PROGRAM",
+        "TERM_PROGRAM_VERSION",
+        "TERM_SESSION_ID",
+        "ITERM_SESSION_ID",
+        "TMUX",
+        "TMUX_PANE",
+        "TTY",
+        "__CFBundleIdentifier",
+        "CLAUDE_SESSION_ID",
+        "CODEX_THREAD_ID",
+        "CODEBUDDY_SESSION_ID",
+    ]
+
+    static func logIfNeeded(
+        envelope: BridgeEnvelope,
+        arguments: [String],
+        environment: [String: String],
+        stdinData: Data
+    ) throws {
+        guard let target = debugTarget(for: envelope) else { return }
+
+        let fileManager = FileManager.default
+        let directory = debugDirectory(for: target, environment: environment)
+        try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        let record = BridgeDebugRecord(
+            id: UUID(),
+            timestamp: Date(),
+            provider: envelope.provider.rawValue,
+            clientKind: envelope.metadata["client_kind"],
+            eventType: envelope.eventType,
+            sessionKey: envelope.sessionKey,
+            expectsResponse: envelope.expectsResponse,
+            statusKind: envelope.status?.kind.rawValue,
+            title: envelope.title,
+            preview: envelope.preview,
+            arguments: Array(arguments.dropFirst()),
+            environment: filteredEnvironment(environment),
+            metadata: envelope.metadata,
+            stdinRaw: String(data: stdinData, encoding: .utf8),
+            envelopeJSON: BridgeCodec.jsonString(for: envelope)
+        )
+
+        let fileURL = directory.appendingPathComponent(dayStamp(for: record.timestamp) + ".jsonl")
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+        let data = try encoder.encode(record)
+
+        if !fileManager.fileExists(atPath: fileURL.path) {
+            fileManager.createFile(atPath: fileURL.path, contents: nil)
+        }
+
+        let handle = try FileHandle(forWritingTo: fileURL)
+        defer { try? handle.close() }
+        try handle.seekToEnd()
+        handle.write(data)
+        handle.write(Data("\n".utf8))
+    }
+
+    private static func debugTarget(for envelope: BridgeEnvelope) -> String? {
+        let clientKind = envelope.metadata["client_kind"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+
+        switch clientKind {
+        case "codebuddy":
+            return "codebuddy-hooks"
+        case "qoder", "qoderwork":
+            return "qoder-hooks"
+        default:
+            break
+        }
+
+        if envelope.provider == .codex {
+            return "codex-hooks"
+        }
+
+        let normalizedEvent = envelope.eventType.lowercased()
+        if envelope.expectsResponse
+            || normalizedEvent.contains("permission")
+            || normalizedEvent.contains("question")
+            || normalizedEvent.contains("tool") {
+            return "claude-hooks"
+        }
+
+        return nil
+    }
+
+    private static func debugDirectory(for target: String, environment: [String: String]) -> URL {
+        if target == "codex-hooks",
+           let customPath = environment["PING_ISLAND_CODEX_HOOK_DEBUG_DIR"],
+           !customPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return URL(fileURLWithPath: NSString(string: customPath).expandingTildeInPath, isDirectory: true)
+        }
+
+        return FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".ping-island-debug", isDirectory: true)
+            .appendingPathComponent(target, isDirectory: true)
+    }
+
+    private static func filteredEnvironment(_ environment: [String: String]) -> [String: String] {
+        environment.reduce(into: [:]) { partial, pair in
+            if interestingEnvironmentKeys.contains(pair.key) || pair.key.hasPrefix("CODEBUDDY_") || pair.key.hasPrefix("CODEX_") {
+                partial[pair.key] = pair.value
+            }
+        }
+    }
+
+    private static func dayStamp(for date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyyMMdd"
+        return formatter.string(from: date)
+    }
+}
+
+private struct BridgeDebugRecord: Codable, Sendable {
+    let id: UUID
+    let timestamp: Date
+    let provider: String
+    let clientKind: String?
+    let eventType: String
+    let sessionKey: String
+    let expectsResponse: Bool
+    let statusKind: String?
+    let title: String?
+    let preview: String?
+    let arguments: [String]
+    let environment: [String: String]
+    let metadata: [String: String]
+    let stdinRaw: String?
+    let envelopeJSON: String?
 }
 
 private enum BridgeError: Error {

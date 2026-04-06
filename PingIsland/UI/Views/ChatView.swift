@@ -240,7 +240,7 @@ struct ChatView: View {
     }
 
     private var assistantAccentColor: Color {
-        session.clientInfo.brand == .codebuddy ? TerminalColors.codebuddy : Color.white.opacity(0.6)
+        session.clientTintColor
     }
 
     private var assistantTextColor: Color {
@@ -248,7 +248,7 @@ struct ChatView: View {
     }
 
     private var processingAccentColor: Color {
-        session.clientInfo.brand == .codebuddy ? TerminalColors.codebuddy : Color(red: 0.85, green: 0.47, blue: 0.34)
+        session.clientTintColor
     }
 
     /// Get the last user message ID for stable text selection per turn
@@ -473,7 +473,7 @@ struct ChatView: View {
                 )
             } else {
                 HStack(spacing: 8) {
-                    Button("打开\(session.clientDisplayName)") {
+                    Button("打开 \(session.interactionDisplayName) 回答") {
                         focusTerminal()
                     }
                     .buttonStyle(.plain)

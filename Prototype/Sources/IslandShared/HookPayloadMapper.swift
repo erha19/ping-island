@@ -1,6 +1,11 @@
 import Foundation
 
 public enum HookPayloadMapper {
+    private static let questionToolNames: Set<String> = [
+        "askuserquestion",
+        "askfollowupquestion"
+    ]
+
     public static func makeEnvelope(
         source: AgentProvider,
         arguments: [String],
@@ -20,7 +25,18 @@ public enum HookPayloadMapper {
             payload: payload,
             clientKind: clientKind
         )
-        let status = detectStatus(eventType: eventType, payload: payload, intervention: intervention)
+        let status = detectStatus(
+            eventType: eventType,
+            payload: payload,
+            clientKind: clientKind,
+            intervention: intervention
+        )
+        let expectsResponse = detectExpectsResponse(
+            eventType: eventType,
+            payload: payload,
+            clientKind: clientKind,
+            intervention: intervention
+        )
 
         return BridgeEnvelope(
             provider: source,
@@ -32,7 +48,7 @@ public enum HookPayloadMapper {
             status: status,
             terminalContext: terminalContext,
             intervention: intervention,
-            expectsResponse: intervention != nil,
+            expectsResponse: expectsResponse,
             metadata: metadata
         )
     }
@@ -49,7 +65,8 @@ public enum HookPayloadMapper {
 
         switch provider {
         case .claude:
-            if normalizedClientKind(from: metadata) == "codebuddy" {
+            let clientKind = normalizedClientKind(from: metadata)
+            if clientKind == "codebuddy" {
                 return codeBuddyStdoutPayload(response: response, decision: decision)
             }
             switch decision {
@@ -66,6 +83,13 @@ public enum HookPayloadMapper {
                 {"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"deny","message":"Denied from Island"}}}
                 """#
             case .answer(let answers):
+                if clientKind == "qoderwork" {
+                    return qoderWorkAnswerPayload(
+                        response: response,
+                        eventType: eventType,
+                        answers: answers
+                    )
+                }
                 return String(data: (try? JSONSerialization.data(withJSONObject: answers, options: [.sortedKeys])) ?? Data("{}".utf8), encoding: .utf8) ?? "{}"
             }
         case .codex:
@@ -140,6 +164,7 @@ public enum HookPayloadMapper {
     private static func detectStatus(
         eventType: String,
         payload: [String: Any],
+        clientKind: String?,
         intervention: InterventionRequest?
     ) -> SessionStatus? {
         if let text = payload["status"] as? String {
@@ -179,6 +204,29 @@ public enum HookPayloadMapper {
             return SessionStatus(kind: .thinking)
         }
         return SessionStatus(kind: .active)
+    }
+
+    private static func detectExpectsResponse(
+        eventType: String,
+        payload: [String: Any],
+        clientKind: String?,
+        intervention: InterventionRequest?
+    ) -> Bool {
+        if intervention != nil {
+            return true
+        }
+
+        if clientKind == "qoderwork",
+           isQoderWorkPreToolQuestionEvent(eventType: eventType, payload: payload) {
+            return true
+        }
+
+        if clientKind == "qoderwork",
+           isQoderWorkPermissionQuestionEvent(eventType: eventType, payload: payload) {
+            return true
+        }
+
+        return false
     }
 
     private static func mapStatusString(_ string: String) -> SessionStatus {
@@ -225,7 +273,7 @@ public enum HookPayloadMapper {
             payload["last_assistant_message"] as? String,
             payload["command"] as? String,
             summarizeValue(payload["tool_input"])
-        ].compactMap { $0 }.first
+        ].compactMap { sanitizedDisplayText($0) }.first
     }
 
     private static func detectCWD(payload: [String: Any], environment: [String: String]) -> String? {
@@ -256,6 +304,13 @@ public enum HookPayloadMapper {
         payload: [String: Any],
         clientKind: String?
     ) -> InterventionRequest? {
+        if clientKind == "qoderwork",
+           eventType == "PostToolUse",
+           questionToolNames.contains(normalizedToolName(from: payload) ?? ""),
+           payload["tool_response"] != nil {
+            return nil
+        }
+
         if let questions = questionPayloads(from: payload), !questions.isEmpty {
             if clientKind == "qoder",
                isQoderQuestionToolEvent(eventType: eventType, payload: payload) {
@@ -263,23 +318,40 @@ public enum HookPayloadMapper {
             }
             let options = questions.flatMap { question -> [InterventionOption] in
                 let baseID = (question["id"] as? String) ?? UUID().uuidString
-                let entries = question["options"] as? [[String: Any]] ?? []
-                if entries.isEmpty {
-                    return [InterventionOption(id: baseID, title: question["question"] as? String ?? "Answer")]
+                let objectEntries = question["options"] as? [[String: Any]] ?? []
+                if !objectEntries.isEmpty {
+                    return objectEntries.enumerated().map { index, option in
+                        InterventionOption(
+                            id: "\(baseID):\(index)",
+                            title: option["label"] as? String ?? "Option \(index + 1)",
+                            detail: option["description"] as? String
+                        )
+                    }
                 }
-                return entries.enumerated().map { index, option in
-                    InterventionOption(
-                        id: "\(baseID):\(index)",
-                        title: option["label"] as? String ?? "Option \(index + 1)",
-                        detail: option["description"] as? String
-                    )
+
+                let stringEntries = question["options"] as? [String] ?? []
+                if !stringEntries.isEmpty {
+                    return stringEntries.enumerated().map { index, option in
+                        InterventionOption(
+                            id: "\(baseID):\(index)",
+                            title: option,
+                            detail: nil
+                        )
+                    }
                 }
+
+                if let prompt = (question["question"] as? String) ?? (question["title"] as? String) {
+                    return [InterventionOption(id: baseID, title: prompt)]
+                }
+                return [InterventionOption(id: baseID, title: "Answer")]
             }
             return InterventionRequest(
                 sessionID: sessionKey,
                 kind: .question,
                 title: provider == .claude ? "Claude needs input" : "Codex needs input",
-                message: (questions.first?["question"] as? String) ?? "Answer required",
+                message: (questions.first?["question"] as? String)
+                    ?? (questions.first?["title"] as? String)
+                    ?? "Answer required",
                 options: options,
                 rawContext: flattenMetadata(payload: payload)
             )
@@ -382,8 +454,7 @@ public enum HookPayloadMapper {
         guard let value else { return nil }
         switch value {
         case let string as String:
-            let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
-            return trimmed.isEmpty ? nil : trimmed
+            return sanitizedDisplayText(string)
         case let number as NSNumber:
             return number.stringValue
         case let array as [Any]:
@@ -417,9 +488,16 @@ public enum HookPayloadMapper {
         if let questions = payload["questions"] as? [[String: Any]], !questions.isEmpty {
             return questions
         }
+        if let questions = decodedQuestions(from: payload["questions"]) {
+            return questions
+        }
         if let toolInput = payload["tool_input"] as? [String: Any],
            let questions = toolInput["questions"] as? [[String: Any]],
            !questions.isEmpty {
+            return questions
+        }
+        if let toolInput = payload["tool_input"] as? [String: Any],
+           let questions = decodedQuestions(from: toolInput["questions"]) {
             return questions
         }
         return nil
@@ -430,12 +508,31 @@ public enum HookPayloadMapper {
         return toolName
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .replacingOccurrences(of: "_", with: "")
+            .replacingOccurrences(of: "-", with: "")
             .lowercased()
     }
 
     private static func isQoderQuestionToolEvent(eventType: String, payload: [String: Any]) -> Bool {
         guard eventType == "PreToolUse",
-              normalizedToolName(from: payload) == "askuserquestion",
+              questionToolNames.contains(normalizedToolName(from: payload) ?? ""),
+              questionPayloads(from: payload) != nil else {
+            return false
+        }
+        return true
+    }
+
+    private static func isQoderWorkPreToolQuestionEvent(eventType: String, payload: [String: Any]) -> Bool {
+        guard eventType == "PreToolUse",
+              questionToolNames.contains(normalizedToolName(from: payload) ?? ""),
+              questionPayloads(from: payload) != nil else {
+            return false
+        }
+        return true
+    }
+
+    private static func isQoderWorkPermissionQuestionEvent(eventType: String, payload: [String: Any]) -> Bool {
+        guard eventType == "PermissionRequest",
+              questionToolNames.contains(normalizedToolName(from: payload) ?? ""),
               questionPayloads(from: payload) != nil else {
             return false
         }
@@ -462,7 +559,7 @@ public enum HookPayloadMapper {
             return false
         }
 
-        if normalizedToolName == "askuserquestion" {
+        if questionToolNames.contains(normalizedToolName), questionPayloads(from: payload) != nil {
             return false
         }
 
@@ -480,6 +577,31 @@ public enum HookPayloadMapper {
         }
 
         return payload["tool_input"] != nil
+    }
+
+    private static func decodedQuestions(from rawValue: Any?) -> [[String: Any]]? {
+        guard let rawValue else { return nil }
+
+        if let questions = rawValue as? [[String: Any]], !questions.isEmpty {
+            return questions
+        }
+
+        if let question = rawValue as? [String: Any] {
+            return [question]
+        }
+
+        if let string = rawValue as? String,
+           let data = string.data(using: .utf8),
+           let json = try? JSONSerialization.jsonObject(with: data) {
+            if let questions = json as? [[String: Any]], !questions.isEmpty {
+                return questions
+            }
+            if let question = json as? [String: Any] {
+                return [question]
+            }
+        }
+
+        return nil
     }
 
     private static func codeBuddyStdoutPayload(
@@ -508,5 +630,52 @@ public enum HookPayloadMapper {
         }
 
         return string
+    }
+
+    private static func qoderWorkAnswerPayload(
+        response: BridgeResponse,
+        eventType: String,
+        answers: [String: String]
+    ) -> String {
+        let updatedInput = response.updatedInput?.mapValues(\.foundationObject)
+            ?? ["answers": answers]
+        let payload: [String: Any] = [
+            "hookSpecificOutput": [
+                "hookEventName": eventType,
+                "permissionDecision": "allow",
+                "updatedInput": updatedInput
+            ]
+        ]
+
+        guard JSONSerialization.isValidJSONObject(payload),
+              let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]),
+              let string = String(data: data, encoding: .utf8) else {
+            return "{}"
+        }
+
+        return string
+    }
+
+    private static func sanitizedDisplayText(_ text: String?) -> String? {
+        guard let text else { return nil }
+
+        var cleaned = text
+        cleaned = cleaned.replacingOccurrences(
+            of: #"(?is)<system-reminder>.*?</system-reminder>"#,
+            with: " ",
+            options: .regularExpression
+        )
+        cleaned = cleaned.replacingOccurrences(
+            of: #"(?is)<system-reminder>.*$"#,
+            with: " ",
+            options: .regularExpression
+        )
+        cleaned = cleaned
+            .replacingOccurrences(of: "\r", with: " ")
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        return cleaned.isEmpty ? nil : cleaned
     }
 }

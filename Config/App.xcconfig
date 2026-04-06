@@ -1,0 +1,4 @@
+#include? "LocalSecrets.xcconfig"
+
+SPARKLE_APPCAST_URL = $(inherited)
+SPARKLE_PUBLIC_ED_KEY = $(inherited)

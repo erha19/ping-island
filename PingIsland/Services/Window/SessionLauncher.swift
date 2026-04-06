@@ -7,6 +7,7 @@
 
 import AppKit
 import ApplicationServices
+import CoreGraphics
 import Foundation
 import os.log
 
@@ -16,11 +17,15 @@ actor SessionLauncher {
     nonisolated private static let logger = Logger(subsystem: "com.wudanwu.pingisland", category: "SessionLauncher")
     nonisolated private static let ideWindowRoutingDelayNanoseconds: UInt64 = 250_000_000
     nonisolated private static let ideSessionActivationDelayNanoseconds: UInt64 = 1_000_000_000
+    nonisolated private static let ideWindowReadyPollNanoseconds: UInt64 = 50_000_000
 
     private init() {}
 
     func activate(_ session: SessionState) async -> Bool {
         Self.logger.debug("Activate request session=\(session.sessionId, privacy: .public) provider=\(String(describing: session.provider), privacy: .public) client=\(session.clientDisplayName, privacy: .public) pid=\(String(describing: session.pid), privacy: .public) tty=\(String(describing: session.tty), privacy: .public) inTmux=\(session.isInTmux)")
+        await FocusDiagnosticsStore.shared.record(
+            "SessionLauncher activate session=\(session.sessionId) provider=\(session.provider.rawValue) client=\(session.clientDisplayName) pid=\(session.pid.map(String.init) ?? "nil") tty=\(session.tty ?? "nil") inTmux=\(session.isInTmux) terminalBundle=\(session.clientInfo.terminalBundleIdentifier ?? "nil") terminalSession=\(session.clientInfo.terminalSessionIdentifier ?? "nil") iTermSession=\(session.clientInfo.iTermSessionIdentifier ?? "nil")"
+        )
         let allowsAppFallback = allowsAppFallback(for: session)
 
         if shouldPrioritizeAppNavigation(for: session),
@@ -36,7 +41,9 @@ actor SessionLauncher {
         if !session.isInTmux,
            let tty = session.tty,
            await activateTerminal(
+               sessionId: session.sessionId,
                forTTY: tty,
+               clientInfo: session.clientInfo,
                workspacePath: session.cwd,
                launchURL: session.clientInfo.launchURL
            ) {
@@ -46,11 +53,18 @@ actor SessionLauncher {
 
         if let pid = session.pid,
            await activateTerminal(
+               sessionId: session.sessionId,
                forProcess: pid,
+               clientInfo: session.clientInfo,
                workspacePath: session.cwd,
                launchURL: session.clientInfo.launchURL
            ) {
             Self.logger.debug("Activated session \(session.sessionId, privacy: .public) via process pid \(pid, privacy: .public)")
+            return true
+        }
+
+        if await activateTrackedTerminalSession(session) {
+            Self.logger.debug("Activated session \(session.sessionId, privacy: .public) via tracked terminal identifiers")
             return true
         }
 
@@ -61,18 +75,18 @@ actor SessionLauncher {
             return true
         }
 
-        if allowsAppFallback,
-           await activatePreferredAppNavigation(for: session) {
-            return true
-        }
-
         if await activateHostedIDEFallback(for: session) {
             Self.logger.debug("Activated session \(session.sessionId, privacy: .public) via hosted IDE fallback")
             return true
         }
 
+        if allowsAppFallback,
+           await activatePreferredAppNavigation(for: session) {
+            return true
+        }
+
         if let terminalBundleIdentifier = session.clientInfo.terminalBundleIdentifier,
-           await activateApplication(bundleIdentifier: terminalBundleIdentifier) {
+           await activateApplication(bundleIdentifier: terminalBundleIdentifier, activateAllWindows: false) {
             Self.logger.debug("Activated session \(session.sessionId, privacy: .public) via terminal bundle \(terminalBundleIdentifier, privacy: .public)")
             return true
         }
@@ -93,6 +107,64 @@ actor SessionLauncher {
         }
 
         Self.logger.debug("Unable to activate session \(session.sessionId, privacy: .public)")
+        await FocusDiagnosticsStore.shared.record("SessionLauncher activate-failed session=\(session.sessionId)")
+        return false
+    }
+
+    private func activateTrackedTerminalSession(_ session: SessionState) async -> Bool {
+        let clientInfo = session.clientInfo
+        guard !session.isInTmux else {
+            await FocusDiagnosticsStore.shared.record("SessionLauncher tracked-terminal skip-tmux session=\(session.sessionId)")
+            return false
+        }
+
+        let terminalSessionIdentifier = clientInfo.terminalSessionIdentifier?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let iTermSessionIdentifier = clientInfo.iTermSessionIdentifier?.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard terminalSessionIdentifier?.isEmpty == false || iTermSessionIdentifier?.isEmpty == false else {
+            await FocusDiagnosticsStore.shared.record(
+                "SessionLauncher tracked-terminal skip-no-identifiers session=\(session.sessionId)"
+            )
+            return false
+        }
+
+        guard let terminalBundleIdentifier = clientInfo.terminalBundleIdentifier else {
+            await FocusDiagnosticsStore.shared.record(
+                "SessionLauncher tracked-terminal skip-no-bundle session=\(session.sessionId)"
+            )
+            return false
+        }
+
+        let normalizedBundleIdentifier = TerminalAppRegistry.normalizedHostBundleIdentifier(for: terminalBundleIdentifier)
+        let runningApplications = await MainActor.run {
+            NSRunningApplication.runningApplications(withBundleIdentifier: normalizedBundleIdentifier)
+                .filter { !$0.isTerminated }
+        }
+        await FocusDiagnosticsStore.shared.record(
+            "SessionLauncher tracked-terminal session=\(session.sessionId) bundle=\(normalizedBundleIdentifier) apps=\(runningApplications.map { String($0.processIdentifier) }.joined(separator: ",")) terminalSession=\(terminalSessionIdentifier ?? "nil") iTermSession=\(iTermSessionIdentifier ?? "nil")"
+        )
+
+        for application in runningApplications {
+            if await TerminalSessionFocuser.shared.focusSession(
+                terminalPid: Int(application.processIdentifier),
+                tty: session.tty,
+                candidateProcessIDs: [],
+                sessionId: session.sessionId,
+                clientInfo: clientInfo,
+                workspacePath: session.cwd,
+                launchURL: clientInfo.launchURL
+            ) {
+                await FocusDiagnosticsStore.shared.record(
+                    "SessionLauncher tracked-terminal success session=\(session.sessionId) terminalPid=\(application.processIdentifier)"
+                )
+                return true
+            }
+
+            await FocusDiagnosticsStore.shared.record(
+                "SessionLauncher tracked-terminal focus-failed session=\(session.sessionId) terminalPid=\(application.processIdentifier)"
+            )
+        }
+
+        await FocusDiagnosticsStore.shared.record("SessionLauncher tracked-terminal exhausted session=\(session.sessionId)")
         return false
     }
 
@@ -115,7 +187,7 @@ actor SessionLauncher {
             _ = await TmuxController.shared.switchToPane(target: target)
 
             if let terminalPid = await findTmuxClientTerminal(forSession: target.session, tree: tree) {
-                return await activateApplication(processIdentifier: terminalPid)
+                return await activateApplication(processIdentifier: terminalPid, activateAllWindows: false)
             }
 
             return true
@@ -125,7 +197,7 @@ actor SessionLauncher {
             _ = await TmuxController.shared.switchToPane(target: target)
 
             if let terminalPid = await findTmuxClientTerminal(forSession: target.session, tree: tree) {
-                return await activateApplication(processIdentifier: terminalPid)
+                return await activateApplication(processIdentifier: terminalPid, activateAllWindows: false)
             }
 
             return true
@@ -158,7 +230,7 @@ actor SessionLauncher {
         .compactMap { $0 }
         + ideProfile.localAppBundleIdentifiers
 
-        return await activateIDEWindow(
+        let preparedIDEWindow = await activateIDEWindow(
             profile: ideProfile,
             detectedBundleIdentifier: detectedBundleIdentifier,
             appName: appName,
@@ -166,6 +238,25 @@ actor SessionLauncher {
             fallbackLaunchURL: session.clientInfo.launchURL,
             additionalBundleIdentifiers: additionalBundleIdentifiers
         )
+
+        if !preparedIDEWindow {
+            return false
+        }
+
+        _ = await Self.waitForIDEWindowActivation(
+            bundleIdentifiers: additionalBundleIdentifiers,
+            timeoutNanoseconds: Self.ideSessionActivationDelayNanoseconds
+        )
+
+        if await TerminalSessionFocuser.shared.focusHostedSession(
+            sessionId: session.sessionId,
+            clientInfo: session.clientInfo,
+            workspacePath: session.cwd
+        ) {
+            Self.logger.debug("Focused hosted IDE terminal for session \(session.sessionId, privacy: .public)")
+        }
+
+        return true
     }
 
     private func activatePreferredAppNavigation(for session: SessionState) async -> Bool {
@@ -182,6 +273,27 @@ actor SessionLauncher {
             bundleIdentifier: detectedBundleIdentifier,
             appName: appName
         )
+        let resolvedLaunchURL = session.clientInfo.launchURL
+            ?? session.clientInfo.bundleIdentifier.flatMap {
+                SessionClientInfo.appLaunchURL(
+                    bundleIdentifier: $0,
+                    sessionId: session.sessionId,
+                    workspacePath: session.cwd
+                )
+            }
+
+        // Codex thread deep links are more precise than workspace routing.
+        if Self.shouldPrioritizeDirectLaunchURL(for: session.clientInfo),
+           let launchURL = resolvedLaunchURL,
+           await activateURL(launchURL) {
+            Self.logger.debug("Activated session \(session.sessionId, privacy: .public) via prioritized launch URL")
+
+            if let bundleIdentifier = session.clientInfo.bundleIdentifier {
+                _ = await activateApplication(bundleIdentifier: bundleIdentifier)
+            }
+
+            return true
+        }
 
         if let ideProfile,
         await activateIDEWindow(
@@ -209,15 +321,6 @@ actor SessionLauncher {
             return true
         }
 
-        let resolvedLaunchURL = session.clientInfo.launchURL
-            ?? session.clientInfo.bundleIdentifier.flatMap {
-                SessionClientInfo.appLaunchURL(
-                    bundleIdentifier: $0,
-                    sessionId: session.sessionId,
-                    workspacePath: session.cwd
-                )
-            }
-
         if let launchURL = resolvedLaunchURL,
            await activateURL(launchURL) {
             Self.logger.debug("Activated session \(session.sessionId, privacy: .public) via launch URL")
@@ -236,6 +339,10 @@ actor SessionLauncher {
         }
 
         return false
+    }
+
+    nonisolated static func shouldPrioritizeDirectLaunchURL(for clientInfo: SessionClientInfo) -> Bool {
+        clientInfo.kind == .codexApp
     }
 
     private func activateIDEWindow(
@@ -282,13 +389,18 @@ actor SessionLauncher {
     }
 
     private func activateTerminal(
+        sessionId: String,
         forProcess pid: Int,
+        clientInfo: SessionClientInfo,
         workspacePath: String,
         launchURL: String?
     ) async -> Bool {
         let tree = ProcessTreeBuilder.shared.buildTree()
         guard let terminalPid = ProcessTreeBuilder.shared.findTerminalPid(forProcess: pid, tree: tree) else {
             Self.logger.debug("activateTerminal(forProcess:) failed to resolve terminal pid for process \(pid, privacy: .public)")
+            await FocusDiagnosticsStore.shared.record(
+                "SessionLauncher process-terminal unresolved session=\(sessionId) pid=\(pid)"
+            )
             return false
         }
 
@@ -306,18 +418,28 @@ actor SessionLauncher {
             terminalPid: terminalPid,
             tty: resolvedTTY,
             candidateProcessIDs: candidateProcessIDs,
+            sessionId: sessionId,
+            clientInfo: clientInfo,
             workspacePath: workspacePath,
             launchURL: launchURL
         ) {
             Self.logger.debug("PID-focused terminal session pid=\(pid, privacy: .public) terminalPid=\(terminalPid, privacy: .public)")
+            await FocusDiagnosticsStore.shared.record(
+                "SessionLauncher process-terminal success session=\(sessionId) pid=\(pid) terminalPid=\(terminalPid)"
+            )
             return true
         }
 
-        return await activateApplication(processIdentifier: terminalPid)
+        await FocusDiagnosticsStore.shared.record(
+            "SessionLauncher process-terminal fallback-app session=\(sessionId) pid=\(pid) terminalPid=\(terminalPid)"
+        )
+        return await activateApplication(processIdentifier: terminalPid, activateAllWindows: false)
     }
 
     private func activateTerminal(
+        sessionId: String,
         forTTY tty: String,
+        clientInfo: SessionClientInfo,
         workspacePath: String,
         launchURL: String?
     ) async -> Bool {
@@ -325,6 +447,9 @@ actor SessionLauncher {
         let candidateProcessIDs = ProcessTreeBuilder.shared.candidateProcessIDs(forTTY: tty, tree: tree)
         guard let terminalPid = ProcessTreeBuilder.shared.findTerminalPid(forTTY: tty, tree: tree) else {
             Self.logger.debug("activateTerminal(forTTY:) failed tty=\(tty, privacy: .public)")
+            await FocusDiagnosticsStore.shared.record(
+                "SessionLauncher tty-terminal unresolved session=\(sessionId) tty=\(tty)"
+            )
             return false
         }
 
@@ -334,15 +459,23 @@ actor SessionLauncher {
             terminalPid: terminalPid,
             tty: tty,
             candidateProcessIDs: candidateProcessIDs,
+            sessionId: sessionId,
+            clientInfo: clientInfo,
             workspacePath: workspacePath,
             launchURL: launchURL
         ) {
             Self.logger.debug("TTY-focused terminal session tty=\(tty, privacy: .public) terminalPid=\(terminalPid, privacy: .public)")
+            await FocusDiagnosticsStore.shared.record(
+                "SessionLauncher tty-terminal success session=\(sessionId) tty=\(tty) terminalPid=\(terminalPid)"
+            )
             return true
         }
 
         Self.logger.debug("Falling back to app activation for tty=\(tty, privacy: .public) terminalPid=\(terminalPid, privacy: .public)")
-        return await activateApplication(processIdentifier: terminalPid)
+        await FocusDiagnosticsStore.shared.record(
+            "SessionLauncher tty-terminal fallback-app session=\(sessionId) tty=\(tty) terminalPid=\(terminalPid)"
+        )
+        return await activateApplication(processIdentifier: terminalPid, activateAllWindows: false)
     }
 
     private func findTmuxClientTerminal(forSession session: String, tree: [Int: ProcessInfo]) async -> Int? {
@@ -494,7 +627,7 @@ actor SessionLauncher {
         var restoredWindowCount = 0
 
         for window in windows {
-            guard isWindowMiniaturized(window) else { continue }
+            guard Self.isWindowMiniaturized(window) else { continue }
 
             let result = AXUIElementSetAttributeValue(
                 window,
@@ -513,7 +646,7 @@ actor SessionLauncher {
     }
 
     @MainActor
-    private func isWindowMiniaturized(_ window: AXUIElement) -> Bool {
+    private static func isWindowMiniaturized(_ window: AXUIElement) -> Bool {
         var minimizedValue: CFTypeRef?
         let result = AXUIElementCopyAttributeValue(window, kAXMinimizedAttribute as CFString, &minimizedValue)
 
@@ -566,24 +699,14 @@ actor SessionLauncher {
         )
 
         if !preparedIDEWindow {
-            var activatedCandidate = false
-
-            for candidateBundleIdentifier in Self.orderedUniqueBundleIdentifiers(candidateBundleIdentifiers) {
-                if await activateApplication(
-                    bundleIdentifier: candidateBundleIdentifier,
-                    activateAllWindows: false
-                ) {
-                    activatedCandidate = true
-                    break
-                }
-            }
-
-            if activatedCandidate {
-                try? await Task.sleep(nanoseconds: Self.ideWindowRoutingDelayNanoseconds)
-            }
+            Self.logger.debug("Unable to prepare IDE window for chat session \(session.sessionId, privacy: .public)")
+            return false
         }
 
-        try? await Task.sleep(nanoseconds: Self.ideSessionActivationDelayNanoseconds)
+        _ = await Self.waitForIDEWindowActivation(
+            bundleIdentifiers: candidateBundleIdentifiers,
+            timeoutNanoseconds: Self.ideSessionActivationDelayNanoseconds
+        )
 
         return await MainActor.run {
             NSWorkspace.shared.open(url)
@@ -719,4 +842,150 @@ actor SessionLauncher {
 
         return workspacePath
     }
+
+    static func waitForIDEWindowActivation(
+        bundleIdentifiers: [String],
+        timeoutNanoseconds: UInt64 = ideSessionActivationDelayNanoseconds
+    ) async -> Bool {
+        let normalizedBundleIdentifiers = orderedUniqueBundleIdentifiers(
+            bundleIdentifiers.map(TerminalAppRegistry.normalizedHostBundleIdentifier(for:))
+        )
+        guard !normalizedBundleIdentifiers.isEmpty else {
+            try? await Task.sleep(nanoseconds: timeoutNanoseconds)
+            return false
+        }
+
+        let deadline = DispatchTime.now().uptimeNanoseconds + timeoutNanoseconds
+
+        while true {
+            if await MainActor.run(body: {
+                isIDEWindowReady(forBundleIdentifiers: normalizedBundleIdentifiers)
+            }) {
+                return true
+            }
+
+            let now = DispatchTime.now().uptimeNanoseconds
+            guard now < deadline else {
+                return false
+            }
+
+            let remaining = deadline - now
+            try? await Task.sleep(nanoseconds: min(Self.ideWindowReadyPollNanoseconds, remaining))
+        }
+    }
+
+    @MainActor
+    private static func isIDEWindowReady(forBundleIdentifiers bundleIdentifiers: [String]) -> Bool {
+        let runningApps = uniqueRunningApplications(forBundleIdentifiers: bundleIdentifiers)
+            .filter { !$0.isHidden && !$0.isTerminated }
+
+        guard !runningApps.isEmpty else {
+            return false
+        }
+
+        if runningApps.contains(where: { $0.isActive }) {
+            return true
+        }
+
+        for app in runningApps {
+            if hasOnScreenWindow(forProcessIdentifier: Int(app.processIdentifier)) {
+                return true
+            }
+        }
+
+        guard AXIsProcessTrusted() else {
+            return false
+        }
+
+        return runningApps.contains { hasUsableAXWindow(forProcessIdentifier: $0.processIdentifier) }
+    }
+
+    @MainActor
+    private static func uniqueRunningApplications(forBundleIdentifiers bundleIdentifiers: [String]) -> [NSRunningApplication] {
+        var seenProcessIdentifiers: Set<pid_t> = []
+        var applications: [NSRunningApplication] = []
+
+        for bundleIdentifier in bundleIdentifiers {
+            for app in NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifier) {
+                guard seenProcessIdentifiers.insert(app.processIdentifier).inserted else { continue }
+                applications.append(app)
+            }
+        }
+
+        return applications
+    }
+
+    private static func hasOnScreenWindow(forProcessIdentifier processIdentifier: Int) -> Bool {
+        guard let windowList = CGWindowListCopyWindowInfo([.optionAll], kCGNullWindowID) as? [[String: Any]] else {
+            return false
+        }
+
+        for window in windowList {
+            guard let ownerPID = window[kCGWindowOwnerPID as String] as? Int,
+                  ownerPID == processIdentifier,
+                  let layer = window[kCGWindowLayer as String] as? Int,
+                  layer == 0 else {
+                continue
+            }
+
+            let isOnScreen = (window[kCGWindowIsOnscreen as String] as? Int) == 1
+            let alpha = window[kCGWindowAlpha as String] as? Double ?? 1
+            guard isOnScreen, alpha > 0 else { continue }
+
+            if let bounds = window[kCGWindowBounds as String] as? [String: Any],
+               let width = bounds["Width"] as? Double,
+               let height = bounds["Height"] as? Double,
+               width > 40,
+               height > 40 {
+                return true
+            }
+        }
+
+        return false
+    }
+
+    @MainActor
+    private static func hasUsableAXWindow(forProcessIdentifier processIdentifier: pid_t) -> Bool {
+        let appElement = AXUIElementCreateApplication(processIdentifier)
+
+        if let focusedWindow = copyAXElement(appElement, attribute: kAXFocusedWindowAttribute),
+           !Self.isWindowMiniaturized(focusedWindow) {
+            return true
+        }
+
+        if let mainWindow = copyAXElement(appElement, attribute: kAXMainWindowAttribute),
+           !Self.isWindowMiniaturized(mainWindow) {
+            return true
+        }
+
+        guard let windows = copyAXWindows(appElement) else {
+            return false
+        }
+
+        return windows.contains { !Self.isWindowMiniaturized($0) }
+    }
+
+    @MainActor
+    private static func copyAXWindows(_ appElement: AXUIElement) -> [AXUIElement]? {
+        var value: CFTypeRef?
+        let result = AXUIElementCopyAttributeValue(appElement, kAXWindowsAttribute as CFString, &value)
+        guard result == .success else {
+            return nil
+        }
+
+        return value as? [AXUIElement]
+    }
+
+    @MainActor
+    private static func copyAXElement(_ appElement: AXUIElement, attribute: String) -> AXUIElement? {
+        var value: CFTypeRef?
+        let result = AXUIElementCopyAttributeValue(appElement, attribute as CFString, &value)
+        guard result == .success,
+              let value else {
+            return nil
+        }
+
+        return unsafeBitCast(value, to: AXUIElement.self)
+    }
+
 }

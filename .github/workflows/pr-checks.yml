@@ -1,0 +1,62 @@
+name: PR Checks
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-checks-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Validate
+    runs-on: macos-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          swift --version
+          xcodebuild -version
+
+      - name: Run prototype tests
+        run: swift test --package-path Prototype
+
+      - name: Build debug app
+        run: >
+          xcodebuild
+          -project PingIsland.xcodeproj
+          -scheme PingIsland
+          -configuration Debug
+          -destination 'platform=macOS'
+          -derivedDataPath "$RUNNER_TEMP/DerivedData"
+          CODE_SIGNING_ALLOWED=NO
+          build
+
+      - name: Run root unit tests
+        run: >
+          xcodebuild
+          -project PingIsland.xcodeproj
+          -scheme PingIsland
+          -configuration Debug
+          -destination 'platform=macOS'
+          -derivedDataPath "$RUNNER_TEMP/DerivedData"
+          -resultBundlePath "$RUNNER_TEMP/PingIslandTests.xcresult"
+          CODE_SIGNING_ALLOWED=NO
+          test
+          -only-testing:PingIslandTests
+
+      - name: Upload unit test results
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: PingIslandTests-xcresult
+          path: ${{ runner.temp }}/PingIslandTests.xcresult
+          if-no-files-found: ignore

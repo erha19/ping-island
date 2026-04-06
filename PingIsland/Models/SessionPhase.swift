@@ -19,7 +19,8 @@ struct PermissionContext: Sendable {
     nonisolated var formattedInput: String? {
         guard let input = toolInput else { return nil }
         var parts: [String] = []
-        for (key, value) in input {
+        for key in input.keys.sorted() {
+            guard let value = input[key] else { continue }
             let valueStr: String
             switch value.value {
             case let str as String:

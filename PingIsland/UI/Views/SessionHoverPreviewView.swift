@@ -198,7 +198,7 @@ private struct HoverConversationCard: View {
 
             if let assistantText = snapshot.assistantText {
                 HoverConversationLine(
-                    label: session.providerDisplayName + "：",
+                    label: HoverPreviewStyle.assistantPrefixLabel(for: session) + "：",
                     labelColor: HoverPreviewStyle.assistantPrefixColor(for: session),
                     text: assistantText,
                     textColor: HoverPreviewStyle.assistantTextColor(for: session, compact: false),
@@ -229,7 +229,7 @@ private struct HoverApprovalCard: View {
     let sessionMonitor: SessionMonitor
 
     private var providerLabel: String {
-        session.clientDisplayName
+        session.interactionDisplayName
     }
 
     private var toolLabel: String {
@@ -315,7 +315,7 @@ private struct HoverQuestionInterventionCard: View {
                     }
                 )
             } else {
-                Button("打开\(session.clientDisplayName)") {
+                Button("打开 \(session.interactionDisplayName) 回答") {
                     Task {
                         _ = await SessionLauncher.shared.activate(session)
                     }
@@ -480,9 +480,6 @@ private struct HoverProviderGlyph: View {
     @ObservedObject private var settings = AppSettings.shared
 
     private var petTone: NotchIndicatorTone {
-        if session.needsApprovalResponse {
-            return .warning
-        }
         if session.clientInfo.brand == .codebuddy {
             return .codebuddy
         }
@@ -511,7 +508,7 @@ private struct HoverProviderGlyph: View {
                 style: settings.notchPetStyle,
                 size: 18,
                 tone: petTone,
-                isProcessing: session.phase.isActive
+                activity: session.phase.isActive ? .processing : .idle
             )
             .frame(width: HoverSessionLayout.glyphSize, height: HoverSessionLayout.glyphSize)
             .background(attentionTone == nil ? Color.white.opacity(0.04) : Color.clear)
@@ -554,22 +551,19 @@ private struct HoverConversationLine: View {
 }
 
 private enum HoverPreviewStyle {
-    private static let claudeOrange = Color(red: 0.85, green: 0.47, blue: 0.34)
-    private static let codexBlue = Color(red: 0.36, green: 0.62, blue: 1.0)
-    private static let qoderGreen = Color(red: 0.12, green: 0.88, blue: 0.56)
-
     static func providerLabel(for session: SessionState) -> String {
         session.providerDisplayName
     }
 
+    static func assistantPrefixLabel(for session: SessionState) -> String {
+        if session.needsQuestionResponse || session.needsApprovalResponse {
+            return session.interactionDisplayName
+        }
+        return session.providerDisplayName
+    }
+
     static func providerColor(for session: SessionState) -> Color {
-        if session.clientInfo.brand == .codebuddy {
-            return TerminalColors.codebuddy
-        }
-        if session.clientInfo.brand == .qoder {
-            return qoderGreen
-        }
-        return session.provider == .claude ? claudeOrange : codexBlue
+        session.clientTintColor
     }
 
     static func providerBadgeFill(for session: SessionState) -> Color {
@@ -578,18 +572,12 @@ private enum HoverPreviewStyle {
 
     static func ideHostBadgeFill(for session: SessionState) -> Color {
         if session.ideHostBadgeLabel?.contains("Qoder") == true {
-            return qoderGreen.opacity(0.24)
+            return TerminalColors.qoder.opacity(0.24)
         }
         return .white.opacity(0.08)
     }
 
     static func assistantPrefixColor(for session: SessionState) -> Color {
-        if session.needsQuestionResponse {
-            return TerminalColors.blue.opacity(0.96)
-        }
-        if session.needsApprovalResponse {
-            return TerminalColors.amber.opacity(0.96)
-        }
         return providerColor(for: session).opacity(session.phase.isActive ? 0.96 : 0.9)
     }
 
@@ -627,7 +615,7 @@ private enum HoverPreviewLineBuilder {
             lines.append(
                 HoverPreviewLine(
                     id: "assistant",
-                    prefix: session.providerDisplayName + "：",
+                    prefix: HoverPreviewStyle.assistantPrefixLabel(for: session) + "：",
                     prefixColor: HoverPreviewStyle.assistantPrefixColor(for: session),
                     text: assistantLine,
                     color: HoverPreviewStyle.assistantTextColor(for: session, compact: compact)

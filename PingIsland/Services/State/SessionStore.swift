@@ -48,10 +48,16 @@ actor SessionStore {
     /// Pending file syncs (debounced)
     private var pendingSyncs: [String: Task<Void, Never>] = [:]
     private var pendingCodexPlaceholderPrunes: [String: Task<Void, Never>] = [:]
+    private var pendingQoderConversationPolls: [String: (id: UUID, task: Task<Void, Never>)] = [:]
+    private var codexSessionAliases: [String: String] = [:]
 
     /// Sync debounce interval (100ms)
     private let syncDebounceNs: UInt64 = 100_000_000
-    private let codexPlaceholderPruneDelayNs: UInt64 = 10_000_000_000
+    private let codexHookPlaceholderPruneDelayNs: UInt64 = 10_000_000_000
+    private let codexAppServerPlaceholderPruneDelayNs: UInt64 = 60_000_000_000
+    private let codexContinuationMergeWindow: TimeInterval = 10 * 60
+    private let qoderConversationPollIntervalNs: UInt64 = 250_000_000
+    private let qoderConversationPollTimeoutNs: UInt64 = 120_000_000_000
 
     /// Persisted session associations used to restore client routing across relaunches.
     private var persistedAssociations: [String: PersistedSessionAssociation] = [:]
@@ -93,6 +99,9 @@ actor SessionStore {
 
         case .interventionResolved(let sessionId, let nextPhase):
             await processInterventionResolved(sessionId: sessionId, nextPhase: nextPhase)
+
+        case .pruneTimedOutExternalContinuations(let now):
+            await processTimedOutExternalContinuations(now: now)
 
         case .fileUpdated(let payload):
             await processFileUpdate(payload)
@@ -150,7 +159,9 @@ actor SessionStore {
     // MARK: - Hook Event Processing
 
     private func processHookEvent(_ event: HookEvent) async {
-        let sessionId = event.sessionId
+        let sessionId = event.provider == .codex
+            ? resolveOrAdoptCodexHookSession(event)
+            : event.sessionId
         if shouldIgnoreCodexHookEvent(event, existingSession: sessions[sessionId]) {
             Self.logger.notice(
                 "Ignoring weak Codex hook event session=\(sessionId, privacy: .public) event=\(event.event, privacy: .public) status=\(event.status, privacy: .public)"
@@ -175,6 +186,11 @@ actor SessionStore {
             session.clientInfo = session.clientInfo.merged(with: runtimeClientInfo)
             session.clientInfo = normalizedClientInfo(session.clientInfo, provider: event.provider, sessionId: sessionId)
         }
+        await TerminalAutomationPermissionCoordinator.shared.prepareIfNeeded(
+            provider: event.provider,
+            clientInfo: session.clientInfo,
+            sessionId: sessionId
+        )
         session.lastActivity = Date()
         if let hookMessage = Self.normalizedHookMessage(event.message) {
             session.latestHookMessage = hookMessage
@@ -185,6 +201,7 @@ actor SessionStore {
             sessions[sessionId] = session
             publishState()
             cancelPendingCodexPlaceholderPrune(sessionId: sessionId)
+            cancelPendingQoderConversationPoll(sessionId: sessionId)
             scheduleFinalSessionSync(for: session)
             return
         }
@@ -231,6 +248,7 @@ actor SessionStore {
         sessions[sessionId] = session
         publishState()
         updateCodexPlaceholderPrune(for: session)
+        updateQoderConversationPoll(for: session, event: event)
 
         if event.shouldSyncFile {
             scheduleFileSync(
@@ -613,18 +631,35 @@ actor SessionStore {
 
     private func processInterventionResolved(sessionId: String, nextPhase: SessionPhase) async {
         guard var session = sessions[sessionId] else { return }
-        session.intervention = nil
-        if session.phase.canTransition(to: nextPhase) || session.phase == nextPhase {
-            session.phase = nextPhase
+        if let intervention = session.intervention,
+           intervention.kind == .question,
+           (session.clientInfo.profileID == "qoderwork" || session.clientInfo.bundleIdentifier == "com.qoder.work"),
+           intervention.supportsInlineResponse == false {
+            session.intervention = intervention.markingAwaitingExternalContinuation(
+                actorName: session.interactionDisplayName
+            )
+            session.phase = .waitingForInput
+        } else {
+            session.intervention = nil
+            if session.phase.canTransition(to: nextPhase) || session.phase == nextPhase {
+                session.phase = nextPhase
+            }
         }
         session.lastActivity = Date()
         sessions[sessionId] = session
+        publishState()
     }
 
     // MARK: - File Update Processing
 
     private func processFileUpdate(_ payload: FileUpdatePayload) async {
         guard var session = sessions[payload.sessionId] else { return }
+        let previousPhase = session.phase
+        let previousIntervention = session.intervention
+
+        if !payload.messages.isEmpty {
+            session.lastActivity = Date()
+        }
 
         // Update conversationInfo from JSONL (summary, lastMessage, etc.)
         let conversationInfo = await ConversationParser.shared.parse(
@@ -762,7 +797,18 @@ actor SessionStore {
 
         await applyQoderFallbackIntervention(to: &session)
 
+        if !payload.messages.isEmpty,
+           session.intervention?.awaitsExternalContinuation == true {
+            session.intervention = nil
+            if session.phase == .waitingForInput {
+                session.phase = .processing
+            }
+        }
+
         sessions[payload.sessionId] = session
+        if session.phase != previousPhase || session.intervention != previousIntervention {
+            publishState()
+        }
 
         await emitToolCompletionEvents(
             sessionId: payload.sessionId,
@@ -771,6 +817,30 @@ actor SessionStore {
             toolResults: payload.toolResults,
             structuredResults: payload.structuredResults
         )
+    }
+
+    private func processTimedOutExternalContinuations(now: Date) async {
+        var didChange = false
+
+        for sessionId in sessions.keys {
+            guard var session = sessions[sessionId],
+                  session.intervention?.awaitsExternalContinuation == true,
+                  session.intervention?.hasTimedOutExternalContinuation(now: now) == true else {
+                continue
+            }
+
+            session.intervention = nil
+            if session.phase == .waitingForInput {
+                session.phase = .processing
+            }
+            session.lastActivity = now
+            sessions[sessionId] = session
+            didChange = true
+        }
+
+        if didChange {
+            publishState()
+        }
     }
 
     /// Populate subagent tools for Task tools using their agent JSONL files
@@ -983,6 +1053,7 @@ actor SessionStore {
         // Mark that a clear happened - the next fileUpdated will reconcile
         // by removing items that no longer exist in the parser's state
         session.needsClearReconciliation = true
+        session.lastActivity = Date()
         sessions[sessionId] = session
 
         Self.logger.info("/clear processed for session \(sessionId.prefix(8), privacy: .public) - marked for reconciliation")
@@ -991,22 +1062,28 @@ actor SessionStore {
     // MARK: - Session End Processing
 
     private func processSessionEnd(sessionId: String) async {
-        guard var session = sessions[sessionId] else {
-            cancelPendingSync(sessionId: sessionId)
-            cancelPendingCodexPlaceholderPrune(sessionId: sessionId)
+        let resolvedSessionId = resolveCodexSessionAlias(sessionId)
+        guard var session = sessions[resolvedSessionId] else {
+            cancelPendingSync(sessionId: resolvedSessionId)
+            cancelPendingCodexPlaceholderPrune(sessionId: resolvedSessionId)
+            cancelPendingQoderConversationPoll(sessionId: resolvedSessionId)
             return
         }
 
         markSessionEnded(&session)
-        sessions[sessionId] = session
-        cancelPendingCodexPlaceholderPrune(sessionId: sessionId)
+        sessions[resolvedSessionId] = session
+        cancelPendingCodexPlaceholderPrune(sessionId: resolvedSessionId)
+        cancelPendingQoderConversationPoll(sessionId: resolvedSessionId)
         scheduleFinalSessionSync(for: session)
     }
 
     private func archiveSession(sessionId: String) async {
-        sessions.removeValue(forKey: sessionId)
-        cancelPendingSync(sessionId: sessionId)
-        cancelPendingCodexPlaceholderPrune(sessionId: sessionId)
+        let resolvedSessionId = resolveCodexSessionAlias(sessionId)
+        sessions.removeValue(forKey: resolvedSessionId)
+        clearCodexSessionAliases(for: resolvedSessionId)
+        cancelPendingSync(sessionId: resolvedSessionId)
+        cancelPendingCodexPlaceholderPrune(sessionId: resolvedSessionId)
+        cancelPendingQoderConversationPoll(sessionId: resolvedSessionId)
     }
 
     private func markSessionEnded(_ session: inout SessionState) {
@@ -1157,6 +1234,76 @@ actor SessionStore {
         pendingSyncs.removeValue(forKey: sessionId)
     }
 
+    private func updateQoderConversationPoll(for session: SessionState, event: HookEvent) {
+        guard session.clientInfo.brand == .qoder else {
+            cancelPendingQoderConversationPoll(sessionId: session.sessionId)
+            return
+        }
+
+        if session.phase == .ended || event.event == "Stop" || event.status == "ended" {
+            cancelPendingQoderConversationPoll(sessionId: session.sessionId)
+            return
+        }
+
+        guard event.event == "UserPromptSubmit" else { return }
+        scheduleQoderConversationPoll(sessionId: session.sessionId)
+    }
+
+    private func scheduleQoderConversationPoll(sessionId: String) {
+        cancelPendingQoderConversationPoll(sessionId: sessionId)
+
+        let pollID = UUID()
+        let task = Task { [weak self] in
+            guard let self else { return }
+
+            let startedAt = Date()
+            while !Task.isCancelled {
+                guard let session = await self.session(for: sessionId),
+                      session.clientInfo.brand == .qoder,
+                      session.phase != .ended else {
+                    break
+                }
+
+                await self.refreshQoderFallbackState(sessionId: sessionId)
+
+                if Date().timeIntervalSince(startedAt) * 1_000_000_000 >= Double(self.qoderConversationPollTimeoutNs) {
+                    break
+                }
+
+                try? await Task.sleep(nanoseconds: self.qoderConversationPollIntervalNs)
+            }
+
+            await self.finishQoderConversationPoll(sessionId: sessionId, pollID: pollID)
+        }
+
+        pendingQoderConversationPolls[sessionId] = (id: pollID, task: task)
+    }
+
+    private func cancelPendingQoderConversationPoll(sessionId: String) {
+        pendingQoderConversationPolls[sessionId]?.task.cancel()
+        pendingQoderConversationPolls.removeValue(forKey: sessionId)
+    }
+
+    private func finishQoderConversationPoll(sessionId: String, pollID: UUID) {
+        guard pendingQoderConversationPolls[sessionId]?.id == pollID else { return }
+        pendingQoderConversationPolls.removeValue(forKey: sessionId)
+    }
+
+    private func refreshQoderFallbackState(sessionId: String) async {
+        guard var session = sessions[sessionId], session.clientInfo.brand == .qoder else { return }
+
+        let previousPhase = session.phase
+        let previousIntervention = session.intervention
+        await applyQoderFallbackIntervention(to: &session)
+
+        guard session.phase != previousPhase || session.intervention != previousIntervention else {
+            return
+        }
+
+        sessions[sessionId] = session
+        publishState()
+    }
+
     private func scheduleCodexRolloutSync(
         sessionId: String,
         clientInfo: SessionClientInfo,
@@ -1217,7 +1364,18 @@ actor SessionStore {
 
     /// Get a specific session
     func session(for sessionId: String) -> SessionState? {
-        sessions[sessionId]
+        let resolvedSessionId = resolveCodexSessionAlias(sessionId)
+        return sessions[resolvedSessionId]
+    }
+
+    func resolvedCodexSessionId(for sessionId: String) -> String {
+        resolveCodexSessionAlias(sessionId)
+    }
+
+    /// Check whether a session exists without requiring `SessionState` equality.
+    func containsSession(_ sessionId: String) -> Bool {
+        let resolvedSessionId = resolveCodexSessionAlias(sessionId)
+        return sessions.keys.contains(resolvedSessionId)
     }
 
     /// Check if there's an active permission for a session
@@ -1235,11 +1393,12 @@ actor SessionStore {
     }
 
     func requestFileSync(for sessionId: String) {
-        guard let session = sessions[sessionId] else { return }
+        let resolvedSessionId = resolveCodexSessionAlias(sessionId)
+        guard let session = sessions[resolvedSessionId] else { return }
 
         if session.provider == .codex {
             scheduleCodexRolloutSync(
-                sessionId: sessionId,
+                sessionId: resolvedSessionId,
                 clientInfo: session.clientInfo,
                 cwd: session.cwd
             )
@@ -1247,7 +1406,7 @@ actor SessionStore {
         }
 
         scheduleFileSync(
-            sessionId: sessionId,
+            sessionId: resolvedSessionId,
             cwd: session.cwd,
             explicitFilePath: session.clientInfo.sessionFilePath
         )
@@ -1290,10 +1449,29 @@ actor SessionStore {
         phase: SessionPhase,
         intervention: SessionIntervention?,
         clientInfo: SessionClientInfo? = nil,
+        activityAt: Date? = nil,
         metadata: [String: String] = [:]
     ) {
-        let restoredAssociation = persistedAssociation(for: .codex, sessionId: sessionId)
-        let initialCwd = cwd ?? sessions[sessionId]?.cwd ?? restoredAssociation?.cwd ?? "/"
+        let resolvedSessionId = resolveOrAdoptCodexSession(
+            incomingSessionId: sessionId,
+            name: name,
+            preview: preview,
+            cwd: cwd,
+            phase: phase,
+            clientInfo: clientInfo,
+            conversationInfo: ConversationInfo(
+                summary: nil,
+                lastMessage: nil,
+                lastMessageRole: nil,
+                lastToolName: nil,
+                firstUserMessage: nil,
+                lastUserMessageDate: nil
+            ),
+            activityAt: activityAt ?? Date(),
+            ingress: .codexAppServer
+        )
+        let restoredAssociation = persistedAssociation(for: .codex, sessionId: resolvedSessionId)
+        let initialCwd = cwd ?? sessions[resolvedSessionId]?.cwd ?? restoredAssociation?.cwd ?? "/"
         let initialProject = restoredAssociation?.projectName
             ?? Self.projectName(for: initialCwd, fallback: name ?? "Codex")
         let resolvedClientInfo = normalizedCodexClientInfo(
@@ -1302,8 +1480,8 @@ actor SessionStore {
             sessionId: sessionId
         )
 
-        var session = sessions[sessionId] ?? SessionState(
-            sessionId: sessionId,
+        var session = sessions[resolvedSessionId] ?? SessionState(
+            sessionId: resolvedSessionId,
             cwd: initialCwd,
             projectName: initialProject,
             provider: .codex,
@@ -1346,7 +1524,7 @@ actor SessionStore {
         if session.ingress != .hookBridge || (!session.phase.needsAttention && !hasIntervention) {
             session.ingress = .codexAppServer
         }
-        session.lastActivity = Date()
+        session.lastActivity = activityAt ?? Date()
 
         if !metadata.isEmpty {
             var previewMetadata = session.previewText ?? ""
@@ -1360,24 +1538,25 @@ actor SessionStore {
 
         let placeholderCandidate = isLikelyEmptyCodexPlaceholder(session)
         Self.logger.info(
-            "Codex upsert session=\(sessionId, privacy: .public) phase=\(String(describing: session.phase), privacy: .public) ingress=\(session.ingress.rawValue, privacy: .public) namePresent=\(name?.isEmpty == false, privacy: .public) previewPresent=\(preview?.isEmpty == false, privacy: .public) cwd=\(session.cwd, privacy: .public) filePathPresent=\(session.clientInfo.sessionFilePath?.isEmpty == false, privacy: .public) placeholderCandidate=\(placeholderCandidate, privacy: .public)"
+            "Codex upsert session=\(resolvedSessionId, privacy: .public) sourceThread=\(sessionId, privacy: .public) phase=\(String(describing: session.phase), privacy: .public) ingress=\(session.ingress.rawValue, privacy: .public) namePresent=\(name?.isEmpty == false, privacy: .public) previewPresent=\(preview?.isEmpty == false, privacy: .public) cwd=\(session.cwd, privacy: .public) filePathPresent=\(session.clientInfo.sessionFilePath?.isEmpty == false, privacy: .public) placeholderCandidate=\(placeholderCandidate, privacy: .public)"
         )
         if placeholderCandidate {
             Self.logger.notice(
-                "Codex placeholder candidate retained session=\(sessionId, privacy: .public) project=\(session.projectName, privacy: .public) displayTitle=\(session.displayTitle, privacy: .public)"
+                "Codex placeholder candidate retained session=\(resolvedSessionId, privacy: .public) project=\(session.projectName, privacy: .public) displayTitle=\(session.displayTitle, privacy: .public)"
             )
         }
 
-        sessions[sessionId] = session
+        sessions[resolvedSessionId] = session
         publishState()
         updateCodexPlaceholderPrune(for: session)
     }
 
     func updateCodexThreadName(sessionId: String, name: String?) {
-        guard var session = sessions[sessionId] else { return }
+        let resolvedSessionId = resolveCodexSessionAlias(sessionId)
+        guard var session = sessions[resolvedSessionId] else { return }
         session.sessionName = name
         session.lastActivity = Date()
-        sessions[sessionId] = session
+        sessions[resolvedSessionId] = session
         publishState()
     }
 
@@ -1385,9 +1564,22 @@ actor SessionStore {
         _ snapshot: CodexThreadSnapshot,
         ingress: SessionIngress = .codexAppServer
     ) {
-        let restoredAssociation = persistedAssociation(for: .codex, sessionId: snapshot.threadId)
+        let resolvedSessionId = ingress == .codexAppServer
+            ? resolveOrAdoptCodexSession(
+                incomingSessionId: snapshot.threadId,
+                name: snapshot.name,
+                preview: snapshot.displayResultText ?? snapshot.preview,
+                cwd: snapshot.cwd,
+                phase: snapshot.phase,
+                clientInfo: snapshot.clientInfo,
+                conversationInfo: snapshot.conversationInfo,
+                activityAt: snapshot.updatedAt,
+                ingress: ingress
+            )
+            : resolveCodexSessionAlias(snapshot.threadId)
+        let restoredAssociation = persistedAssociation(for: .codex, sessionId: resolvedSessionId)
         let fallbackCwd = snapshot.cwd.isEmpty
-            ? (sessions[snapshot.threadId]?.cwd ?? restoredAssociation?.cwd ?? "/")
+            ? (sessions[resolvedSessionId]?.cwd ?? restoredAssociation?.cwd ?? "/")
             : snapshot.cwd
         let fallbackName = snapshot.name ?? snapshot.preview ?? "Codex"
         let projectName = restoredAssociation?.projectName
@@ -1398,8 +1590,8 @@ actor SessionStore {
             sessionId: snapshot.threadId
         )
 
-        var session = sessions[snapshot.threadId] ?? SessionState(
-            sessionId: snapshot.threadId,
+        var session = sessions[resolvedSessionId] ?? SessionState(
+            sessionId: resolvedSessionId,
             cwd: fallbackCwd,
             projectName: projectName,
             provider: .codex,
@@ -1448,20 +1640,21 @@ actor SessionStore {
 
         let placeholderCandidate = isLikelyEmptyCodexPlaceholder(session)
         Self.logger.info(
-            "Codex snapshot sync session=\(snapshot.threadId, privacy: .public) ingress=\(ingress.rawValue, privacy: .public) historyItems=\(snapshot.historyItems.count, privacy: .public) namePresent=\(snapshot.name?.isEmpty == false, privacy: .public) previewPresent=\(snapshot.preview?.isEmpty == false, privacy: .public) filePathPresent=\(session.clientInfo.sessionFilePath?.isEmpty == false, privacy: .public) placeholderCandidate=\(placeholderCandidate, privacy: .public)"
+            "Codex snapshot sync session=\(resolvedSessionId, privacy: .public) sourceThread=\(snapshot.threadId, privacy: .public) ingress=\(ingress.rawValue, privacy: .public) historyItems=\(snapshot.historyItems.count, privacy: .public) namePresent=\(snapshot.name?.isEmpty == false, privacy: .public) previewPresent=\(snapshot.preview?.isEmpty == false, privacy: .public) filePathPresent=\(session.clientInfo.sessionFilePath?.isEmpty == false, privacy: .public) placeholderCandidate=\(placeholderCandidate, privacy: .public)"
         )
 
-        sessions[snapshot.threadId] = session
+        sessions[resolvedSessionId] = session
         publishState()
         updateCodexPlaceholderPrune(for: session)
     }
 
     func resolveCodexIntervention(sessionId: String, nextPhase: SessionPhase = .processing) {
-        guard var session = sessions[sessionId] else { return }
+        let resolvedSessionId = resolveCodexSessionAlias(sessionId)
+        guard var session = sessions[resolvedSessionId] else { return }
         session.intervention = nil
         session.phase = nextPhase
         session.lastActivity = Date()
-        sessions[sessionId] = session
+        sessions[resolvedSessionId] = session
         publishState()
     }
 
@@ -1471,11 +1664,7 @@ actor SessionStore {
     }
 
     private nonisolated static func normalizedHookMessage(_ message: String?) -> String? {
-        guard let message else { return nil }
-        let normalized = message
-            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return normalized.isEmpty ? nil : normalized
+        SessionTextSanitizer.sanitizedDisplayText(message)
     }
 
     private func persistedAssociation(for provider: SessionProvider, sessionId: String) -> PersistedSessionAssociation? {
@@ -1731,6 +1920,185 @@ actor SessionStore {
         return persistedAssociations.removeValue(forKey: key) != nil
     }
 
+    private func resolveCodexSessionAlias(_ sessionId: String) -> String {
+        var resolved = sessionId
+        var visited: Set<String> = []
+
+        while let next = codexSessionAliases[resolved], visited.insert(resolved).inserted {
+            resolved = next
+        }
+
+        return resolved
+    }
+
+    private func aliasCodexSession(_ previousSessionId: String, to currentSessionId: String) {
+        guard previousSessionId != currentSessionId else { return }
+
+        for (alias, target) in codexSessionAliases where target == previousSessionId {
+            codexSessionAliases[alias] = currentSessionId
+        }
+        codexSessionAliases[previousSessionId] = currentSessionId
+    }
+
+    private func clearCodexSessionAliases(for sessionId: String) {
+        codexSessionAliases.removeValue(forKey: sessionId)
+        codexSessionAliases = codexSessionAliases.filter { $0.value != sessionId }
+    }
+
+    private func resolveOrAdoptCodexHookSession(_ event: HookEvent) -> String {
+        let resolvedSessionId = resolveCodexSessionAlias(event.sessionId)
+        guard resolvedSessionId == event.sessionId else {
+            return resolvedSessionId
+        }
+        guard !sessions.keys.contains(event.sessionId) else {
+            return event.sessionId
+        }
+
+        let candidateCwd = event.cwd.isEmpty ? "/" : event.cwd
+        let candidate = SessionState(
+            sessionId: event.sessionId,
+            cwd: candidateCwd,
+            projectName: Self.projectName(for: candidateCwd, fallback: "Codex"),
+            provider: .codex,
+            clientInfo: normalizedCodexClientInfo(
+                restored: nil,
+                incoming: event.clientInfo,
+                sessionId: event.sessionId
+            ),
+            ingress: .hookBridge,
+            latestHookMessage: Self.normalizedHookMessage(event.message),
+            phase: event.sessionPhase,
+            lastActivity: Date()
+        )
+
+        guard candidate.isLikelyTransientCodexContinuationPlaceholder else {
+            return event.sessionId
+        }
+
+        guard let existingSession = sessions.values
+            .filter({
+                candidate.shouldRebindToExistingCodexThread(
+                    comparedTo: $0,
+                    maximumRecencyGap: codexContinuationMergeWindow
+                )
+            })
+            .sorted(by: { $0.lastActivity > $1.lastActivity })
+            .first else {
+            return event.sessionId
+        }
+
+        aliasCodexSession(event.sessionId, to: existingSession.sessionId)
+        Self.logger.notice(
+            "Rebound Codex hook placeholder hookSession=\(event.sessionId, privacy: .public) existingSession=\(existingSession.sessionId, privacy: .public) cwd=\(candidateCwd, privacy: .public)"
+        )
+        return existingSession.sessionId
+    }
+
+    private func resolveOrAdoptCodexSession(
+        incomingSessionId: String,
+        name: String?,
+        preview: String?,
+        cwd: String?,
+        phase: SessionPhase,
+        clientInfo: SessionClientInfo?,
+        conversationInfo: ConversationInfo,
+        activityAt: Date,
+        ingress: SessionIngress
+    ) -> String {
+        let resolvedIncomingId = resolveCodexSessionAlias(incomingSessionId)
+        guard resolvedIncomingId == incomingSessionId else {
+            return resolvedIncomingId
+        }
+        guard !sessions.keys.contains(incomingSessionId) else {
+            return incomingSessionId
+        }
+        guard ingress == .codexAppServer else {
+            return incomingSessionId
+        }
+
+        let candidateCwd: String = {
+            let trimmed = cwd?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return trimmed.isEmpty ? "/" : trimmed
+        }()
+        let candidateClientInfo = normalizedCodexClientInfo(
+            restored: nil,
+            incoming: clientInfo,
+            sessionId: incomingSessionId
+        )
+        let candidate = SessionState(
+            sessionId: incomingSessionId,
+            cwd: candidateCwd,
+            projectName: Self.projectName(for: candidateCwd, fallback: name ?? "Codex"),
+            provider: .codex,
+            clientInfo: candidateClientInfo,
+            ingress: ingress,
+            sessionName: name,
+            previewText: preview,
+            phase: phase,
+            conversationInfo: conversationInfo,
+            lastActivity: activityAt
+        )
+
+        guard let existingSession = sessions.values
+            .filter({
+                candidate.shouldRebindToExistingCodexThread(
+                    comparedTo: $0,
+                    maximumRecencyGap: codexContinuationMergeWindow
+                )
+            })
+            .sorted(by: { $0.lastActivity > $1.lastActivity })
+            .first else {
+            return incomingSessionId
+        }
+
+        migrateCodexSessionState(from: existingSession.sessionId, to: incomingSessionId)
+        aliasCodexSession(existingSession.sessionId, to: incomingSessionId)
+        Self.logger.notice(
+            "Rebound Codex continuation oldSession=\(existingSession.sessionId, privacy: .public) newThread=\(incomingSessionId, privacy: .public) cwd=\(candidateCwd, privacy: .public)"
+        )
+        return incomingSessionId
+    }
+
+    private func migrateCodexSessionState(from previousSessionId: String, to currentSessionId: String) {
+        guard previousSessionId != currentSessionId,
+              let previousSession = sessions.removeValue(forKey: previousSessionId),
+              !sessions.keys.contains(currentSessionId) else {
+            return
+        }
+
+        cancelPendingSync(sessionId: previousSessionId)
+        cancelPendingCodexPlaceholderPrune(sessionId: previousSessionId)
+        cancelPendingQoderConversationPoll(sessionId: previousSessionId)
+
+        let migratedSession = SessionState(
+            sessionId: currentSessionId,
+            cwd: previousSession.cwd,
+            projectName: previousSession.projectName,
+            provider: previousSession.provider,
+            clientInfo: previousSession.clientInfo,
+            ingress: previousSession.ingress,
+            sessionName: previousSession.sessionName,
+            previewText: previousSession.previewText,
+            latestHookMessage: previousSession.latestHookMessage,
+            intervention: previousSession.intervention,
+            pid: previousSession.pid,
+            tty: previousSession.tty,
+            isInTmux: previousSession.isInTmux,
+            phase: previousSession.phase,
+            chatItems: previousSession.chatItems,
+            toolTracker: previousSession.toolTracker,
+            completedErrorToolIDs: previousSession.completedErrorToolIDs,
+            subagentState: previousSession.subagentState,
+            conversationInfo: previousSession.conversationInfo,
+            needsClearReconciliation: previousSession.needsClearReconciliation,
+            lastActivity: previousSession.lastActivity,
+            createdAt: previousSession.createdAt
+        )
+
+        sessions[currentSessionId] = migratedSession
+        _ = removePersistedAssociation(provider: .codex, sessionId: previousSessionId)
+    }
+
     private func runtimeClientInfo(for session: SessionState, tree: [Int: ProcessInfo]) async -> SessionClientInfo? {
         let resolvedTTY = session.tty?.trimmingCharacters(in: .whitespacesAndNewlines)
         let terminalPid =
@@ -1785,7 +2153,7 @@ actor SessionStore {
     ) -> SessionClientInfo {
         switch provider {
         case .claude:
-            return clientInfo
+            return clientInfo.normalizedForClaudeRouting()
         case .codex:
             return clientInfo.normalizedForCodexRouting(sessionId: sessionId)
         }
@@ -1877,8 +2245,11 @@ actor SessionStore {
 
     private func scheduleCodexPlaceholderPrune(sessionId: String) {
         cancelPendingCodexPlaceholderPrune(sessionId: sessionId)
-        pendingCodexPlaceholderPrunes[sessionId] = Task { [weak self, codexPlaceholderPruneDelayNs] in
-            try? await Task.sleep(nanoseconds: codexPlaceholderPruneDelayNs)
+        guard let delayNs = codexPlaceholderPruneDelayNs(for: sessions[sessionId]) else {
+            return
+        }
+        pendingCodexPlaceholderPrunes[sessionId] = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: delayNs)
             guard !Task.isCancelled else { return }
             await self?.pruneCodexHookPlaceholderIfNeeded(sessionId: sessionId)
         }
@@ -1896,9 +2267,10 @@ actor SessionStore {
         }
 
         Self.logger.notice(
-            "Pruning stale Codex hook placeholder session=\(sessionId, privacy: .public) phase=\(String(describing: session.phase), privacy: .public)"
+            "Pruning stale Codex placeholder session=\(sessionId, privacy: .public) phase=\(String(describing: session.phase), privacy: .public)"
         )
         sessions.removeValue(forKey: sessionId)
+        clearCodexSessionAliases(for: sessionId)
         cancelPendingSync(sessionId: sessionId)
         publishState()
     }
@@ -1913,9 +2285,10 @@ actor SessionStore {
         guard !expiredSessionIDs.isEmpty else { return [] }
         for sessionId in expiredSessionIDs {
             Self.logger.notice(
-                "Pruning expired Codex hook placeholder during publish session=\(sessionId, privacy: .public)"
+                "Pruning expired Codex placeholder during publish session=\(sessionId, privacy: .public)"
             )
             sessions.removeValue(forKey: sessionId)
+            clearCodexSessionAliases(for: sessionId)
             cancelPendingSync(sessionId: sessionId)
             cancelPendingCodexPlaceholderPrune(sessionId: sessionId)
         }
@@ -1923,35 +2296,33 @@ actor SessionStore {
     }
 
     private func shouldPruneCodexHookPlaceholder(_ session: SessionState) -> Bool {
-        guard session.provider == .codex else { return false }
-        guard session.ingress == .hookBridge else { return false }
-        return isLikelyEmptyCodexPlaceholder(session)
+        codexPlaceholderPruneDelayNs(for: session) != nil
     }
 
     private func isCodexHookPlaceholderExpired(_ session: SessionState, referenceDate: Date) -> Bool {
         let anchor = max(session.lastActivity, session.createdAt)
-        let expirationInterval = TimeInterval(codexPlaceholderPruneDelayNs) / 1_000_000_000
+        guard let delayNs = codexPlaceholderPruneDelayNs(for: session) else { return false }
+        let expirationInterval = TimeInterval(delayNs) / 1_000_000_000
         return referenceDate.timeIntervalSince(anchor) >= expirationInterval
+    }
+
+    private func codexPlaceholderPruneDelayNs(for session: SessionState?) -> UInt64? {
+        guard let session, session.provider == .codex, isLikelyEmptyCodexPlaceholder(session) else {
+            return nil
+        }
+
+        switch session.ingress {
+        case .hookBridge:
+            return codexHookPlaceholderPruneDelayNs
+        case .codexAppServer:
+            return codexAppServerPlaceholderPruneDelayNs
+        }
     }
 
     private func isLikelyEmptyCodexPlaceholder(_ session: SessionState) -> Bool {
         guard session.provider == .codex else { return false }
-        guard session.chatItems.isEmpty else { return false }
-        guard case .none = session.intervention else { return false }
         guard session.phase == .idle || session.phase == .ended || session.phase == .processing else { return false }
-
-        let hasDisplayContent =
-            (session.sessionName?.isEmpty == false)
-            || (session.previewText?.isEmpty == false)
-            || (session.conversationInfo.summary?.isEmpty == false)
-            || (session.conversationInfo.firstUserMessage?.isEmpty == false)
-            || (session.conversationInfo.lastMessage?.isEmpty == false)
-            || (session.latestHookMessage?.isEmpty == false)
-
-        if hasDisplayContent {
-            return false
-        }
-
-        return session.clientInfo.sessionFilePath?.isEmpty != false
+        return session.isLikelyEmptyCodexPlaceholderForUI
+            || session.isLikelyTransientCodexContinuationPlaceholder
     }
 }

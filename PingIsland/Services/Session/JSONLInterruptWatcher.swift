@@ -49,7 +49,12 @@ class JSONLInterruptWatcher {
             if FileManager.default.fileExists(atPath: qoderPath) {
                 self.filePath = qoderPath
             } else {
-                self.filePath = NSHomeDirectory() + "/.claude/projects/" + projectDir + "/" + sessionId + ".jsonl"
+                let qoderWorkPath = NSHomeDirectory() + "/.qoderwork/projects/" + projectDir + "/" + sessionId + ".jsonl"
+                if FileManager.default.fileExists(atPath: qoderWorkPath) {
+                    self.filePath = qoderWorkPath
+                } else {
+                    self.filePath = NSHomeDirectory() + "/.claude/projects/" + projectDir + "/" + sessionId + ".jsonl"
+                }
             }
         }
     }

@@ -17,12 +17,25 @@ class SessionMonitor: ObservableObject {
 
     private var cancellables = Set<AnyCancellable>()
     private var hasStarted = false
+    private var allSessions: [SessionState] = []
 
     init() {
         SessionStore.shared.sessionsPublisher
             .receive(on: DispatchQueue.main)
             .sink { [weak self] sessions in
                 self?.updateFromSessions(sessions)
+            }
+            .store(in: &cancellables)
+
+        Timer.publish(every: 60, on: .main, in: .common)
+            .autoconnect()
+            .sink { [weak self] _ in
+                self?.refreshVisibleSessions()
+                Task {
+                    await SessionStore.shared.process(
+                        .pruneTimedOutExternalContinuations(now: Date())
+                    )
+                }
             }
             .store(in: &cancellables)
 
@@ -39,6 +52,19 @@ class SessionMonitor: ObservableObject {
             onEvent: { event in
                 Task {
                     await SessionStore.shared.process(.hookReceived(event))
+
+                    if let autoAnswer = await MainActor.run(body: { Self.defaultQoderWorkAutoAnswer(for: event) }) {
+                        await MainActor.run {
+                            HookSocketServer.shared.respondToIntervention(
+                                toolUseId: autoAnswer.toolUseId,
+                                decision: "answer",
+                                updatedInput: autoAnswer.updatedInput
+                            )
+                        }
+                        await SessionStore.shared.process(
+                            .interventionResolved(sessionId: event.sessionId, nextPhase: .processing)
+                        )
+                    }
 
                     if event.event == "PostToolUse",
                        let toolUseId = event.toolUseId,
@@ -105,7 +131,8 @@ class SessionMonitor: ObservableObject {
             }
 
             if session.ingress == .codexAppServer {
-                await CodexAppServerMonitor.shared.approve(threadId: sessionId, forSession: forSession)
+                let resolvedSessionId = await SessionStore.shared.resolvedCodexSessionId(for: sessionId)
+                await CodexAppServerMonitor.shared.approve(threadId: resolvedSessionId, forSession: forSession)
                 return
             }
 
@@ -129,7 +156,8 @@ class SessionMonitor: ObservableObject {
             }
 
             if session.ingress == .codexAppServer {
-                await CodexAppServerMonitor.shared.deny(threadId: sessionId)
+                let resolvedSessionId = await SessionStore.shared.resolvedCodexSessionId(for: sessionId)
+                await CodexAppServerMonitor.shared.deny(threadId: resolvedSessionId)
                 return
             }
 
@@ -154,7 +182,8 @@ class SessionMonitor: ObservableObject {
             }
 
             if session.ingress == .codexAppServer {
-                await CodexAppServerMonitor.shared.answer(threadId: sessionId, answers: answers)
+                let resolvedSessionId = await SessionStore.shared.resolvedCodexSessionId(for: sessionId)
+                await CodexAppServerMonitor.shared.answer(threadId: resolvedSessionId, answers: answers)
                 return
             }
 
@@ -179,10 +208,11 @@ class SessionMonitor: ObservableObject {
 
     func loadCodexThread(sessionId: String) async throws -> CodexThreadSnapshot {
         let session = await SessionStore.shared.session(for: sessionId)
+        let resolvedSessionId = await SessionStore.shared.resolvedCodexSessionId(for: sessionId)
 
         do {
             let snapshot = try await CodexAppServerMonitor.shared.readThread(
-                threadId: sessionId,
+                threadId: resolvedSessionId,
                 includeTurns: true
             )
             if !snapshot.historyItems.isEmpty || session?.clientInfo.sessionFilePath == nil {
@@ -207,8 +237,9 @@ class SessionMonitor: ObservableObject {
     }
 
     func continueCodexThread(sessionId: String, expectedTurnId: String, text: String) async throws {
+        let resolvedSessionId = await SessionStore.shared.resolvedCodexSessionId(for: sessionId)
         try await CodexAppServerMonitor.shared.continueThread(
-            threadId: sessionId,
+            threadId: resolvedSessionId,
             expectedTurnId: expectedTurnId,
             text: text
         )
@@ -224,8 +255,23 @@ class SessionMonitor: ObservableObject {
     // MARK: - State Update
 
     private func updateFromSessions(_ sessions: [SessionState]) {
-        instances = sessions
-        pendingInstances = sessions.filter { $0.needsAttention }
+        allSessions = sessions
+        refreshVisibleSessions()
+    }
+
+    private func refreshVisibleSessions() {
+        let visibleSessions = filteredVisibleSessions(from: allSessions)
+        instances = visibleSessions
+        pendingInstances = visibleSessions.filter { $0.needsAttention }
+    }
+
+    private func filteredVisibleSessions(from sessions: [SessionState]) -> [SessionState] {
+        let primaryVisibleSessions = sessions.filter { !$0.shouldHideFromPrimaryUI }
+        return primaryVisibleSessions.filter { candidate in
+            !primaryVisibleSessions.contains { other in
+                candidate.shouldHideAsDuplicateCodexPlaceholder(comparedTo: other)
+            }
+        }
     }
 
     // MARK: - History Loading (for UI)
@@ -237,9 +283,8 @@ class SessionMonitor: ObservableObject {
         }
     }
 
-    private func updatedHookToolInput(for intervention: SessionIntervention, answers: [String: [String]]) -> [String: Any]? {
-        guard let rawJSON = intervention.metadata["toolInputJSON"],
-              let data = rawJSON.data(using: .utf8),
+    private nonisolated static func updatedHookToolInput(rawJSON: String, answers: [String: [String]]) -> [String: Any]? {
+        guard let data = rawJSON.data(using: .utf8),
               let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else {
             return nil
@@ -267,6 +312,47 @@ class SessionMonitor: ObservableObject {
 
         updated["answers"] = encodedAnswers
         return updated
+    }
+
+    private func updatedHookToolInput(for intervention: SessionIntervention, answers: [String: [String]]) -> [String: Any]? {
+        guard let rawJSON = intervention.metadata["toolInputJSON"] else {
+            return nil
+        }
+
+        return Self.updatedHookToolInput(rawJSON: rawJSON, answers: answers)
+    }
+
+    nonisolated static func defaultAnswers(for intervention: SessionIntervention) -> [String: [String]] {
+        intervention.questions.reduce(into: [String: [String]]()) { partial, question in
+            guard let firstOption = question.options.first?.title, !firstOption.isEmpty else { return }
+            partial[question.id] = [firstOption]
+        }
+    }
+
+    nonisolated static func defaultQoderWorkAutoAnswer(
+        for event: HookEvent
+    ) -> (toolUseId: String, updatedInput: [String: Any])? {
+        let isQoderWork =
+            event.clientInfo.profileID == "qoderwork"
+            || event.clientInfo.bundleIdentifier == "com.qoder.work"
+
+        guard isQoderWork,
+              let toolUseId = event.toolUseId,
+              let intervention = event.intervention,
+              intervention.kind == .question,
+              let rawJSON = intervention.metadata["toolInputJSON"]
+        else {
+            return nil
+        }
+
+        let answers = defaultAnswers(for: intervention)
+        guard !answers.isEmpty,
+              let updatedInput = updatedHookToolInput(rawJSON: rawJSON, answers: answers)
+        else {
+            return nil
+        }
+
+        return (toolUseId, updatedInput)
     }
 
     private func loadCodexRolloutFallback(

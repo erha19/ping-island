@@ -2,7 +2,8 @@
 //  TerminalSessionFocuser.swift
 //  PingIsland
 //
-//  Focuses a specific terminal tab/session by TTY when the host app supports scripting.
+//  Focuses a specific terminal tab/session using stable terminal identifiers when
+//  the host app supports scripting, falling back to TTY matching when needed.
 //
 
 import AppKit
@@ -12,6 +13,7 @@ import os.log
 actor TerminalSessionFocuser {
     static let shared = TerminalSessionFocuser()
     private let logger = Logger(subsystem: "com.wudanwu.pingisland", category: "TerminalFocus")
+    private let iTermSelectionRetryDelayNanoseconds: UInt64 = 250_000_000
 
     private init() {}
 
@@ -19,6 +21,8 @@ actor TerminalSessionFocuser {
         terminalPid: Int,
         tty: String?,
         candidateProcessIDs: [Int] = [],
+        sessionId: String? = nil,
+        clientInfo: SessionClientInfo? = nil,
         workspacePath: String? = nil,
         launchURL: String? = nil
     ) async -> Bool {
@@ -31,6 +35,9 @@ actor TerminalSessionFocuser {
             }
         }) else {
             logger.debug("No running app found for terminal pid \(terminalPid, privacy: .public)")
+            await FocusDiagnosticsStore.shared.record(
+                "TerminalFocus no-running-app terminalPid=\(terminalPid) tty=\(tty ?? "nil") sessionId=\(sessionId ?? "nil")"
+            )
             return false
         }
 
@@ -39,13 +46,17 @@ actor TerminalSessionFocuser {
         let logTTY = tty ?? "unknown"
 
         logger.debug("Attempting scripted focus terminalPid=\(terminalPid, privacy: .public) bundle=\(bundleIdentifier, privacy: .public) tty=\(logTTY, privacy: .public)")
+        await FocusDiagnosticsStore.shared.record(
+            "TerminalFocus start terminalPid=\(terminalPid) bundle=\(bundleIdentifier) tty=\(logTTY) sessionId=\(sessionId ?? "nil") clientSession=\(clientInfo?.terminalSessionIdentifier ?? "nil") iTermSession=\(clientInfo?.iTermSessionIdentifier ?? "nil")"
+        )
 
         if let profile = ClientProfileRegistry.ideExtensionProfile(
             bundleIdentifier: bundleIdentifier,
             appName: localizedName
         ), IDEExtensionInstaller.isInstalled(profile) {
+            let activatedIDEWindow: Bool
             if profile.prefersWorkspaceWindowRouting {
-                _ = await SessionLauncher.routeIDEWorkspaceWindow(
+                activatedIDEWindow = await SessionLauncher.routeIDEWorkspaceWindow(
                     detectedBundleIdentifier: bundleIdentifier,
                     appName: localizedName,
                     workspacePath: workspacePath,
@@ -53,7 +64,7 @@ actor TerminalSessionFocuser {
                     additionalBundleIdentifiers: profile.localAppBundleIdentifiers
                 )
             } else {
-                _ = await MainActor.run {
+                activatedIDEWindow = await MainActor.run {
                     guard let app = NSRunningApplication(processIdentifier: pid_t(terminalPid)) else {
                         return false
                     }
@@ -66,33 +77,133 @@ actor TerminalSessionFocuser {
                 }
             }
 
+            if activatedIDEWindow {
+                _ = await SessionLauncher.waitForIDEWindowActivation(
+                    bundleIdentifiers: [bundleIdentifier] + profile.localAppBundleIdentifiers
+                )
+            }
+
             let pids = candidateProcessIDs.isEmpty ? [terminalPid] : candidateProcessIDs
-            if await focusWithExtension(profile: profile, processIDs: pids) {
+            if await focusWithExtension(
+                profile: profile,
+                processIDs: pids,
+                tty: tty,
+                sessionId: sessionId,
+                clientInfo: clientInfo,
+                workspacePath: workspacePath
+            ) {
                 logger.debug("Focused IDE terminal via URI extension profile=\(profile.id, privacy: .public) pids=\(String(describing: pids), privacy: .public)")
+                await FocusDiagnosticsStore.shared.record(
+                    "TerminalFocus ide-extension success profile=\(profile.id) terminalPid=\(terminalPid)"
+                )
                 return true
             }
         }
 
-        guard let tty else {
-            logger.debug("No tty available for bundle \(bundleIdentifier, privacy: .public); skipping AppleScript fallback")
-            return false
-        }
-
         switch bundleIdentifier {
         case "com.apple.Terminal":
+            guard let tty else {
+                logger.debug("No tty available for Terminal bundle \(bundleIdentifier, privacy: .public); skipping AppleScript fallback")
+                await FocusDiagnosticsStore.shared.record(
+                    "TerminalFocus terminal skip-no-tty terminalPid=\(terminalPid)"
+                )
+                return false
+            }
             return await runAppleScript(lines: terminalScriptLines(for: tty))
         case "com.googlecode.iterm2":
-            return await runAppleScript(lines: iTermScriptLines(for: tty))
+            let iTermSessionIdentifier = clientInfo?.iTermSessionIdentifier ?? clientInfo?.terminalSessionIdentifier
+            guard let selector = iTermScriptSelector(
+                for: tty,
+                sessionIdentifier: iTermSessionIdentifier
+            ) else {
+                logger.debug("No iTerm session identifier or tty available for bundle \(bundleIdentifier, privacy: .public); skipping AppleScript fallback")
+                await FocusDiagnosticsStore.shared.record(
+                    "TerminalFocus iterm skip-no-selector terminalPid=\(terminalPid) tty=\(tty ?? "nil") sessionIdentifier=\(iTermSessionIdentifier ?? "nil")"
+                )
+                return false
+            }
+
+            await FocusDiagnosticsStore.shared.record(
+                "TerminalFocus iterm applescript terminalPid=\(terminalPid) tty=\(tty ?? "nil") normalizedSessionIdentifier=\(normalizedITermSessionIdentifier(iTermSessionIdentifier) ?? "nil")"
+            )
+            return await focusITermSession(terminalPid: terminalPid, selector: selector)
         default:
             logger.debug("No scripted focuser for bundle \(bundleIdentifier, privacy: .public)")
+            await FocusDiagnosticsStore.shared.record(
+                "TerminalFocus unsupported bundle=\(bundleIdentifier) terminalPid=\(terminalPid)"
+            )
             return false
         }
     }
 
-    private func focusWithExtension(profile: ManagedIDEExtensionProfile, processIDs: [Int]) async -> Bool {
-        let queryItems = processIDs
+    func focusHostedSession(
+        sessionId: String? = nil,
+        clientInfo: SessionClientInfo,
+        workspacePath: String? = nil
+    ) async -> Bool {
+        let detectedBundleIdentifier = clientInfo.terminalBundleIdentifier ?? clientInfo.bundleIdentifier
+        let appName = clientInfo.originator ?? clientInfo.name
+        guard let profile = ClientProfileRegistry.ideExtensionProfile(
+            bundleIdentifier: detectedBundleIdentifier,
+            appName: appName
+        ), IDEExtensionInstaller.isInstalled(profile) else {
+            return false
+        }
+
+        return await focusWithExtension(
+            profile: profile,
+            processIDs: [],
+            tty: nil,
+            sessionId: sessionId,
+            clientInfo: clientInfo,
+            workspacePath: workspacePath
+        )
+    }
+
+    private func focusWithExtension(
+        profile: ManagedIDEExtensionProfile,
+        processIDs: [Int],
+        tty: String?,
+        sessionId: String?,
+        clientInfo: SessionClientInfo?,
+        workspacePath: String?
+    ) async -> Bool {
+        var queryItems = processIDs
             .filter { $0 > 0 }
             .map { URLQueryItem(name: "pid", value: String($0)) }
+
+        if let sessionId = sessionId?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !sessionId.isEmpty {
+            queryItems.append(URLQueryItem(name: "sessionId", value: sessionId))
+        }
+
+        if let normalizedTTY = tty?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "/dev/", with: ""),
+           !normalizedTTY.isEmpty {
+            queryItems.append(URLQueryItem(name: "tty", value: normalizedTTY))
+        }
+
+        let resolvedWorkspacePath = workspacePath?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let resolvedWorkspacePath, !resolvedWorkspacePath.isEmpty {
+            queryItems.append(URLQueryItem(name: "cwd", value: resolvedWorkspacePath))
+        }
+
+        if let processName = clientInfo?.processName?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !processName.isEmpty {
+            queryItems.append(URLQueryItem(name: "processName", value: processName))
+        }
+
+        if let terminalSessionIdentifier = clientInfo?.terminalSessionIdentifier?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !terminalSessionIdentifier.isEmpty {
+            queryItems.append(URLQueryItem(name: "terminalSessionId", value: terminalSessionIdentifier))
+        }
+
+        if let iTermSessionIdentifier = clientInfo?.iTermSessionIdentifier?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !iTermSessionIdentifier.isEmpty {
+            queryItems.append(URLQueryItem(name: "iTermSessionId", value: iTermSessionIdentifier))
+        }
+
         guard !queryItems.isEmpty,
               let url = IDEExtensionInstaller.makeURI(
                 profile: profile,
@@ -110,18 +221,36 @@ actor TerminalSessionFocuser {
     private func runAppleScript(lines: [String]) async -> Bool {
         let preview = lines.joined(separator: " | ")
         logger.debug("Running AppleScript: \(preview, privacy: .public)")
+        await FocusDiagnosticsStore.shared.record("TerminalFocus applescript-run \(preview)")
 
-        let result = await ProcessExecutor.shared.runWithResult("/usr/bin/osascript", arguments: lines.flatMap { ["-e", $0] })
+        return await MainActor.run {
+            let source = lines.joined(separator: "\n")
+            var errorInfo: NSDictionary?
+            guard let script = NSAppleScript(source: source) else {
+                logger.error("Failed to create AppleScript object")
+                Task {
+                    await FocusDiagnosticsStore.shared.record("TerminalFocus applescript-create-failed")
+                }
+                return false
+            }
 
-        switch result {
-        case .success(let processResult):
-            let stdout = processResult.output.trimmingCharacters(in: .whitespacesAndNewlines)
-            let stderr = processResult.stderr?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            logger.debug("AppleScript success stdout=\(stdout, privacy: .public) stderr=\(stderr, privacy: .public)")
-            return stdout == "ok"
-        case .failure(let error):
-            logger.error("AppleScript failed: \(error.localizedDescription, privacy: .public)")
-            return false
+            let result = script.executeAndReturnError(&errorInfo)
+            if let errorInfo {
+                logger.error("AppleScript failed: \(String(describing: errorInfo), privacy: .public)")
+                Task {
+                    await FocusDiagnosticsStore.shared.record(
+                        "TerminalFocus applescript-error \(String(describing: errorInfo))"
+                    )
+                }
+                return false
+            }
+
+            let output = result.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            logger.debug("AppleScript success result=\(output, privacy: .public)")
+            Task {
+                await FocusDiagnosticsStore.shared.record("TerminalFocus applescript-result \(output)")
+            }
+            return output == "ok"
         }
     }
 
@@ -149,28 +278,167 @@ actor TerminalSessionFocuser {
         ]
     }
 
-    private func iTermScriptLines(for tty: String) -> [String] {
-        let normalizedTTY = tty.replacingOccurrences(of: "/dev/", with: "")
-        let fullTTY = "/dev/\(normalizedTTY)"
+    private func focusITermSession(terminalPid: Int, selector: ITermScriptSelector) async -> Bool {
+        let restoreResult = await runAppleScript(lines: iTermRestoreScriptLines(for: selector))
+        await FocusDiagnosticsStore.shared.record(
+            "TerminalFocus iterm restore-result terminalPid=\(terminalPid) success=\(restoreResult)"
+        )
+        guard restoreResult else {
+            return false
+        }
 
-        return [
-            "set shortTTY to \"\(normalizedTTY)\"",
-            "set fullTTY to \"\(fullTTY)\"",
+        let waitResult = await SessionLauncher.waitForIDEWindowActivation(
+            bundleIdentifiers: ["com.googlecode.iterm2"],
+            timeoutNanoseconds: iTermSelectionRetryDelayNanoseconds
+        )
+        await FocusDiagnosticsStore.shared.record(
+            "TerminalFocus iterm wait-visible terminalPid=\(terminalPid) success=\(waitResult)"
+        )
+
+        let selectionLines = iTermSelectionScriptLines(for: selector)
+        if await runAppleScript(lines: selectionLines) {
+            await FocusDiagnosticsStore.shared.record(
+                "TerminalFocus iterm select-result terminalPid=\(terminalPid) success=true attempt=1"
+            )
+            return true
+        }
+
+        await FocusDiagnosticsStore.shared.record(
+            "TerminalFocus iterm select-result terminalPid=\(terminalPid) success=false attempt=1"
+        )
+        try? await Task.sleep(nanoseconds: iTermSelectionRetryDelayNanoseconds)
+
+        let retryResult = await runAppleScript(lines: selectionLines)
+        await FocusDiagnosticsStore.shared.record(
+            "TerminalFocus iterm select-result terminalPid=\(terminalPid) success=\(retryResult) attempt=2"
+        )
+        return retryResult
+    }
+
+    private struct ITermScriptSelector {
+        let sessionIdentifier: String?
+        let tty: String?
+    }
+
+    private func iTermScriptSelector(for tty: String?, sessionIdentifier: String?) -> ITermScriptSelector? {
+        let normalizedSessionIdentifier = normalizedITermSessionIdentifier(sessionIdentifier)
+        let usableSessionIdentifier = normalizedSessionIdentifier?.isEmpty == false ? normalizedSessionIdentifier : nil
+        let normalizedTTY = tty?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "/dev/", with: "")
+        let usableTTY = normalizedTTY?.isEmpty == false ? normalizedTTY : nil
+
+        guard usableSessionIdentifier != nil || usableTTY != nil else {
+            return nil
+        }
+
+        return ITermScriptSelector(
+            sessionIdentifier: usableSessionIdentifier,
+            tty: usableTTY
+        )
+    }
+
+    private func iTermRestoreScriptLines(for selector: ITermScriptSelector) -> [String] {
+        var lines: [String] = [
             "tell application id \"com.googlecode.iterm2\"",
             "repeat with theWindow in windows",
             "repeat with theTab in tabs of theWindow",
-            "repeat with theSession in sessions of theTab",
-            "set sessionTTY to tty of theSession",
-            "if sessionTTY is shortTTY or sessionTTY is fullTTY then",
-            "select theSession",
-            "activate",
-            "return \"ok\"",
-            "end if",
+            "repeat with theSession in sessions of theTab"
+        ]
+
+        appendITermSelectorMatch(lines: &lines, selector: selector) {
+            [
+                "set targetWindowId to (id of theWindow)",
+                "set resolvedWindow to first window whose id is targetWindowId",
+                "set miniaturized of resolvedWindow to false",
+                "select resolvedWindow",
+                "activate",
+                "return \"ok\""
+            ]
+        }
+
+        lines.append(contentsOf: [
             "end repeat",
             "end repeat",
             "end repeat",
             "return \"not-found\"",
             "end tell"
+        ])
+
+        return lines
+    }
+
+    private func iTermSelectionScriptLines(for selector: ITermScriptSelector) -> [String] {
+        var lines: [String] = [
+            "tell application id \"com.googlecode.iterm2\"",
+            "repeat with theWindow in windows",
+            "repeat with theTab in tabs of theWindow",
+            "repeat with theSession in sessions of theTab"
         ]
+
+        appendITermSelectorMatch(lines: &lines, selector: selector) {
+            [
+                "set targetWindowId to (id of theWindow)",
+                "set resolvedWindow to first window whose id is targetWindowId",
+                "select theTab",
+                "select theSession",
+                "select resolvedWindow",
+                "activate",
+                "return \"ok\""
+            ]
+        }
+
+        lines.append(contentsOf: [
+            "end repeat",
+            "end repeat",
+            "end repeat",
+            "return \"not-found\"",
+            "end tell"
+        ])
+
+        return lines
+    }
+
+    private func appendITermSelectorMatch(
+        lines: inout [String],
+        selector: ITermScriptSelector,
+        body: () -> [String]
+    ) {
+        if let usableSessionIdentifier = selector.sessionIdentifier {
+            lines.append(contentsOf: [
+                "try",
+                "if (id of theSession as text) is \"\(usableSessionIdentifier)\" then"
+            ])
+            lines.append(contentsOf: body())
+            lines.append(contentsOf: [
+                "end if",
+                "end try"
+            ])
+        }
+
+        if let usableTTY = selector.tty {
+            let fullTTY = "/dev/\(usableTTY)"
+            lines.append(contentsOf: [
+                "set sessionTTY to tty of theSession",
+                "if sessionTTY is \"\(usableTTY)\" or sessionTTY is \"\(fullTTY)\" then"
+            ])
+            lines.append(contentsOf: body())
+            lines.append("end if")
+        }
+    }
+
+    private func normalizedITermSessionIdentifier(_ sessionIdentifier: String?) -> String? {
+        guard let rawValue = sessionIdentifier?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+            !rawValue.isEmpty else {
+            return nil
+        }
+
+        if let suffix = rawValue.split(separator: ":", omittingEmptySubsequences: false).last,
+           !suffix.isEmpty {
+            return String(suffix)
+        }
+
+        return rawValue
     }
 }

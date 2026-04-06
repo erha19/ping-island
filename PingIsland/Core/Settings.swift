@@ -383,7 +383,7 @@ final class AppSettingsStore: ObservableObject {
     private init() {
         let legacyNotificationSound = NotificationSound(
             rawValue: defaults.string(forKey: Keys.notificationSound) ?? ""
-        ) ?? .pop
+        ) ?? .blow
         let usageValueModeRaw = defaults.string(forKey: Keys.usageValueMode)
         let soundThemeModeRaw = defaults.string(forKey: Keys.soundThemeMode)
         let notchPetStyleRaw = defaults.string(forKey: Keys.notchPetStyle)
@@ -425,7 +425,7 @@ final class AppSettingsStore: ObservableObject {
         _usageValueMode = Published(initialValue: UsageValueMode(rawValue: usageValueModeRaw ?? "") ?? .used)
         _contentFontSize = Published(initialValue: defaults.object(forKey: Keys.contentFontSize) as? Double ?? 13)
         _maxPanelHeight = Published(initialValue: defaults.object(forKey: Keys.maxPanelHeight) as? Double ?? 580)
-        _notchPetStyle = Published(initialValue: NotchPetStyle(rawValue: notchPetStyleRaw ?? "") ?? .crab)
+        _notchPetStyle = Published(initialValue: NotchPetStyle(rawValue: notchPetStyleRaw ?? "") ?? .cat)
         _notchDisplayMode = Published(initialValue: NotchDisplayMode(rawValue: notchDisplayModeRaw ?? "") ?? .compact)
 
         isBootstrapping = false

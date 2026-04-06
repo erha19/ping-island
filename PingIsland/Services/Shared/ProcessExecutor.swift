@@ -47,12 +47,10 @@ protocol ProcessExecuting: Sendable {
 }
 
 /// Default implementation using Foundation.Process
-actor ProcessExecutor: ProcessExecuting {
-    /// Shared instance (nonisolated(unsafe) required for actor init in static context)
-    nonisolated(unsafe) static let shared = ProcessExecutor()
+struct ProcessExecutor: ProcessExecuting {
+    static let shared = ProcessExecutor()
 
-    /// Logger for process execution (nonisolated static for cross-context access)
-    nonisolated static let logger = Logger(subsystem: "com.wudanwu.pingisland", category: "ProcessExecutor")
+    static let logger = Logger(subsystem: "com.wudanwu.pingisland", category: "ProcessExecutor")
 
     private init() {}
 
@@ -122,7 +120,7 @@ actor ProcessExecutor: ProcessExecuting {
 
     /// Run a command synchronously (for use in nonisolated contexts)
     /// Returns Result instead of optional for better error handling
-    nonisolated func runSync(_ executable: String, arguments: [String]) -> Result<String, ProcessExecutorError> {
+    func runSync(_ executable: String, arguments: [String]) -> Result<String, ProcessExecutorError> {
         let process = Process()
         let stdoutPipe = Pipe()
         let stderrPipe = Pipe()
@@ -182,7 +180,7 @@ extension ProcessExecutor {
     }
 
     /// Run a command synchronously, returning nil on failure (backwards compatible)
-    nonisolated func runSyncOrNil(_ executable: String, arguments: [String]) -> String? {
+    func runSyncOrNil(_ executable: String, arguments: [String]) -> String? {
         switch runSync(executable, arguments: arguments) {
         case .success(let output):
             return output

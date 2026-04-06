@@ -11,6 +11,7 @@ import SwiftUI
 struct SessionListView: View {
     @ObservedObject var sessionMonitor: SessionMonitor
     @ObservedObject var viewModel: NotchViewModel
+    @State private var expandedSessionStableID: String?
 
     var body: some View {
         if sessionMonitor.instances.isEmpty {
@@ -55,7 +56,9 @@ struct SessionListView: View {
                 ForEach(sortedInstances) { session in
                     InstanceRow(
                         session: session,
+                        isExpanded: expandedSessionStableID == session.stableId,
                         onActivate: { activateSession(session) },
+                        onToggleExpanded: { toggleExpanded(session) },
                         onFocus: { activateSession(session) },
                         onChat: { openChat(session) },
                         onArchive: { archiveSession(session) },
@@ -76,6 +79,10 @@ struct SessionListView: View {
             )
         }
         .scrollBounceBehavior(.basedOnSize)
+        .onChange(of: sortedInstances.map(\.stableId)) { _, stableIDs in
+            guard let expandedSessionStableID, !stableIDs.contains(expandedSessionStableID) else { return }
+            self.expandedSessionStableID = nil
+        }
     }
 
     // MARK: - Actions
@@ -83,6 +90,16 @@ struct SessionListView: View {
     private func activateSession(_ session: SessionState) {
         Task {
             _ = await SessionLauncher.shared.activate(session)
+        }
+    }
+
+    private func toggleExpanded(_ session: SessionState) {
+        withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
+            if expandedSessionStableID == session.stableId {
+                expandedSessionStableID = nil
+            } else {
+                expandedSessionStableID = session.stableId
+            }
         }
     }
 
@@ -107,7 +124,9 @@ struct SessionListView: View {
 
 struct InstanceRow: View {
     let session: SessionState
+    let isExpanded: Bool
     let onActivate: () -> Void
+    let onToggleExpanded: () -> Void
     let onFocus: () -> Void
     let onChat: () -> Void
     let onArchive: () -> Void
@@ -119,8 +138,6 @@ struct InstanceRow: View {
     @State private var isYabaiAvailable = false
     @ObservedObject private var settings = AppSettings.shared
 
-    private let claudeOrange = Color(red: 0.85, green: 0.47, blue: 0.34)
-    private let codexBlue = Color(red: 0.36, green: 0.62, blue: 1.0)
     private let spinnerSymbols = ["·", "✢", "✳", "∗", "✻", "✽"]
     private let spinnerTimer = Timer.publish(every: 0.15, on: .main, in: .common).autoconnect()
 
@@ -142,14 +159,12 @@ struct InstanceRow: View {
         session.clientDisplayName
     }
 
+    private var interactionLabel: String {
+        session.interactionDisplayName
+    }
+
     private var providerColor: Color {
-        if session.clientInfo.brand == .codebuddy {
-            return TerminalColors.codebuddy
-        }
-        if session.clientInfo.brand == .qoder {
-            return Color(red: 0.12, green: 0.88, blue: 0.56)
-        }
-        return session.provider == .claude ? claudeOrange : codexBlue
+        session.clientTintColor
     }
 
     private var titleFontSize: CGFloat {
@@ -164,36 +179,62 @@ struct InstanceRow: View {
         settings.showAgentDetail
     }
 
+    private var isMinimalCompactPresentation: Bool {
+        session.shouldUseMinimalCompactPresentation
+    }
+
+    private var isCollapsedCompactPresentation: Bool {
+        isMinimalCompactPresentation && !isExpanded
+    }
+
+    private var projectTitleFontSize: CGFloat {
+        max(11, titleFontSize - 1)
+    }
+
+    private var sessionTitleFontSize: CGFloat {
+        if isCollapsedCompactPresentation {
+            return max(11, titleFontSize - 1)
+        }
+        return max(12, titleFontSize + 1)
+    }
+
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
+        HStack(alignment: isCollapsedCompactPresentation ? .center : .top, spacing: 10) {
             leadingContent
 
-            VStack(alignment: .trailing, spacing: 6) {
-                HStack(spacing: 6) {
-                    metaBadge(providerLabel, tint: providerColor.opacity(0.2))
-                    if let ideHostBadgeLabel = session.ideHostBadgeLabel {
+            if isCollapsedCompactPresentation {
+                compactMetaLine
+            } else {
+                VStack(alignment: .trailing, spacing: 6) {
+                    HStack(spacing: 6) {
+                        metaBadge(providerLabel, tint: providerColor.opacity(0.2))
+                        if let ideHostBadgeLabel = session.ideHostBadgeLabel {
+                            metaBadge(
+                                ideHostBadgeLabel,
+                                tint: ideHostBadgeTint,
+                                foreground: .white.opacity(0.9)
+                            )
+                        }
                         metaBadge(
-                            ideHostBadgeLabel,
-                            tint: ideHostBadgeTint,
-                            foreground: .white.opacity(0.9)
+                            timeLabel,
+                            tint: Color.white.opacity(0.1),
+                            foreground: .white.opacity(0.64),
+                            fontDesign: .monospaced
                         )
                     }
-                    metaBadge(
-                        timeLabel,
-                        tint: Color.white.opacity(0.1),
-                        foreground: .white.opacity(0.64),
-                        fontDesign: .monospaced
-                    )
-                }
 
-                trailingActions
-                    .transition(.opacity.combined(with: .scale(scale: 0.9)))
+                    trailingActions
+                        .transition(.opacity.combined(with: .scale(scale: 0.9)))
+                }
             }
         }
         .padding(.leading, 10)
         .padding(.trailing, 12)
-        .padding(.vertical, 8)
+        .padding(.vertical, isCollapsedCompactPresentation ? 5 : 8)
         .animation(.spring(response: 0.3, dampingFraction: 0.8), value: session.phase)
+        .animation(.spring(response: 0.28, dampingFraction: 0.82), value: isExpanded)
+        .saturation(isCollapsedCompactPresentation ? 0 : 1)
+        .opacity(isCollapsedCompactPresentation ? 0.72 : 1)
         .background(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .fill(rowBackgroundColor)
@@ -209,41 +250,52 @@ struct InstanceRow: View {
     }
 
     private var leadingContent: some View {
-        HStack(alignment: .top, spacing: 10) {
+        Group {
+            if isMinimalCompactPresentation {
+                baseLeadingContent
+                    .onTapGesture(count: 2) { onActivate() }
+                    .onTapGesture { onToggleExpanded() }
+            } else {
+                baseLeadingContent
+                    .onTapGesture(count: 2) { onChat() }
+                    .onTapGesture { onActivate() }
+            }
+        }
+    }
+
+    private var baseLeadingContent: some View {
+        HStack(alignment: isCollapsedCompactPresentation ? .center : .top, spacing: 10) {
             avatarView
 
-            VStack(alignment: .leading, spacing: 5) {
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text(session.projectName)
-                        .font(.system(size: max(11, titleFontSize - 1), weight: .semibold))
-                        .foregroundColor(.white.opacity(0.84))
-                        .lineLimit(1)
+            VStack(alignment: .leading, spacing: isCollapsedCompactPresentation ? 0 : 5) {
+                titleLine
+                    .lineLimit(1)
+                    .truncationMode(.tail)
 
-                    Text("·")
-                        .font(.system(size: max(11, titleFontSize - 1), weight: .bold))
-                        .foregroundColor(.white.opacity(0.34))
-
-                    Text(session.displayTitle)
-                        .font(.system(size: max(12, titleFontSize + 1), weight: .bold))
-                        .foregroundColor(.white)
-                        .lineLimit(1)
+                if shouldShowExpandedDetails {
+                    previewLinesView
+                        .transition(
+                            .opacity.combined(with: .move(edge: .top))
+                        )
                 }
-
-                previewLinesView
             }
 
             Spacer(minLength: 10)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
-        .gesture(
-            TapGesture(count: 2)
-                .onEnded { onChat() }
-                .exclusively(
-                    before: TapGesture()
-                        .onEnded { onActivate() }
-                )
-        )
+    }
+
+    private var titleLine: Text {
+        Text(session.projectName)
+            .font(.system(size: projectTitleFontSize, weight: .semibold))
+            .foregroundColor(.white.opacity(0.84))
+        + Text(" · ")
+            .font(.system(size: projectTitleFontSize, weight: .bold))
+            .foregroundColor(.white.opacity(0.34))
+        + Text(session.displayTitle)
+            .font(.system(size: sessionTitleFontSize, weight: .bold))
+            .foregroundColor(.white)
     }
 
     @ViewBuilder
@@ -254,16 +306,16 @@ struct InstanceRow: View {
 
             NotchPetIcon(
                 style: settings.notchPetStyle,
-                size: 18,
+                size: isCollapsedCompactPresentation ? 16 : 18,
                 tone: avatarTone,
-                isProcessing: session.phase.isActive
+                activity: session.phase.isActive ? .processing : .idle
             )
             .padding(6)
 
             avatarStatusBadge
                 .offset(x: 2, y: 2)
         }
-        .frame(width: 34, height: 34)
+        .frame(width: isCollapsedCompactPresentation ? 30 : 34, height: isCollapsedCompactPresentation ? 30 : 34)
     }
 
     @ViewBuilder
@@ -297,12 +349,6 @@ struct InstanceRow: View {
     }
 
     private var avatarTone: NotchIndicatorTone {
-        if session.needsQuestionResponse {
-            return .intervention
-        }
-        if isWaitingForApproval {
-            return .warning
-        }
         if session.clientInfo.brand == .codebuddy {
             return .codebuddy
         }
@@ -345,6 +391,15 @@ struct InstanceRow: View {
     }
 
     private var rowBackgroundColor: Color {
+        if isExpanded {
+            if session.needsQuestionResponse {
+                return TerminalColors.blue.opacity(isHovered ? 0.2 : 0.16)
+            }
+            if isWaitingForApproval {
+                return TerminalColors.amber.opacity(isHovered ? 0.18 : 0.13)
+            }
+            return Color.white.opacity(isHovered ? 0.1 : 0.07)
+        }
         if session.needsQuestionResponse {
             return TerminalColors.blue.opacity(isHovered ? 0.16 : 0.11)
         }
@@ -358,6 +413,15 @@ struct InstanceRow: View {
     }
 
     private var rowBorderColor: Color {
+        if isExpanded {
+            if session.needsQuestionResponse {
+                return TerminalColors.blue.opacity(0.28)
+            }
+            if isWaitingForApproval {
+                return TerminalColors.amber.opacity(0.26)
+            }
+            return Color.white.opacity(isHovered ? 0.16 : 0.12)
+        }
         if session.needsQuestionResponse {
             return TerminalColors.blue.opacity(0.16)
         }
@@ -367,21 +431,42 @@ struct InstanceRow: View {
         return Color.white.opacity(isHovered ? 0.08 : 0.04)
     }
 
+    private var shouldShowExpandedDetails: Bool {
+        !isMinimalCompactPresentation || isExpanded
+    }
+
+    private var compactMetaLine: some View {
+        HStack(spacing: 5) {
+            metaBadge(
+                providerLabel,
+                tint: providerColor.opacity(0.18),
+                foreground: .white.opacity(0.86),
+                compact: true
+            )
+
+            metaBadge(
+                timeLabel,
+                tint: Color.white.opacity(0.08),
+                foreground: .white.opacity(0.6),
+                fontDesign: .monospaced,
+                compact: true
+            )
+        }
+    }
+
     @ViewBuilder
     private var previewLinesView: some View {
-        if !session.shouldUseMinimalCompactPresentation {
-            VStack(alignment: .leading, spacing: 3) {
-                ForEach(previewLines) { line in
-                    HStack(alignment: .firstTextBaseline, spacing: 4) {
-                        Text(line.prefix)
-                            .font(.system(size: detailFontSize, weight: .semibold))
-                            .foregroundColor(line.prefixColor)
+        VStack(alignment: .leading, spacing: 3) {
+            ForEach(previewLines) { line in
+                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    Text(line.prefix)
+                        .font(.system(size: detailFontSize, weight: .semibold))
+                        .foregroundColor(line.prefixColor)
 
-                        Text(line.text)
-                            .font(.system(size: detailFontSize, weight: .medium))
-                            .foregroundColor(line.textColor)
-                            .lineLimit(1)
-                    }
+                    Text(line.text)
+                        .font(.system(size: detailFontSize, weight: .medium))
+                        .foregroundColor(line.textColor)
+                        .lineLimit(1)
                 }
             }
         }
@@ -406,7 +491,7 @@ struct InstanceRow: View {
             lines.append(
                 QueuePreviewLine(
                     id: "assistant",
-                    prefix: session.providerDisplayName + "：",
+                    prefix: assistantPrefixLabel + "：",
                     prefixColor: assistantPrefixColor,
                     text: assistantLine,
                     textColor: assistantTextColor
@@ -429,14 +514,15 @@ struct InstanceRow: View {
         return Array(lines.prefix(detailsEnabled ? 2 : 1))
     }
 
+    private var assistantPrefixLabel: String {
+        if session.needsQuestionResponse || isWaitingForApproval {
+            return interactionLabel
+        }
+        return session.providerDisplayName
+    }
+
     private var assistantPrefixColor: Color {
-        if session.needsQuestionResponse {
-            return TerminalColors.blue.opacity(0.96)
-        }
-        if isWaitingForApproval {
-            return TerminalColors.amber.opacity(0.96)
-        }
-        return providerColor.opacity(0.92)
+        providerColor.opacity(session.phase.isActive ? 0.96 : 0.92)
     }
 
     private var assistantTextColor: Color {
@@ -540,14 +626,15 @@ struct InstanceRow: View {
         _ text: String,
         tint: Color,
         foreground: Color = .white.opacity(0.92),
-        fontDesign: Font.Design = .default
+        fontDesign: Font.Design = .default,
+        compact: Bool = false
     ) -> some View {
         Text(text)
-            .font(.system(size: 10, weight: .semibold, design: fontDesign))
+            .font(.system(size: compact ? 9 : 10, weight: .semibold, design: fontDesign))
             .monospacedDigit()
             .foregroundColor(foreground)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
+            .padding(.horizontal, compact ? 6 : 8)
+            .padding(.vertical, compact ? 2 : 4)
             .background(tint)
             .clipShape(Capsule())
     }

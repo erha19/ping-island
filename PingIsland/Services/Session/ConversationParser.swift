@@ -121,11 +121,9 @@ actor ConversationParser {
 
             if type == "user" && !isMeta {
                 if let message = json["message"] as? [String: Any],
-                   let msgContent = message["content"] as? String {
-                    if !msgContent.hasPrefix("<command-name>") && !msgContent.hasPrefix("<local-command") && !msgContent.hasPrefix("Caveat:") {
-                        firstUserMessage = Self.truncateMessage(msgContent, maxLength: 50)
-                        break
-                    }
+                   let msgContent = Self.firstDisplayText(in: message) {
+                    firstUserMessage = Self.truncateMessage(msgContent, maxLength: 50)
+                    break
                 }
             }
         }
@@ -143,28 +141,23 @@ actor ConversationParser {
                 if type == "user" || type == "assistant" {
                     let isMeta = json["isMeta"] as? Bool ?? false
                     if !isMeta, let message = json["message"] as? [String: Any] {
-                        if let msgContent = message["content"] as? String {
-                            if !msgContent.hasPrefix("<command-name>") && !msgContent.hasPrefix("<local-command") && !msgContent.hasPrefix("Caveat:") {
-                                lastMessage = msgContent
+                        for block in Self.contentBlocks(in: message).reversed() {
+                            let blockType = block["type"] as? String
+                            if blockType == "tool_use" {
+                                let toolName = block["name"] as? String ?? "Tool"
+                                let toolInput = Self.formatToolInput(block["input"] as? [String: Any], toolName: toolName)
+                                lastMessage = toolInput
+                                lastMessageRole = "tool"
+                                lastToolName = toolName
+                                break
+                            } else if blockType == "text",
+                                      let text = block["text"] as? String,
+                                      let sanitizedText = SessionTextSanitizer.sanitizedDisplayText(text),
+                                      Self.isDisplayableText(sanitizedText),
+                                      !sanitizedText.hasPrefix("[Request interrupted by user") {
+                                lastMessage = sanitizedText
                                 lastMessageRole = type
-                            }
-                        } else if let contentArray = message["content"] as? [[String: Any]] {
-                            for block in contentArray.reversed() {
-                                let blockType = block["type"] as? String
-                                if blockType == "tool_use" {
-                                    let toolName = block["name"] as? String ?? "Tool"
-                                    let toolInput = Self.formatToolInput(block["input"] as? [String: Any], toolName: toolName)
-                                    lastMessage = toolInput
-                                    lastMessageRole = "tool"
-                                    lastToolName = toolName
-                                    break
-                                } else if blockType == "text", let text = block["text"] as? String {
-                                    if !text.hasPrefix("[Request interrupted by user") {
-                                        lastMessage = text
-                                        lastMessageRole = type
-                                        break
-                                    }
-                                }
+                                break
                             }
                         }
                     }
@@ -174,13 +167,11 @@ actor ConversationParser {
             if !foundLastUserMessage && type == "user" {
                 let isMeta = json["isMeta"] as? Bool ?? false
                 if !isMeta, let message = json["message"] as? [String: Any] {
-                    if let msgContent = message["content"] as? String {
-                        if !msgContent.hasPrefix("<command-name>") && !msgContent.hasPrefix("<local-command") && !msgContent.hasPrefix("Caveat:") {
-                            if let timestampStr = json["timestamp"] as? String {
-                                lastUserMessageDate = formatter.date(from: timestampStr)
-                            }
-                            foundLastUserMessage = true
+                    if Self.firstDisplayText(in: message) != nil {
+                        if let timestampStr = json["timestamp"] as? String {
+                            lastUserMessageDate = formatter.date(from: timestampStr)
                         }
+                        foundLastUserMessage = true
                     }
                 }
             }
@@ -202,6 +193,38 @@ actor ConversationParser {
             firstUserMessage: firstUserMessage,
             lastUserMessageDate: lastUserMessageDate
         )
+    }
+
+    private static func contentBlocks(in message: [String: Any]) -> [[String: Any]] {
+        if let text = message["content"] as? String {
+            return [["type": "text", "text": text]]
+        }
+
+        if let contentArray = message["content"] as? [[String: Any]] {
+            return contentArray
+        }
+
+        return []
+    }
+
+    private static func firstDisplayText(in message: [String: Any]) -> String? {
+        for block in contentBlocks(in: message) {
+            guard block["type"] as? String == "text",
+                  let text = block["text"] as? String,
+                  let sanitizedText = SessionTextSanitizer.sanitizedDisplayText(text),
+                  isDisplayableText(sanitizedText) else {
+                continue
+            }
+            return sanitizedText
+        }
+
+        return nil
+    }
+
+    private static func isDisplayableText(_ text: String) -> Bool {
+        !text.hasPrefix("<command-name>")
+            && !text.hasPrefix("<local-command")
+            && !text.hasPrefix("Caveat:")
     }
 
     /// Format tool input for display in instance list
@@ -468,6 +491,11 @@ actor ConversationParser {
             return qoderPath
         }
 
+        let qoderWorkPath = NSHomeDirectory() + "/.qoderwork/projects/" + projectDir + "/" + sessionId + ".jsonl"
+        if FileManager.default.fileExists(atPath: qoderWorkPath) {
+            return qoderWorkPath
+        }
+
         let claudePath = NSHomeDirectory() + "/.claude/projects/" + projectDir + "/" + sessionId + ".jsonl"
         if FileManager.default.fileExists(atPath: claudePath) {
             return claudePath
@@ -629,24 +657,27 @@ actor ConversationParser {
         var blocks: [MessageBlock] = []
 
         if let content = messageDict["content"] as? String {
+            let sanitizedContent = SessionTextSanitizer.sanitizedDisplayText(content)
             if content.hasPrefix("<command-name>") || content.hasPrefix("<local-command") || content.hasPrefix("Caveat:") {
                 return nil
             }
-            if content.hasPrefix("[Request interrupted by user") {
+            guard let sanitizedContent else { return nil }
+            if sanitizedContent.hasPrefix("[Request interrupted by user") {
                 blocks.append(.interrupted)
             } else {
-                blocks.append(.text(content))
+                blocks.append(.text(sanitizedContent))
             }
         } else if let contentArray = messageDict["content"] as? [[String: Any]] {
             for block in contentArray {
                 if let blockType = block["type"] as? String {
                     switch blockType {
                     case "text":
-                        if let text = block["text"] as? String {
-                            if text.hasPrefix("[Request interrupted by user") {
+                        if let text = block["text"] as? String,
+                           let sanitizedText = SessionTextSanitizer.sanitizedDisplayText(text) {
+                            if sanitizedText.hasPrefix("[Request interrupted by user") {
                                 blocks.append(.interrupted)
                             } else {
-                                blocks.append(.text(text))
+                                blocks.append(.text(sanitizedText))
                             }
                         }
                     case "tool_use":
@@ -663,8 +694,9 @@ actor ConversationParser {
                             blocks.append(.toolUse(toolBlock))
                         }
                     case "thinking":
-                        if let thinking = block["thinking"] as? String {
-                            blocks.append(.thinking(thinking))
+                        if let thinking = block["thinking"] as? String,
+                           let sanitizedThinking = SessionTextSanitizer.sanitizedDisplayText(thinking) {
+                            blocks.append(.thinking(sanitizedThinking))
                         }
                     default:
                         break

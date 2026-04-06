@@ -56,12 +56,21 @@ private enum SettingsCategory: String, CaseIterable, Identifiable {
 
 @MainActor
 final class SettingsPanelViewModel: ObservableObject {
+    struct HookReinstallFeedback: Equatable {
+        let message: String
+        let isError: Bool
+    }
+
     @Published var launchAtLogin = false
     @Published private(set) var hookInstallationStates: [String: Bool] = [:]
     @Published private(set) var ideExtensionInstallationStates: [String: Bool] = [:]
     @Published var accessibilityEnabled = false
     @Published var isExportingLogs = false
     @Published var logExportStatus = "导出最近 6 小时的 Island 诊断日志与配置"
+    @Published private(set) var reinstallingHookProfileID: String?
+    @Published private(set) var hookReinstallFeedbacks: [String: HookReinstallFeedback] = [:]
+
+    private var hookFeedbackClearTasks: [String: Task<Void, Never>] = [:]
 
     var visibleHookProfiles: [ManagedHookClientProfile] {
         ClientProfileRegistry.managedHookProfiles.filter { profile in
@@ -72,8 +81,11 @@ final class SettingsPanelViewModel: ObservableObject {
 
     var visibleIDEExtensionProfiles: [ManagedIDEExtensionProfile] {
         ClientProfileRegistry.ideExtensionProfiles.filter { profile in
-            profile.alwaysVisibleInSettings
+            profile.showsInSettings
+                && (
+                    profile.alwaysVisibleInSettings
                 || ClientAppLocator.isInstalled(bundleIdentifiers: profile.localAppBundleIdentifiers)
+                )
         }
     }
 
@@ -113,8 +125,35 @@ final class SettingsPanelViewModel: ObservableObject {
     }
 
     func reinstallHooks(for profile: ManagedHookClientProfile) {
-        HookInstaller.reinstall(profile)
-        refreshHookInstallationStates()
+        guard reinstallingHookProfileID == nil else { return }
+
+        hookFeedbackClearTasks[profile.id]?.cancel()
+        hookFeedbackClearTasks[profile.id] = nil
+        hookReinstallFeedbacks[profile.id] = nil
+        reinstallingHookProfileID = profile.id
+
+        Task {
+            await Task.yield()
+
+            HookInstaller.reinstall(profile)
+            let didInstall = HookInstaller.isInstalled(profile)
+
+            try? await Task.sleep(nanoseconds: 450_000_000)
+
+            refreshHookInstallationStates()
+            reinstallingHookProfileID = nil
+            hookReinstallFeedbacks[profile.id] = HookReinstallFeedback(
+                message: didInstall ? "重新安装成功" : "重新安装失败，请稍后重试",
+                isError: !didInstall
+            )
+
+            hookFeedbackClearTasks[profile.id] = Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 2_500_000_000)
+                guard !Task.isCancelled else { return }
+                hookReinstallFeedbacks[profile.id] = nil
+                hookFeedbackClearTasks[profile.id] = nil
+            }
+        }
     }
 
     func uninstallHooks(for profile: ManagedHookClientProfile) {
@@ -135,6 +174,14 @@ final class SettingsPanelViewModel: ObservableObject {
     func uninstallIDEExtension(for profile: ManagedIDEExtensionProfile) {
         IDEExtensionInstaller.uninstall(profile)
         refreshIDEExtensionInstallationStates()
+    }
+
+    func isReinstallingHooks(for profile: ManagedHookClientProfile) -> Bool {
+        reinstallingHookProfileID == profile.id
+    }
+
+    func hookReinstallFeedback(for profile: ManagedHookClientProfile) -> HookReinstallFeedback? {
+        hookReinstallFeedbacks[profile.id]
     }
 
     func authorizeIDEExtension(for profile: ManagedIDEExtensionProfile) {
@@ -257,6 +304,7 @@ private struct SettingsPanelContentView: View {
     @ObservedObject private var soundPacks = SoundPackCatalog.shared
     @ObservedObject private var updateManager = UpdateManager.shared
     @State private var selectedCategory: SettingsCategory? = .general
+    @State private var pendingHookReinstallProfile: ManagedHookClientProfile?
 
     var body: some View {
         ZStack {
@@ -294,6 +342,26 @@ private struct SettingsPanelContentView: View {
         }
         .onChange(of: soundPacks.availablePacks) { _, _ in
             ensureValidSelectedSoundPack()
+        }
+        .alert(
+            "重新安装 Hooks？",
+            isPresented: Binding(
+                get: { pendingHookReinstallProfile != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        pendingHookReinstallProfile = nil
+                    }
+                }
+            ),
+            presenting: pendingHookReinstallProfile
+        ) { profile in
+            Button("取消", role: .cancel) {}
+            Button("重新安装") {
+                viewModel.reinstallHooks(for: profile)
+                pendingHookReinstallProfile = nil
+            }
+        } message: { profile in
+            Text("这会重新写入 \(profile.title) 的 Island hooks 配置，并保留其他非 Island hooks。")
         }
     }
 
@@ -391,6 +459,7 @@ private struct SettingsPanelContentView: View {
                                     )
                                 }
                                 .buttonStyle(.plain)
+                                .accessibilityIdentifier("settings.sidebar.\(category.rawValue)")
                             }
                         }
                     }
@@ -510,6 +579,7 @@ private struct SettingsPanelContentView: View {
             .padding(.bottom, 24)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .accessibilityIdentifier("settings.detail.\(currentCategory.rawValue)")
         .background(
             UnevenRoundedRectangle(
                 topLeadingRadius: 0,
@@ -595,7 +665,7 @@ private struct SettingsPanelContentView: View {
             SettingsSectionCard(title: "行为") {
                 SettingsToggleLine(
                     title: "全屏时隐藏",
-                    subtitle: "仅在无刘海屏的全屏空间里隐藏 Island，刘海屏顶部会继续展示",
+                    subtitle: "无刘海屏会在全屏时收起到顶部中央触发区；刘海屏会收缩为空白系统刘海，hover 后再展示 Island 内容",
                     isOn: $settings.hideInFullscreen
                 )
                 SettingsLineDivider()
@@ -706,7 +776,7 @@ private struct SettingsPanelContentView: View {
             SettingsSectionCard(title: "通知") {
                 SettingsToggleLine(
                     title: "启用提示音",
-                    subtitle: "Claude 开始处理、需要你介入、完成时可分别播放不同音效。",
+                    subtitle: "不同阶段可分别播放不同音效，适用于 Claude、Codex 等会话。",
                     isOn: $settings.soundEnabled
                 )
                 SettingsLineDivider()
@@ -734,14 +804,8 @@ private struct SettingsPanelContentView: View {
                     ForEach(NotificationEvent.allCases) { event in
                         SoundEventSettingsLine(
                             event: event,
-                            isEnabled: Binding(
-                                get: { AppSettings.isSoundEnabled(for: event) },
-                                set: { AppSettings.setSoundEnabled($0, for: event) }
-                            ),
-                            selectedSound: Binding(
-                                get: { AppSettings.sound(for: event) },
-                                set: { AppSettings.setSound($0, for: event) }
-                            )
+                            isEnabled: soundEnabledBinding(for: event),
+                            selectedSound: soundBinding(for: event)
                         ) {
                             AppSettings.playSound(for: event)
                         }
@@ -749,17 +813,11 @@ private struct SettingsPanelContentView: View {
                 }
             } else {
                 SettingsSectionCard(title: "主题音效包") {
-                    SettingsInfoLine(
-                        title: "当前主题包",
-                        subtitle: "从 `~/.openpeon/packs`、项目 `.claude/hooks/peon-ping/packs`，或手动导入的目录中选择。"
-                    ) {
+                    SoundPackSourceInfoLine {
                         soundPackPicker
                     }
 
-                    SettingsActionLine(
-                        title: "导入本地主题包",
-                        subtitle: "选择一个包含 `openpeon.json` 的目录，将其加入可选列表。"
-                    ) {
+                    SoundPackImportActionLine {
                         if soundPacks.importPack(), soundPacks.pack(for: settings.selectedSoundPackPath) == nil {
                             settings.selectedSoundPackPath = soundPacks.availablePacks.first?.rootURL.path ?? ""
                         }
@@ -803,8 +861,10 @@ private struct SettingsPanelContentView: View {
                         HookManagementLine(
                             profile: profile,
                             isInstalled: viewModel.isHookInstalled(profile),
+                            isReinstalling: viewModel.isReinstallingHooks(for: profile),
+                            reinstallFeedback: viewModel.hookReinstallFeedback(for: profile),
                             installAction: { viewModel.installHooks(for: profile) },
-                            reinstallAction: { viewModel.reinstallHooks(for: profile) },
+                            reinstallAction: { pendingHookReinstallProfile = profile },
                             uninstallAction: { viewModel.uninstallHooks(for: profile) }
                         )
 
@@ -867,6 +927,21 @@ private struct SettingsPanelContentView: View {
                     handleUpdateAction()
                 } accessory: {
                     updateAccessory
+                }
+
+                if updateManager.canShowReleaseNotes {
+                    SettingsLineDivider()
+
+                    SettingsActionLine(
+                        title: updateManager.releaseNotesActionTitle,
+                        subtitle: updateManager.releaseNotesActionSubtitle
+                    ) {
+                        updateManager.showReleaseNotes()
+                    } accessory: {
+                        Image(systemName: "doc.text.magnifyingglass")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(.white.opacity(0.5))
+                    }
                 }
             }
 
@@ -973,6 +1048,36 @@ private struct SettingsPanelContentView: View {
         )
     }
 
+    private func soundEnabledBinding(for event: NotificationEvent) -> Binding<Bool> {
+        switch event {
+        case .processingStarted:
+            return $settings.processingStartSoundEnabled
+        case .attentionRequired:
+            return $settings.attentionRequiredSoundEnabled
+        case .taskCompleted:
+            return $settings.taskCompletedSoundEnabled
+        case .taskError:
+            return $settings.taskErrorSoundEnabled
+        case .resourceLimit:
+            return $settings.resourceLimitSoundEnabled
+        }
+    }
+
+    private func soundBinding(for event: NotificationEvent) -> Binding<NotificationSound> {
+        switch event {
+        case .processingStarted:
+            return $settings.processingStartSound
+        case .attentionRequired:
+            return $settings.attentionRequiredSound
+        case .taskCompleted:
+            return $settings.taskCompletedSound
+        case .taskError:
+            return $settings.taskErrorSound
+        case .resourceLimit:
+            return $settings.resourceLimitSound
+        }
+    }
+
     private func screenToken(for screen: NSScreen) -> String {
         let identifier = ScreenIdentifier(screen: screen)
         return "\(identifier.displayID ?? 0)-\(identifier.localizedName)"
@@ -1010,7 +1115,7 @@ private struct SettingsPanelContentView: View {
     private var updateSubtitle: String {
         switch updateManager.state {
         case .idle:
-            return "检查 Island 是否有新版本"
+            return updateManager.isConfigured ? "检查 Island 是否有新版本" : updateManager.configurationStatus.message
         case .upToDate:
             return "当前已经是最新版本"
         case .checking:
@@ -1084,6 +1189,7 @@ struct SettingsWindowView: View {
             onClose: onClose,
             onMinimize: onMinimize
         )
+        .accessibilityIdentifier("settings.root")
     }
 }
 
@@ -1233,6 +1339,8 @@ private struct SettingsLineDivider: View {
 private struct HookManagementLine: View {
     let profile: ManagedHookClientProfile
     let isInstalled: Bool
+    let isReinstalling: Bool
+    let reinstallFeedback: SettingsPanelViewModel.HookReinstallFeedback?
     let installAction: () -> Void
     let reinstallAction: () -> Void
     let uninstallAction: () -> Void
@@ -1272,11 +1380,40 @@ private struct HookManagementLine: View {
 
             HStack(spacing: 10) {
                 if isInstalled {
-                    HookManagementButton(title: "重新安装", tint: tint, action: reinstallAction)
-                    HookManagementButton(title: "卸载", tint: TerminalColors.amber, action: uninstallAction)
+                    HookManagementButton(
+                        title: isReinstalling ? "重新安装中..." : "重新安装",
+                        tint: tint,
+                        isLoading: isReinstalling,
+                        isDisabled: isReinstalling,
+                        action: reinstallAction
+                    )
+                    HookManagementButton(
+                        title: "卸载",
+                        tint: TerminalColors.amber,
+                        isDisabled: isReinstalling,
+                        action: uninstallAction
+                    )
                 } else {
-                    HookManagementButton(title: "安装", tint: tint, action: installAction)
+                    HookManagementButton(
+                        title: "安装",
+                        tint: tint,
+                        isDisabled: isReinstalling,
+                        action: installAction
+                    )
                 }
+            }
+
+            if let reinstallFeedback {
+                HStack(spacing: 8) {
+                    Image(systemName: reinstallFeedback.isError ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundColor(reinstallFeedback.isError ? TerminalColors.amber : TerminalColors.green)
+
+                    Text(reinstallFeedback.message)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.76))
+                }
+                .padding(.horizontal, 2)
             }
         }
         .padding(.horizontal, 18)
@@ -1425,18 +1562,7 @@ private struct IDEExtensionManagementIcon: View {
 }
 
 private func brandTint(_ brand: SessionClientBrand) -> Color {
-    switch brand {
-    case .claude:
-        return Color(red: 0.95, green: 0.67, blue: 0.28)
-    case .codebuddy:
-        return TerminalColors.codebuddy
-    case .codex:
-        return TerminalColors.blue
-    case .qoder:
-        return Color(red: 0.12, green: 0.88, blue: 0.56)
-    case .neutral:
-        return Color.white.opacity(0.72)
-    }
+    brand.tintColor
 }
 
 private func ideTint(_ profileID: String) -> Color {
@@ -1449,6 +1575,8 @@ private func ideTint(_ profileID: String) -> Color {
         return Color(red: 0.98, green: 0.61, blue: 0.28)
     case "qoder-extension":
         return Color(red: 0.12, green: 0.88, blue: 0.56)
+    case "qoderwork-extension":
+        return Color(red: 0.12, green: 0.88, blue: 0.56)
     default:
         return Color.white.opacity(0.72)
     }
@@ -1457,25 +1585,37 @@ private func ideTint(_ profileID: String) -> Color {
 private struct HookManagementButton: View {
     let title: String
     let tint: Color
+    var isLoading = false
+    var isDisabled = false
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            Text(title)
-                .font(.system(size: 11, weight: .bold))
-                .foregroundColor(.white)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 7)
-                .background(
-                    Capsule(style: .continuous)
-                        .fill(tint.opacity(0.22))
-                )
-                .overlay(
-                    Capsule(style: .continuous)
-                        .strokeBorder(tint.opacity(0.34), lineWidth: 1)
-                )
+            HStack(spacing: 6) {
+                if isLoading {
+                    ProgressView()
+                        .controlSize(.small)
+                        .tint(.white.opacity(0.86))
+                }
+
+                Text(title)
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundColor(.white)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(tint.opacity(0.22))
+            )
+            .overlay(
+                Capsule(style: .continuous)
+                    .strokeBorder(tint.opacity(0.34), lineWidth: 1)
+            )
         }
         .buttonStyle(.plain)
+        .disabled(isDisabled)
+        .opacity(isDisabled ? 0.72 : 1)
     }
 }
 
@@ -1559,6 +1699,43 @@ private struct SettingsInfoLine<Accessory: View>: View {
     }
 }
 
+private struct SoundPackSourceInfoLine<Accessory: View>: View {
+    @ViewBuilder let accessory: Accessory
+
+    private let sourcePaths = [
+        "~/.openpeon/packs",
+        ".claude/hooks/peon-ping/packs"
+    ]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .center, spacing: 16) {
+                Text("当前主题包")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.white)
+
+                Spacer(minLength: 12)
+
+                accessory
+            }
+
+            Text("自动扫描以下目录，也支持手动导入本地目录。")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(.white.opacity(0.58))
+                .fixedSize(horizontal: false, vertical: true)
+
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(sourcePaths, id: \.self) { path in
+                    SettingsCodeCapsule(text: path, systemImage: "folder")
+                }
+            }
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
 private struct SettingsActionLine<Accessory: View>: View {
     let title: String
     let subtitle: String?
@@ -1573,6 +1750,75 @@ private struct SettingsActionLine<Accessory: View>: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+}
+
+private struct SoundPackImportActionLine<Accessory: View>: View {
+    let action: () -> Void
+    @ViewBuilder let accessory: Accessory
+
+    var body: some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .center, spacing: 16) {
+                    Text("导入本地主题包")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.white)
+
+                    Spacer(minLength: 12)
+
+                    accessory
+                }
+
+                Text("选择一个本地目录，导入后会加入可选列表。")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.white.opacity(0.58))
+                    .fixedSize(horizontal: false, vertical: true)
+
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("目录内需要包含以下清单文件")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.42))
+
+                    SettingsCodeCapsule(text: "openpeon.json", systemImage: "doc.text")
+                }
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+private struct SettingsCodeCapsule: View {
+    let text: String
+    let systemImage: String
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: systemImage)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundColor(.white.opacity(0.42))
+
+            Text(text)
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .foregroundColor(.white.opacity(0.74))
+                .lineLimit(1)
+                .truncationMode(.middle)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color.white.opacity(0.05))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
+        )
     }
 }
 
@@ -1797,9 +2043,9 @@ private struct NotchDisplayModeCard: View {
     }
 
     private func notchMock(width: CGFloat, height: CGFloat) -> some View {
-        let actualClosedWidth: CGFloat = 266
+        let actualClosedWidth: CGFloat = 274
         let actualSideWidth: CGFloat = 30
-        let actualCenterWidth: CGFloat = 178
+        let actualCenterWidth: CGFloat = 186
         let sideSlotWidth = width * (actualSideWidth / actualClosedWidth)
         let centerSlotWidth = width * (actualCenterWidth / actualClosedWidth)
 
@@ -1950,6 +2196,7 @@ private struct SoundEventSettingsLine: View {
                             Text(sound.rawValue).tag(sound)
                         }
                     }
+                    .id(selectedSound)
                     .labelsHidden()
                     .settingsMenuPicker(width: 148)
                     .disabled(!isEnabled)

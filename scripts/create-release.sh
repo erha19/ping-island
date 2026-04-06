@@ -19,6 +19,7 @@ WEBSITE_PUBLIC="$WEBSITE_DIR/public"
 APP_PATH="$EXPORT_PATH/Ping Island.app"
 APP_NAME="PingIsland"
 KEYCHAIN_PROFILE="PingIsland"
+NOTES_DIR="$PROJECT_DIR/releases/notes"
 
 echo "=== Creating Release ==="
 echo ""
@@ -37,7 +38,7 @@ BUILD=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$APP_PATH/Contents/
 echo "Version: $VERSION (build $BUILD)"
 echo ""
 
-mkdir -p "$RELEASE_DIR"
+mkdir -p "$RELEASE_DIR" "$NOTES_DIR"
 
 # ============================================
 # Step 1: Notarize the app
@@ -89,6 +90,8 @@ echo ""
 echo "=== Step 2: Creating DMG ==="
 
 DMG_PATH="$RELEASE_DIR/$APP_NAME-$VERSION.dmg"
+NOTES_PATH="$NOTES_DIR/$VERSION.md"
+NOTES_ASSET_PATH="$RELEASE_DIR/$APP_NAME-$VERSION.md"
 
 # Remove existing DMG if present
 if [ -f "$DMG_PATH" ]; then
@@ -117,6 +120,13 @@ else
 fi
 
 echo "DMG created: $DMG_PATH"
+
+if [ -f "$NOTES_PATH" ]; then
+    cp "$NOTES_PATH" "$NOTES_ASSET_PATH"
+    echo "Release notes copied: $NOTES_ASSET_PATH"
+else
+    echo "WARNING: No markdown release notes found at $NOTES_PATH"
+fi
 echo ""
 
 # ============================================
@@ -188,6 +198,9 @@ else
 
         # Copy DMG to appcast directory
         cp "$DMG_PATH" "$APPCAST_DIR/"
+        if [ -f "$NOTES_ASSET_PATH" ]; then
+            cp "$NOTES_ASSET_PATH" "$APPCAST_DIR/"
+        fi
 
         # Generate appcast.xml
         "$GENERATE_APPCAST" --ed-key-file "$KEYS_DIR/eddsa_private_key" "$APPCAST_DIR"
@@ -211,9 +224,17 @@ else
     if gh release view "v$VERSION" --repo "$GITHUB_REPO" &>/dev/null; then
         echo "Release v$VERSION already exists. Updating..."
         gh release upload "v$VERSION" "$DMG_PATH" --repo "$GITHUB_REPO" --clobber
+        if [ -f "$NOTES_ASSET_PATH" ]; then
+            gh release upload "v$VERSION" "$NOTES_ASSET_PATH" --repo "$GITHUB_REPO" --clobber
+        fi
     else
         echo "Creating release v$VERSION..."
-        gh release create "v$VERSION" "$DMG_PATH" \
+        RELEASE_ASSETS=("$DMG_PATH")
+        if [ -f "$NOTES_ASSET_PATH" ]; then
+            RELEASE_ASSETS+=("$NOTES_ASSET_PATH")
+        fi
+
+        gh release create "v$VERSION" "${RELEASE_ASSETS[@]}" \
             --repo "$GITHUB_REPO" \
             --title "Ping Island v$VERSION" \
             --notes "## Ping Island v$VERSION
@@ -242,6 +263,9 @@ echo "=== Step 6: Updating Website ==="
 if [ -d "$WEBSITE_PUBLIC" ] && [ -f "$RELEASE_DIR/appcast/appcast.xml" ]; then
     # Copy appcast to website
     cp "$RELEASE_DIR/appcast/appcast.xml" "$WEBSITE_PUBLIC/appcast.xml"
+    if [ -f "$NOTES_ASSET_PATH" ]; then
+        cp "$NOTES_ASSET_PATH" "$WEBSITE_PUBLIC/"
+    fi
 
     # Update the download URL in appcast to point to GitHub releases
     if [ -n "$GITHUB_DOWNLOAD_URL" ]; then
@@ -264,6 +288,9 @@ EOF
     cd "$WEBSITE_DIR"
     if [ -d ".git" ]; then
         git add public/appcast.xml src/config.ts
+        if [ -f "$NOTES_ASSET_PATH" ]; then
+            git add "public/$APP_NAME-$VERSION.md"
+        fi
         if ! git diff --cached --quiet; then
             git commit -m "Update appcast for v$VERSION"
             echo "Committed appcast update"
@@ -297,6 +324,9 @@ echo "Files created:"
 echo "  - DMG: $DMG_PATH"
 if [ -f "$RELEASE_DIR/appcast/appcast.xml" ]; then
     echo "  - Appcast: $RELEASE_DIR/appcast/appcast.xml"
+fi
+if [ -f "$NOTES_ASSET_PATH" ]; then
+    echo "  - Release notes: $NOTES_ASSET_PATH"
 fi
 if [ -n "$GITHUB_DOWNLOAD_URL" ]; then
     echo "  - GitHub: https://github.com/$GITHUB_REPO/releases/tag/v$VERSION"

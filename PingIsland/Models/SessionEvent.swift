@@ -30,6 +30,9 @@ enum SessionEvent: Sendable {
     /// A question/approval intervention was resolved inside the app
     case interventionResolved(sessionId: String, nextPhase: SessionPhase)
 
+    /// Periodic cleanup for stale external-continuation interventions
+    case pruneTimedOutExternalContinuations(now: Date)
+
     // MARK: - File Events (from ConversationParser)
 
     /// JSONL file was updated with new content
@@ -133,9 +136,23 @@ struct ToolCompletionResult: Sendable {
 // MARK: - Hook Event Extensions
 
 extension HookEvent {
+    private nonisolated static let questionToolNames: Set<String> = [
+        "askuserquestion",
+        "askfollowupquestion"
+    ]
+
     private nonisolated func normalizedJSONValue(_ value: Any) -> Any {
         if let codable = value as? AnyCodable {
             return normalizedJSONValue(codable.value)
+        }
+        if let string = value as? String {
+            let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+            if (trimmed.hasPrefix("{") || trimmed.hasPrefix("[")),
+               let data = trimmed.data(using: .utf8),
+               let decoded = try? JSONSerialization.jsonObject(with: data) {
+                return normalizedJSONValue(decoded)
+            }
+            return string
         }
         if let dictionary = value as? [String: Any] {
             return dictionary.mapValues { normalizedJSONValue($0) }
@@ -157,11 +174,40 @@ extension HookEvent {
         return tool
             .lowercased()
             .replacingOccurrences(of: "_", with: "")
+            .replacingOccurrences(of: "-", with: "")
+    }
+
+    private nonisolated var isQoderWorkQuestionEvent: Bool {
+        (clientInfo.profileID == "qoderwork" || clientInfo.bundleIdentifier == "com.qoder.work")
+            && Self.questionToolNames.contains(normalizedToolNameForIntervention ?? "")
+            && !(questionPayloads?.isEmpty ?? true)
+    }
+
+    private nonisolated var qoderWorkQuestionInterventionID: String? {
+        guard isQoderWorkQuestionEvent else { return nil }
+        if let toolUseId, !toolUseId.isEmpty {
+            return toolUseId
+        }
+
+        let questionID = questionPayloads?
+            .compactMap { question in
+                (question["id"] as? String)
+                    ?? (question["question"] as? String)
+                    ?? (question["title"] as? String)
+            }
+            .joined(separator: "|")
+
+        guard let questionID, !questionID.isEmpty else { return nil }
+        return "qoderwork-question-\(sessionId)-\(questionID)"
     }
 
     nonisolated var isAskUserQuestionRequest: Bool {
-        event == "PreToolUse"
-            && normalizedToolNameForIntervention == "askuserquestion"
+        if isQoderWorkQuestionEvent {
+            return event == "PreToolUse" || event == "PermissionRequest"
+        }
+
+        return event == "PreToolUse"
+            && Self.questionToolNames.contains(normalizedToolNameForIntervention ?? "")
             && !(questionPayloads?.isEmpty ?? true)
     }
 
@@ -183,7 +229,7 @@ extension HookEvent {
 
     nonisolated var intervention: SessionIntervention? {
         guard isAskUserQuestionRequest, let questions = questionPayloads else { return nil }
-        let providerName = provider.displayName
+        let actorName = clientInfo.interactionLabel(for: provider)
 
         let parsedQuestions = questions.enumerated().compactMap { index, question -> SessionInterventionQuestion? in
             let prompt = (question["question"] as? String)
@@ -201,12 +247,27 @@ extension HookEvent {
                 )
             }
 
+            let normalizedOptions: [SessionInterventionOption]
+            if !options.isEmpty {
+                normalizedOptions = options
+            } else if let stringOptions = question["options"] as? [String], !stringOptions.isEmpty {
+                normalizedOptions = stringOptions.enumerated().map { optionIndex, label in
+                    SessionInterventionOption(
+                        id: "\(index)-option-\(optionIndex)",
+                        title: label,
+                        detail: nil
+                    )
+                }
+            } else {
+                normalizedOptions = []
+            }
+
             return SessionInterventionQuestion(
                 id: question["id"] as? String ?? prompt,
                 header: question["header"] as? String ?? "\(index + 1).",
                 prompt: prompt,
                 detail: question["description"] as? String,
-                options: options,
+                options: normalizedOptions,
                 allowsMultiple: question["isMultiple"] as? Bool
                     ?? question["allowsMultiple"] as? Bool
                     ?? question["multiSelect"] as? Bool
@@ -224,20 +285,27 @@ extension HookEvent {
         guard !parsedQuestions.isEmpty else { return nil }
 
         let title = parsedQuestions.count == 1
-            ? "\(providerName) 的提问"
-            : "\(providerName) 的提问（\(parsedQuestions.count) 个问题）"
+            ? "\(actorName) 的提问"
+            : "\(actorName) 的提问（\(parsedQuestions.count) 个问题）"
         var metadata: [String: String] = ["toolName": "AskUserQuestion"]
         if let toolInputJSONObject,
            let data = try? JSONSerialization.data(withJSONObject: toolInputJSONObject, options: [.sortedKeys]),
            let json = String(data: data, encoding: .utf8) {
             metadata["toolInputJSON"] = json
         }
+        let message: String
+        if isQoderWorkQuestionEvent {
+            metadata["responseMode"] = "external_only"
+            message = "\(actorName) 已在客户端内发起提问，请切回 \(actorName) 完成回答。Island 暂不支持直接提交这类回答。"
+        } else {
+            message = "\(actorName) 需要你补充回答，提交后会继续执行当前会话。"
+        }
 
         return SessionIntervention(
-            id: toolUseId ?? UUID().uuidString,
+            id: qoderWorkQuestionInterventionID ?? toolUseId ?? UUID().uuidString,
             kind: .question,
             title: title,
-            message: "\(providerName) 需要你补充回答，提交后会继续执行当前会话。",
+            message: message,
             options: [],
             questions: parsedQuestions,
             supportsSessionScope: false,
@@ -317,6 +385,8 @@ extension SessionEvent: CustomStringConvertible {
             return "permissionSocketFailed(session: \(sessionId.prefix(8)), tool: \(toolUseId.prefix(12)))"
         case .interventionResolved(let sessionId, let nextPhase):
             return "interventionResolved(session: \(sessionId.prefix(8)), next: \(String(describing: nextPhase)))"
+        case .pruneTimedOutExternalContinuations(let now):
+            return "pruneTimedOutExternalContinuations(now: \(now))"
         case .fileUpdated(let payload):
             return "fileUpdated(session: \(payload.sessionId.prefix(8)), messages: \(payload.messages.count))"
         case .interruptDetected(let sessionId):

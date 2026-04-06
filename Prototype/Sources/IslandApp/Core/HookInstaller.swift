@@ -110,21 +110,51 @@ struct HookInstaller {
     }
 
     func installQoderAssets() throws {
+        try installQoderCompatibleAssets(
+            relativePath: ".qoder/settings.json",
+            clientKind: "qoder",
+            clientName: "Qoder",
+            preToolUseTimeout: nil
+        )
+    }
+
+    func installQoderWorkAssets() throws {
+        try installQoderCompatibleAssets(
+            relativePath: ".qoderwork/settings.json",
+            clientKind: "qoderwork",
+            clientName: "QoderWork",
+            preToolUseTimeout: 86_400
+        )
+    }
+
+    private func installQoderCompatibleAssets(
+        relativePath: String,
+        clientKind: String,
+        clientName: String,
+        preToolUseTimeout: Int?
+    ) throws {
         try ensureSupportFiles()
-        let fileURL = homeDirectory.appending(path: ".qoder/settings.json")
+        let fileURL = homeDirectory.appending(path: relativePath)
         let current = try readJSON(fileURL) ?? [:]
         var updated = current
         var hooks = current["hooks"] as? [String: Any] ?? [:]
 
         let wildcardEvents = ["PreToolUse", "PostToolUse", "PostToolUseFailure", "PermissionRequest", "Notification"]
+        let command = bridgeCommand(
+            source: "claude",
+            extraArguments: [
+                "--client-kind", clientKind,
+                "--client-name", clientName
+            ]
+        )
         for event in ["UserPromptSubmit", "Stop"] {
-            hooks[event] = installHookArray(existing: hooks[event], command: bridgeCommand(source: "claude", extraArguments: ["--client-kind", "qoder"]), matcher: nil)
+            hooks[event] = installHookArray(existing: hooks[event], command: command, matcher: nil)
         }
         for event in wildcardEvents {
             hooks[event] = installHookArray(
                 existing: hooks[event],
-                command: bridgeCommand(source: "claude", extraArguments: ["--client-kind", "qoder"]),
-                timeout: event == "PermissionRequest" ? 86_400 : nil,
+                command: command,
+                timeout: event == "PermissionRequest" ? 86_400 : (event == "PreToolUse" ? preToolUseTimeout : nil),
                 matcher: "*"
             )
         }

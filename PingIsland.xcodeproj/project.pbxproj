@@ -7,10 +7,15 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A1000000000000000000001B /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = A1000000000000000000001C /* Sparkle */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		FD33FD5D2EDF32D7002A6548 /* Ping Island.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Ping Island.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		A10000000000000000000001 /* PingIslandTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PingIslandTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		A10000000000000000000002 /* PingIslandUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PingIslandUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		A1000000000000000000001E /* App.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = App.xcconfig; sourceTree = "<group>"; };
+		A1000000000000000000001F /* LocalSecrets.example.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = LocalSecrets.example.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -32,10 +37,35 @@
 			path = PingIsland;
 			sourceTree = "<group>";
 		};
+		A10000000000000000000003 /* PingIslandTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = PingIslandTests;
+			sourceTree = "<group>";
+		};
+		A10000000000000000000004 /* PingIslandUITests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = PingIslandUITests;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		FD33FD5A2EDF32D7002A6548 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A1000000000000000000001B /* Sparkle in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A10000000000000000000005 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A10000000000000000000006 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -48,7 +78,10 @@
 		FD33FD542EDF32D7002A6548 = {
 			isa = PBXGroup;
 			children = (
+				A10000000000000000000020 /* Config */,
 				FD33FD5F2EDF32D7002A6548 /* PingIsland */,
+				A10000000000000000000003 /* PingIslandTests */,
+				A10000000000000000000004 /* PingIslandUITests */,
 				FD33FD5E2EDF32D7002A6548 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -57,11 +90,39 @@
 			isa = PBXGroup;
 			children = (
 				FD33FD5D2EDF32D7002A6548 /* Ping Island.app */,
+				A10000000000000000000001 /* PingIslandTests.xctest */,
+				A10000000000000000000002 /* PingIslandUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
 		};
+		A10000000000000000000020 /* Config */ = {
+			isa = PBXGroup;
+			children = (
+				A1000000000000000000001E /* App.xcconfig */,
+				A1000000000000000000001F /* LocalSecrets.example.xcconfig */,
+			);
+			path = Config;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
+
+/* Begin PBXContainerItemProxy section */
+		A1000000000000000000000B /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = FD33FD552EDF32D7002A6548 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = FD33FD5C2EDF32D7002A6548;
+			remoteInfo = PingIsland;
+		};
+		A1000000000000000000000C /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = FD33FD552EDF32D7002A6548 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = FD33FD5C2EDF32D7002A6548;
+			remoteInfo = PingIsland;
+		};
+/* End PBXContainerItemProxy section */
 
 /* Begin PBXNativeTarget section */
 		FD33FD5C2EDF32D7002A6548 /* PingIsland */ = {
@@ -81,10 +142,57 @@
 			);
 			name = PingIsland;
 			packageProductDependencies = (
+				A1000000000000000000001C /* Sparkle */,
 			);
 			productName = PingIsland;
 			productReference = FD33FD5D2EDF32D7002A6548 /* Ping Island.app */;
 			productType = "com.apple.product-type.application";
+		};
+		A1000000000000000000000F /* PingIslandTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A10000000000000000000012 /* Build configuration list for PBXNativeTarget "PingIslandTests" */;
+			buildPhases = (
+				A10000000000000000000007 /* Sources */,
+				A10000000000000000000005 /* Frameworks */,
+				A10000000000000000000009 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				A1000000000000000000000D /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				A10000000000000000000003 /* PingIslandTests */,
+			);
+			name = PingIslandTests;
+			packageProductDependencies = (
+			);
+			productName = PingIslandTests;
+			productReference = A10000000000000000000001 /* PingIslandTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		A10000000000000000000010 /* PingIslandUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A10000000000000000000013 /* Build configuration list for PBXNativeTarget "PingIslandUITests" */;
+			buildPhases = (
+				A10000000000000000000008 /* Sources */,
+				A10000000000000000000006 /* Frameworks */,
+				A1000000000000000000000A /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				A1000000000000000000000E /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				A10000000000000000000004 /* PingIslandUITests */,
+			);
+			name = PingIslandUITests;
+			packageProductDependencies = (
+			);
+			productName = PingIslandUITests;
+			productReference = A10000000000000000000002 /* PingIslandUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
 		};
 /* End PBXNativeTarget section */
 
@@ -99,6 +207,14 @@
 					FD33FD5C2EDF32D7002A6548 = {
 						CreatedOnToolsVersion = 26.1.1;
 					};
+					A1000000000000000000000F = {
+						CreatedOnToolsVersion = 26.1.1;
+						TestTargetID = FD33FD5C2EDF32D7002A6548;
+					};
+					A10000000000000000000010 = {
+						CreatedOnToolsVersion = 26.1.1;
+						TestTargetID = FD33FD5C2EDF32D7002A6548;
+					};
 				};
 			};
 			buildConfigurationList = FD33FD582EDF32D7002A6548 /* Build configuration list for PBXProject "PingIsland" */;
@@ -111,6 +227,7 @@
 			mainGroup = FD33FD542EDF32D7002A6548;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
+				A1000000000000000000001D /* XCRemoteSwiftPackageReference "Sparkle" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = FD33FD5E2EDF32D7002A6548 /* Products */;
@@ -118,12 +235,28 @@
 			projectRoot = "";
 			targets = (
 				FD33FD5C2EDF32D7002A6548 /* PingIsland */,
+				A1000000000000000000000F /* PingIslandTests */,
+				A10000000000000000000010 /* PingIslandUITests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
 		FD33FD5B2EDF32D7002A6548 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A10000000000000000000009 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A1000000000000000000000A /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -140,7 +273,34 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		A10000000000000000000007 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A10000000000000000000008 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		A1000000000000000000000D /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = FD33FD5C2EDF32D7002A6548 /* PingIsland */;
+			targetProxy = A1000000000000000000000B /* PBXContainerItemProxy */;
+		};
+		A1000000000000000000000E /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = FD33FD5C2EDF32D7002A6548 /* PingIsland */;
+			targetProxy = A1000000000000000000000C /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		FD33FD662EDF32D8002A6548 /* Debug */ = {
@@ -265,6 +425,7 @@
 		};
 		FD33FD692EDF32D8002A6548 /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = A1000000000000000000001E /* App.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -300,6 +461,7 @@
 		};
 		FD33FD6A2EDF32D8002A6548 /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = A1000000000000000000001E /* App.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -333,7 +495,126 @@
 			};
 			name = Release;
 		};
+		A10000000000000000000014 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 2DKS5U9LV4;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.wudanwu.PingIslandTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Ping Island.app/Contents/MacOS/Ping Island";
+				TEST_TARGET_NAME = PingIsland;
+			};
+			name = Debug;
+		};
+		A10000000000000000000015 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 2DKS5U9LV4;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.wudanwu.PingIslandTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Ping Island.app/Contents/MacOS/Ping Island";
+				TEST_TARGET_NAME = PingIsland;
+			};
+			name = Release;
+		};
+		A10000000000000000000016 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 2DKS5U9LV4;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.wudanwu.PingIslandUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TEST_TARGET_NAME = PingIsland;
+			};
+			name = Debug;
+		};
+		A10000000000000000000017 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 2DKS5U9LV4;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.wudanwu.PingIslandUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TEST_TARGET_NAME = PingIsland;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		A1000000000000000000001D /* XCRemoteSwiftPackageReference "Sparkle" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/sparkle-project/Sparkle";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.8.1;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCConfigurationList section */
 		FD33FD582EDF32D7002A6548 /* Build configuration list for PBXProject "PingIsland" */ = {
@@ -354,7 +635,33 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+		A10000000000000000000012 /* Build configuration list for PBXNativeTarget "PingIslandTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A10000000000000000000014 /* Debug */,
+				A10000000000000000000015 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A10000000000000000000013 /* Build configuration list for PBXNativeTarget "PingIslandUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A10000000000000000000016 /* Debug */,
+				A10000000000000000000017 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 /* End XCConfigurationList section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		A1000000000000000000001C /* Sparkle */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A1000000000000000000001D /* XCRemoteSwiftPackageReference "Sparkle" */;
+			productName = Sparkle;
+		};
+/* End XCSwiftPackageProductDependency section */
 
 	};
 	rootObject = FD33FD552EDF32D7002A6548 /* Project object */;

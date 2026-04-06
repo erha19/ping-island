@@ -169,13 +169,35 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
         }
     }
 
+    nonisolated var interactionOriginDisplayName: String? {
+        guard isHostedInIDE else { return nil }
+        let hostBundleIdentifier = (terminalBundleIdentifier ?? bundleIdentifier)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        if hostBundleIdentifier == "com.qoder.work" || profileID == "qoderwork" {
+            return "QoderWork"
+        }
+        return ideHostProfile?.title
+    }
+
+    nonisolated func interactionLabel(for provider: SessionProvider) -> String {
+        interactionOriginDisplayName ?? badgeLabel(for: provider)
+    }
+
     nonisolated var isQoderFamily: Bool {
         brand == .qoder
     }
 
     nonisolated var ideHostProfile: ManagedIDEExtensionProfile? {
         let detectedBundleIdentifier = terminalBundleIdentifier ?? bundleIdentifier
-        let appName = originator ?? name
+        let appName: String?
+        if let detectedBundleIdentifier,
+           TerminalAppRegistry.isTerminalBundle(detectedBundleIdentifier),
+           !TerminalAppRegistry.isIDEBundle(detectedBundleIdentifier) {
+            appName = nil
+        } else {
+            appName = originator ?? name
+        }
         return ClientProfileRegistry.ideExtensionProfile(
             bundleIdentifier: detectedBundleIdentifier,
             appName: appName
@@ -195,6 +217,13 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
     }
 
     nonisolated func ideHostBadgeLabel(for provider: SessionProvider) -> String? {
+        if profileID == "qoderwork"
+            || (terminalBundleIdentifier ?? bundleIdentifier)?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased() == "com.qoder.work" {
+            return nil
+        }
+
         guard isHostedInIDE,
               let ideTitle = ideHostProfile?.title else {
             return nil
@@ -251,7 +280,13 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
                 normalized.bundleIdentifier = "com.openai.codex"
             }
 
-            if normalized.launchURL == nil,
+            if let sessionId,
+               Self.isLegacyCodexThreadURL(normalized.launchURL) {
+                normalized.launchURL = Self.appLaunchURL(
+                    bundleIdentifier: normalized.bundleIdentifier ?? "com.openai.codex",
+                    sessionId: sessionId
+                )
+            } else if normalized.launchURL == nil,
                let sessionId,
                let bundleIdentifier = normalized.bundleIdentifier {
                 normalized.launchURL = Self.appLaunchURL(
@@ -262,6 +297,61 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
 
         case .claudeCode, .qoder, .custom, .unknown:
             break
+        }
+
+        return normalized
+    }
+
+    nonisolated func normalizedForClaudeRouting() -> SessionClientInfo {
+        var normalized = self
+
+        guard normalized.kind == .qoder else {
+            return normalized
+        }
+
+        let hostBundleIdentifier = (
+            normalized.terminalBundleIdentifier
+                ?? normalized.bundleIdentifier
+        )?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let isQoderWorkHosted =
+            hostBundleIdentifier == "com.qoder.work"
+            || normalized.profileID == "qoderwork"
+            || normalized.name?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "qoderwork"
+            || normalized.name?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "qoder work"
+        let isIDEBundle = hostBundleIdentifier.map { TerminalAppRegistry.isIDEBundle($0) } ?? false
+        let isTerminalHosted =
+            (hostBundleIdentifier.map { TerminalAppRegistry.isTerminalBundle($0) } ?? false)
+            && !isIDEBundle
+            && !isQoderWorkHosted
+        let isQoderIDEHosted =
+            hostBundleIdentifier == "com.qoder.ide"
+            || (
+                normalized.ideHostProfile?.id == "qoder-extension"
+                    && !isQoderWorkHosted
+            )
+            || normalized.profileID == "qoder"
+                && (
+                    normalized.terminalBundleIdentifier?.lowercased() == "com.qoder.ide"
+                        || normalized.bundleIdentifier?.lowercased() == "com.qoder.ide"
+                )
+
+        if isTerminalHosted {
+            normalized.profileID = "qoder-cli"
+            normalized.name = "Qoder CLI"
+        } else if isQoderWorkHosted {
+            normalized.profileID = "qoderwork"
+            normalized.name = "QoderWork"
+        } else if isQoderIDEHosted {
+            normalized.profileID = "qoder"
+            normalized.name = "Qoder"
+        } else if normalized.profileID == "qoder-cli"
+            || normalized.name?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "qoder cli"
+            || normalized.origin?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "cli" {
+            normalized.profileID = "qoder-cli"
+            normalized.name = "Qoder CLI"
+        } else if normalized.profileID == nil, normalized.name == nil {
+            normalized.profileID = "qoder"
+            normalized.name = "Qoder"
         }
 
         return normalized
@@ -391,6 +481,10 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
             return workspacePath.flatMap { workspaceURL(scheme: "vscode", path: $0) }
         case "com.microsoft.vscodeinsiders":
             return workspacePath.flatMap { workspaceURL(scheme: "vscode-insiders", path: $0) }
+        case "com.qoder.work":
+            return workspacePath.flatMap { workspaceURL(scheme: "qoder-work", path: $0) }
+        case "com.qoder.ide":
+            return workspacePath.flatMap { workspaceURL(scheme: "qoder", path: $0) }
         default:
             if normalizedBundleIdentifier.contains("qoder") {
                 return workspacePath.flatMap { workspaceURL(scheme: "qoder", path: $0) }
@@ -407,7 +501,14 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
 
     private nonisolated static func codexThreadURL(threadId: String) -> String {
         let encodedThreadId = threadId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? threadId
-        return "codex://local/\(encodedThreadId)"
+        return "codex://threads/\(encodedThreadId)"
+    }
+
+    private nonisolated static func isLegacyCodexThreadURL(_ url: String?) -> Bool {
+        guard let normalizedURL = url?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() else {
+            return false
+        }
+        return normalizedURL.hasPrefix("codex://local/")
     }
 
     private nonisolated static func workspaceURL(scheme: String, path: String) -> String? {
@@ -441,6 +542,8 @@ struct SessionInterventionQuestion: Equatable, Identifiable, Sendable {
 }
 
 struct SessionIntervention: Equatable, Identifiable, Sendable {
+    private nonisolated static let externalContinuationTimeout: TimeInterval = 5 * 60
+
     let id: String
     let kind: SessionInterventionKind
     let title: String
@@ -452,6 +555,48 @@ struct SessionIntervention: Equatable, Identifiable, Sendable {
 
     nonisolated var supportsInlineResponse: Bool {
         metadata["responseMode"] != "external_only"
+    }
+
+    nonisolated var awaitsExternalContinuation: Bool {
+        metadata["continuationState"] == "awaiting_client_followup"
+    }
+
+    nonisolated var externalContinuationAnsweredAt: Date? {
+        guard let rawValue = metadata["continuationAnsweredAt"],
+              let timestamp = TimeInterval(rawValue) else {
+            return nil
+        }
+        return Date(timeIntervalSince1970: timestamp)
+    }
+
+    nonisolated var externalContinuationDeadline: Date? {
+        guard let answeredAt = externalContinuationAnsweredAt else { return nil }
+        return answeredAt.addingTimeInterval(Self.externalContinuationTimeout)
+    }
+
+    nonisolated func hasTimedOutExternalContinuation(now: Date = Date()) -> Bool {
+        guard let deadline = externalContinuationDeadline else { return false }
+        return now >= deadline
+    }
+
+    nonisolated func markingAwaitingExternalContinuation(
+        actorName: String,
+        answeredAt: Date = Date()
+    ) -> SessionIntervention {
+        var updatedMetadata = metadata
+        updatedMetadata["continuationState"] = "awaiting_client_followup"
+        updatedMetadata["continuationAnsweredAt"] = String(answeredAt.timeIntervalSince1970)
+
+        return SessionIntervention(
+            id: id,
+            kind: kind,
+            title: title,
+            message: "已为 \(actorName) 自动提交答案，正在等待客户端继续返回后续消息。你也可以打开 \(actorName) 查看进展；如果 5 分钟内没有新消息，这条提醒会自动收起。",
+            options: options,
+            questions: questions,
+            supportsSessionScope: supportsSessionScope,
+            metadata: updatedMetadata
+        )
     }
 
     nonisolated var summaryText: String {

@@ -138,55 +138,74 @@ struct NotchPetPalette {
     let outerGlow: Color
 }
 
+enum NotchPetActivity: Equatable {
+    case sleeping
+    case idle
+    case processing
+}
+
 struct NotchPetIcon: View {
     let style: NotchPetStyle
     let size: CGFloat
     let tone: NotchIndicatorTone
-    var isProcessing: Bool = false
+    var activity: NotchPetActivity = .sleeping
 
     @State private var phase: Int = 0
 
     private let animationTimer = Timer.publish(every: 0.18, on: .main, in: .common).autoconnect()
 
-    init(style: NotchPetStyle, size: CGFloat = 16, tone: NotchIndicatorTone = .normal, isProcessing: Bool = false) {
+    init(
+        style: NotchPetStyle,
+        size: CGFloat = 16,
+        tone: NotchIndicatorTone = .normal,
+        activity: NotchPetActivity = .sleeping
+    ) {
         self.style = style
         self.size = size
         self.tone = tone
-        self.isProcessing = isProcessing
+        self.activity = activity
     }
 
     var body: some View {
         let palette = tone.petPalette
-        let frames = style.frames(isProcessing: isProcessing, tone: tone)
+        let frames = style.frames(activity: activity, tone: tone)
 
-        Canvas { context, canvasSize in
-            guard !frames.isEmpty else { return }
+        ZStack(alignment: .topTrailing) {
+            Canvas { context, canvasSize in
+                guard !frames.isEmpty else { return }
 
-            let frame = frames[phase % frames.count]
-            let logicalSize = style.logicalSize
-            let scale = min(canvasSize.width / CGFloat(logicalSize.width), canvasSize.height / CGFloat(logicalSize.height))
-            let pixelSize = max(1, floor(scale))
-            let contentWidth = CGFloat(logicalSize.width) * pixelSize
-            let contentHeight = CGFloat(logicalSize.height) * pixelSize
-            let xOffset = (canvasSize.width - contentWidth) / 2
-            let yOffset = (canvasSize.height - contentHeight) / 2
+                let frame = frames[phase % frames.count]
+                let logicalSize = style.logicalSize
+                let scale = min(canvasSize.width / CGFloat(logicalSize.width), canvasSize.height / CGFloat(logicalSize.height))
+                let pixelSize = max(1, floor(scale))
+                let contentWidth = CGFloat(logicalSize.width) * pixelSize
+                let contentHeight = CGFloat(logicalSize.height) * pixelSize
+                let xOffset = (canvasSize.width - contentWidth) / 2
+                let yOffset = (canvasSize.height - contentHeight) / 2
 
-            for (rowIndex, row) in frame.enumerated() {
-                for (columnIndex, symbol) in row.enumerated() {
-                    guard let color = style.color(for: symbol, palette: palette) else { continue }
-                    let rect = CGRect(
-                        x: xOffset + CGFloat(columnIndex) * pixelSize,
-                        y: yOffset + CGFloat(rowIndex) * pixelSize,
-                        width: pixelSize,
-                        height: pixelSize
-                    )
-                    let glowRect = rect.insetBy(dx: -pixelSize * 0.42, dy: -pixelSize * 0.42)
-                    context.fill(
-                        Path(roundedRect: glowRect, cornerRadius: pixelSize * 0.28),
-                        with: .color(style.glowColor(for: symbol, palette: palette))
-                    )
-                    context.fill(Path(rect), with: .color(color))
+                for (rowIndex, row) in frame.enumerated() {
+                    for (columnIndex, symbol) in row.enumerated() {
+                        guard let color = style.color(for: symbol, palette: palette) else { continue }
+                        let rect = CGRect(
+                            x: xOffset + CGFloat(columnIndex) * pixelSize,
+                            y: yOffset + CGFloat(rowIndex) * pixelSize,
+                            width: pixelSize,
+                            height: pixelSize
+                        )
+                        let glowRect = rect.insetBy(dx: -pixelSize * 0.42, dy: -pixelSize * 0.42)
+                        context.fill(
+                            Path(roundedRect: glowRect, cornerRadius: pixelSize * 0.28),
+                            with: .color(style.glowColor(for: symbol, palette: palette))
+                        )
+                        context.fill(Path(rect), with: .color(color))
+                    }
                 }
+            }
+            .offset(y: sleepOffsetY)
+            .scaleEffect(x: 1, y: sleepScaleY, anchor: .bottom)
+
+            if activity == .sleeping {
+                sleepOverlay(palette: palette)
             }
         }
         .frame(width: size * style.aspectRatio, height: size)
@@ -194,12 +213,64 @@ struct NotchPetIcon: View {
         .onReceive(animationTimer) { _ in
             phase = (phase + 1) % max(1, frames.count)
         }
-        .onChange(of: isProcessing) { _, _ in
+        .onChange(of: activity) { _, _ in
             phase = 0
         }
         .onChange(of: tone) { _, _ in
             phase = 0
         }
+    }
+
+    private var sleepOffsetY: CGFloat {
+        guard activity == .sleeping else { return 0 }
+        let offsets: [CGFloat] = [0, 0.2, 0.55, 0.9, 0.9, 0.55, 0.2, 0]
+        return offsets[phase % offsets.count] * max(0.7, size * 0.065)
+    }
+
+    private var sleepScaleY: CGFloat {
+        guard activity == .sleeping else { return 1 }
+        let scales: [CGFloat] = [1.0, 0.99, 0.97, 0.95, 0.95, 0.97, 0.99, 1.0]
+        return scales[phase % scales.count]
+    }
+
+    @ViewBuilder
+    private func sleepOverlay(palette: NotchPetPalette) -> some View {
+        let primaryProgress = sleepBubbleProgress(offset: 0)
+        let secondaryProgress = sleepBubbleProgress(offset: 4)
+
+        ZStack(alignment: .topTrailing) {
+            sleepBubble(progress: secondaryProgress, fontSize: size * 0.34, palette: palette)
+                .offset(
+                    x: size * (0.10 + secondaryProgress * 0.16),
+                    y: -size * (0.12 + secondaryProgress * 0.18)
+                )
+
+            sleepBubble(progress: primaryProgress, fontSize: size * 0.42, palette: palette)
+                .offset(
+                    x: size * (0.20 + primaryProgress * 0.22),
+                    y: -size * (0.28 + primaryProgress * 0.26)
+                )
+        }
+        .frame(width: size * style.aspectRatio, height: size, alignment: .topTrailing)
+        .allowsHitTesting(false)
+    }
+
+    private func sleepBubble(progress: CGFloat, fontSize: CGFloat, palette: NotchPetPalette) -> some View {
+        let opacity = max(0, 0.88 - abs(progress - 0.5) * 1.45)
+        let scale = 0.88 + (progress * 0.26)
+
+        return Text("z")
+            .font(.system(size: fontSize, weight: .black, design: .rounded))
+            .foregroundStyle(palette.highlight.opacity(opacity))
+            .scaleEffect(scale)
+            .shadow(color: palette.outerGlow.opacity(0.4), radius: 1.5, y: 0.8)
+            .opacity(opacity)
+    }
+
+    private func sleepBubbleProgress(offset: Int) -> CGFloat {
+        let cycleLength = 8
+        let index = (phase + offset) % cycleLength
+        return CGFloat(index) / CGFloat(cycleLength - 1)
     }
 }
 
@@ -271,9 +342,14 @@ private extension NotchPetStyle {
         }
     }
 
-    func frames(isProcessing: Bool, tone: NotchIndicatorTone) -> [[String]] {
-        if isProcessing {
+    func frames(activity: NotchPetActivity, tone: NotchIndicatorTone) -> [[String]] {
+        switch activity {
+        case .processing:
             return activeFrames
+        case .sleeping:
+            return sleepFrames
+        case .idle:
+            break
         }
 
         switch tone {
@@ -292,6 +368,23 @@ private extension NotchPetStyle {
         case .intervention:
             return interventionFrames
         }
+    }
+
+    private var sleepFrames: [[String]] {
+        let baseFrames = idleFrames
+        guard !baseFrames.isEmpty else { return [] }
+
+        if baseFrames.count == 1 {
+            return Array(repeating: baseFrames[0], count: 8)
+        }
+
+        if baseFrames.count == 2 {
+            let indices = [0, 0, 0, 1, 1, 1, 0, 0]
+            return indices.map { baseFrames[$0] }
+        }
+
+        let indices = [0, 0, 1, 1, 2, 1, 0, 0]
+        return indices.map { baseFrames[$0] }
     }
 
     private var idleFrames: [[String]] {

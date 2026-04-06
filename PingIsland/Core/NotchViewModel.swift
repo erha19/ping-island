@@ -44,7 +44,8 @@ class NotchViewModel: ObservableObject {
     @Published var contentType: NotchContentType = .instances
     @Published var isHovering: Bool = false
     @Published private(set) var openedMeasuredHeight: CGFloat?
-    @Published private(set) var areInteractionsSuppressed = false
+    @Published private(set) var isFullscreenEdgeRevealActive = false
+    @Published private(set) var isFullscreenPhysicalNotchCompactActive = false
     @Published private(set) var isSettingsPopoverPresented = false
 
     // MARK: - Geometry
@@ -52,17 +53,28 @@ class NotchViewModel: ObservableObject {
     let geometry: NotchGeometry
     let spacing: CGFloat = 12
     let hasPhysicalNotch: Bool
-    let closedHeight: CGFloat = 32
 
-    private static let defaultClosedWidth: CGFloat = 266
-    private static let manualAttentionClosedWidth: CGFloat = 300
+    private static let defaultClosedHeight: CGFloat = 32
+    private static let defaultClosedWidth: CGFloat = 274
+    private static let manualAttentionClosedWidth: CGFloat = 308
     @Published private(set) var closedWidth: CGFloat
 
     var deviceNotchRect: CGRect { geometry.deviceNotchRect }
     var screenRect: CGRect { geometry.screenRect }
     var windowHeight: CGFloat { geometry.windowHeight }
+    var closedHeight: CGFloat {
+        usesPhysicalNotchClosedPresentation
+            ? deviceNotchRect.height
+            : Self.defaultClosedHeight
+    }
+    var usesPhysicalNotchClosedPresentation: Bool {
+        hasPhysicalNotch && isFullscreenPhysicalNotchCompactActive
+    }
     var closedSize: CGSize {
-        CGSize(width: closedWidth, height: closedHeight)
+        if usesPhysicalNotchClosedPresentation {
+            return deviceNotchRect.size
+        }
+        return CGSize(width: closedWidth, height: closedHeight)
     }
     var closedScreenRect: CGRect {
         CGRect(
@@ -121,12 +133,25 @@ class NotchViewModel: ObservableObject {
     // MARK: - Private
 
     private var cancellables = Set<AnyCancellable>()
-    private let events = EventMonitors.shared
+    private let events: EventMonitors?
+    private let fullscreenActivityProvider: @MainActor (CGRect) -> Bool
     private var hoverTimer: DispatchWorkItem?
+    private let defaultHoverActivationDelay: TimeInterval = 0.45
+    private let fullscreenHoverActivationDelay: TimeInterval = 0.18
+    private let fullscreenRevealZoneHeight: CGFloat = 8
+    private let fullscreenRevealZoneHorizontalInset: CGFloat = 36
 
     // MARK: - Initialization
 
-    init(deviceNotchRect: CGRect, screenRect: CGRect, windowHeight: CGFloat, hasPhysicalNotch: Bool) {
+    init(
+        deviceNotchRect: CGRect,
+        screenRect: CGRect,
+        windowHeight: CGFloat,
+        hasPhysicalNotch: Bool,
+        enableEventMonitoring: Bool = true,
+        observeSystemEnvironment: Bool = true,
+        fullscreenActivityProvider: @escaping @MainActor (CGRect) -> Bool = FullscreenAppDetector.isFullscreenAppActive
+    ) {
         self.geometry = NotchGeometry(
             deviceNotchRect: deviceNotchRect,
             screenRect: screenRect,
@@ -134,9 +159,15 @@ class NotchViewModel: ObservableObject {
         )
         self.hasPhysicalNotch = hasPhysicalNotch
         self.closedWidth = Self.defaultClosedWidth
-        setupEventHandlers()
-        observeEnvironment()
-        refreshInteractionSuppression()
+        self.events = enableEventMonitoring ? EventMonitors.shared : nil
+        self.fullscreenActivityProvider = fullscreenActivityProvider
+        if enableEventMonitoring {
+            setupEventHandlers()
+        }
+        if observeSystemEnvironment {
+            observeEnvironment()
+        }
+        refreshFullscreenPresentationState()
     }
 
     private func observeEnvironment() {
@@ -144,19 +175,19 @@ class NotchViewModel: ObservableObject {
 
         workspaceCenter.publisher(for: NSWorkspace.didActivateApplicationNotification)
             .sink { [weak self] _ in
-                self?.refreshInteractionSuppression()
+                self?.refreshFullscreenPresentationState()
             }
             .store(in: &cancellables)
 
         workspaceCenter.publisher(for: NSWorkspace.activeSpaceDidChangeNotification)
             .sink { [weak self] _ in
-                self?.refreshInteractionSuppression()
+                self?.refreshFullscreenPresentationState()
             }
             .store(in: &cancellables)
 
         AppSettings.shared.$hideInFullscreen
             .sink { [weak self] _ in
-                self?.refreshInteractionSuppression()
+                self?.refreshFullscreenPresentationState()
             }
             .store(in: &cancellables)
 
@@ -167,15 +198,21 @@ class NotchViewModel: ObservableObject {
             .store(in: &cancellables)
     }
 
-    private func refreshInteractionSuppression() {
-        let shouldSuppress = AppSettings.hideInFullscreen &&
+    private func refreshFullscreenPresentationState() {
+        let isFullscreenActive = fullscreenActivityProvider(screenRect)
+        let shouldUseEdgeReveal = AppSettings.hideInFullscreen &&
             !hasPhysicalNotch &&
-            FullscreenAppDetector.isFullscreenAppActive(screenFrame: screenRect)
+            isFullscreenActive
+        let shouldUsePhysicalNotchCompact = hasPhysicalNotch && isFullscreenActive
 
-        guard shouldSuppress != areInteractionsSuppressed else { return }
-        areInteractionsSuppressed = shouldSuppress
+        if shouldUsePhysicalNotchCompact != isFullscreenPhysicalNotchCompactActive {
+            isFullscreenPhysicalNotchCompactActive = shouldUsePhysicalNotchCompact
+        }
 
-        if shouldSuppress {
+        guard shouldUseEdgeReveal != isFullscreenEdgeRevealActive else { return }
+        isFullscreenEdgeRevealActive = shouldUseEdgeReveal
+
+        if shouldUseEdgeReveal {
             hoverTimer?.cancel()
             hoverTimer = nil
             isHovering = false
@@ -188,6 +225,8 @@ class NotchViewModel: ObservableObject {
     // MARK: - Event Handling
 
     private func setupEventHandlers() {
+        guard let events else { return }
+
         events.mouseLocation
             .throttle(for: .milliseconds(50), scheduler: DispatchQueue.main, latest: true)
             .sink { [weak self] location in
@@ -213,16 +252,7 @@ class NotchViewModel: ObservableObject {
     private var currentChatSession: SessionState?
 
     private func handleMouseMove(_ location: CGPoint) {
-        if areInteractionsSuppressed {
-            hoverTimer?.cancel()
-            hoverTimer = nil
-            if isHovering {
-                isHovering = false
-            }
-            return
-        }
-
-        let inNotch = isPointInClosedNotch(location)
+        let inNotch = isPointInHoverTrigger(location)
         let inOpened = status == .opened && geometry.isPointInOpenedPanel(location, size: openedSize)
 
         let newHovering = inNotch || inOpened
@@ -251,15 +281,11 @@ class NotchViewModel: ObservableObject {
                 self.notchOpen(reason: .hover)
             }
             hoverTimer = workItem
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.45, execute: workItem)
+            DispatchQueue.main.asyncAfter(deadline: .now() + hoverActivationDelay, execute: workItem)
         }
     }
 
     private func handleMouseDown() {
-        if areInteractionsSuppressed {
-            return
-        }
-
         if isSettingsPopoverPresented {
             return
         }
@@ -279,14 +305,47 @@ class NotchViewModel: ObservableObject {
                 }
             }
         case .closed, .popping:
-            if isPointInClosedNotch(location) {
+            if isPointInHoverTrigger(location) {
                 notchOpen(reason: .click)
             }
         }
     }
 
+    private var hoverActivationDelay: TimeInterval {
+        isFullscreenEdgeRevealActive ? fullscreenHoverActivationDelay : defaultHoverActivationDelay
+    }
+
+    var shouldHideClosedPresentation: Bool {
+        isFullscreenEdgeRevealActive && status != .opened
+    }
+
+    var shouldSuppressAutomaticPresentation: Bool {
+        isFullscreenEdgeRevealActive && status != .opened
+    }
+
+    var closedPresentationOffsetY: CGFloat {
+        shouldHideClosedPresentation ? -(closedHeight + 12) : 0
+    }
+
+    func isPointInHoverTrigger(_ point: CGPoint) -> Bool {
+        if shouldHideClosedPresentation {
+            return fullscreenRevealTriggerRect.contains(point)
+        }
+        return isPointInClosedNotch(point)
+    }
+
     private func isPointInClosedNotch(_ point: CGPoint) -> Bool {
         closedScreenRect.insetBy(dx: -10, dy: -5).contains(point)
+    }
+
+    private var fullscreenRevealTriggerRect: CGRect {
+        let width = closedSize.width + (fullscreenRevealZoneHorizontalInset * 2)
+        return CGRect(
+            x: screenRect.midX - width / 2,
+            y: screenRect.maxY - fullscreenRevealZoneHeight,
+            width: width,
+            height: fullscreenRevealZoneHeight
+        )
     }
 
     /// Re-posts a mouse click at the given screen location so it reaches windows behind us
@@ -323,6 +382,10 @@ class NotchViewModel: ObservableObject {
     // MARK: - Actions
 
     func notchOpen(reason: NotchOpenReason = .unknown) {
+        if reason == .notification && shouldSuppressAutomaticPresentation {
+            return
+        }
+
         openReason = reason
         status = .opened
         if case .instances = contentType {
@@ -407,6 +470,7 @@ class NotchViewModel: ObservableObject {
 
     /// Perform boot animation: expand briefly then collapse
     func performBootAnimation() {
+        guard !shouldSuppressAutomaticPresentation else { return }
         notchOpen(reason: .boot)
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
             guard let self = self, self.openReason == .boot else { return }

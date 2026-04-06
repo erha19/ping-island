@@ -195,6 +195,19 @@ struct SessionClientProfile: Identifiable, Sendable {
             || containsKeywordAlias(normalized)
     }
 
+    nonisolated func labelAliasScore(_ rawValue: String) -> Int {
+        guard let normalized = Self.normalize(rawValue) else {
+            return 0
+        }
+        if exactAliases.contains(normalized) || recognizedKinds.contains(normalized) {
+            return 2
+        }
+        if containsKeywordAlias(normalized) {
+            return 1
+        }
+        return 0
+    }
+
     nonisolated private func containsKeywordAlias(_ normalizedValue: String) -> Bool {
         keywordAliases.contains { normalizedValue.contains($0) }
     }
@@ -213,6 +226,7 @@ struct ManagedIDEExtensionProfile: Identifiable, Sendable {
     let id: String
     let title: String
     let subtitle: String
+    let showsInSettings: Bool
     let alwaysVisibleInSettings: Bool
     let sessionFocusStrategy: IDESessionFocusStrategy?
     let localAppBundleIdentifiers: [String]
@@ -227,6 +241,7 @@ struct ManagedIDEExtensionProfile: Identifiable, Sendable {
         id: String,
         title: String,
         subtitle: String,
+        showsInSettings: Bool = true,
         alwaysVisibleInSettings: Bool = false,
         sessionFocusStrategy: IDESessionFocusStrategy? = nil,
         localAppBundleIdentifiers: [String] = [],
@@ -241,6 +256,7 @@ struct ManagedIDEExtensionProfile: Identifiable, Sendable {
             id: id,
             title: title,
             subtitle: subtitle,
+            showsInSettings: showsInSettings,
             alwaysVisibleInSettings: alwaysVisibleInSettings,
             sessionFocusStrategy: sessionFocusStrategy,
             localAppBundleIdentifiers: localAppBundleIdentifiers,
@@ -257,6 +273,7 @@ struct ManagedIDEExtensionProfile: Identifiable, Sendable {
         id: String,
         title: String,
         subtitle: String,
+        showsInSettings: Bool = true,
         alwaysVisibleInSettings: Bool = false,
         sessionFocusStrategy: IDESessionFocusStrategy? = nil,
         localAppBundleIdentifiers: [String] = [],
@@ -270,6 +287,7 @@ struct ManagedIDEExtensionProfile: Identifiable, Sendable {
         self.id = id
         self.title = title
         self.subtitle = subtitle
+        self.showsInSettings = showsInSettings
         self.alwaysVisibleInSettings = alwaysVisibleInSettings
         self.sessionFocusStrategy = sessionFocusStrategy
         self.localAppBundleIdentifiers = localAppBundleIdentifiers
@@ -287,7 +305,7 @@ struct ManagedIDEExtensionProfile: Identifiable, Sendable {
 
     nonisolated var prefersWorkspaceWindowRouting: Bool {
         switch uriScheme {
-        case "vscode", "cursor", "trae", "codebuddy", "qoder":
+        case "vscode", "cursor", "trae", "codebuddy", "qoder", "qoder-work":
             return true
         default:
             return false
@@ -295,7 +313,7 @@ struct ManagedIDEExtensionProfile: Identifiable, Sendable {
     }
 
     nonisolated var prefersWorkspaceURLRouting: Bool {
-        uriScheme == "qoder"
+        uriScheme == "qoder" || uriScheme == "qoder-work"
     }
 
     nonisolated var extensionRootURLs: [URL] {
@@ -452,6 +470,32 @@ enum ClientProfileRegistry {
                 HookInstallEventDescriptor(name: "Stop", templates: [.plain]),
             ]
         ),
+        ManagedHookClientProfile(
+            id: "qoderwork-hooks",
+            title: "QoderWork",
+            subtitle: "管理 ~/.qoderwork/settings.json，按 Qoder CLI 同款 Claude Hooks 协议接入 Island",
+            logoAssetName: "QoderLogo",
+            localAppBundleIdentifiers: ["com.qoder.work"],
+            iconSymbolName: "bolt.horizontal.circle.fill",
+            configurationRelativePath: ".qoderwork/settings.json",
+            bridgeSource: "claude",
+            bridgeExtraArguments: [
+                "--client-kind", "qoderwork",
+                "--client-name", "QoderWork"
+            ],
+            defaultEnabled: true,
+            installsClaudePythonScript: false,
+            brand: .qoder,
+            events: [
+                HookInstallEventDescriptor(name: "UserPromptSubmit", templates: [.plain]),
+                HookInstallEventDescriptor(name: "PreToolUse", templates: [.matcher("*")], timeout: 86_400),
+                HookInstallEventDescriptor(name: "PostToolUse", templates: [.matcher("*")]),
+                HookInstallEventDescriptor(name: "PostToolUseFailure", templates: [.matcher("*")]),
+                HookInstallEventDescriptor(name: "PermissionRequest", templates: [.matcher("*")], timeout: 86_400),
+                HookInstallEventDescriptor(name: "Notification", templates: [.matcher("*")]),
+                HookInstallEventDescriptor(name: "Stop", templates: [.plain]),
+            ]
+        ),
     ]
 
     nonisolated static let runtimeProfiles: [SessionClientProfile] = [
@@ -484,6 +528,36 @@ enum ClientProfileRegistry {
             exactAliases: ["qoder", "qoder-client", "qoder client"],
             keywordAliases: ["qoder"],
             bundleIdentifiers: ["com.qoder.ide"]
+        ),
+        SessionClientProfile(
+            id: "qoderwork",
+            provider: .claude,
+            family: .claudeHooks,
+            kind: .qoder,
+            displayName: "QoderWork",
+            assistantLabelMode: .badgeLabel,
+            brand: .qoder,
+            defaultBundleIdentifier: nil,
+            defaultOrigin: nil,
+            recognizedKinds: ["qoderwork", "qoder-work", "qoder_work", "qoder work"],
+            exactAliases: ["qoderwork", "qoder-work", "qoder work"],
+            keywordAliases: ["qoderwork", "qoder work"],
+            bundleIdentifiers: ["com.qoder.work"]
+        ),
+        SessionClientProfile(
+            id: "qoder-cli",
+            provider: .claude,
+            family: .claudeHooks,
+            kind: .qoder,
+            displayName: "Qoder CLI",
+            assistantLabelMode: .badgeLabel,
+            brand: .qoder,
+            defaultBundleIdentifier: nil,
+            defaultOrigin: nil,
+            recognizedKinds: ["qoder-cli", "qoder_cli", "qoder cli"],
+            exactAliases: ["qoder-cli", "qoder cli"],
+            keywordAliases: ["qoder cli"],
+            bundleIdentifiers: []
         ),
         SessionClientProfile(
             id: "codebuddy",
@@ -627,8 +701,22 @@ enum ClientProfileRegistry {
             extensionRootRelativePath: ".qoder/extensions",
             uriScheme: "qoder",
             exactBundleIdentifiers: ["com.qoder.ide"],
-            bundleIdentifierKeywords: ["qoder"],
+            bundleIdentifierKeywords: ["qoder.ide"],
             appNameKeywords: ["qoder"]
+        ),
+        ManagedIDEExtensionProfile(
+            id: "qoderwork-extension",
+            title: "QoderWork",
+            subtitle: "安装 Ping Island，支持会话跳转与终端精准聚焦",
+            showsInSettings: false,
+            sessionFocusStrategy: .qoderChatHistory,
+            localAppBundleIdentifiers: ["com.qoder.work"],
+            iconSymbolName: "bolt.horizontal.circle.fill",
+            extensionRootRelativePath: ".qoderwork/extensions",
+            uriScheme: "qoder-work",
+            exactBundleIdentifiers: ["com.qoder.work"],
+            bundleIdentifierKeywords: ["qoder.work"],
+            appNameKeywords: ["qoderwork", "qoder work"]
         ),
     ]
 
@@ -660,24 +748,47 @@ enum ClientProfileRegistry {
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
 
-        return ideExtensionProfiles.first { profile in
-            if let normalizedBundle {
-                if profile.exactBundleIdentifiers.contains(normalizedBundle) {
-                    return true
-                }
-
-                if profile.bundleIdentifierKeywords.contains(where: { normalizedBundle.contains($0) }) {
-                    return true
-                }
+        if let normalizedBundle {
+            let exactBundleMatch = ideExtensionProfiles.first { profile in
+                profile.exactBundleIdentifiers.contains(normalizedBundle)
+            }
+            if let exactBundleMatch {
+                return exactBundleMatch
             }
 
-            if let normalizedName,
-               profile.appNameKeywords.contains(where: { normalizedName.contains($0) }) {
-                return true
+            let bundleKeywordMatch = ideExtensionProfiles
+                .compactMap { profile -> (ManagedIDEExtensionProfile, Int)? in
+                    let longestMatchLength = profile.bundleIdentifierKeywords
+                        .filter { normalizedBundle.contains($0) }
+                        .map(\.count)
+                        .max()
+                    guard let longestMatchLength else { return nil }
+                    return (profile, longestMatchLength)
+                }
+                .max { lhs, rhs in
+                    lhs.1 < rhs.1
+                }
+                .map(\.0)
+            if let bundleKeywordMatch {
+                return bundleKeywordMatch
             }
-
-            return false
         }
+
+        guard let normalizedName else { return nil }
+
+        return ideExtensionProfiles
+            .compactMap { profile -> (ManagedIDEExtensionProfile, Int)? in
+                let longestMatchLength = profile.appNameKeywords
+                    .filter { normalizedName.contains($0) }
+                    .map(\.count)
+                    .max()
+                guard let longestMatchLength else { return nil }
+                return (profile, longestMatchLength)
+            }
+            .max { lhs, rhs in
+                lhs.1 < rhs.1
+            }
+            .map(\.0)
     }
 
     nonisolated static func defaultRuntimeProfile(for provider: SessionProvider, kind: SessionClientKind? = nil) -> SessionClientProfile? {
@@ -732,6 +843,13 @@ enum ClientProfileRegistry {
         kind: SessionClientKind
     ) -> String? {
         let profiles = runtimeProfiles.filter { $0.provider == provider || $0.kind == kind }
-        return profiles.first { $0.matchesLabelAlias(rawValue) }?.displayName
+        return profiles
+            .map { profile in
+                (profile: profile, score: profile.labelAliasScore(rawValue))
+            }
+            .filter { $0.score > 0 }
+            .max { lhs, rhs in lhs.score < rhs.score }?
+            .profile
+            .displayName
     }
 }

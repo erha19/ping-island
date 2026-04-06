@@ -351,6 +351,13 @@ actor CodexAppServerMonitor {
                 threadId: threadId,
                 intervention: pendingRequestsByThread[threadId]?.intervention
             )
+            let hasExistingSession = await SessionStore.shared.containsSession(threadId)
+            if !hasExistingSession, pendingRequestsByThread[threadId] == nil {
+                logger.notice(
+                    "Ignoring status-only update for unknown Codex thread=\(threadId, privacy: .public) statusType=\(statusType, privacy: .public)"
+                )
+                return
+            }
             await SessionStore.shared.upsertCodexSession(
                 sessionId: threadId,
                 name: nil,
@@ -642,7 +649,8 @@ actor CodexAppServerMonitor {
             cwd: cwd,
             phase: phase,
             intervention: pendingRequestsByThread[threadId]?.intervention,
-            clientInfo: clientInfo
+            clientInfo: clientInfo,
+            activityAt: diagnostics.updatedAt
         )
     }
 
@@ -694,7 +702,10 @@ actor CodexAppServerMonitor {
             && (name?.isEmpty != false)
             && (preview?.isEmpty != false)
             && (path?.isEmpty != false)
-            && statusType != "active"
+            && (statusType != "active" || {
+                guard let updatedAt else { return false }
+                return Date().timeIntervalSince(updatedAt) >= 60
+            }())
 
         return ThreadDiagnosticsSnapshot(
             threadId: threadId,

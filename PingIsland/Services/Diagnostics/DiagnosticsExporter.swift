@@ -35,8 +35,11 @@ actor DiagnosticsExporter {
 
         let copiedFiles: [(source: URL, relativePath: String)] = [
             (SessionAssociationStore.diagnosticsFileURL, "state/session-associations.json"),
+            (FocusDiagnosticsStore.diagnosticsFileURL, "logs/focus-debug.log"),
             (fileManager.homeDirectoryForCurrentUser.appendingPathComponent(".claude/settings.json"), "configs/claude-settings.json"),
+            (fileManager.homeDirectoryForCurrentUser.appendingPathComponent(".codebuddy/settings.json"), "configs/codebuddy-settings.json"),
             (fileManager.homeDirectoryForCurrentUser.appendingPathComponent(".qoder/settings.json"), "configs/qoder-settings.json"),
+            (fileManager.homeDirectoryForCurrentUser.appendingPathComponent(".qoderwork/settings.json"), "configs/qoderwork-settings.json"),
             (fileManager.homeDirectoryForCurrentUser.appendingPathComponent(".codex/hooks.json"), "configs/codex-hooks.json"),
             (fileManager.homeDirectoryForCurrentUser.appendingPathComponent(".codex/config.toml"), "configs/codex-config.toml"),
             (fileManager.homeDirectoryForCurrentUser.appendingPathComponent(".codex/session_index.jsonl"), "configs/codex-session-index.jsonl"),
@@ -58,6 +61,26 @@ actor DiagnosticsExporter {
             )
         } catch {
             warnings.append("Failed to copy Codex hook debug logs: \(error.localizedDescription)")
+        }
+
+        do {
+            try copyDirectoryContentsIfPresent(
+                from: preferredCodeBuddyHookDebugDirectory(),
+                toRelativeDirectory: "debug/codebuddy-hooks",
+                under: exportRoot
+            )
+        } catch {
+            warnings.append("Failed to copy CodeBuddy hook debug logs: \(error.localizedDescription)")
+        }
+
+        do {
+            try copyDirectoryContentsIfPresent(
+                from: preferredQoderHookDebugDirectory(),
+                toRelativeDirectory: "debug/qoder-hooks",
+                under: exportRoot
+            )
+        } catch {
+            warnings.append("Failed to copy Qoder hook debug logs: \(error.localizedDescription)")
         }
 
         do {
@@ -247,6 +270,14 @@ actor DiagnosticsExporter {
 
     private func preferredCodexHookDebugDirectory() -> URL {
         fileManager.homeDirectoryForCurrentUser.appendingPathComponent(".ping-island-debug/codex-hooks", isDirectory: true)
+    }
+
+    private func preferredCodeBuddyHookDebugDirectory() -> URL {
+        fileManager.homeDirectoryForCurrentUser.appendingPathComponent(".ping-island-debug/codebuddy-hooks", isDirectory: true)
+    }
+
+    private func preferredQoderHookDebugDirectory() -> URL {
+        fileManager.homeDirectoryForCurrentUser.appendingPathComponent(".ping-island-debug/qoder-hooks", isDirectory: true)
     }
 
     private func writeCommandOutput(executable: String, arguments: [String], to destinationURL: URL) async throws {

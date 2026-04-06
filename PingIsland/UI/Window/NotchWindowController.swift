@@ -12,6 +12,7 @@ import SwiftUI
 class NotchWindowController: NSWindowController {
     let viewModel: NotchViewModel
     private let screen: NSScreen
+    private let fullWindowFrame: NSRect
     private var cancellables = Set<AnyCancellable>()
 
     init(screen: NSScreen) {
@@ -28,6 +29,7 @@ class NotchWindowController: NSWindowController {
             width: screenFrame.width,
             height: windowHeight
         )
+        self.fullWindowFrame = windowFrame
 
         // Device notch rect - positioned at center
         let deviceNotchRect = CGRect(
@@ -66,25 +68,23 @@ class NotchWindowController: NSWindowController {
         // - Opened: ignoresMouseEvents = false (buttons inside panel work)
         viewModel.$status
             .receive(on: DispatchQueue.main)
-            .sink { [weak notchWindow, weak viewModel] status in
-                switch status {
-                case .opened:
-                    // Accept mouse events when opened so buttons work
-                    notchWindow?.ignoresMouseEvents = false
-                    // Don't steal focus when opened by notification (task finished)
-                    if viewModel?.openReason != .notification {
-                        NSApp.activate(ignoringOtherApps: false)
-                        notchWindow?.makeKey()
-                    }
-                case .closed, .popping:
-                    // Ignore mouse events when closed so clicks pass through
-                    notchWindow?.ignoresMouseEvents = true
-                }
+            .sink { [weak self, weak notchWindow, weak viewModel] _ in
+                guard let self, let notchWindow, let viewModel else { return }
+                self.updateWindowPresentation(window: notchWindow, viewModel: viewModel)
+            }
+            .store(in: &cancellables)
+
+        viewModel.$isFullscreenEdgeRevealActive
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self, weak notchWindow, weak viewModel] _ in
+                guard let self, let notchWindow, let viewModel else { return }
+                self.updateWindowPresentation(window: notchWindow, viewModel: viewModel)
             }
             .store(in: &cancellables)
 
         // Start with ignoring mouse events (closed state)
         notchWindow.ignoresMouseEvents = true
+        updateWindowPresentation(window: notchWindow, viewModel: viewModel)
 
         // Perform boot animation after a brief delay
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
@@ -94,5 +94,36 @@ class NotchWindowController: NSWindowController {
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    private func updateWindowPresentation(window: NotchPanel, viewModel: NotchViewModel) {
+        let shouldHideWindow = viewModel.shouldHideClosedPresentation
+
+        if shouldHideWindow {
+            window.ignoresMouseEvents = true
+            if window.isVisible {
+                window.orderOut(nil)
+            }
+            return
+        }
+
+        if window.frame != fullWindowFrame {
+            window.setFrame(fullWindowFrame, display: true)
+        }
+
+        if !window.isVisible {
+            window.orderFront(nil)
+        }
+
+        switch viewModel.status {
+        case .opened:
+            window.ignoresMouseEvents = false
+            if viewModel.openReason != .notification {
+                NSApp.activate(ignoringOtherApps: false)
+                window.makeKey()
+            }
+        case .closed, .popping:
+            window.ignoresMouseEvents = true
+        }
     }
 }

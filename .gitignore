@@ -35,6 +35,7 @@ Pods/
 
 # Sparkle signing keys (NEVER commit these!)
 .sparkle-keys/
+Config/LocalSecrets.xcconfig
 
 # Release artifacts
 releases/

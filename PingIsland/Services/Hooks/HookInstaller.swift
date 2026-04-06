@@ -10,6 +10,7 @@ import Foundation
 struct HookInstaller {
     private static let preferredTargetsDefaultsKey = "HookInstaller.preferredTargets.v1"
     private static let qoderMigrationDefaultsKey = "HookInstaller.preferredTargets.qoder-default.v1"
+    private static let qoderWorkMigrationDefaultsKey = "HookInstaller.preferredTargets.qoderwork-default.v1"
     private static var defaultPreferredTargets: Set<String> {
         Set(
             ClientProfileRegistry.managedHookProfiles
@@ -121,6 +122,15 @@ struct HookInstaller {
                 persistPreferredTargets(targets)
             }
             UserDefaults.standard.set(true, forKey: qoderMigrationDefaultsKey)
+        }
+
+        if !UserDefaults.standard.bool(forKey: qoderWorkMigrationDefaultsKey) {
+            if let qoderWorkProfile = ClientProfileRegistry.managedHookProfile(id: "qoderwork-hooks"),
+               canManage(qoderWorkProfile) {
+                targets.insert(qoderWorkProfile.id)
+                persistPreferredTargets(targets)
+            }
+            UserDefaults.standard.set(true, forKey: qoderWorkMigrationDefaultsKey)
         }
 
         return targets.isEmpty ? [] : targets
