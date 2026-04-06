@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
-DEFAULT_LOG_DIR = Path.home() / ".island-debug" / "codex-hooks"
+DEFAULT_LOG_DIR = Path.home() / ".ping-island-debug" / "codex-hooks"
 INTERESTING_ENV_KEYS = [
     "CODEX_THREAD_ID",
     "PWD",
@@ -80,7 +80,9 @@ def main() -> int:
     parsed_payload = parse_json(raw_stdin)
     event = detect_event(sys.argv[1:], parsed_payload) or "unknown"
 
-    log_dir = Path(os.environ.get("ISLAND_CODEX_HOOK_DEBUG_DIR", DEFAULT_LOG_DIR)).expanduser()
+    log_dir = Path(
+        os.environ.get("PING_ISLAND_CODEX_HOOK_DEBUG_DIR", DEFAULT_LOG_DIR)
+    ).expanduser()
     log_dir.mkdir(parents=True, exist_ok=True)
 
     record = {

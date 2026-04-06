@@ -24,11 +24,12 @@ struct IslandBridgeMain {
                 socketPath: environment["ISLAND_SOCKET_PATH"] ?? "/tmp/island.sock"
             )
 
-            if let decision = response?.decision {
+            if let response, response.decision != nil {
                 let payload = HookPayloadMapper.stdoutPayload(
                     for: source,
-                    decision: decision,
-                    eventType: envelope.eventType
+                    response: response,
+                    eventType: envelope.eventType,
+                    metadata: envelope.metadata
                 )
                 FileHandle.standardOutput.write(Data(payload.utf8))
             }

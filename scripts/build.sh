@@ -1,14 +1,14 @@
 #!/bin/bash
-# Build Claude Island for release
+# Build Ping Island for release
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 BUILD_DIR="$PROJECT_DIR/build"
-ARCHIVE_PATH="$BUILD_DIR/ClaudeIsland.xcarchive"
+ARCHIVE_PATH="$BUILD_DIR/PingIsland.xcarchive"
 EXPORT_PATH="$BUILD_DIR/export"
 
-echo "=== Building Claude Island ==="
+echo "=== Building Ping Island ==="
 echo ""
 
 # Clean previous builds
@@ -20,14 +20,16 @@ cd "$PROJECT_DIR"
 # Build and archive
 echo "Archiving..."
 xcodebuild archive \
-    -scheme ClaudeIsland \
+    -project PingIsland.xcodeproj \
+    -scheme PingIsland \
     -configuration Release \
     -archivePath "$ARCHIVE_PATH" \
     -destination "generic/platform=macOS" \
     ENABLE_HARDENED_RUNTIME=YES \
     CODE_SIGN_STYLE=Automatic \
     | xcpretty || xcodebuild archive \
-    -scheme ClaudeIsland \
+    -project PingIsland.xcodeproj \
+    -scheme PingIsland \
     -configuration Release \
     -archivePath "$ARCHIVE_PATH" \
     -destination "generic/platform=macOS" \
@@ -65,6 +67,6 @@ xcodebuild -exportArchive \
 
 echo ""
 echo "=== Build Complete ==="
-echo "App exported to: $EXPORT_PATH/Claude Island.app"
+echo "App exported to: $EXPORT_PATH/Ping Island.app"
 echo ""
 echo "Next: Run ./scripts/create-release.sh to notarize and create DMG"

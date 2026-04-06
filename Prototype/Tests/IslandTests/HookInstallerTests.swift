@@ -154,11 +154,13 @@ func installerReplacesLegacyIslandHooksButKeepsUnrelatedHooks() throws {
     #expect(!qoderCommands.contains { $0.contains("/.vibe-island/bin/vibe-island-bridge") })
     #expect(qoderCommands.filter { $0.contains("/.island/bin/island-bridge --source claude --client-kind qoder") }.count == 1)
     #expect(qoderHooks["UserPromptSubmit"] != nil)
+    #expect(qoderHooks["PermissionRequest"] != nil)
+    #expect(qoderHooks["Notification"] != nil)
     #expect(qoderHooks["Stop"] != nil)
 }
 
 @Test
-func installerAddsClaudeCompatibleHooksForCodeBuddyTraeAndCursor() throws {
+func installerAddsCodeBuddyAndCursorHooks() throws {
     let root = URL(fileURLWithPath: NSTemporaryDirectory()).appending(path: UUID().uuidString, directoryHint: .isDirectory)
     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: root) }
@@ -179,17 +181,12 @@ func installerAddsClaudeCompatibleHooksForCodeBuddyTraeAndCursor() throws {
     """
     try Data(codeBuddyExisting.utf8).write(to: codeBuddyURL)
 
-    let traeSettingsDirectory = root.appending(path: "Library/Application Support/Trae/User", directoryHint: .isDirectory)
-    try FileManager.default.createDirectory(at: traeSettingsDirectory, withIntermediateDirectories: true)
-    let traeURL = traeSettingsDirectory.appending(path: "settings.json")
-
     let cursorSettingsDirectory = root.appending(path: "Library/Application Support/Cursor/User", directoryHint: .isDirectory)
     try FileManager.default.createDirectory(at: cursorSettingsDirectory, withIntermediateDirectories: true)
     let cursorURL = cursorSettingsDirectory.appending(path: "settings.json")
 
     let installer = HookInstaller(homeDirectory: root)
     try installer.installCodeBuddyAssets()
-    try installer.installTraeAssets()
     try installer.installCursorAssets()
 
     let codeBuddyData = try Data(contentsOf: codeBuddyURL)
@@ -203,29 +200,11 @@ func installerAddsClaudeCompatibleHooksForCodeBuddyTraeAndCursor() throws {
     #expect(codeBuddyCommands.contains {
         $0.contains("/.island/bin/island-bridge --source claude --client-kind codebuddy --client-name CodeBuddy --client-originator CodeBuddy")
     })
-    let codeBuddyPermissionRequest = try #require(codeBuddyHooks["PermissionRequest"] as? [[String: Any]])
-    let codeBuddyManagedPermissionHook = try #require(
-        codeBuddyPermissionRequest.first {
-            (((($0["hooks"] as? [[String: Any]])?.first)?["command"] as? String) ?? "").contains("--client-kind codebuddy")
-        }
-    )
-    let codeBuddyPermissionCommand = try #require((codeBuddyManagedPermissionHook["hooks"] as? [[String: Any]])?.first)
-    #expect(codeBuddyPermissionCommand["timeout"] as? Int == 86_400)
     #expect(codeBuddyHooks["SessionEnd"] != nil)
     #expect(codeBuddyHooks["PreCompact"] != nil)
-
-    let traeData = try Data(contentsOf: traeURL)
-    let traeJSON = try #require(JSONSerialization.jsonObject(with: traeData) as? [String: Any])
-    let traeHooks = try #require(traeJSON["hooks"] as? [String: Any])
-    let traeUserPromptSubmit = try #require(traeHooks["UserPromptSubmit"] as? [[String: Any]])
-    let traeCommands = traeUserPromptSubmit.compactMap { hook in
-        ((hook["hooks"] as? [[String: Any]])?.first?["command"] as? String)
-    }
-    #expect(traeCommands.contains {
-        $0.contains("/.island/bin/island-bridge --source claude --client-kind trae --client-name Trae --client-originator Trae")
-    })
-    #expect(traeHooks["Notification"] != nil)
-    #expect(traeHooks["SubagentStop"] != nil)
+    #expect(codeBuddyHooks["PermissionRequest"] == nil)
+    #expect(codeBuddyHooks["Notification"] != nil)
+    #expect(codeBuddyHooks["SubagentStop"] != nil)
 
     let cursorData = try Data(contentsOf: cursorURL)
     let cursorJSON = try #require(JSONSerialization.jsonObject(with: cursorData) as? [String: Any])

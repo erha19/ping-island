@@ -205,14 +205,96 @@ public struct BridgeEnvelope: Codable, Equatable, Sendable, Identifiable {
     }
 }
 
+public indirect enum JSONValue: Codable, Equatable, Sendable {
+    case null
+    case bool(Bool)
+    case int(Int)
+    case double(Double)
+    case string(String)
+    case array([JSONValue])
+    case object([String: JSONValue])
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+
+        if container.decodeNil() {
+            self = .null
+        } else if let bool = try? container.decode(Bool.self) {
+            self = .bool(bool)
+        } else if let int = try? container.decode(Int.self) {
+            self = .int(int)
+        } else if let double = try? container.decode(Double.self) {
+            self = .double(double)
+        } else if let string = try? container.decode(String.self) {
+            self = .string(string)
+        } else if let array = try? container.decode([JSONValue].self) {
+            self = .array(array)
+        } else if let object = try? container.decode([String: JSONValue].self) {
+            self = .object(object)
+        } else {
+            throw DecodingError.dataCorruptedError(in: container, debugDescription: "Unsupported JSON value")
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+
+        switch self {
+        case .null:
+            try container.encodeNil()
+        case .bool(let bool):
+            try container.encode(bool)
+        case .int(let int):
+            try container.encode(int)
+        case .double(let double):
+            try container.encode(double)
+        case .string(let string):
+            try container.encode(string)
+        case .array(let array):
+            try container.encode(array)
+        case .object(let object):
+            try container.encode(object)
+        }
+    }
+
+    public var foundationObject: Any {
+        switch self {
+        case .null:
+            return NSNull()
+        case .bool(let bool):
+            return bool
+        case .int(let int):
+            return int
+        case .double(let double):
+            return double
+        case .string(let string):
+            return string
+        case .array(let array):
+            return array.map(\.foundationObject)
+        case .object(let object):
+            return object.mapValues(\.foundationObject)
+        }
+    }
+}
+
 public struct BridgeResponse: Codable, Equatable, Sendable {
     public var requestID: UUID
     public var decision: InterventionDecision?
+    public var reason: String?
+    public var updatedInput: [String: JSONValue]?
     public var errorMessage: String?
 
-    public init(requestID: UUID, decision: InterventionDecision? = nil, errorMessage: String? = nil) {
+    public init(
+        requestID: UUID,
+        decision: InterventionDecision? = nil,
+        reason: String? = nil,
+        updatedInput: [String: JSONValue]? = nil,
+        errorMessage: String? = nil
+    ) {
         self.requestID = requestID
         self.decision = decision
+        self.reason = reason
+        self.updatedInput = updatedInput
         self.errorMessage = errorMessage
     }
 }

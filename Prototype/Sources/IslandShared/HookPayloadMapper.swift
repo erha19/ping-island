@@ -11,14 +11,16 @@ public enum HookPayloadMapper {
         let eventType = detectEventType(arguments: arguments, payload: payload)
         let terminalContext = makeTerminalContext(environment: environment, payload: payload)
         let sessionKey = detectSessionKey(payload: payload, environment: environment, provider: source)
-        let status = detectStatus(eventType: eventType, payload: payload)
         let metadata = mergedMetadata(arguments: arguments, payload: payload)
+        let clientKind = normalizedClientKind(from: metadata)
         let intervention = detectIntervention(
             provider: source,
             eventType: eventType,
             sessionKey: sessionKey,
-            payload: payload
+            payload: payload,
+            clientKind: clientKind
         )
+        let status = detectStatus(eventType: eventType, payload: payload, intervention: intervention)
 
         return BridgeEnvelope(
             provider: source,
@@ -37,11 +39,19 @@ public enum HookPayloadMapper {
 
     public static func stdoutPayload(
         for provider: AgentProvider,
-        decision: InterventionDecision,
-        eventType: String
+        response: BridgeResponse,
+        eventType: String,
+        metadata: [String: String]
     ) -> String {
+        guard let decision = response.decision else {
+            return "{}"
+        }
+
         switch provider {
         case .claude:
+            if normalizedClientKind(from: metadata) == "codebuddy" {
+                return codeBuddyStdoutPayload(response: response, decision: decision)
+            }
             switch decision {
             case .approve:
                 return #"""
@@ -73,6 +83,24 @@ public enum HookPayloadMapper {
             }
         }
     }
+
+    private static let codeBuddyApprovalTools: Set<String> = [
+        "bash",
+        "edit",
+        "multiedit",
+        "write",
+        "task",
+        "todowrite"
+    ]
+
+    private static let codeBuddyReadOnlyTools: Set<String> = [
+        "read",
+        "glob",
+        "grep",
+        "ls",
+        "webfetch",
+        "websearch"
+    ]
 
     private static func detectEventType(arguments: [String], payload: [String: Any]) -> String {
         if let explicit = payload["hook_event_name"] as? String { return explicit }
@@ -109,9 +137,24 @@ public enum HookPayloadMapper {
         return "\(provider.rawValue):\(cwd)"
     }
 
-    private static func detectStatus(eventType: String, payload: [String: Any]) -> SessionStatus? {
+    private static func detectStatus(
+        eventType: String,
+        payload: [String: Any],
+        intervention: InterventionRequest?
+    ) -> SessionStatus? {
         if let text = payload["status"] as? String {
             return mapStatusString(text)
+        }
+        if let intervention {
+            switch intervention.kind {
+            case .approval:
+                return SessionStatus(kind: .waitingForApproval)
+            case .question:
+                return SessionStatus(kind: .waitingForInput)
+            }
+        }
+        if isQoderQuestionToolEvent(eventType: eventType, payload: payload) {
+            return SessionStatus(kind: .waitingForInput)
         }
         let lowered = eventType.lowercased()
         if lowered.contains("permission") || lowered.contains("approval") {
@@ -210,9 +253,14 @@ public enum HookPayloadMapper {
         provider: AgentProvider,
         eventType: String,
         sessionKey: String,
-        payload: [String: Any]
+        payload: [String: Any],
+        clientKind: String?
     ) -> InterventionRequest? {
-        if let questions = payload["questions"] as? [[String: Any]], !questions.isEmpty {
+        if let questions = questionPayloads(from: payload), !questions.isEmpty {
+            if clientKind == "qoder",
+               isQoderQuestionToolEvent(eventType: eventType, payload: payload) {
+                return nil
+            }
             let options = questions.flatMap { question -> [InterventionOption] in
                 let baseID = (question["id"] as? String) ?? UUID().uuidString
                 let entries = question["options"] as? [[String: Any]] ?? []
@@ -233,6 +281,28 @@ public enum HookPayloadMapper {
                 title: provider == .claude ? "Claude needs input" : "Codex needs input",
                 message: (questions.first?["question"] as? String) ?? "Answer required",
                 options: options,
+                rawContext: flattenMetadata(payload: payload)
+            )
+        }
+
+        if shouldRequestCodeBuddyApproval(
+            eventType: eventType,
+            payload: payload,
+            clientKind: clientKind
+        ) {
+            let toolName = (payload["tool_name"] as? String) ?? "Tool"
+            let message = summarizeValue(payload["tool_input"])
+                .map { "\(toolName) \($0)" }
+                ?? toolName
+            return InterventionRequest(
+                sessionID: sessionKey,
+                kind: .approval,
+                title: "CodeBuddy needs approval",
+                message: message,
+                options: [
+                    InterventionOption(id: "approve", title: "Allow Once"),
+                    InterventionOption(id: "deny", title: "Deny")
+                ],
                 rawContext: flattenMetadata(payload: payload)
             )
         }
@@ -261,6 +331,12 @@ public enum HookPayloadMapper {
 
     private static func mergedMetadata(arguments: [String], payload: [String: Any]) -> [String: String] {
         var metadata = flattenMetadata(payload: payload)
+        if let toolInput = payload["tool_input"] as? [String: Any],
+           JSONSerialization.isValidJSONObject(toolInput),
+           let data = try? JSONSerialization.data(withJSONObject: toolInput, options: [.sortedKeys]),
+           let json = String(data: data, encoding: .utf8) {
+            metadata["tool_input_json"] = json
+        }
         for (key, value) in argumentMetadata(arguments: arguments) where metadata[key] == nil {
             metadata[key] = value
         }
@@ -329,5 +405,108 @@ public enum HookPayloadMapper {
         default:
             return nil
         }
+    }
+
+    private static func normalizedClientKind(from metadata: [String: String]) -> String? {
+        metadata["client_kind"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+    }
+
+    private static func questionPayloads(from payload: [String: Any]) -> [[String: Any]]? {
+        if let questions = payload["questions"] as? [[String: Any]], !questions.isEmpty {
+            return questions
+        }
+        if let toolInput = payload["tool_input"] as? [String: Any],
+           let questions = toolInput["questions"] as? [[String: Any]],
+           !questions.isEmpty {
+            return questions
+        }
+        return nil
+    }
+
+    private static func normalizedToolName(from payload: [String: Any]) -> String? {
+        guard let toolName = payload["tool_name"] as? String else { return nil }
+        return toolName
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "_", with: "")
+            .lowercased()
+    }
+
+    private static func isQoderQuestionToolEvent(eventType: String, payload: [String: Any]) -> Bool {
+        guard eventType == "PreToolUse",
+              normalizedToolName(from: payload) == "askuserquestion",
+              questionPayloads(from: payload) != nil else {
+            return false
+        }
+        return true
+    }
+
+    private static func normalizedPermissionMode(from payload: [String: Any]) -> String? {
+        (payload["permission_mode"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "_", with: "")
+            .lowercased()
+    }
+
+    private static func shouldRequestCodeBuddyApproval(
+        eventType: String,
+        payload: [String: Any],
+        clientKind: String?
+    ) -> Bool {
+        guard clientKind == "codebuddy", eventType == "PreToolUse" else {
+            return false
+        }
+
+        guard let normalizedToolName = normalizedToolName(from: payload) else {
+            return false
+        }
+
+        if normalizedToolName == "askuserquestion" {
+            return false
+        }
+
+        if let permissionMode = normalizedPermissionMode(from: payload),
+           permissionMode == "bypasspermissions" || permissionMode == "plan" {
+            return false
+        }
+
+        if codeBuddyReadOnlyTools.contains(normalizedToolName) {
+            return false
+        }
+
+        if codeBuddyApprovalTools.contains(normalizedToolName) {
+            return true
+        }
+
+        return payload["tool_input"] != nil
+    }
+
+    private static func codeBuddyStdoutPayload(
+        response: BridgeResponse,
+        decision: InterventionDecision
+    ) -> String {
+        var payload: [String: Any] = [:]
+
+        switch decision {
+        case .approve, .approveForSession:
+            payload["permissionDecision"] = "allow"
+        case .deny, .cancel:
+            payload["permissionDecision"] = "deny"
+            payload["permissionDecisionReason"] = response.reason ?? "Denied from Island"
+        case .answer:
+            payload["permissionDecision"] = "allow"
+            if let updatedInput = response.updatedInput {
+                payload["modifiedInput"] = updatedInput.mapValues(\.foundationObject)
+            }
+        }
+
+        guard JSONSerialization.isValidJSONObject(payload),
+              let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]),
+              let string = String(data: data, encoding: .utf8) else {
+            return "{}"
+        }
+
+        return string
     }
 }

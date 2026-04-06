@@ -4,71 +4,72 @@ This file is a routing layer for coding agents working in this repo. Keep it sho
 
 ## Mission
 
-- `ClaudeIsland` is a macOS menu bar app that surfaces Dynamic Island-style status for Claude Code and Codex sessions.
+- `PingIsland` is a macOS menu bar app that surfaces Dynamic Island-style status for Claude Code and Codex sessions.
 - The main runtime path is:
   - hook or app-server events
   - monitoring and service layers
   - `SessionStore`
-  - `ClaudeSessionMonitor` and `NotchViewModel`
+  - `SessionMonitor` and `NotchViewModel`
   - SwiftUI notch UI
 - There are two important codepaths:
-  - `ClaudeIsland/`: the shipping Xcode app
+  - `PingIsland/`: the shipping Xcode app
   - `Prototype/`: a SwiftPM prototype with focused tests and reference implementations
 
 ## Start Here
 
 - Product overview: `README.md`
-- App entry: `ClaudeIsland/App/ClaudeIslandApp.swift`, `ClaudeIsland/App/AppDelegate.swift`
-- Main state hub: `ClaudeIsland/Services/State/SessionStore.swift`
-- Session association cache: `ClaudeIsland/Services/State/SessionAssociationStore.swift`
-- Session bridge for UI: `ClaudeIsland/Services/Session/ClaudeSessionMonitor.swift`
-- Notch state and layout: `ClaudeIsland/Core/NotchViewModel.swift`, `ClaudeIsland/UI/Views/NotchView.swift`
-- Claude hook ingress: `ClaudeIsland/Resources/island-state.py`, `ClaudeIsland/Services/Hooks/HookInstaller.swift`, `ClaudeIsland/Services/Hooks/HookSocketServer.swift`
+- App entry: `PingIsland/App/PingIslandApp.swift`, `PingIsland/App/AppDelegate.swift`
+- Main state hub: `PingIsland/Services/State/SessionStore.swift`
+- Session association cache: `PingIsland/Services/State/SessionAssociationStore.swift`
+- Session bridge for UI: `PingIsland/Services/Session/SessionMonitor.swift`
+- Notch state and layout: `PingIsland/Core/NotchViewModel.swift`, `PingIsland/UI/Views/NotchView.swift`
+- Claude hook ingress: `PingIsland/Resources/island-state.py`, `PingIsland/Services/Hooks/HookInstaller.swift`, `PingIsland/Services/Hooks/HookSocketServer.swift`
   - `island-state.py` is responsible for terminal, tmux, SSH-remote, and IDE terminal context capture before envelopes hit Swift code
-- Codex ingress: `ClaudeIsland/Services/Codex/`, `ClaudeIsland/UI/Views/CodexSessionView.swift`
-  - Hook-less fallback parsing for Codex sessions lives in `ClaudeIsland/Services/Codex/CodexRolloutParser.swift`
-- Terminal and focus control: `ClaudeIsland/Services/Tmux/`, `ClaudeIsland/Services/Window/`, `ClaudeIsland/Utilities/TerminalVisibilityDetector.swift`
-- Provider/client routing: bridge envelopes are normalized in `ClaudeIsland/Services/Hooks/HookSocketServer.swift`, stored on `SessionState`, and launched via `ClaudeIsland/Services/Window/SessionLauncher.swift`
-- Client profile registry: installable hook clients and runtime client branding / recognition are centralized in `ClaudeIsland/Models/ClientProfile.swift`
-- VS Code-compatible IDE focus extension install / URI launch: `ClaudeIsland/Services/Window/IDEExtensionInstaller.swift`, `ClaudeIsland/Services/Window/TerminalSessionFocuser.swift`
+- Codex ingress: `PingIsland/Services/Codex/`, `PingIsland/UI/Views/CodexSessionView.swift`
+  - Hook-less fallback parsing for Codex sessions lives in `PingIsland/Services/Codex/CodexRolloutParser.swift`
+- Terminal and focus control: `PingIsland/Services/Tmux/`, `PingIsland/Services/Window/`, `PingIsland/Utilities/TerminalVisibilityDetector.swift`
+- Provider/client routing: bridge envelopes are normalized in `PingIsland/Services/Hooks/HookSocketServer.swift`, stored on `SessionState`, and launched via `PingIsland/Services/Window/SessionLauncher.swift`
+- Client profile registry: installable hook clients and runtime client branding / recognition are centralized in `PingIsland/Models/ClientProfile.swift`
+- VS Code-compatible IDE focus extension install / URI launch: `PingIsland/Services/Window/IDEExtensionInstaller.swift`, `PingIsland/Services/Window/TerminalSessionFocuser.swift`
+- Session list UI: `PingIsland/UI/Views/SessionListView.swift`
 
 ## Repo Map
 
-- `ClaudeIsland/App`: app lifecycle, window setup, screen observation
-- `ClaudeIsland/Core`: notch geometry, shared state, app settings, selectors
-- `ClaudeIsland/Models`: domain models for sessions, events, tools, phases
-- `ClaudeIsland/Services`: ingestion, socket handling, state management, tmux, windows, updates
-- `ClaudeIsland/Services/Window/IDEExtensionInstaller.swift`: installs the VS Code-compatible terminal-focus extension used by Cursor / VS Code / Trae / CodeBuddy style IDE hosts
-- `ClaudeIsland/UI`: SwiftUI views, reusable components, AppKit-backed window controllers
-- `ClaudeIsland/Resources`: hook assets, entitlements, bundled fonts
+- `PingIsland/App`: app lifecycle, window setup, screen observation
+- `PingIsland/Core`: notch geometry, shared state, app settings, selectors
+- `PingIsland/Models`: domain models for sessions, events, tools, phases
+- `PingIsland/Services`: ingestion, socket handling, state management, tmux, windows, updates
+- `PingIsland/Services/Window/IDEExtensionInstaller.swift`: installs the VS Code-compatible terminal-focus extension used by Cursor / VS Code / CodeBuddy / Qoder style IDE hosts
+- `PingIsland/UI`: SwiftUI views, reusable components, AppKit-backed window controllers
+- `PingIsland/Resources`: hook assets, entitlements, bundled fonts
 - `Prototype`: Swift package prototype and testbed
 - `scripts`: release, signing, and packaging automation
 
 ## Change Routing
 
 - If you change hook payload shape or hook event semantics, update these together:
-  - `ClaudeIsland/Resources/island-state.py`
-  - `ClaudeIsland/Services/Hooks/HookSocketServer.swift`
-  - `ClaudeIsland/Models/SessionEvent.swift`
-  - `ClaudeIsland/Services/State/SessionStore.swift`
-  - the affected UI under `ClaudeIsland/UI/`
+  - `PingIsland/Resources/island-state.py`
+  - `PingIsland/Services/Hooks/HookSocketServer.swift`
+  - `PingIsland/Models/SessionEvent.swift`
+  - `PingIsland/Services/State/SessionStore.swift`
+  - the affected UI under `PingIsland/UI/`
 - If you change provider/client detection or click-through behavior, trace through `HookSocketServer`, `SessionStore`, `SessionState`, `SessionLauncher`, and the session list / hover UI so labels and launch targets stay in sync.
-- If you add a Claude-compatible hook client, start in `ClaudeIsland/Models/ClientProfile.swift` and wire any truly client-specific behavior from there before adding new ad-hoc switches elsewhere.
+- If you add a Claude-compatible hook client, start in `PingIsland/Models/ClientProfile.swift` and wire any truly client-specific behavior from there before adding new ad-hoc switches elsewhere.
 - If you change how sessions are associated across relaunches or between hook/app-server ingress paths, inspect both `SessionStore` and `SessionAssociationStore` so cached client metadata stays compatible.
 - If you change session lifecycle or transitions, start in `SessionStore`. Avoid ad-hoc state mutation elsewhere.
   - Current rule: provider-originated end events should preserve the session in `.ended` so it stays visible in the list; only explicit user archive/removal should delete it from `SessionStore`.
 - If you change notch sizing, opening behavior, or visibility, inspect both `NotchViewModel` and `NotchView`.
 - If you change tmux or terminal focusing, trace through `Services/Tmux`, `Services/Window`, and `TerminalVisibilityDetector`.
 - If you change IDE terminal jump behavior, inspect both `TerminalSessionFocuser` and `IDEExtensionInstaller`, plus the integration settings UI so install state and URI schemes stay aligned.
-- If you change Codex behavior, verify both the monitor layer under `ClaudeIsland/Services/Codex/` and the UI under `ClaudeIsland/UI/Views/CodexSessionView.swift`.
+- If you change Codex behavior, verify both the monitor layer under `PingIsland/Services/Codex/` and the UI under `PingIsland/UI/Views/CodexSessionView.swift`.
 - If you only need logic-level confidence, prefer adding or updating tests under `Prototype/Tests`.
 
 ## Build And Test
 
 - App debug build:
-  - `xcodebuild -project ClaudeIsland.xcodeproj -scheme ClaudeIsland -configuration Debug build`
+  - `xcodebuild -project PingIsland.xcodeproj -scheme PingIsland -configuration Debug build`
 - App release build:
-  - `xcodebuild -project ClaudeIsland.xcodeproj -scheme ClaudeIsland -configuration Release build`
+  - `xcodebuild -project PingIsland.xcodeproj -scheme PingIsland -configuration Release build`
 - Prototype tests:
   - `swift test --package-path Prototype`
 - Release automation:
@@ -84,10 +85,10 @@ This file is a routing layer for coding agents working in this repo. Keep it sho
 - Treat documentation upkeep as part of the change, not follow-up work.
 - Every major feature change or refactor must review and update `AGENTS.md` plus any affected adjacent docs, tests, scripts, or inline code comments that describe the old behavior.
 - Prefer code search over guesswork:
-  - `rg "process\\(" ClaudeIsland`
-  - `rg "Hook|hook" ClaudeIsland`
-  - `rg "Codex" ClaudeIsland Prototype`
-  - `rg "tmux|Tmux" ClaudeIsland`
+  - `rg "process\\(" PingIsland`
+  - `rg "Hook|hook" PingIsland`
+  - `rg "Codex" PingIsland Prototype`
+  - `rg "tmux|Tmux" PingIsland`
 - When adding new state, decide deliberately whether it belongs in:
   - SwiftUI view-local `@State`
   - shared `ObservableObject` state

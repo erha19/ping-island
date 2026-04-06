@@ -62,21 +62,42 @@ struct HookInstaller {
     }
 
     func installCodeBuddyAssets() throws {
-        try installClaudeCompatibleAssets(
-            relativePath: ".codebuddy/settings.json",
-            clientKind: "codebuddy",
-            clientName: "CodeBuddy",
-            clientOriginator: "CodeBuddy"
-        )
-    }
+        try ensureSupportFiles()
+        let fileURL = homeDirectory.appending(path: ".codebuddy/settings.json")
+        let current = try readJSON(fileURL) ?? [:]
+        var updated = current
+        var hooks = current["hooks"] as? [String: Any] ?? [:]
 
-    func installTraeAssets() throws {
-        try installClaudeCompatibleAssets(
-            relativePath: "Library/Application Support/Trae/User/settings.json",
-            clientKind: "trae",
-            clientName: "Trae",
-            clientOriginator: "Trae"
+        let plainEvents = ["UserPromptSubmit", "Stop", "SubagentStop", "SessionStart", "SessionEnd"]
+        let wildcardEvents = ["PreToolUse", "PostToolUse", "Notification"]
+        let compactEvents = ["PreCompact": ["auto", "manual"]]
+        let command = bridgeCommand(
+            source: "claude",
+            extraArguments: [
+                "--client-kind", "codebuddy",
+                "--client-name", "CodeBuddy",
+                "--client-originator", "CodeBuddy"
+            ]
         )
+
+        for event in plainEvents {
+            hooks[event] = installHookArray(existing: hooks[event], command: command, matcher: nil)
+        }
+
+        for event in wildcardEvents {
+            hooks[event] = installHookArray(existing: hooks[event], command: command, matcher: "*")
+        }
+
+        for (event, matchers) in compactEvents {
+            var entries = hooks[event] as? [[String: Any]]
+            for matcher in matchers {
+                entries = installHookArray(existing: entries, command: command, matcher: matcher)
+            }
+            hooks[event] = entries
+        }
+
+        updated["hooks"] = hooks
+        try writeJSON(updated, to: fileURL)
     }
 
     func installCursorAssets() throws {
@@ -95,12 +116,17 @@ struct HookInstaller {
         var updated = current
         var hooks = current["hooks"] as? [String: Any] ?? [:]
 
-        let wildcardEvents = ["PreToolUse", "PostToolUse", "PostToolUseFailure"]
+        let wildcardEvents = ["PreToolUse", "PostToolUse", "PostToolUseFailure", "PermissionRequest", "Notification"]
         for event in ["UserPromptSubmit", "Stop"] {
             hooks[event] = installHookArray(existing: hooks[event], command: bridgeCommand(source: "claude", extraArguments: ["--client-kind", "qoder"]), matcher: nil)
         }
         for event in wildcardEvents {
-            hooks[event] = installHookArray(existing: hooks[event], command: bridgeCommand(source: "claude", extraArguments: ["--client-kind", "qoder"]), matcher: "*")
+            hooks[event] = installHookArray(
+                existing: hooks[event],
+                command: bridgeCommand(source: "claude", extraArguments: ["--client-kind", "qoder"]),
+                timeout: event == "PermissionRequest" ? 86_400 : nil,
+                matcher: "*"
+            )
         }
 
         updated["hooks"] = hooks

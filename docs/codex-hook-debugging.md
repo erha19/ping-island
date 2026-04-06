@@ -6,7 +6,7 @@ The script:
 
 - reads the hook's stdin without modifying it
 - records argv, cwd, a focused subset of `CODEX_*` and terminal env vars
-- appends newline-delimited JSON records under `~/.island-debug/codex-hooks/`
+- appends newline-delimited JSON records under `~/.ping-island-debug/codex-hooks/`
 
 Example `~/.codex/hooks.json` snippet for temporary debugging:
 
@@ -53,5 +53,5 @@ Example `~/.codex/hooks.json` snippet for temporary debugging:
 Inspect the latest records with:
 
 ```bash
-tail -n 20 ~/.island-debug/codex-hooks/$(date +%Y%m%d).jsonl
+tail -n 20 ~/.ping-island-debug/codex-hooks/$(date +%Y%m%d).jsonl
 ```
