@@ -2043,9 +2043,9 @@ private struct NotchDisplayModeCard: View {
     }
 
     private func notchMock(width: CGFloat, height: CGFloat) -> some View {
-        let actualClosedWidth: CGFloat = 274
+        let actualClosedWidth: CGFloat = 266
         let actualSideWidth: CGFloat = 30
-        let actualCenterWidth: CGFloat = 186
+        let actualCenterWidth: CGFloat = 178
         let sideSlotWidth = width * (actualSideWidth / actualClosedWidth)
         let centerSlotWidth = width * (actualCenterWidth / actualClosedWidth)
 

@@ -55,8 +55,8 @@ class NotchViewModel: ObservableObject {
     let hasPhysicalNotch: Bool
 
     private static let defaultClosedHeight: CGFloat = 32
-    private static let defaultClosedWidth: CGFloat = 274
-    private static let manualAttentionClosedWidth: CGFloat = 308
+    private static let defaultClosedWidth: CGFloat = 266
+    private static let manualAttentionClosedWidth: CGFloat = 300
     @Published private(set) var closedWidth: CGFloat
 
     var deviceNotchRect: CGRect { geometry.deviceNotchRect }
