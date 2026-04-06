@@ -85,7 +85,9 @@ On macOS, the UI test runner must pass local code-signing policy before it will 
 
 Pull requests run GitHub Actions validation automatically through [`.github/workflows/pr-checks.yml`](.github/workflows/pr-checks.yml).
 
-The PR workflow currently runs the stable CI slice for hosted macOS runners:
+The workflow stays on `macos-26`, while the `Prototype` package manifest is kept compatible with GitHub-hosted Swift 6.1+ toolchains so the package tests do not depend on the runner having the very latest Swift patch level.
+
+It currently runs this CI slice:
 
 ```bash
 swift test --package-path Prototype
