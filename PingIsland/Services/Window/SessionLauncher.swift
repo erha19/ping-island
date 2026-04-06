@@ -111,6 +111,34 @@ actor SessionLauncher {
         return false
     }
 
+    func activateClientApplication(_ session: SessionState) async -> Bool {
+        let candidateBundleIdentifiers = clientApplicationBundleIdentifiers(for: session)
+        let resolvedLaunchURL = session.clientInfo.launchURL
+            ?? session.clientInfo.bundleIdentifier.flatMap {
+                SessionClientInfo.appLaunchURL(
+                    bundleIdentifier: $0,
+                    sessionId: session.sessionId,
+                    workspacePath: session.cwd
+                )
+            }
+
+        for bundleIdentifier in candidateBundleIdentifiers {
+            if await activateApplication(bundleIdentifier: bundleIdentifier) {
+                return true
+            }
+        }
+
+        if let resolvedLaunchURL,
+           await activateURL(resolvedLaunchURL) {
+            for bundleIdentifier in candidateBundleIdentifiers {
+                _ = await activateApplication(bundleIdentifier: bundleIdentifier)
+            }
+            return true
+        }
+
+        return false
+    }
+
     private func activateTrackedTerminalSession(_ session: SessionState) async -> Bool {
         let clientInfo = session.clientInfo
         guard !session.isInTmux else {
@@ -550,13 +578,26 @@ actor SessionLauncher {
     private func activateApplication(bundleIdentifier: String, activateAllWindows: Bool = true) async -> Bool {
         let normalizedBundleIdentifier = TerminalAppRegistry.normalizedHostBundleIdentifier(for: bundleIdentifier)
 
-        if await MainActor.run(body: {
+        if let runningActivation = await MainActor.run(resultType: Bool?.self, body: {
             guard let app = NSRunningApplication.runningApplications(withBundleIdentifier: normalizedBundleIdentifier).first else {
-                return false
+                return nil
             }
 
-            return activateRunningApplication(app, activateAllWindows: activateAllWindows)
-        }) {
+            let didActivate = activateRunningApplication(app, activateAllWindows: activateAllWindows)
+            if activateAllWindows,
+               let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: normalizedBundleIdentifier) {
+                let configuration = NSWorkspace.OpenConfiguration()
+                configuration.activates = true
+                configuration.createsNewApplicationInstance = false
+                NSWorkspace.shared.openApplication(at: appURL, configuration: configuration) { _, error in
+                    if let error {
+                        Self.logger.debug("Reopen running app \(normalizedBundleIdentifier, privacy: .public) failed: \(error.localizedDescription, privacy: .public)")
+                    }
+                }
+            }
+
+            return didActivate
+        }), runningActivation {
             return true
         }
 
@@ -741,6 +782,25 @@ actor SessionLauncher {
         return orderedUniqueBundleIdentifiers(
             ([normalizedBundleIdentifier].compactMap { $0 } + additionalBundleIdentifiers + (profile?.localAppBundleIdentifiers ?? []))
                 .map(TerminalAppRegistry.normalizedHostBundleIdentifier(for:))
+        )
+    }
+
+    private func clientApplicationBundleIdentifiers(for session: SessionState) -> [String] {
+        var candidates: [String] = []
+
+        if session.clientInfo.profileID == "qoderwork"
+            || session.clientInfo.bundleIdentifier == "com.qoder.work"
+            || session.clientInfo.terminalBundleIdentifier == "com.qoder.work" {
+            candidates.append("com.qoder.work")
+        }
+
+        candidates.append(contentsOf: [
+            session.clientInfo.bundleIdentifier,
+            session.clientInfo.terminalBundleIdentifier
+        ].compactMap { $0 })
+
+        return Self.orderedUniqueBundleIdentifiers(
+            candidates.map(TerminalAppRegistry.normalizedHostBundleIdentifier(for:))
         )
     }
 

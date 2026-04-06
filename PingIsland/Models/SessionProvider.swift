@@ -528,6 +528,10 @@ struct SessionInterventionOption: Equatable, Identifiable, Sendable {
     let id: String
     let title: String
     let detail: String?
+
+    nonisolated var mergeSignature: String {
+        [id, title, detail ?? ""].joined(separator: "|")
+    }
 }
 
 struct SessionInterventionQuestion: Equatable, Identifiable, Sendable {
@@ -539,10 +543,25 @@ struct SessionInterventionQuestion: Equatable, Identifiable, Sendable {
     let allowsMultiple: Bool
     let allowsOther: Bool
     let isSecret: Bool
+
+    nonisolated var mergeSignature: String {
+        let optionSignature = options.map(\.mergeSignature).joined(separator: "||")
+        return [
+            id,
+            header,
+            prompt,
+            detail ?? "",
+            allowsMultiple ? "1" : "0",
+            allowsOther ? "1" : "0",
+            isSecret ? "1" : "0",
+            optionSignature
+        ].joined(separator: "|")
+    }
 }
 
 struct SessionIntervention: Equatable, Identifiable, Sendable {
     private nonisolated static let externalContinuationTimeout: TimeInterval = 5 * 60
+    private nonisolated static let submittedAnswersMetadataKey = "submittedAnswersJSON"
 
     let id: String
     let kind: SessionInterventionKind
@@ -574,6 +593,35 @@ struct SessionIntervention: Equatable, Identifiable, Sendable {
         return answeredAt.addingTimeInterval(Self.externalContinuationTimeout)
     }
 
+    nonisolated var externalContinuationStatusMessage: String? {
+        guard awaitsExternalContinuation else { return nil }
+        let actorName = metadata["continuationActorName"] ?? "客户端"
+        return "\(actorName) 需要你进行后续操作，可通过上方按钮快速响应"
+    }
+
+    nonisolated var submittedAnswers: [String: [String]] {
+        guard let rawJSON = metadata[Self.submittedAnswersMetadataKey],
+              let data = rawJSON.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else {
+            return [:]
+        }
+
+        return object.reduce(into: [String: [String]]()) { partial, entry in
+            switch entry.value {
+            case let value as String:
+                guard !value.isEmpty else { return }
+                partial[entry.key] = [value]
+            case let values as [String]:
+                let filtered = values.filter { !$0.isEmpty }
+                guard !filtered.isEmpty else { return }
+                partial[entry.key] = filtered
+            default:
+                break
+            }
+        }
+    }
+
     nonisolated func hasTimedOutExternalContinuation(now: Date = Date()) -> Bool {
         guard let deadline = externalContinuationDeadline else { return false }
         return now >= deadline
@@ -581,17 +629,24 @@ struct SessionIntervention: Equatable, Identifiable, Sendable {
 
     nonisolated func markingAwaitingExternalContinuation(
         actorName: String,
-        answeredAt: Date = Date()
+        answeredAt: Date = Date(),
+        selectedAnswers: [String: [String]]? = nil
     ) -> SessionIntervention {
         var updatedMetadata = metadata
         updatedMetadata["continuationState"] = "awaiting_client_followup"
         updatedMetadata["continuationAnsweredAt"] = String(answeredAt.timeIntervalSince1970)
+        updatedMetadata["continuationActorName"] = actorName
+        if let selectedAnswers = selectedAnswers,
+           let data = try? JSONSerialization.data(withJSONObject: selectedAnswers, options: [.sortedKeys]),
+           let json = String(data: data, encoding: .utf8) {
+            updatedMetadata[Self.submittedAnswersMetadataKey] = json
+        }
 
         return SessionIntervention(
             id: id,
             kind: kind,
             title: title,
-            message: "已为 \(actorName) 自动提交答案，正在等待客户端继续返回后续消息。你也可以打开 \(actorName) 查看进展；如果 5 分钟内没有新消息，这条提醒会自动收起。",
+            message: message,
             options: options,
             questions: questions,
             supportsSessionScope: supportsSessionScope,

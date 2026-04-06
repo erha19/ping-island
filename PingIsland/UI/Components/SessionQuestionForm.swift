@@ -2,13 +2,32 @@ import SwiftUI
 
 struct SessionQuestionForm: View {
     let intervention: SessionIntervention
-    let submitLabel: String
+    let submitLabel: String?
     let onSubmit: ([String: [String]]) -> Void
     var secondaryActionTitle: String? = nil
     var onSecondaryAction: (() -> Void)? = nil
+    var isEditable: Bool = true
 
     @State private var answers: [String: [String]] = [:]
     @State private var otherAnswers: [String: String] = [:]
+
+    init(
+        intervention: SessionIntervention,
+        submitLabel: String? = nil,
+        initialAnswers: [String: [String]] = [:],
+        onSubmit: @escaping ([String: [String]]) -> Void,
+        secondaryActionTitle: String? = nil,
+        onSecondaryAction: (() -> Void)? = nil,
+        isEditable: Bool = true
+    ) {
+        self.intervention = intervention
+        self.submitLabel = submitLabel
+        self.onSubmit = onSubmit
+        self.secondaryActionTitle = secondaryActionTitle
+        self.onSecondaryAction = onSecondaryAction
+        self.isEditable = isEditable
+        _answers = State(initialValue: initialAnswers)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -48,11 +67,13 @@ struct SessionQuestionForm: View {
             }
 
             HStack(spacing: 8) {
-                Button(submitLabel) {
-                    onSubmit(submissionPayload())
+                if let submitLabel {
+                    Button(submitLabel) {
+                        onSubmit(submissionPayload())
+                    }
+                    .buttonStyle(SessionQuestionButtonStyle(background: Color.white.opacity(0.9), foreground: .black))
+                    .disabled(!canSubmit || !isEditable)
                 }
-                .buttonStyle(SessionQuestionButtonStyle(background: Color.white.opacity(0.9), foreground: .black))
-                .disabled(!canSubmit)
 
                 if let secondaryActionTitle, let onSecondaryAction {
                     Button(secondaryActionTitle) {
@@ -71,6 +92,7 @@ struct SessionQuestionForm: View {
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 8)], spacing: 8) {
                 ForEach(question.options) { option in
                     Button {
+                        guard isEditable else { return }
                         toggle(option.title, for: question)
                     } label: {
                         HStack(alignment: .top, spacing: 8) {
@@ -116,6 +138,7 @@ struct SessionQuestionForm: View {
                         .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                     }
                     .buttonStyle(.plain)
+                    .disabled(!isEditable)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -127,6 +150,7 @@ struct SessionQuestionForm: View {
                 ))
                 .textFieldStyle(.plain)
                 .padding(10)
+                .disabled(!isEditable)
                 .overlay(
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
                         .stroke(Color.white.opacity(0.14), lineWidth: 1)
@@ -139,6 +163,7 @@ struct SessionQuestionForm: View {
             ))
             .textFieldStyle(.plain)
             .padding(10)
+            .disabled(!isEditable)
             .overlay(
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .stroke(Color.white.opacity(0.14), lineWidth: 1)
@@ -150,6 +175,7 @@ struct SessionQuestionForm: View {
             ))
             .textFieldStyle(.plain)
             .padding(10)
+            .disabled(!isEditable)
             .overlay(
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .stroke(Color.white.opacity(0.14), lineWidth: 1)

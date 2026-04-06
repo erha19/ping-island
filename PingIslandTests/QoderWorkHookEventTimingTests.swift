@@ -132,6 +132,8 @@ final class QoderWorkHookEventTimingTests: XCTestCase {
         let autoAnswer = SessionMonitor.defaultQoderWorkAutoAnswer(for: event)
 
         XCTAssertEqual(autoAnswer?.toolUseId, "call_auto")
+        XCTAssertEqual(autoAnswer?.answers["topic"], ["A 方案"])
+        XCTAssertEqual(autoAnswer?.answers["style"], ["简洁"])
         let updatedInput = autoAnswer?.updatedInput
         let answers = updatedInput?["answers"] as? [String: Any]
         XCTAssertEqual(answers?["topic"] as? String, "A 方案")

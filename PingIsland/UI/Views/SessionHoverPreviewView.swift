@@ -314,10 +314,34 @@ private struct HoverQuestionInterventionCard: View {
                         sessionMonitor.answerIntervention(sessionId: session.sessionId, answers: payload)
                     }
                 )
+            } else if session.clientInfo.profileID == "qoderwork"
+                || session.clientInfo.bundleIdentifier == "com.qoder.work",
+                intervention.awaitsExternalContinuation {
+                VStack(alignment: .leading, spacing: 10) {
+                    SessionQuestionForm(
+                        intervention: intervention,
+                        initialAnswers: intervention.submittedAnswers,
+                        onSubmit: { _ in },
+                        secondaryActionTitle: "打开 \(session.interactionDisplayName)",
+                        onSecondaryAction: {
+                            Task {
+                                _ = await SessionLauncher.shared.activateClientApplication(session)
+                            }
+                        },
+                        isEditable: false
+                    )
+
+                    if let statusMessage = intervention.externalContinuationStatusMessage {
+                        Text(statusMessage)
+                            .font(.system(size: 11))
+                            .foregroundColor(.white.opacity(0.62))
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
             } else {
                 Button("打开 \(session.interactionDisplayName) 回答") {
                     Task {
-                        _ = await SessionLauncher.shared.activate(session)
+                        _ = await SessionLauncher.shared.activateClientApplication(session)
                     }
                 }
                 .buttonStyle(HoverApprovalButtonStyle(background: Color.white.opacity(0.9), foreground: .black))

@@ -28,7 +28,7 @@ enum SessionEvent: Sendable {
     case permissionSocketFailed(sessionId: String, toolUseId: String)
 
     /// A question/approval intervention was resolved inside the app
-    case interventionResolved(sessionId: String, nextPhase: SessionPhase)
+    case interventionResolved(sessionId: String, nextPhase: SessionPhase, submittedAnswers: [String: [String]]?)
 
     /// Periodic cleanup for stale external-continuation interventions
     case pruneTimedOutExternalContinuations(now: Date)
@@ -383,8 +383,9 @@ extension SessionEvent: CustomStringConvertible {
             return "permissionDenied(session: \(sessionId.prefix(8)), tool: \(toolUseId.prefix(12)))"
         case .permissionSocketFailed(let sessionId, let toolUseId):
             return "permissionSocketFailed(session: \(sessionId.prefix(8)), tool: \(toolUseId.prefix(12)))"
-        case .interventionResolved(let sessionId, let nextPhase):
-            return "interventionResolved(session: \(sessionId.prefix(8)), next: \(String(describing: nextPhase)))"
+        case .interventionResolved(let sessionId, let nextPhase, let submittedAnswers):
+            let answerCount = submittedAnswers?.count ?? 0
+            return "interventionResolved(session: \(sessionId.prefix(8)), next: \(String(describing: nextPhase)), answers: \(answerCount))"
         case .pruneTimedOutExternalContinuations(let now):
             return "pruneTimedOutExternalContinuations(now: \(now))"
         case .fileUpdated(let payload):

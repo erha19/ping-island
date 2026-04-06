@@ -62,7 +62,11 @@ class SessionMonitor: ObservableObject {
                             )
                         }
                         await SessionStore.shared.process(
-                            .interventionResolved(sessionId: event.sessionId, nextPhase: .processing)
+                            .interventionResolved(
+                                sessionId: event.sessionId,
+                                nextPhase: .processing,
+                                submittedAnswers: autoAnswer.answers
+                            )
                         )
                     }
 
@@ -201,7 +205,11 @@ class SessionMonitor: ObservableObject {
             )
 
             await SessionStore.shared.process(
-                .interventionResolved(sessionId: sessionId, nextPhase: .processing)
+                .interventionResolved(
+                    sessionId: sessionId,
+                    nextPhase: .processing,
+                    submittedAnswers: answers
+                )
             )
         }
     }
@@ -331,7 +339,7 @@ class SessionMonitor: ObservableObject {
 
     nonisolated static func defaultQoderWorkAutoAnswer(
         for event: HookEvent
-    ) -> (toolUseId: String, updatedInput: [String: Any])? {
+    ) -> (toolUseId: String, answers: [String: [String]], updatedInput: [String: Any])? {
         let isQoderWork =
             event.clientInfo.profileID == "qoderwork"
             || event.clientInfo.bundleIdentifier == "com.qoder.work"
@@ -352,7 +360,7 @@ class SessionMonitor: ObservableObject {
             return nil
         }
 
-        return (toolUseId, updatedInput)
+        return (toolUseId, answers, updatedInput)
     }
 
     private func loadCodexRolloutFallback(

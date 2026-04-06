@@ -97,8 +97,12 @@ actor SessionStore {
         case .permissionSocketFailed(let sessionId, let toolUseId):
             await processSocketFailure(sessionId: sessionId, toolUseId: toolUseId)
 
-        case .interventionResolved(let sessionId, let nextPhase):
-            await processInterventionResolved(sessionId: sessionId, nextPhase: nextPhase)
+        case .interventionResolved(let sessionId, let nextPhase, let submittedAnswers):
+            await processInterventionResolved(
+                sessionId: sessionId,
+                nextPhase: nextPhase,
+                submittedAnswers: submittedAnswers
+            )
 
         case .pruneTimedOutExternalContinuations(let now):
             await processTimedOutExternalContinuations(now: now)
@@ -629,14 +633,19 @@ actor SessionStore {
         sessions[sessionId] = session
     }
 
-    private func processInterventionResolved(sessionId: String, nextPhase: SessionPhase) async {
+    private func processInterventionResolved(
+        sessionId: String,
+        nextPhase: SessionPhase,
+        submittedAnswers: [String: [String]]?
+    ) async {
         guard var session = sessions[sessionId] else { return }
         if let intervention = session.intervention,
            intervention.kind == .question,
            (session.clientInfo.profileID == "qoderwork" || session.clientInfo.bundleIdentifier == "com.qoder.work"),
            intervention.supportsInlineResponse == false {
             session.intervention = intervention.markingAwaitingExternalContinuation(
-                actorName: session.interactionDisplayName
+                actorName: session.interactionDisplayName,
+                selectedAnswers: submittedAnswers
             )
             session.phase = .waitingForInput
         } else {
@@ -797,8 +806,10 @@ actor SessionStore {
 
         await applyQoderFallbackIntervention(to: &session)
 
-        if !payload.messages.isEmpty,
-           session.intervention?.awaitsExternalContinuation == true {
+        if payload.isIncremental,
+           let continuationAnsweredAt = session.intervention?.externalContinuationAnsweredAt,
+           session.intervention?.awaitsExternalContinuation == true,
+           payload.messages.contains(where: { $0.timestamp >= continuationAnsweredAt }) {
             session.intervention = nil
             if session.phase == .waitingForInput {
                 session.phase = .processing
@@ -1005,6 +1016,13 @@ actor SessionStore {
 
     private func shouldClearIntervention(for event: HookEvent, newPhase: SessionPhase, currentIntervention: SessionIntervention?) -> Bool {
         guard currentIntervention?.kind == .question else { return false }
+        if currentIntervention?.awaitsExternalContinuation == true,
+           (event.clientInfo.profileID == "qoderwork" || event.clientInfo.bundleIdentifier == "com.qoder.work") {
+            if event.event == "SessionEnd" {
+                return true
+            }
+            return false
+        }
         if event.event == "PostToolUse" || event.event == "Stop" || event.event == "SessionEnd" {
             return true
         }
@@ -1866,6 +1884,13 @@ actor SessionStore {
         current: SessionIntervention?,
         proposed: SessionIntervention
     ) -> SessionIntervention {
+        if let current,
+           current.kind == .question,
+           current.awaitsExternalContinuation,
+           current.questions.map(\.mergeSignature) == proposed.questions.map(\.mergeSignature) {
+            return current
+        }
+
         guard proposed.kind == .question,
               let current,
               current.kind == .question,

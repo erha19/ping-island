@@ -471,10 +471,30 @@ struct ChatView: View {
                     secondaryActionTitle: session.isInTmux ? "打开终端" : nil,
                     onSecondaryAction: session.isInTmux ? { focusTerminal() } : nil
                 )
+            } else if session.clientInfo.profileID == "qoderwork"
+                || session.clientInfo.bundleIdentifier == "com.qoder.work",
+                intervention.awaitsExternalContinuation {
+                VStack(alignment: .leading, spacing: 10) {
+                    SessionQuestionForm(
+                        intervention: intervention,
+                        initialAnswers: intervention.submittedAnswers,
+                        onSubmit: { _ in },
+                        secondaryActionTitle: "打开 \(session.interactionDisplayName)",
+                        onSecondaryAction: { openClientApplication() },
+                        isEditable: false
+                    )
+
+                    if let statusMessage = intervention.externalContinuationStatusMessage {
+                        Text(statusMessage)
+                            .font(.system(size: 11))
+                            .foregroundColor(.white.opacity(0.62))
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
             } else {
                 HStack(spacing: 8) {
                     Button("打开 \(session.interactionDisplayName) 回答") {
-                        focusTerminal()
+                        openClientApplication()
                     }
                     .buttonStyle(.plain)
                     .font(.system(size: 12, weight: .semibold))
@@ -533,6 +553,12 @@ struct ChatView: View {
     private func focusTerminal() {
         Task {
             _ = await SessionLauncher.shared.activate(session)
+        }
+    }
+
+    private func openClientApplication() {
+        Task {
+            _ = await SessionLauncher.shared.activateClientApplication(session)
         }
     }
 
