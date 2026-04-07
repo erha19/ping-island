@@ -5,6 +5,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var windowManager: WindowManager?
     private var screenObserver: ScreenObserver?
     private let launchConfiguration = AppLaunchConfiguration()
+    private var quickPickService: QuickPickService?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         if launchConfiguration.shouldEnforceSingleInstance && !ensureSingleInstance() {
@@ -32,6 +33,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             screenObserver = ScreenObserver { [weak self] in
                 self?.handleScreenChange()
             }
+        }
+
+        // 初始化 QuickPick 服务
+        if launchConfiguration.shouldEnableQuickPick {
+            quickPickService = QuickPickService.shared
         }
 
         if launchConfiguration.shouldPresentSettingsWindowOnLaunch {
