@@ -90,7 +90,21 @@ public enum HookPayloadMapper {
                         answers: answers
                     )
                 }
-                return String(data: (try? JSONSerialization.data(withJSONObject: answers, options: [.sortedKeys])) ?? Data("{}".utf8), encoding: .utf8) ?? "{}"
+                // Serialize answers to JSON string
+                guard let answersJson = String(data: (try? JSONSerialization.data(withJSONObject: answers, options: [.sortedKeys])) ?? Data("{}".utf8), encoding: .utf8) else {
+                    return "{}"
+                }
+                
+                // For question/user input events, return format expected by Claude
+                if eventType.contains("Question") || eventType == "UserInputRequest" || eventType == "UserPromptSubmit" {
+                    return """
+                    {"hookSpecificOutput":{"hookEventName":"\(eventType)","permissionDecision":"allow","updatedInput":\(answersJson)}}
+                    """
+                }
+                // For PermissionRequest events with answer
+                return """
+                {"hookSpecificOutput":{"hookEventName":"\(eventType)","decision":{"behavior":"allow","updatedInput":\(answersJson)}}}
+                """
             }
         case .codex:
             switch decision {

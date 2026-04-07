@@ -103,6 +103,7 @@ actor SessionStore {
         switch provider {
         case .claude: "Claude Session"
         case .codex: "Codex Session"
+        case .copilot: "Copilot Session"
         }
     }
 }
