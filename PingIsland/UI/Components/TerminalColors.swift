@@ -48,6 +48,8 @@ extension SessionClientBrand {
             return TerminalColors.qoder
         case .neutral:
             return Color.white.opacity(0.72)
+        case .copilot:
+            return TerminalColors.green
         }
     }
 }
