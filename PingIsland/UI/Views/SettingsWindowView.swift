@@ -917,6 +917,10 @@ private struct SettingsPanelContentView: View {
                 SettingsValueLine(title: "版本", value: appVersion)
                 SettingsLineDivider()
                 SettingsValueLine(title: "构建", value: appBuild)
+                SettingsLineDivider()
+                SettingsValueLine(title: "安装时间", value: versionMetadata)
+                SettingsLineDivider()
+                SettingsValueLine(title: "之前版本", value: previousVersion)
             }
 
             SettingsSectionCard(title: "更新") {
@@ -1089,6 +1093,33 @@ private struct SettingsPanelContentView: View {
 
     private var appBuild: String {
         Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
+    }
+
+    private var versionMetadata: String {
+        guard let metadata = HookInstaller.getVersionMetadata(),
+              let installedAt = metadata["installedAt"] as? String else {
+            return "首次安装"
+        }
+
+        // Format the date
+        let formatter = ISO8601DateFormatter()
+        if let date = formatter.date(from: installedAt) {
+            let displayFormatter = DateFormatter()
+            displayFormatter.dateStyle = .medium
+            displayFormatter.timeStyle = .short
+            return displayFormatter.string(from: date)
+        }
+
+        return installedAt
+    }
+
+    private var previousVersion: String {
+        guard let metadata = HookInstaller.getVersionMetadata(),
+              let previous = metadata["previousVersion"] as? String,
+              !previous.isEmpty else {
+            return "无"
+        }
+        return previous
     }
 
     private var updateTitle: String {
