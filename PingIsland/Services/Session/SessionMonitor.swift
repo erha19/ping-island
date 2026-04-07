@@ -198,8 +198,10 @@ class SessionMonitor: ObservableObject {
                 return
             }
 
+            // 使用正确的 toolUseId：优先使用 metadata 中保存的原始值
+            let toolUseId = intervention.metadata["originalToolUseId"] ?? intervention.id
             HookSocketServer.shared.respondToIntervention(
-                toolUseId: intervention.id,
+                toolUseId: toolUseId,
                 decision: "answer",
                 updatedInput: updatedInput
             )
