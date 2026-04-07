@@ -9,6 +9,7 @@ struct AppLaunchConfiguration: Equatable {
     let shouldObserveScreens: Bool
     let shouldEnforceSingleInstance: Bool
     let shouldPresentSettingsWindowOnLaunch: Bool
+    let shouldEnableQuickPick: Bool
     let activationPolicy: NSApplication.ActivationPolicy
 
     init(environment: [String: String] = Foundation.ProcessInfo.processInfo.environment) {
@@ -24,6 +25,7 @@ struct AppLaunchConfiguration: Equatable {
         self.shouldObserveScreens = !isRunningTests
         self.shouldEnforceSingleInstance = !isRunningTests
         self.shouldPresentSettingsWindowOnLaunch = isUITesting || shouldShowSettings
+        self.shouldEnableQuickPick = !isRunningTests
         self.activationPolicy = isUITesting ? .regular : .accessory
     }
 }
