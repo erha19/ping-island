@@ -11,6 +11,7 @@ enum SessionClientBrand: String, Codable, Equatable, Sendable {
     case codebuddy
     case codex
     case qoder
+    case copilot
     case neutral
 }
 
@@ -494,6 +495,31 @@ enum ClientProfileRegistry {
                 HookInstallEventDescriptor(name: "PermissionRequest", templates: [.matcher("*")], timeout: 86_400),
                 HookInstallEventDescriptor(name: "Notification", templates: [.matcher("*")]),
                 HookInstallEventDescriptor(name: "Stop", templates: [.plain]),
+            ]
+        ),
+        ManagedHookClientProfile(
+            id: "copilot-hooks",
+            title: "GitHub Copilot",
+            subtitle: "管理 ~/.github/hooks/island.json，支持 Copilot CLI 与 Agent hooks",
+            alwaysVisibleInSettings: true,
+            logoAssetName: nil,
+            localAppBundleIdentifiers: ["com.github.Copilot", "com.github.CopilotForXcode"],
+            iconSymbolName: "chevron.left.forwardslash.chevron.right",
+            configurationRelativePath: ".github/hooks/island.json",
+            bridgeSource: "copilot",
+            bridgeExtraArguments: [],
+            defaultEnabled: false,
+            installsClaudePythonScript: false,
+            brand: .copilot,
+            events: [
+                HookInstallEventDescriptor(name: "sessionStart", templates: [.matcher("*")]),
+                HookInstallEventDescriptor(name: "sessionEnd", templates: [.matcher("*")]),
+                HookInstallEventDescriptor(name: "userPromptSubmitted", templates: [.matcher("*")]),
+                HookInstallEventDescriptor(name: "preToolUse", templates: [.matcher("*")]),
+                HookInstallEventDescriptor(name: "postToolUse", templates: [.matcher("*")]),
+                HookInstallEventDescriptor(name: "agentStop", templates: [.matcher("*")]),
+                HookInstallEventDescriptor(name: "subagentStop", templates: [.matcher("*")]),
+                HookInstallEventDescriptor(name: "errorOccurred", templates: [.matcher("*")]),
             ]
         ),
     ]
