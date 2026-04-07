@@ -96,14 +96,18 @@ public enum HookPayloadMapper {
                 }
                 
                 // For question/user input events, return format expected by Claude
+                // Use hookSpecificOutput with permissionDecision for question events
                 if eventType.contains("Question") || eventType == "UserInputRequest" || eventType == "UserPromptSubmit" {
                     return """
                     {"hookSpecificOutput":{"hookEventName":"\(eventType)","permissionDecision":"allow","updatedInput":\(answersJson)}}
                     """
                 }
-                // For PermissionRequest events with answer
+                
+                // For PermissionRequest events, always use hookSpecificOutput format
+                // This ensures Claude receives the response in the expected format
+                let updatedInputJson = "{\"answers\":\(answersJson)}"
                 return """
-                {"hookSpecificOutput":{"hookEventName":"\(eventType)","decision":{"behavior":"allow","updatedInput":\(answersJson)}}}
+                {"hookSpecificOutput":{"hookEventName":"\(eventType)","decision":{"behavior":"allow","updatedInput":\(updatedInputJson)}}}
                 """
             }
         case .codex:
@@ -153,14 +157,27 @@ public enum HookPayloadMapper {
     ]
 
     private static func detectEventType(arguments: [String], payload: [String: Any]) -> String {
+        // Check explicit fields first
         if let explicit = payload["hook_event_name"] as? String { return explicit }
         if let explicit = payload["event"] as? String { return explicit }
         if let explicit = payload["type"] as? String { return explicit }
+        
+        // Check arguments
         if let index = arguments.firstIndex(of: "--event"), arguments.indices.contains(index + 1) {
             return arguments[index + 1]
         }
+        
+        // Check for questions/user input
         if payload["questions"] != nil { return "UserInputRequest" }
+        
+        // Check for permission request indicators
+        if let reason = payload["reason"] as? String, reason.lowercased().contains("permission") {
+            return "PermissionRequest"
+        }
+        
+        // Check for tool use events
         if payload["tool_input"] != nil || payload["tool_name"] != nil { return "PreToolUse" }
+        
         return "UnknownEvent"
     }
 
@@ -238,10 +255,12 @@ public enum HookPayloadMapper {
         clientKind: String?,
         intervention: InterventionRequest?
     ) -> Bool {
+        // If we have an intervention, always expect a response
         if intervention != nil {
             return true
         }
 
+        // Check for qoderwork specific question events
         if clientKind == "qoderwork",
            isQoderWorkPreToolQuestionEvent(eventType: eventType, payload: payload) {
             return true
@@ -249,6 +268,17 @@ public enum HookPayloadMapper {
 
         if clientKind == "qoderwork",
            isQoderWorkPermissionQuestionEvent(eventType: eventType, payload: payload) {
+            return true
+        }
+
+        // For PermissionRequest and approval-related events, always expect a response
+        let loweredEventType = eventType.lowercased()
+        if loweredEventType.contains("permission") || loweredEventType.contains("approval") {
+            return true
+        }
+
+        // Check for question/user input events
+        if loweredEventType.contains("question") || loweredEventType.contains("userinput") {
             return true
         }
 
