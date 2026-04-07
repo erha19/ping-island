@@ -50,6 +50,11 @@ class SessionMonitor: ObservableObject {
 
         HookSocketServer.shared.start(
             onEvent: { event in
+                // Play sound for the event
+                Task { @MainActor in
+                    SoundManager.shared.handleEvent(event.event)
+                }
+                
                 Task {
                     await SessionStore.shared.process(.hookReceived(event))
 
