@@ -7,6 +7,7 @@ import UniformTypeIdentifiers
 private enum SettingsCategory: String, CaseIterable, Identifiable {
     case general
     case display
+    case mascot
     case sound
     case integration
     case about
@@ -17,6 +18,7 @@ private enum SettingsCategory: String, CaseIterable, Identifiable {
         switch self {
         case .general: return "通用"
         case .display: return "显示"
+        case .mascot: return "角色"
         case .sound: return "声音"
         case .integration: return "集成"
         case .about: return "关于"
@@ -27,6 +29,7 @@ private enum SettingsCategory: String, CaseIterable, Identifiable {
         switch self {
         case .general: return "系统与基础行为"
         case .display: return "显示器与位置"
+        case .mascot: return "像素角色与动画"
         case .sound: return "通知与提示音"
         case .integration: return "Hooks 与 IDE 扩展"
         case .about: return "版本与更新"
@@ -37,6 +40,7 @@ private enum SettingsCategory: String, CaseIterable, Identifiable {
         switch self {
         case .general: return "gearshape.fill"
         case .display: return "rectangle.on.rectangle"
+        case .mascot: return "face.smiling.fill"
         case .sound: return "speaker.wave.2.fill"
         case .integration: return "link.circle.fill"
         case .about: return "info.circle.fill"
@@ -47,6 +51,7 @@ private enum SettingsCategory: String, CaseIterable, Identifiable {
         switch self {
         case .general: return Color(red: 0.12, green: 0.42, blue: 0.95)
         case .display: return Color(red: 0.46, green: 0.40, blue: 0.96)
+        case .mascot: return Color(red: 0.91, green: 0.27, blue: 0.81)  // Pink
         case .sound: return Color(red: 0.22, green: 0.83, blue: 0.42)
         case .integration: return Color(red: 0.16, green: 0.76, blue: 0.72)
         case .about: return Color(red: 0.17, green: 0.60, blue: 0.96)
@@ -566,6 +571,8 @@ private struct SettingsPanelContentView: View {
                     generalContent
                 case .display:
                     displayContent
+                case .mascot:
+                    mascotContent
                 case .sound:
                     soundContent
                 case .integration:
@@ -769,6 +776,10 @@ private struct SettingsPanelContentView: View {
                 )
             }
         }
+    }
+
+    private var mascotContent: some View {
+        MascotSettingsView()
     }
 
     private var soundContent: some View {
