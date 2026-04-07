@@ -37,6 +37,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if launchConfiguration.shouldPresentSettingsWindowOnLaunch {
             SettingsWindowController.shared.present()
         }
+        
+        // Play boot sound
+        Task { @MainActor in
+            SoundManager.shared.playBoot()
+        }
     }
 
     private func handleScreenChange() {
