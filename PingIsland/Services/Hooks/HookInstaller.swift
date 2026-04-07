@@ -11,6 +11,9 @@ struct HookInstaller {
     private static let preferredTargetsDefaultsKey = "HookInstaller.preferredTargets.v1"
     private static let qoderMigrationDefaultsKey = "HookInstaller.preferredTargets.qoder-default.v1"
     private static let qoderWorkMigrationDefaultsKey = "HookInstaller.preferredTargets.qoderwork-default.v1"
+    private static let installedVersionDefaultsKey = "HookInstaller.installedVersion.v1"
+    private static let firstLaunchDefaultsKey = "HookInstaller.isFirstLaunch.v1"
+
     private static var defaultPreferredTargets: Set<String> {
         Set(
             ClientProfileRegistry.managedHookProfiles
@@ -21,17 +24,72 @@ struct HookInstaller {
 
     /// Install managed hooks for preferred clients on app launch.
     static func installIfNeeded() {
+        // Check if this is first launch and perform auto-integration
+        let isFirstLaunch = checkAndMarkFirstLaunch()
+
         let preferredTargets = preferredTargets()
         installBridgeLauncherIfNeeded()
         removeLegacyTraeHooks()
 
         for profile in ClientProfileRegistry.managedHookProfiles {
-            if preferredTargets.contains(profile.id) && canManage(profile) {
+            // For first launch, auto-install all defaultEnabled profiles
+            if isFirstLaunch && profile.defaultEnabled && canManage(profile) {
+                install(profile, persistPreference: true)
+            } else if preferredTargets.contains(profile.id) && canManage(profile) {
                 install(profile, persistPreference: false)
             } else {
                 uninstall(profile, persistPreference: false)
             }
         }
+
+        // Update version metadata after installation
+        updateVersionMetadata()
+    }
+
+    /// Check if this is the first launch and mark as installed
+    private static func checkAndMarkFirstLaunch() -> Bool {
+        let defaults = UserDefaults.standard
+
+        // Check if we've already recorded a version
+        if defaults.string(forKey: installedVersionDefaultsKey) != nil {
+            return false
+        }
+
+        // First launch - mark it
+        defaults.set(true, forKey: firstLaunchDefaultsKey)
+        return true
+    }
+
+    /// Update version metadata for tracking updates
+    private static func updateVersionMetadata() {
+        let defaults = UserDefaults.standard
+        let currentVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
+        let currentBuild = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
+
+        let versionMetadata: [String: Any] = [
+            "version": currentVersion,
+            "build": currentBuild,
+            "installedAt": ISO8601DateFormatter().string(from: Date()),
+            "previousVersion": defaults.string(forKey: installedVersionDefaultsKey) ?? ""
+        ]
+
+        defaults.set(currentVersion, forKey: installedVersionDefaultsKey)
+        defaults.set(versionMetadata, forKey: "HookInstaller.versionMetadata.v1")
+    }
+
+    /// Get the installed version metadata
+    static func getVersionMetadata() -> [String: Any]? {
+        return UserDefaults.standard.dictionary(forKey: "HookInstaller.versionMetadata.v1")
+    }
+
+    /// Check if this is a fresh install (never installed before)
+    static func isFreshInstall() -> Bool {
+        return UserDefaults.standard.string(forKey: installedVersionDefaultsKey) == nil
+    }
+
+    /// Get the current installed version
+    static func getInstalledVersion() -> String? {
+        return UserDefaults.standard.string(forKey: installedVersionDefaultsKey)
     }
 
     static func install(_ profile: ManagedHookClientProfile) {
