@@ -3,6 +3,7 @@ import Foundation
 public enum AgentProvider: String, Codable, CaseIterable, Sendable {
     case claude
     case codex
+    case copilot
 }
 
 public enum SessionStatusKind: String, Codable, CaseIterable, Sendable {

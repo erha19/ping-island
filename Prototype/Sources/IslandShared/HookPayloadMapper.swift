@@ -105,6 +105,18 @@ public enum HookPayloadMapper {
             case .answer(let answers):
                 return String(data: (try? JSONSerialization.data(withJSONObject: ["answers": answers], options: [.sortedKeys])) ?? Data("{}".utf8), encoding: .utf8) ?? "{}"
             }
+        case .copilot:
+            // GitHub Copilot uses similar response format to Codex
+            switch decision {
+            case .approve, .approveForSession:
+                return #"{"decision":"accept"}"#
+            case .deny:
+                return #"{"decision":"decline"}"#
+            case .cancel:
+                return #"{"decision":"cancel"}"#
+            case .answer(let answers):
+                return String(data: (try? JSONSerialization.data(withJSONObject: ["answers": answers], options: [.sortedKeys])) ?? Data("{}".utf8), encoding: .utf8) ?? "{}"
+            }
         }
     }
 

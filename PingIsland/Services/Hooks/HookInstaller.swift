@@ -320,6 +320,13 @@ struct HookInstaller {
             json = existing
         }
 
+        // Add version field for GitHub Copilot hooks
+        if profile.brand == .copilot {
+            if json["version"] == nil {
+                json["version"] = 1
+            }
+        }
+
         let command: String
         if profile.installsClaudePythonScript {
             let python = detectPython()
