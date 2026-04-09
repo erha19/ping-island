@@ -2410,8 +2410,11 @@ actor SessionStore {
         guard event.clientInfo.sessionFilePath?.isEmpty != false else { return false }
         guard !event.expectsResponse else { return false }
         guard case .none = event.intervention else { return false }
+        guard let message = Self.normalizedHookMessage(event.message) else {
+            return false
+        }
 
-        return Self.normalizedHookMessage(event.message) == nil
+        return CodexAuxiliaryHookFilter.isCodexTitleGenerationPrompt(message)
     }
 
     private func shouldIgnoreClaudeAskUserQuestionPermissionRequest(_ event: HookEvent) -> Bool {

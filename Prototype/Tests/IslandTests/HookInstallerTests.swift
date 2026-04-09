@@ -178,6 +178,10 @@ func installerDeduplicatesManagedHooksButKeepsUnrelatedHooks() throws {
     #expect(codexCommands.contains("/usr/bin/printf keep"))
     #expect(codexCommands.contains { $0.contains("/.ping-island/bin/ping-island-bridge --source codex") })
     #expect(codexCommands.filter { $0.contains("/.ping-island/bin/ping-island-bridge --source codex") }.count == 1)
+    #expect(codexHooks["PreToolUse"] != nil)
+    #expect(codexHooks["PostToolUse"] != nil)
+    #expect(codexHooks["PermissionRequest"] != nil)
+    #expect(codexHooks["Stop"] != nil)
 
     let qoderData = try Data(contentsOf: qoderSettingsURL)
     let qoderJSON = try #require(JSONSerialization.jsonObject(with: qoderData) as? [String: Any])

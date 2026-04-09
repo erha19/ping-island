@@ -4,17 +4,20 @@ Minimal Codex hook debugger.
 
 This script captures the raw stdin payload, argv, and a focused subset of
 environment variables so we can inspect what Codex hooks actually provide.
+When PingIslandBridge is available, it also forwards the hook payload so the
+normal Ping Island session flow keeps working during debugging.
 
 It is intentionally side-effect light:
 - writes newline-delimited JSON records to disk
-- never prints to stdout
-- exits 0 unless logging itself crashes
+- forwards stdout/stderr from PingIslandBridge when forwarding is enabled
+- exits 0 unless logging or bridge forwarding crashes
 """
 
 from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 import uuid
 from datetime import datetime, timezone
@@ -22,6 +25,7 @@ from pathlib import Path
 
 
 DEFAULT_LOG_DIR = Path.home() / ".ping-island-debug" / "codex-hooks"
+DEFAULT_BRIDGE_PATH = Path.home() / ".ping-island" / "bin" / "ping-island-bridge"
 INTERESTING_ENV_KEYS = [
     "CODEX_THREAD_ID",
     "PWD",
@@ -75,10 +79,57 @@ def parse_json(raw_text: str) -> object | None:
         return None
 
 
+def should_forward(argv: list[str]) -> bool:
+    if "--log-only" in argv:
+        return False
+
+    log_only = os.environ.get("PING_ISLAND_DEBUG_LOG_ONLY", "").strip().lower()
+    return log_only not in {"1", "true", "yes"}
+
+
+def resolve_bridge_command() -> list[str] | None:
+    override = os.environ.get("PING_ISLAND_CODEX_BRIDGE", "").strip()
+    candidates = []
+    if override:
+        candidates.append(Path(override).expanduser())
+    candidates.append(DEFAULT_BRIDGE_PATH)
+
+    for candidate in candidates:
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return [str(candidate), "--source", "codex"]
+
+    return None
+
+
+def forward_to_bridge(raw_stdin: str) -> tuple[bool, list[str] | None, int, str, str]:
+    command = resolve_bridge_command()
+    if command is None:
+        return False, None, 0, "", ""
+
+    completed = subprocess.run(
+        command,
+        input=raw_stdin,
+        capture_output=True,
+        text=True,
+        env=os.environ.copy(),
+        check=False,
+    )
+    return True, command, completed.returncode, completed.stdout, completed.stderr
+
+
 def main() -> int:
     raw_stdin = sys.stdin.read()
     parsed_payload = parse_json(raw_stdin)
     event = detect_event(sys.argv[1:], parsed_payload) or "unknown"
+    should_forward_to_bridge = should_forward(sys.argv[1:])
+    forwarded = False
+    bridge_command: list[str] | None = None
+    bridge_exit_code = 0
+    bridge_stdout = ""
+    bridge_stderr = ""
+
+    if should_forward_to_bridge:
+        forwarded, bridge_command, bridge_exit_code, bridge_stdout, bridge_stderr = forward_to_bridge(raw_stdin)
 
     log_dir = Path(
         os.environ.get("PING_ISLAND_CODEX_HOOK_DEBUG_DIR", DEFAULT_LOG_DIR)
@@ -91,6 +142,10 @@ def main() -> int:
         "event": event,
         "argv": sys.argv[1:],
         "cwd": os.getcwd(),
+        "forwarding_enabled": should_forward_to_bridge,
+        "forwarded_to_bridge": forwarded,
+        "bridge_command": bridge_command,
+        "bridge_exit_code": bridge_exit_code if forwarded else None,
         "environment": collect_environment(),
         "stdin_raw": raw_stdin,
         "stdin_json": parsed_payload,
@@ -101,7 +156,12 @@ def main() -> int:
         handle.write(json.dumps(record, ensure_ascii=False, sort_keys=True))
         handle.write("\n")
 
-    return 0
+    if bridge_stdout:
+        sys.stdout.write(bridge_stdout)
+    if bridge_stderr:
+        sys.stderr.write(bridge_stderr)
+
+    return bridge_exit_code if forwarded else 0
 
 
 if __name__ == "__main__":

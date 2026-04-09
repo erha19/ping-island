@@ -228,6 +228,7 @@ struct IDEExtensionInstaller {
         return """
         const vscode = require('vscode');
         const childProcess = require('child_process');
+        const fs = require('fs');
 
         function runCommand(command, args) {
             try {
@@ -275,6 +276,21 @@ struct IDEExtensionInstaller {
             }
 
             console.warn(`[ping-island] ${message}`, JSON.stringify(details));
+        }
+
+        function writeProbeFile(path, contents) {
+            if (!path) return false;
+
+            try {
+                fs.writeFileSync(path, contents, { encoding: 'utf8' });
+                return true;
+            } catch (error) {
+                logWarn('Failed to write setup probe file', {
+                    path,
+                    message: error?.message || String(error),
+                });
+                return false;
+            }
         }
 
         function readTTY(pid) {
@@ -540,11 +556,37 @@ struct IDEExtensionInstaller {
 
         \(sessionFocusLogic)
 
+        async function handleSetupURI(uri) {
+            const params = new URLSearchParams(uri.query);
+            const probePath = params.get('probe') || params.get('probePath');
+            const details = {
+                path: uri.path,
+                query: uri.query || null,
+                probePath,
+            };
+
+            logInfo('Received setup URI', details);
+
+            if (probePath) {
+                writeProbeFile(probePath, JSON.stringify({
+                    ok: true,
+                    path: uri.path,
+                    query: uri.query || '',
+                    handledAt: new Date().toISOString(),
+                }));
+            }
+
+            await vscode.window.showInformationMessage('Ping Island is ready in \(profile.title).');
+        }
+
         function activate(context) {
             context.subscriptions.push(
                 vscode.window.registerUriHandler({
                     async handleUri(uri) {
-                        if (uri.path === '/setup') return;
+                        if (uri.path === '/setup') {
+                            await handleSetupURI(uri);
+                            return;
+                        }
 
                         const params = new URLSearchParams(uri.query);
                         const sessionId = params.get('sessionId') || params.get('session_id');

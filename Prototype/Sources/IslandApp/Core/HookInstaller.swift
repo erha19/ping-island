@@ -199,7 +199,14 @@ struct HookInstaller {
         var updated = current
         var hooks = current["hooks"] as? [String: Any] ?? [:]
 
-        for event in ["SessionStart", "UserPromptSubmit", "Stop"] {
+        for event in [
+            "SessionStart",
+            "UserPromptSubmit",
+            "PreToolUse",
+            "PostToolUse",
+            "PermissionRequest",
+            "Stop"
+        ] {
             hooks[event] = installHookArray(existing: hooks[event], command: bridgeCommand(source: "codex"))
         }
 
