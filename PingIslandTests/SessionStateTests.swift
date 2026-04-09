@@ -108,6 +108,50 @@ final class SessionStateTests: XCTestCase {
         XCTAssertEqual(session.pendingToolInput, "command: swift test\ntimeout: 30")
     }
 
+    func testClaudeCodeWaitingForApprovalSupportsAutoApproveAction() {
+        let session = SessionState(
+            sessionId: "claude-auto-approve",
+            cwd: "/tmp/project",
+            provider: .claude,
+            clientInfo: SessionClientInfo(kind: .claudeCode, name: "Claude Code"),
+            phase: .waitingForApproval(
+                PermissionContext(toolUseId: "tool-1", toolName: "Bash", toolInput: nil, receivedAt: Date())
+            )
+        )
+
+        XCTAssertEqual(session.scopedApprovalAction, .autoApprove)
+        XCTAssertTrue(session.supportsSessionScopedApproval)
+    }
+
+    func testQoderWaitingForApprovalDoesNotExposeClaudeAutoApproveAction() {
+        let session = SessionState(
+            sessionId: "qoder-no-auto-approve",
+            cwd: "/tmp/project",
+            provider: .claude,
+            clientInfo: SessionClientInfo(kind: .qoder, profileID: "qoder", name: "Qoder"),
+            phase: .waitingForApproval(
+                PermissionContext(toolUseId: "tool-1", toolName: "Bash", toolInput: nil, receivedAt: Date())
+            )
+        )
+
+        XCTAssertNil(session.scopedApprovalAction)
+        XCTAssertFalse(session.supportsSessionScopedApproval)
+    }
+
+    func testCodexAppServerWaitingForApprovalUsesAllowSessionAction() {
+        let session = SessionState(
+            sessionId: "codex-session-scope",
+            cwd: "/tmp/project",
+            provider: .codex,
+            ingress: .codexAppServer,
+            phase: .waitingForApproval(
+                PermissionContext(toolUseId: "tool-1", toolName: "shell", toolInput: nil, receivedAt: Date())
+            )
+        )
+
+        XCTAssertEqual(session.scopedApprovalAction, .allowSession)
+    }
+
     func testIdleSessionAutoArchivesFromPrimaryUIAfterThirtyMinutes() {
         let session = SessionState(
             sessionId: "idle-auto-archive",

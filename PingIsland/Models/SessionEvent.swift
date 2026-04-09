@@ -21,6 +21,9 @@ enum SessionEvent: Sendable {
     /// User approved a permission request
     case permissionApproved(sessionId: String, toolUseId: String)
 
+    /// Session-level approval preference changed for the current session runtime.
+    case permissionAutoApprovalChanged(sessionId: String, isEnabled: Bool)
+
     /// User denied a permission request
     case permissionDenied(sessionId: String, toolUseId: String, reason: String?)
 
@@ -383,6 +386,8 @@ extension SessionEvent: CustomStringConvertible {
             return "hookReceived(\(event.event), session: \(event.sessionId.prefix(8)))"
         case .permissionApproved(let sessionId, let toolUseId):
             return "permissionApproved(session: \(sessionId.prefix(8)), tool: \(toolUseId.prefix(12)))"
+        case .permissionAutoApprovalChanged(let sessionId, let isEnabled):
+            return "permissionAutoApprovalChanged(session: \(sessionId.prefix(8)), enabled: \(isEnabled))"
         case .permissionDenied(let sessionId, let toolUseId, _):
             return "permissionDenied(session: \(sessionId.prefix(8)), tool: \(toolUseId.prefix(12)))"
         case .permissionSocketFailed(let sessionId, let toolUseId):

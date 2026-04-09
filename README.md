@@ -59,6 +59,7 @@ Ping Island focuses on the moments that actually interrupt coding flow, then kee
 
 - **Attention-first UI** - Stay compact until a session needs approval, input, review, or intervention.
 - **Act from the notch** - Approve tools, deny requests, and answer follow-up prompts without hunting through tabs.
+- **Claude Code auto-approve** - Turn on per-session auto-approval when you want Claude Code to stop pausing on every permission request.
 - **One-click return** - Jump back to the right iTerm2, Ghostty, Terminal.app, tmux pane, or IDE window.
 - **Multi-agent coverage** - Track Claude Code, Codex, Gemini CLI, OpenCode, Cursor, Qoder, CodeBuddy, GitHub Copilot, and other compatible sessions in one place.
 - **Codex hook + app-server sync** - Support Codex CLI hooks, live app-server threads, and rollout parsing fallback when needed.

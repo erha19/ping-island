@@ -50,13 +50,28 @@ class SessionMonitor: ObservableObject {
 
         HookSocketServer.shared.start(
             onEvent: { event in
-                // Play sound for the event
-                Task { @MainActor in
-                    SoundManager.shared.handleEvent(event.event)
-                }
-                
                 Task {
+                    let shouldAutoApprovePermission = await Self.shouldAutoApproveClaudePermission(for: event)
+
+                    if !shouldAutoApprovePermission {
+                        await MainActor.run {
+                            SoundManager.shared.handleEvent(event.event)
+                        }
+                    }
+
                     await SessionStore.shared.process(.hookReceived(event))
+
+                    if shouldAutoApprovePermission,
+                       let approvedToolUseId = await Self.resolvePendingApprovalToolUseId(for: event.sessionId, fallback: event.toolUseId) {
+                        HookSocketServer.shared.respondToPermission(
+                            toolUseId: approvedToolUseId,
+                            decision: "approveForSession"
+                        )
+                        await SessionStore.shared.process(
+                            .permissionApproved(sessionId: event.sessionId, toolUseId: approvedToolUseId)
+                        )
+                        return
+                    }
 
                     if let autoAnswer = await MainActor.run(body: { Self.defaultQoderAutoAnswer(for: event) }) {
                         await MainActor.run {
@@ -146,6 +161,20 @@ class SessionMonitor: ObservableObject {
             }
 
             guard let permission = session.activePermission else { return }
+
+            if forSession, session.scopedApprovalAction == .autoApprove {
+                await SessionStore.shared.process(
+                    .permissionAutoApprovalChanged(sessionId: sessionId, isEnabled: true)
+                )
+                HookSocketServer.shared.respondToPermission(
+                    toolUseId: permission.toolUseId,
+                    decision: "approveForSession"
+                )
+                await SessionStore.shared.process(
+                    .permissionApproved(sessionId: sessionId, toolUseId: permission.toolUseId)
+                )
+                return
+            }
 
             HookSocketServer.shared.respondToPermission(
                 toolUseId: permission.toolUseId,
@@ -422,6 +451,36 @@ class SessionMonitor: ObservableObject {
         }
 
         return (toolUseId, answers, updatedInput)
+    }
+
+    private nonisolated static func shouldAutoApproveClaudePermission(for event: HookEvent) async -> Bool {
+        guard event.provider == .claude,
+              event.event == "PermissionRequest",
+              event.status == "waiting_for_approval"
+        else {
+            return false
+        }
+
+        guard let session = await SessionStore.shared.session(for: event.sessionId) else {
+            return false
+        }
+
+        return session.autoApprovePermissions
+            && session.provider == .claude
+            && session.clientInfo.kind == .claudeCode
+    }
+
+    private nonisolated static func resolvePendingApprovalToolUseId(
+        for sessionId: String,
+        fallback: String?
+    ) async -> String? {
+        if let toolUseId = await SessionStore.shared.session(for: sessionId)?.activePermission?.toolUseId,
+           !toolUseId.isEmpty {
+            return toolUseId
+        }
+
+        guard let fallback, !fallback.isEmpty else { return nil }
+        return fallback
     }
 
     private func loadCodexRolloutFallback(

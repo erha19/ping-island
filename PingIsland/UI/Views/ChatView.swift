@@ -445,7 +445,9 @@ struct ChatView: View {
         ChatApprovalBar(
             tool: tool,
             toolInput: session.pendingToolInput,
+            sessionAction: session.scopedApprovalAction,
             onApprove: { approvePermission() },
+            onApproveForSession: { approvePermissionForSession() },
             onDeny: { denyPermission() }
         )
     }
@@ -583,6 +585,10 @@ struct ChatView: View {
 
     private func approvePermission() {
         sessionMonitor.approvePermission(sessionId: sessionId)
+    }
+
+    private func approvePermissionForSession() {
+        sessionMonitor.approvePermission(sessionId: sessionId, forSession: true)
     }
 
     private func denyPermission() {
@@ -1201,12 +1207,15 @@ struct ChatInteractivePromptBar: View {
 struct ChatApprovalBar: View {
     let tool: String
     let toolInput: String?
+    let sessionAction: SessionScopedApprovalAction?
     let onApprove: () -> Void
+    let onApproveForSession: () -> Void
     let onDeny: () -> Void
 
     @State private var showContent = false
     @State private var showAllowButton = false
     @State private var showDenyButton = false
+    @State private var showSessionButton = false
 
     var body: some View {
         HStack(spacing: 12) {
@@ -1243,6 +1252,23 @@ struct ChatApprovalBar: View {
             .opacity(showDenyButton ? 1 : 0)
             .scaleEffect(showDenyButton ? 1 : 0.8)
 
+            if let sessionAction {
+                Button {
+                    onApproveForSession()
+                } label: {
+                    Text(sessionAction.buttonTitle)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(.white.opacity(0.92))
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .background(TerminalColors.blue.opacity(0.26))
+                        .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .opacity(showSessionButton ? 1 : 0)
+                .scaleEffect(showSessionButton ? 1 : 0.8)
+            }
+
             // Allow button
             Button {
                 onApprove()
@@ -1271,6 +1297,9 @@ struct ChatApprovalBar: View {
                 showDenyButton = true
             }
             withAnimation(.spring(response: 0.35, dampingFraction: 0.7).delay(0.15)) {
+                showSessionButton = sessionAction != nil
+            }
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.7).delay(0.2)) {
                 showAllowButton = true
             }
         }

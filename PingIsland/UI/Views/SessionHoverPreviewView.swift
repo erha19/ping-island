@@ -274,6 +274,18 @@ private struct HoverApprovalCard: View {
                 }
                 .buttonStyle(HoverApprovalButtonStyle(background: Color.white.opacity(0.1)))
 
+                if let sessionAction = session.scopedApprovalAction {
+                    Button(sessionAction.buttonTitle) {
+                        sessionMonitor.approvePermission(sessionId: session.sessionId, forSession: true)
+                    }
+                    .buttonStyle(
+                        HoverApprovalButtonStyle(
+                            background: TerminalColors.blue.opacity(0.26),
+                            foreground: .white.opacity(0.95)
+                        )
+                    )
+                }
+
                 Button("Allow") {
                     sessionMonitor.approvePermission(sessionId: session.sessionId)
                 }

@@ -91,6 +91,9 @@ actor SessionStore {
         case .permissionApproved(let sessionId, let toolUseId):
             await processPermissionApproved(sessionId: sessionId, toolUseId: toolUseId)
 
+        case .permissionAutoApprovalChanged(let sessionId, let isEnabled):
+            processPermissionAutoApprovalChanged(sessionId: sessionId, isEnabled: isEnabled)
+
         case .permissionDenied(let sessionId, let toolUseId, let reason):
             await processPermissionDenied(sessionId: sessionId, toolUseId: toolUseId, reason: reason)
 
@@ -476,6 +479,12 @@ actor SessionStore {
     }
 
     // MARK: - Permission Processing
+
+    private func processPermissionAutoApprovalChanged(sessionId: String, isEnabled: Bool) {
+        guard var session = sessions[sessionId] else { return }
+        session.autoApprovePermissions = isEnabled
+        sessions[sessionId] = session
+    }
 
     private func processPermissionApproved(sessionId: String, toolUseId: String) async {
         guard var session = sessions[sessionId] else { return }
@@ -1126,6 +1135,7 @@ actor SessionStore {
     private func markSessionEnded(_ session: inout SessionState) {
         session.phase = .ended
         session.intervention = nil
+        session.autoApprovePermissions = false
         session.lastActivity = Date()
     }
 

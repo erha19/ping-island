@@ -63,6 +63,7 @@ struct SessionListView: View {
                         onChat: { openChat(session) },
                         onArchive: { archiveSession(session) },
                         onApprove: { approveSession(session) },
+                        onApproveForSession: { approveSessionForScope(session) },
                         onReject: { rejectSession(session) }
                     )
                     .id(session.stableId)
@@ -111,6 +112,10 @@ struct SessionListView: View {
         sessionMonitor.approvePermission(sessionId: session.sessionId)
     }
 
+    private func approveSessionForScope(_ session: SessionState) {
+        sessionMonitor.approvePermission(sessionId: session.sessionId, forSession: true)
+    }
+
     private func rejectSession(_ session: SessionState) {
         sessionMonitor.denyPermission(sessionId: session.sessionId, reason: nil)
     }
@@ -131,6 +136,7 @@ struct InstanceRow: View {
     let onChat: () -> Void
     let onArchive: () -> Void
     let onApprove: () -> Void
+    let onApproveForSession: () -> Void
     let onReject: () -> Void
 
     @State private var isHovered = false
@@ -624,8 +630,10 @@ struct InstanceRow: View {
             }
         } else if isWaitingForApproval {
             InlineApprovalButtons(
+                sessionAction: session.scopedApprovalAction,
                 onChat: onChat,
                 onApprove: onApprove,
+                onApproveForSession: onApproveForSession,
                 onReject: onReject
             )
         } else {
@@ -710,13 +718,16 @@ private struct QueuePreviewLine: Identifiable {
 
 /// Compact inline approval buttons with staggered animation
 struct InlineApprovalButtons: View {
+    let sessionAction: SessionScopedApprovalAction?
     let onChat: () -> Void
     let onApprove: () -> Void
+    let onApproveForSession: () -> Void
     let onReject: () -> Void
 
     @State private var showChatButton = false
     @State private var showDenyButton = false
     @State private var showAllowButton = false
+    @State private var showSessionButton = false
 
     var body: some View {
         HStack(spacing: 5) {
@@ -742,6 +753,23 @@ struct InlineApprovalButtons: View {
             .opacity(showDenyButton ? 1 : 0)
             .scaleEffect(showDenyButton ? 1 : 0.8)
 
+            if let sessionAction {
+                Button {
+                    onApproveForSession()
+                } label: {
+                    Text(sessionAction.compactButtonTitle)
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.86))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(TerminalColors.blue.opacity(0.24))
+                        .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .opacity(showSessionButton ? 1 : 0)
+                .scaleEffect(showSessionButton ? 1 : 0.8)
+            }
+
             Button {
                 onApprove()
             } label: {
@@ -765,6 +793,9 @@ struct InlineApprovalButtons: View {
                 showDenyButton = true
             }
             withAnimation(.spring(response: 0.3, dampingFraction: 0.7).delay(0.1)) {
+                showSessionButton = sessionAction != nil
+            }
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.7).delay(0.15)) {
                 showAllowButton = true
             }
         }

@@ -8,6 +8,29 @@
 
 import Foundation
 
+enum SessionScopedApprovalAction: Equatable, Sendable {
+    case allowSession
+    case autoApprove
+
+    nonisolated var buttonTitle: String {
+        switch self {
+        case .allowSession:
+            return "Allow Session"
+        case .autoApprove:
+            return "Auto-Approve"
+        }
+    }
+
+    nonisolated var compactButtonTitle: String {
+        switch self {
+        case .allowSession:
+            return "Session"
+        case .autoApprove:
+            return "Auto"
+        }
+    }
+}
+
 /// Complete state for a single tracked session
 /// This is the single source of truth - all state reads and writes go through SessionStore
 struct SessionState: Equatable, Identifiable, Sendable {
@@ -33,6 +56,7 @@ struct SessionState: Equatable, Identifiable, Sendable {
     var pid: Int?
     var tty: String?
     var isInTmux: Bool
+    var autoApprovePermissions: Bool
 
     // MARK: - State Machine
 
@@ -93,6 +117,7 @@ struct SessionState: Equatable, Identifiable, Sendable {
         pid: Int? = nil,
         tty: String? = nil,
         isInTmux: Bool = false,
+        autoApprovePermissions: Bool = false,
         phase: SessionPhase = .idle,
         chatItems: [ChatHistoryItem] = [],
         toolTracker: ToolTracker = ToolTracker(),
@@ -119,6 +144,7 @@ struct SessionState: Equatable, Identifiable, Sendable {
         self.pid = pid
         self.tty = tty
         self.isInTmux = isInTmux
+        self.autoApprovePermissions = autoApprovePermissions
         self.phase = phase
         self.chatItems = chatItems
         self.toolTracker = toolTracker
@@ -470,6 +496,24 @@ struct SessionState: Equatable, Identifiable, Sendable {
     /// Whether the session is waiting on an approval-like decision.
     nonisolated var needsApprovalResponse: Bool {
         phase.isWaitingForApproval || intervention?.kind == .approval
+    }
+
+    nonisolated var scopedApprovalAction: SessionScopedApprovalAction? {
+        guard needsApprovalResponse else { return nil }
+
+        if ingress == .codexAppServer || intervention?.supportsSessionScope == true {
+            return .allowSession
+        }
+
+        if provider == .claude, clientInfo.kind == .claudeCode {
+            return .autoApprove
+        }
+
+        return nil
+    }
+
+    nonisolated var supportsSessionScopedApproval: Bool {
+        scopedApprovalAction != nil
     }
 
     /// Timestamp used when sorting sessions that need manual attention.
