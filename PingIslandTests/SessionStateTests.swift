@@ -657,4 +657,32 @@ final class SessionStateTests: XCTestCase {
         XCTAssertEqual(messages.first?.textContent, "使用工具问我一个问题")
         XCTAssertEqual(messages.last?.textContent, "好的，我来问你。")
     }
+
+    func testGhosttySelectionScriptPrefersStableTerminalIdentifier() {
+        let lines = TerminalSessionFocuser.ghosttySelectionScriptLines(
+            terminalSessionIdentifier: "ghostty-terminal-1",
+            workspacePath: "/tmp/demo"
+        )
+        let script = lines.joined(separator: "\n")
+
+        XCTAssertTrue(script.contains("set targetTerminalID to \"ghostty-terminal-1\""))
+        XCTAssertTrue(script.contains("set targetTerminal to first terminal whose id is targetTerminalID"))
+        XCTAssertTrue(script.contains("focus targetTerminal"))
+
+        let identifierIndex = try! XCTUnwrap(lines.firstIndex(of: "set targetTerminalID to \"ghostty-terminal-1\""))
+        let workspaceIndex = try! XCTUnwrap(lines.firstIndex(of: "set targetPath to \"/tmp/demo\""))
+        XCTAssertLessThan(identifierIndex, workspaceIndex)
+    }
+
+    func testGhosttySelectionScriptFallsBackToWorkspaceMatchingWithoutIdentifier() {
+        let lines = TerminalSessionFocuser.ghosttySelectionScriptLines(
+            terminalSessionIdentifier: nil,
+            workspacePath: "/tmp/demo"
+        )
+        let script = lines.joined(separator: "\n")
+
+        XCTAssertFalse(script.contains("targetTerminalID"))
+        XCTAssertTrue(script.contains("set targetPath to \"/tmp/demo\""))
+        XCTAssertTrue(script.contains("focus (item 1 of exactMatches)"))
+    }
 }

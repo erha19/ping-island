@@ -128,11 +128,13 @@ actor TerminalSessionFocuser {
             )
             return await focusITermSession(terminalPid: terminalPid, selector: selector)
         case "com.mitchellh.ghostty":
+            let ghosttyTerminalIdentifier = clientInfo?.terminalSessionIdentifier
             await FocusDiagnosticsStore.shared.record(
-                "TerminalFocus ghostty applescript terminalPid=\(terminalPid) workspacePath=\(workspacePath ?? "nil")"
+                "TerminalFocus ghostty applescript terminalPid=\(terminalPid) terminalIdentifier=\(ghosttyTerminalIdentifier ?? "nil") workspacePath=\(workspacePath ?? "nil")"
             )
             return await focusGhosttyTerminal(
                 terminalPid: terminalPid,
+                terminalSessionIdentifier: ghosttyTerminalIdentifier,
                 workspacePath: workspacePath
             )
         default:
@@ -323,8 +325,15 @@ actor TerminalSessionFocuser {
         return retryResult
     }
 
-    private func focusGhosttyTerminal(terminalPid: Int, workspacePath: String?) async -> Bool {
-        let result = await runAppleScript(lines: ghosttySelectionScriptLines(for: workspacePath))
+    private func focusGhosttyTerminal(
+        terminalPid: Int,
+        terminalSessionIdentifier: String?,
+        workspacePath: String?
+    ) async -> Bool {
+        let result = await runAppleScript(lines: Self.ghosttySelectionScriptLines(
+            terminalSessionIdentifier: terminalSessionIdentifier,
+            workspacePath: workspacePath
+        ))
         await FocusDiagnosticsStore.shared.record(
             "TerminalFocus ghostty select-result terminalPid=\(terminalPid) success=\(result)"
         )
@@ -443,10 +452,25 @@ actor TerminalSessionFocuser {
         }
     }
 
-    private func ghosttySelectionScriptLines(for workspacePath: String?) -> [String] {
+    static func ghosttySelectionScriptLines(
+        terminalSessionIdentifier: String?,
+        workspacePath: String?
+    ) -> [String] {
         var lines = [
             "tell application id \"com.mitchellh.ghostty\""
         ]
+
+        if let terminalSessionIdentifier = terminalSessionIdentifier?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !terminalSessionIdentifier.isEmpty {
+            lines.append(contentsOf: [
+                "set targetTerminalID to \(appleScriptStringLiteral(terminalSessionIdentifier))",
+                "try",
+                "set targetTerminal to first terminal whose id is targetTerminalID",
+                "focus targetTerminal",
+                "return \"ok\"",
+                "end try"
+            ])
+        }
 
         if let workspacePath = workspacePath?.trimmingCharacters(in: .whitespacesAndNewlines),
            !workspacePath.isEmpty {
@@ -498,7 +522,7 @@ actor TerminalSessionFocuser {
         return rawValue
     }
 
-    private func appleScriptStringLiteral(_ value: String) -> String {
+    private static func appleScriptStringLiteral(_ value: String) -> String {
         let escaped = value
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")

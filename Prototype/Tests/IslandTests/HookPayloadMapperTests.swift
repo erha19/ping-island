@@ -39,12 +39,17 @@ func mapsGhosttyTerminalContextFromEnvironment() throws {
     let envelope = HookPayloadMapper.makeEnvelope(
         source: .claude,
         arguments: ["island-bridge", "--source", "claude"],
-        environment: ["TERM_PROGRAM": "ghostty", "PWD": "/tmp/demo"],
+        environment: [
+            "TERM_PROGRAM": "ghostty",
+            "TERM_SESSION_ID": "ghostty-terminal-1",
+            "PWD": "/tmp/demo"
+        ],
         stdinData: payload
     )
 
     #expect(envelope.terminalContext.terminalProgram == "ghostty")
     #expect(envelope.terminalContext.terminalBundleID == "com.mitchellh.ghostty")
+    #expect(envelope.terminalContext.terminalSessionID == "ghostty-terminal-1")
 }
 
 @Test
