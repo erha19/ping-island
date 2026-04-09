@@ -1,13 +1,13 @@
 #!/bin/bash
-# Create a release: notarize, create DMG, sign for Sparkle, upload to GitHub, update website
-set -e
+# Create a release: build, notarize, create DMG, optionally sign for Sparkle, upload to GitHub, update website
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
-BUILD_DIR="$PROJECT_DIR/build"
+BUILD_DIR="${PING_ISLAND_BUILD_DIR:-$PROJECT_DIR/build/release}"
 EXPORT_PATH="$BUILD_DIR/export"
-RELEASE_DIR="$PROJECT_DIR/releases"
-KEYS_DIR="$PROJECT_DIR/.sparkle-keys"
+RELEASE_DIR="${PING_ISLAND_RELEASE_DIR:-$PROJECT_DIR/releases/signed}"
+NOTES_DIR="$PROJECT_DIR/releases/notes"
 
 # GitHub repository (owner/repo format)
 GITHUB_REPO="${PING_ISLAND_GITHUB_REPO:-farouqaldori/ping-island}"
@@ -18,22 +18,33 @@ WEBSITE_PUBLIC="$WEBSITE_DIR/public"
 
 APP_PATH="$EXPORT_PATH/Ping Island.app"
 APP_NAME="PingIsland"
-KEYCHAIN_PROFILE="PingIsland"
-NOTES_DIR="$PROJECT_DIR/releases/notes"
+NOTARY_PROFILE="${PING_ISLAND_NOTARY_KEYCHAIN_PROFILE:-PingIsland}"
 
 echo "=== Creating Release ==="
 echo ""
 
-# Check if app exists
+export PING_ISLAND_BUILD_DIR="$BUILD_DIR"
+export PING_ISLAND_RELEASE_DIR="$RELEASE_DIR"
+export PING_ISLAND_GENERATE_APPCAST=1
+export PING_ISLAND_NOTARY_KEYCHAIN_PROFILE="$NOTARY_PROFILE"
+
+"$SCRIPT_DIR/package-release.sh"
+
 if [ ! -d "$APP_PATH" ]; then
     echo "ERROR: App not found at $APP_PATH"
-    echo "Run ./scripts/build.sh first"
     exit 1
 fi
 
-# Get version from app
 VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP_PATH/Contents/Info.plist")
 BUILD=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$APP_PATH/Contents/Info.plist")
+DMG_PATH="$RELEASE_DIR/$APP_NAME-$VERSION-$BUILD.dmg"
+NOTES_PATH="$NOTES_DIR/$VERSION.md"
+NOTES_ASSET_PATH="$RELEASE_DIR/$APP_NAME-$VERSION.md"
+
+if [ ! -f "$DMG_PATH" ]; then
+    echo "ERROR: DMG not found at $DMG_PATH"
+    exit 1
+fi
 
 echo "Version: $VERSION (build $BUILD)"
 echo ""
@@ -41,187 +52,17 @@ echo ""
 mkdir -p "$RELEASE_DIR" "$NOTES_DIR"
 
 # ============================================
-# Step 1: Notarize the app
+# Step 1: Create GitHub Release
 # ============================================
-echo "=== Step 1: Notarizing ==="
+echo "=== Step 1: Creating GitHub Release ==="
 
-# Check if keychain profile exists
-if ! xcrun notarytool history --keychain-profile "$KEYCHAIN_PROFILE" &>/dev/null; then
-    echo ""
-    echo "No keychain profile found. Set up credentials with:"
-    echo ""
-    echo "  xcrun notarytool store-credentials \"$KEYCHAIN_PROFILE\" \\"
-    echo "      --apple-id \"your@email.com\" \\"
-    echo "      --team-id \"2DKS5U9LV4\" \\"
-    echo "      --password \"xxxx-xxxx-xxxx-xxxx\""
-    echo ""
-    echo "Create an app-specific password at: https://appleid.apple.com"
-    echo ""
-    read -p "Skip notarization for now? (y/N) " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        exit 1
-    fi
-    SKIP_NOTARIZATION=true
-    echo "WARNING: Skipping notarization. Users will see Gatekeeper warnings!"
-else
-    # Create zip for notarization
-    ZIP_PATH="$BUILD_DIR/$APP_NAME-$VERSION.zip"
-    echo "Creating zip for notarization..."
-    ditto -c -k --keepParent "$APP_PATH" "$ZIP_PATH"
+GITHUB_DOWNLOAD_URL=""
 
-    echo "Submitting for notarization..."
-    xcrun notarytool submit "$ZIP_PATH" \
-        --keychain-profile "$KEYCHAIN_PROFILE" \
-        --wait
-
-    echo "Stapling notarization ticket..."
-    xcrun stapler staple "$APP_PATH"
-
-    rm "$ZIP_PATH"
-    echo "Notarization complete!"
-fi
-
-echo ""
-
-# ============================================
-# Step 2: Create DMG
-# ============================================
-echo "=== Step 2: Creating DMG ==="
-
-DMG_PATH="$RELEASE_DIR/$APP_NAME-$VERSION.dmg"
-NOTES_PATH="$NOTES_DIR/$VERSION.md"
-NOTES_ASSET_PATH="$RELEASE_DIR/$APP_NAME-$VERSION.md"
-
-# Remove existing DMG if present
-if [ -f "$DMG_PATH" ]; then
-    echo "Removing existing DMG..."
-    rm -f "$DMG_PATH"
-fi
-
-# Check if create-dmg is available (prettier DMG)
-if command -v create-dmg &> /dev/null; then
-    echo "Using create-dmg for prettier output..."
-    create-dmg \
-        --volname "Ping Island" \
-        --window-size 600 400 \
-        --icon-size 100 \
-        --icon "Ping Island.app" 150 200 \
-        --app-drop-link 450 200 \
-        --hide-extension "Ping Island.app" \
-        "$DMG_PATH" \
-        "$APP_PATH"
-else
-    echo "Using hdiutil (install create-dmg for prettier DMG: brew install create-dmg)"
-    hdiutil create -volname "Ping Island" \
-        -srcfolder "$APP_PATH" \
-        -ov -format UDZO \
-        "$DMG_PATH"
-fi
-
-echo "DMG created: $DMG_PATH"
-
-if [ -f "$NOTES_PATH" ]; then
-    cp "$NOTES_PATH" "$NOTES_ASSET_PATH"
-    echo "Release notes copied: $NOTES_ASSET_PATH"
-else
-    echo "WARNING: No markdown release notes found at $NOTES_PATH"
-fi
-echo ""
-
-# ============================================
-# Step 3: Notarize the DMG
-# ============================================
-if [ -z "$SKIP_NOTARIZATION" ]; then
-    echo "=== Step 3: Notarizing DMG ==="
-
-    xcrun notarytool submit "$DMG_PATH" \
-        --keychain-profile "$KEYCHAIN_PROFILE" \
-        --wait
-
-    xcrun stapler staple "$DMG_PATH"
-    echo "DMG notarized!"
-    echo ""
-fi
-
-# ============================================
-# Step 4: Sign for Sparkle and generate appcast
-# ============================================
-echo "=== Step 4: Signing for Sparkle ==="
-
-# Find Sparkle tools
-SPARKLE_SIGN=""
-GENERATE_APPCAST=""
-
-POSSIBLE_PATHS=(
-    "$HOME/Library/Developer/Xcode/DerivedData/PingIsland-*/SourcePackages/artifacts/sparkle/Sparkle/bin"
-)
-
-for path_pattern in "${POSSIBLE_PATHS[@]}"; do
-    for path in $path_pattern; do
-        if [ -x "$path/sign_update" ]; then
-            SPARKLE_SIGN="$path/sign_update"
-            GENERATE_APPCAST="$path/generate_appcast"
-            break 2
-        fi
-    done
-done
-
-if [ -z "$SPARKLE_SIGN" ]; then
-    echo "WARNING: Could not find Sparkle tools."
-    echo "Build the project in Xcode first to download Sparkle package."
-    echo ""
-    echo "Skipping Sparkle signing. You'll need to manually:"
-    echo "1. Sign the DMG with sign_update"
-    echo "2. Generate appcast with generate_appcast"
-else
-    # Check for private key
-    if [ ! -f "$KEYS_DIR/eddsa_private_key" ]; then
-        echo "WARNING: No private key found at $KEYS_DIR/eddsa_private_key"
-        echo "Run ./scripts/generate-keys.sh first"
-        echo ""
-        echo "Skipping Sparkle signing."
-    else
-        # Generate signature
-        echo "Signing DMG for Sparkle..."
-        SIGNATURE=$("$SPARKLE_SIGN" --ed-key-file "$KEYS_DIR/eddsa_private_key" "$DMG_PATH")
-
-        echo ""
-        echo "Sparkle signature:"
-        echo "$SIGNATURE"
-        echo ""
-
-        # Generate/update appcast
-        echo "Generating appcast..."
-        APPCAST_DIR="$RELEASE_DIR/appcast"
-        mkdir -p "$APPCAST_DIR"
-
-        # Copy DMG to appcast directory
-        cp "$DMG_PATH" "$APPCAST_DIR/"
-        if [ -f "$NOTES_ASSET_PATH" ]; then
-            cp "$NOTES_ASSET_PATH" "$APPCAST_DIR/"
-        fi
-
-        # Generate appcast.xml
-        "$GENERATE_APPCAST" --ed-key-file "$KEYS_DIR/eddsa_private_key" "$APPCAST_DIR"
-
-        echo "Appcast generated at: $APPCAST_DIR/appcast.xml"
-    fi
-fi
-
-echo ""
-
-# ============================================
-# Step 5: Create GitHub Release
-# ============================================
-echo "=== Step 5: Creating GitHub Release ==="
-
-if ! command -v gh &> /dev/null; then
+if ! command -v gh >/dev/null 2>&1; then
     echo "WARNING: gh CLI not found. Install with: brew install gh"
     echo "Skipping GitHub release."
 else
-    # Check if release already exists
-    if gh release view "v$VERSION" --repo "$GITHUB_REPO" &>/dev/null; then
+    if gh release view "v$VERSION" --repo "$GITHUB_REPO" >/dev/null 2>&1; then
         echo "Release v$VERSION already exists. Updating..."
         gh release upload "v$VERSION" "$DMG_PATH" --repo "$GITHUB_REPO" --clobber
         if [ -f "$NOTES_ASSET_PATH" ]; then
@@ -252,7 +93,7 @@ else
                 --notes "## Ping Island v$VERSION
 
 ### Installation
-1. Download \`$APP_NAME-$VERSION.dmg\`
+1. Download \`$(basename "$DMG_PATH")\`
 2. Open the DMG and drag Ping Island to Applications
 3. Launch Ping Island from Applications
 
@@ -261,7 +102,7 @@ After installation, Ping Island will automatically check for updates."
         fi
     fi
 
-    GITHUB_DOWNLOAD_URL="https://github.com/$GITHUB_REPO/releases/download/v$VERSION/$APP_NAME-$VERSION.dmg"
+    GITHUB_DOWNLOAD_URL="https://github.com/$GITHUB_REPO/releases/download/v$VERSION/$(basename "$DMG_PATH")"
     echo "GitHub release created: https://github.com/$GITHUB_REPO/releases/tag/v$VERSION"
     echo "Download URL: $GITHUB_DOWNLOAD_URL"
 fi
@@ -269,24 +110,21 @@ fi
 echo ""
 
 # ============================================
-# Step 6: Update website appcast and deploy
+# Step 2: Update website appcast and deploy
 # ============================================
-echo "=== Step 6: Updating Website ==="
+echo "=== Step 2: Updating Website ==="
 
 if [ -d "$WEBSITE_PUBLIC" ] && [ -f "$RELEASE_DIR/appcast/appcast.xml" ]; then
-    # Copy appcast to website
     cp "$RELEASE_DIR/appcast/appcast.xml" "$WEBSITE_PUBLIC/appcast.xml"
     if [ -f "$NOTES_ASSET_PATH" ]; then
         cp "$NOTES_ASSET_PATH" "$WEBSITE_PUBLIC/"
     fi
 
-    # Update the download URL in appcast to point to GitHub releases
     if [ -n "$GITHUB_DOWNLOAD_URL" ]; then
-        sed -i '' "s|url=\"[^\"]*$APP_NAME-$VERSION.dmg\"|url=\"$GITHUB_DOWNLOAD_URL\"|g" "$WEBSITE_PUBLIC/appcast.xml"
+        sed -i '' "s|url=\"[^\"]*$(basename "$DMG_PATH")\"|url=\"$GITHUB_DOWNLOAD_URL\"|g" "$WEBSITE_PUBLIC/appcast.xml"
         echo "Updated appcast.xml with GitHub download URL"
     fi
 
-    # Update src/config.ts with latest version and download URL
     CONFIG_FILE="$WEBSITE_DIR/src/config.ts"
     if [ -n "$GITHUB_DOWNLOAD_URL" ]; then
         cat > "$CONFIG_FILE" << EOF
@@ -297,7 +135,6 @@ EOF
         echo "Updated src/config.ts with version $VERSION"
     fi
 
-    # Commit and push website changes
     cd "$WEBSITE_DIR"
     if [ -d ".git" ]; then
         git add public/appcast.xml src/config.ts
@@ -330,7 +167,6 @@ else
 fi
 
 echo ""
-
 echo "=== Release Complete ==="
 echo ""
 echo "Files created:"

@@ -103,10 +103,11 @@ This file is a routing layer for coding agents working in this repo. Keep it sho
   - `./scripts/render-mascots.sh`
 - Release automation:
   - `./scripts/build.sh`
+  - `./scripts/package-release.sh`
   - `./scripts/package-unsigned.sh`
   - `./scripts/create-release.sh`
   - `./scripts/generate-keys.sh`
-  - GitHub Actions: `.github/workflows/release-packages.yml` publishes unsigned `dmg` / `zip` assets to the matching GitHub Release for a `v*` tag or manual dispatch
+  - GitHub Actions: `.github/workflows/release-packages.yml` imports a Developer ID certificate from repository secrets, notarizes the exported app, and publishes signed `dmg` / `zip` assets to the matching GitHub Release for a `v*` tag or manual dispatch
 - Release scripts assume local signing and notarization tooling. They may modify `build/`, `releases/`, and `.sparkle-keys/`.
 
 ## Working Rules

@@ -112,6 +112,8 @@ To create a locally shareable unsigned package for local testing:
 
 The script re-signs the built app bundle with a consistent ad-hoc signature before creating the `.dmg` and `.zip`, which helps embedded frameworks launch more reliably on another machine. The package is still unsigned for distribution and not notarized, so first launch may still require `Open` from Finder's context menu or manual quarantine removal.
 
+To create signed and notarized release packages in GitHub Actions, configure the release secrets described in [docs/sparkle-release.md](docs/sparkle-release.md) and run `.github/workflows/release-packages.yml` against a `v*` tag or the manual workflow dispatch input.
+
 For the full notarized release flow and Sparkle appcast setup, see [docs/sparkle-release.md](docs/sparkle-release.md).
 
 ## Testing

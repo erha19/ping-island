@@ -30,7 +30,7 @@ concurrency:
 
 jobs:
   release:
-    name: Build and publish unsigned packages
+    name: Build and publish signed packages
     runs-on: macos-15
     timeout-minutes: 45
     env:
@@ -46,8 +46,97 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
 
-      - name: Build unsigned DMG and ZIP packages
-        run: ./scripts/package-unsigned.sh
+      - name: Validate release signing secrets
+        env:
+          BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
+          P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          SPARKLE_APPCAST_URL: ${{ secrets.SPARKLE_APPCAST_URL }}
+          SPARKLE_PUBLIC_ED_KEY: ${{ secrets.SPARKLE_PUBLIC_ED_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          required=(
+            BUILD_CERTIFICATE_BASE64
+            P12_PASSWORD
+            KEYCHAIN_PASSWORD
+            APPLE_ID
+            APPLE_TEAM_ID
+            APPLE_APP_SPECIFIC_PASSWORD
+          )
+
+          for name in "${required[@]}"; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::Missing required repository secret: $name"
+              exit 1
+            fi
+          done
+
+          if [ -n "${SPARKLE_APPCAST_URL:-}" ] && [ -z "${SPARKLE_PUBLIC_ED_KEY:-}" ]; then
+            echo "::error::SPARKLE_PUBLIC_ED_KEY is required when SPARKLE_APPCAST_URL is set"
+            exit 1
+          fi
+
+          if [ -n "${SPARKLE_PUBLIC_ED_KEY:-}" ] && [ -z "${SPARKLE_APPCAST_URL:-}" ]; then
+            echo "::error::SPARKLE_APPCAST_URL is required when SPARKLE_PUBLIC_ED_KEY is set"
+            exit 1
+          fi
+
+      - name: Import Developer ID certificate
+        env:
+          BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
+          P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cert_path="$RUNNER_TEMP/build_certificate.p12"
+          keychain_path="$RUNNER_TEMP/ping-island-signing.keychain-db"
+
+          if ! echo "$BUILD_CERTIFICATE_BASE64" | base64 --decode > "$cert_path" 2>/dev/null; then
+            echo "$BUILD_CERTIFICATE_BASE64" | base64 -D > "$cert_path"
+          fi
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$keychain_path"
+          security set-keychain-settings -lut 21600 "$keychain_path"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$keychain_path"
+          security import "$cert_path" -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k "$keychain_path"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$keychain_path"
+          security default-keychain -s "$keychain_path"
+
+          existing_keychains=$(security list-keychains -d user | tr -d '"' | xargs)
+          security list-keychains -d user -s "$keychain_path" $existing_keychains
+          security find-identity -v -p codesigning "$keychain_path"
+
+      - name: Inject Sparkle release config
+        if: ${{ secrets.SPARKLE_APPCAST_URL != '' && secrets.SPARKLE_PUBLIC_ED_KEY != '' }}
+        shell: bash
+        env:
+          SPARKLE_APPCAST_URL: ${{ secrets.SPARKLE_APPCAST_URL }}
+          SPARKLE_PUBLIC_ED_KEY: ${{ secrets.SPARKLE_PUBLIC_ED_KEY }}
+        run: |
+          set -euo pipefail
+
+          printf 'SPARKLE_APPCAST_URL = %s\nSPARKLE_PUBLIC_ED_KEY = %s\n' \
+            "$SPARKLE_APPCAST_URL" \
+            "$SPARKLE_PUBLIC_ED_KEY" \
+            > Config/LocalSecrets.xcconfig
+
+      - name: Build signed DMG and ZIP packages
+        env:
+          PING_ISLAND_BUILD_DIR: ${{ github.workspace }}/build/release
+          PING_ISLAND_RELEASE_DIR: ${{ github.workspace }}/releases/signed
+          PING_ISLAND_KEYCHAIN_PATH: ${{ runner.temp }}/ping-island-signing.keychain-db
+          PING_ISLAND_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          PING_ISLAND_NOTARY_APPLE_ID: ${{ secrets.APPLE_ID }}
+          PING_ISLAND_NOTARY_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          PING_ISLAND_NOTARY_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+        run: ./scripts/package-release.sh
 
       - name: Collect release metadata
         id: meta
@@ -56,20 +145,20 @@ jobs:
           set -euo pipefail
 
           shopt -s nullglob
-          dmg_assets=(releases/unsigned/*.dmg)
-          zip_assets=(releases/unsigned/*.zip)
+          dmg_assets=(releases/signed/*.dmg)
+          zip_assets=(releases/signed/*.zip)
 
           if [ "${#dmg_assets[@]}" -ne 1 ]; then
-            echo "::error::Expected exactly one DMG asset in releases/unsigned, found ${#dmg_assets[@]}"
+            echo "::error::Expected exactly one DMG asset in releases/signed, found ${#dmg_assets[@]}"
             exit 1
           fi
 
           if [ "${#zip_assets[@]}" -ne 1 ]; then
-            echo "::error::Expected exactly one ZIP asset in releases/unsigned, found ${#zip_assets[@]}"
+            echo "::error::Expected exactly one ZIP asset in releases/signed, found ${#zip_assets[@]}"
             exit 1
           fi
 
-          app_path="build/unsigned/DerivedData/Build/Products/Release/Ping Island.app"
+          app_path="build/release/export/Ping Island.app"
           if [ ! -d "$app_path" ]; then
             echo "::error::Expected built app bundle at $app_path"
             exit 1
@@ -117,17 +206,17 @@ jobs:
           set -euo pipefail
 
           notes_file="$RUNNER_TEMP/release-notes.md"
-          warning_block='> Warning: These GitHub Actions artifacts are unsigned local-test builds. Ping Island re-signs the app bundle with a consistent ad-hoc signature, but macOS may still require right-click Open or manual quarantine removal on first launch.'
+          release_block='> Built, signed with Developer ID, and notarized on GitHub Actions.'
 
           if [ "${{ steps.meta.outputs.has_notes }}" = "true" ]; then
             cp "${{ steps.meta.outputs.notes_path }}" "$notes_file"
-            printf '\n\n%s\n' "$warning_block" >> "$notes_file"
+            printf '\n\n%s\n' "$release_block" >> "$notes_file"
           else
             printf 'Release build for %s.\n\nIncluded assets:\n- %s\n- %s\n\n%s\n' \
               "$RELEASE_TAG" \
               "$(basename "${{ steps.meta.outputs.dmg_path }}")" \
               "$(basename "${{ steps.meta.outputs.zip_path }}")" \
-              "$warning_block" \
+              "$release_block" \
               > "$notes_file"
           fi
 
@@ -185,3 +274,13 @@ jobs:
             --prerelease="$RELEASE_PRERELEASE"
 
           gh release view "$RELEASE_TAG" --repo "$repo"
+
+      - name: Cleanup signing material
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          rm -f Config/LocalSecrets.xcconfig
+          rm -f "$RUNNER_TEMP/build_certificate.p12"
+          security delete-keychain "$RUNNER_TEMP/ping-island-signing.keychain-db" || true

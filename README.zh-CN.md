@@ -124,6 +124,8 @@ xcodebuild -project PingIsland.xcodeproj -scheme PingIsland -configuration Relea
 ./scripts/package-unsigned.sh
 ```
 
+如果你想通过 GitHub Actions 产出带 `Developer ID` 签名并完成 notarization 的发布包，请先按 [docs/sparkle-release.md](docs/sparkle-release.md) 配好仓库 secrets，再运行 `.github/workflows/release-packages.yml`。
+
 完整的 Sparkle / notarization 发布流程见 [docs/sparkle-release.md](docs/sparkle-release.md)。
 
 ## 测试
