@@ -233,6 +233,99 @@ final class SessionStateTests: XCTestCase {
         XCTAssertFalse(secondRealSession.shouldHideAsDuplicateCodexPlaceholder(comparedTo: firstRealSession))
     }
 
+    func testOpenCodeChildPlaceholderHidesWhenRicherParentMatchesSameSurface() {
+        let now = Date()
+        let parent = SessionState(
+            sessionId: "opencode-parent",
+            cwd: "/tmp/project",
+            clientInfo: SessionClientInfo(
+                kind: .custom,
+                profileID: "opencode",
+                name: "OpenCode",
+                origin: "cli",
+                originator: "OpenCode",
+                threadSource: "opencode-plugin",
+                terminalBundleIdentifier: "com.mitchellh.ghostty",
+                terminalProgram: "ghostty",
+                terminalSessionIdentifier: "ghostty-session-1"
+            ),
+            previewText: "Fix duplicate sessions in the menu bar",
+            phase: .processing,
+            lastActivity: now.addingTimeInterval(-15),
+            createdAt: now.addingTimeInterval(-60)
+        )
+        let child = SessionState(
+            sessionId: "opencode-child",
+            cwd: "/tmp/project",
+            clientInfo: SessionClientInfo(
+                kind: .custom,
+                profileID: "opencode",
+                name: "OpenCode",
+                origin: "cli",
+                originator: "OpenCode",
+                threadSource: "opencode-plugin",
+                terminalBundleIdentifier: "com.mitchellh.ghostty",
+                terminalProgram: "ghostty",
+                terminalSessionIdentifier: "ghostty-session-1"
+            ),
+            previewText: "Working...",
+            phase: .processing,
+            lastActivity: now,
+            createdAt: now.addingTimeInterval(-10)
+        )
+
+        XCTAssertTrue(child.isLikelyOpenCodeChildSessionPlaceholderForUI)
+        XCTAssertTrue(parent.hasDurableOpenCodeDisplayIdentity)
+        XCTAssertTrue(child.shouldHideAsDuplicateOpenCodeChildSession(comparedTo: parent))
+    }
+
+    func testOpenCodeRealSessionDoesNotHideAnotherRealSessionOnSameSurface() {
+        let now = Date()
+        let firstSession = SessionState(
+            sessionId: "opencode-real-1",
+            cwd: "/tmp/project",
+            clientInfo: SessionClientInfo(
+                kind: .custom,
+                profileID: "opencode",
+                name: "OpenCode",
+                origin: "cli",
+                originator: "OpenCode",
+                threadSource: "opencode-plugin",
+                terminalBundleIdentifier: "com.mitchellh.ghostty",
+                terminalProgram: "ghostty",
+                terminalSessionIdentifier: "ghostty-session-1"
+            ),
+            previewText: "Investigate working state detection",
+            phase: .processing,
+            lastActivity: now.addingTimeInterval(-20),
+            createdAt: now.addingTimeInterval(-120)
+        )
+        let secondSession = SessionState(
+            sessionId: "opencode-real-2",
+            cwd: "/tmp/project",
+            clientInfo: SessionClientInfo(
+                kind: .custom,
+                profileID: "opencode",
+                name: "OpenCode",
+                origin: "cli",
+                originator: "OpenCode",
+                threadSource: "opencode-plugin",
+                terminalBundleIdentifier: "com.mitchellh.ghostty",
+                terminalProgram: "ghostty",
+                terminalSessionIdentifier: "ghostty-session-1"
+            ),
+            previewText: "Write regression tests for child sessions",
+            phase: .processing,
+            lastActivity: now,
+            createdAt: now.addingTimeInterval(-30)
+        )
+
+        XCTAssertFalse(firstSession.isLikelyOpenCodeChildSessionPlaceholderForUI)
+        XCTAssertFalse(secondSession.isLikelyOpenCodeChildSessionPlaceholderForUI)
+        XCTAssertFalse(firstSession.shouldHideAsDuplicateOpenCodeChildSession(comparedTo: secondSession))
+        XCTAssertFalse(secondSession.shouldHideAsDuplicateOpenCodeChildSession(comparedTo: firstSession))
+    }
+
     func testGenericEmptyCodexPlaceholderHidesWhenNearbyThreadHasRolloutPath() {
         let now = Date()
         let placeholder = SessionState(

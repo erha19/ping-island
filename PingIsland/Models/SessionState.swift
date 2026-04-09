@@ -14,6 +14,7 @@ struct SessionState: Equatable, Identifiable, Sendable {
     private nonisolated static let minimalCompactDelay: TimeInterval = 10 * 60
     private nonisolated static let autoArchiveDelay: TimeInterval = 30 * 60
     private nonisolated static let codexContinuationPlaceholderHideWindow: TimeInterval = 10 * 60
+    private nonisolated static let openCodeChildSessionHideWindow: TimeInterval = 120
 
     // MARK: - Identity
 
@@ -233,6 +234,43 @@ struct SessionState: Equatable, Identifiable, Sendable {
             || (conversationInfo.lastMessage?.isEmpty == false)
     }
 
+    /// OpenCode subagents currently surface as extra shallow sessions on the same
+    /// terminal surface. Hide them once the richer parent session is visible.
+    nonisolated var isLikelyOpenCodeChildSessionPlaceholderForUI: Bool {
+        guard clientInfo.brand == .opencode else { return false }
+        guard chatItems.isEmpty else { return false }
+        guard intervention == nil else { return false }
+        guard sessionName?.isEmpty != false else { return false }
+        guard conversationInfo.summary?.isEmpty != false else { return false }
+        guard conversationInfo.firstUserMessage?.isEmpty != false else { return false }
+        guard conversationInfo.lastMessage?.isEmpty != false else { return false }
+
+        let visibleTexts = [
+            SessionTextSanitizer.sanitizedDisplayText(previewText),
+            compactHookMessage
+        ].compactMap { $0 }
+
+        guard !visibleTexts.isEmpty else { return false }
+        return visibleTexts.allSatisfy(Self.isLikelyGenericHookProgressText(_:))
+    }
+
+    nonisolated var hasDurableOpenCodeDisplayIdentity: Bool {
+        guard clientInfo.brand == .opencode else { return false }
+
+        let visibleTexts = [
+            SessionTextSanitizer.sanitizedDisplayText(previewText),
+            compactHookMessage,
+            SessionTextSanitizer.sanitizedDisplayText(conversationInfo.summary),
+            SessionTextSanitizer.sanitizedDisplayText(conversationInfo.firstUserMessage),
+            SessionTextSanitizer.sanitizedDisplayText(conversationInfo.lastMessage)
+        ].compactMap { $0 }
+
+        return !chatItems.isEmpty
+            || intervention != nil
+            || (sessionName?.isEmpty == false)
+            || visibleTexts.contains(where: { !Self.isLikelyGenericHookProgressText($0) })
+    }
+
     nonisolated func shouldRebindToExistingCodexThread(
         comparedTo other: SessionState,
         maximumRecencyGap: TimeInterval
@@ -267,6 +305,22 @@ struct SessionState: Equatable, Identifiable, Sendable {
 
         guard other.clientInfo.sessionFilePath?.isEmpty == false else { return false }
         return recencyGap <= 120
+    }
+
+    nonisolated func shouldHideAsDuplicateOpenCodeChildSession(comparedTo other: SessionState) -> Bool {
+        guard sessionId != other.sessionId else { return false }
+        guard isLikelyOpenCodeChildSessionPlaceholderForUI else { return false }
+        guard other.clientInfo.brand == .opencode else { return false }
+        guard other.hasDurableOpenCodeDisplayIdentity else { return false }
+        guard other.phase != .ended else { return false }
+        guard normalizedWorkspacePath == other.normalizedWorkspacePath else { return false }
+        guard createdAt >= other.createdAt else { return false }
+
+        let sharedIdentity = !hookSurfaceIdentityTokens.isDisjoint(with: other.hookSurfaceIdentityTokens)
+        guard sharedIdentity else { return false }
+
+        let recencyGap = abs(lastActivity.timeIntervalSince(other.lastActivity))
+        return recencyGap <= Self.openCodeChildSessionHideWindow
     }
 
     private nonisolated var hasOnlyTransientCodexProgressContent: Bool {
@@ -334,6 +388,56 @@ struct SessionState: Equatable, Identifiable, Sendable {
             "正在处理",
             "思考中",
             "压缩上下文"
+        ]
+        return containsMatches.contains { normalized.contains($0) }
+    }
+
+    private nonisolated static func isLikelyGenericHookProgressText(_ text: String) -> Bool {
+        let normalized = text
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: #"[….]+"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+
+        guard !normalized.isEmpty else { return false }
+        guard normalized.count <= 32 else { return false }
+
+        let exactMatches: Set<String> = [
+            "working",
+            "working on it",
+            "processing",
+            "thinking",
+            "loading",
+            "starting",
+            "running",
+            "busy",
+            "work in progress",
+            "idle",
+            "ready",
+            "工作中",
+            "处理中",
+            "正在处理",
+            "思考中",
+            "加载中",
+            "准备中",
+            "运行中"
+        ]
+        if exactMatches.contains(normalized) {
+            return true
+        }
+
+        let containsMatches = [
+            "still working",
+            "working",
+            "processing",
+            "thinking",
+            "loading",
+            "running",
+            "waiting",
+            "工作中",
+            "处理中",
+            "正在处理",
+            "思考中"
         ]
         return containsMatches.contains { normalized.contains($0) }
     }
@@ -589,6 +693,26 @@ struct SessionState: Equatable, Identifiable, Sendable {
             normalized(clientInfo.tmuxSessionIdentifier).map { "tmuxSession:\($0)" },
             normalized(clientInfo.tmuxPaneIdentifier).map { "tmuxPane:\($0)" },
             normalized(clientInfo.processName).map { "process:\($0)" }
+        ].compactMap { $0 })
+    }
+
+    private nonisolated var hookSurfaceIdentityTokens: Set<String> {
+        func normalized(_ value: String?) -> String? {
+            let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let trimmed, !trimmed.isEmpty else { return nil }
+            return trimmed.lowercased()
+        }
+
+        return Set([
+            normalized(tty).map { "tty:\($0)" },
+            normalized(clientInfo.terminalBundleIdentifier).map { "terminalBundle:\($0)" },
+            normalized(clientInfo.terminalProgram).map { "terminalProgram:\($0)" },
+            normalized(clientInfo.transport).map { "transport:\($0)" },
+            normalized(clientInfo.remoteHost).map { "remoteHost:\($0)" },
+            normalized(clientInfo.terminalSessionIdentifier).map { "terminalSession:\($0)" },
+            normalized(clientInfo.iTermSessionIdentifier).map { "itermSession:\($0)" },
+            normalized(clientInfo.tmuxSessionIdentifier).map { "tmuxSession:\($0)" },
+            normalized(clientInfo.tmuxPaneIdentifier).map { "tmuxPane:\($0)" }
         ].compactMap { $0 })
     }
 }
