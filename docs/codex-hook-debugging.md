@@ -1,6 +1,6 @@
 # Codex Hook Debugging
 
-Use [`scripts/debug-codex-hook.py`](/Users/wudanwu/Island/scripts/debug-codex-hook.py) when you need to inspect the raw payload that Codex sends to hook commands.
+Use `scripts/debug-codex-hook.py` when you need to inspect the raw payload that Codex sends to hook commands.
 
 The script:
 
@@ -13,6 +13,12 @@ Use `PING_ISLAND_DEBUG_LOG_ONLY=1` or `--log-only` when you explicitly want capt
 
 Example `~/.codex/hooks.json` snippet for temporary debugging:
 
+```bash
+REPO_ROOT="/absolute/path/to/ping-island"
+```
+
+Replace `"$REPO_ROOT"` in the JSON snippet below with the real absolute repo path before saving it into `~/.codex/hooks.json`.
+
 ```json
 {
   "hooks": {
@@ -22,7 +28,7 @@ Example `~/.codex/hooks.json` snippet for temporary debugging:
         "hooks": [
           {
             "type": "command",
-            "command": "/usr/bin/env python3 /Users/wudanwu/Island/scripts/debug-codex-hook.py"
+            "command": "/usr/bin/env python3 \"$REPO_ROOT/scripts/debug-codex-hook.py\""
           }
         ]
       }
@@ -33,7 +39,7 @@ Example `~/.codex/hooks.json` snippet for temporary debugging:
         "hooks": [
           {
             "type": "command",
-            "command": "/usr/bin/env python3 /Users/wudanwu/Island/scripts/debug-codex-hook.py"
+            "command": "/usr/bin/env python3 \"$REPO_ROOT/scripts/debug-codex-hook.py\""
           }
         ]
       }
@@ -44,7 +50,7 @@ Example `~/.codex/hooks.json` snippet for temporary debugging:
         "hooks": [
           {
             "type": "command",
-            "command": "/usr/bin/env python3 /Users/wudanwu/Island/scripts/debug-codex-hook.py"
+            "command": "/usr/bin/env python3 \"$REPO_ROOT/scripts/debug-codex-hook.py\""
           }
         ]
       }
@@ -64,6 +70,6 @@ If you want to see only captured payloads without forwarding into Ping Island, r
 ```json
 {
   "type": "command",
-  "command": "/usr/bin/env python3 /Users/wudanwu/Island/scripts/debug-codex-hook.py --log-only"
+  "command": "/usr/bin/env python3 \"$REPO_ROOT/scripts/debug-codex-hook.py\" --log-only"
 }
 ```
