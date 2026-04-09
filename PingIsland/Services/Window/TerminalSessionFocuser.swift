@@ -109,6 +109,17 @@ actor TerminalSessionFocuser {
                 )
                 return false
             }
+            guard await TerminalAutomationPermissionCoordinator.shared.ensurePermissionIfNeeded(
+                terminalPid: terminalPid,
+                bundleIdentifier: bundleIdentifier,
+                sessionId: sessionId
+            ) else {
+                logger.debug("Automation permission unavailable for Terminal bundle \(bundleIdentifier, privacy: .public)")
+                await FocusDiagnosticsStore.shared.record(
+                    "TerminalFocus terminal skip-no-automation-permission terminalPid=\(terminalPid) sessionId=\(sessionId ?? "nil")"
+                )
+                return false
+            }
             return await runAppleScript(lines: terminalScriptLines(for: tty))
         case "com.googlecode.iterm2":
             let iTermSessionIdentifier = clientInfo?.iTermSessionIdentifier ?? clientInfo?.terminalSessionIdentifier
@@ -126,11 +137,33 @@ actor TerminalSessionFocuser {
             await FocusDiagnosticsStore.shared.record(
                 "TerminalFocus iterm applescript terminalPid=\(terminalPid) tty=\(tty ?? "nil") normalizedSessionIdentifier=\(normalizedITermSessionIdentifier(iTermSessionIdentifier) ?? "nil")"
             )
+            guard await TerminalAutomationPermissionCoordinator.shared.ensurePermissionIfNeeded(
+                terminalPid: terminalPid,
+                bundleIdentifier: bundleIdentifier,
+                sessionId: sessionId
+            ) else {
+                logger.debug("Automation permission unavailable for iTerm bundle \(bundleIdentifier, privacy: .public)")
+                await FocusDiagnosticsStore.shared.record(
+                    "TerminalFocus iterm skip-no-automation-permission terminalPid=\(terminalPid) sessionId=\(sessionId ?? "nil")"
+                )
+                return false
+            }
             return await focusITermSession(terminalPid: terminalPid, selector: selector)
         case "com.mitchellh.ghostty":
             await FocusDiagnosticsStore.shared.record(
                 "TerminalFocus ghostty applescript terminalPid=\(terminalPid) workspacePath=\(workspacePath ?? "nil")"
             )
+            guard await TerminalAutomationPermissionCoordinator.shared.ensurePermissionIfNeeded(
+                terminalPid: terminalPid,
+                bundleIdentifier: bundleIdentifier,
+                sessionId: sessionId
+            ) else {
+                logger.debug("Automation permission unavailable for Ghostty bundle \(bundleIdentifier, privacy: .public)")
+                await FocusDiagnosticsStore.shared.record(
+                    "TerminalFocus ghostty skip-no-automation-permission terminalPid=\(terminalPid) sessionId=\(sessionId ?? "nil")"
+                )
+                return false
+            }
             return await focusGhosttyTerminal(
                 terminalPid: terminalPid,
                 workspacePath: workspacePath

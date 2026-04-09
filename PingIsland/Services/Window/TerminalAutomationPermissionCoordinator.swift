@@ -15,57 +15,47 @@ actor TerminalAutomationPermissionCoordinator {
         sessionId: String
     ) {
         guard provider == .claude || provider == .codex,
-              let bundleIdentifier = scriptableTerminalBundleIdentifier(for: clientInfo)
+              let bundleIdentifier = Self.scriptableTerminalBundleIdentifier(for: clientInfo)
         else {
             return
         }
 
-        guard attemptedBundleIdentifiers.insert(bundleIdentifier).inserted else {
-            return
-        }
-
         Task.detached(priority: .utility) {
-            await FocusDiagnosticsStore.shared.record(
-                "AutomationPermission preflight-start session=\(sessionId) bundle=\(bundleIdentifier)"
-            )
-
-            let runningApplication = await MainActor.run {
-                NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifier)
-                    .first { !$0.isTerminated }
-            }
-
-            guard let runningApplication else {
-                await FocusDiagnosticsStore.shared.record(
-                    "AutomationPermission preflight-skip-no-running-app session=\(sessionId) bundle=\(bundleIdentifier)"
-                )
-                return
-            }
-
-            let targetDescriptor = NSAppleEventDescriptor(
-                processIdentifier: runningApplication.processIdentifier
-            )
-            guard let address = targetDescriptor.aeDesc else {
-                await FocusDiagnosticsStore.shared.record(
-                    "AutomationPermission preflight-skip-no-descriptor session=\(sessionId) bundle=\(bundleIdentifier) pid=\(runningApplication.processIdentifier)"
-                )
-                return
-            }
-
-            let status = AEDeterminePermissionToAutomateTarget(
-                address,
-                AEEventClass(typeWildCard),
-                AEEventID(typeWildCard),
-                true
-            )
-
-            await FocusDiagnosticsStore.shared.record(
-                "AutomationPermission preflight-result session=\(sessionId) bundle=\(bundleIdentifier) pid=\(runningApplication.processIdentifier) status=\(status)"
-            )
+            await self.preflightIfNeeded(bundleIdentifier: bundleIdentifier, sessionId: sessionId)
         }
     }
 
-    private func scriptableTerminalBundleIdentifier(for clientInfo: SessionClientInfo) -> String? {
+    func ensurePermissionIfNeeded(
+        terminalPid: Int,
+        bundleIdentifier: String,
+        sessionId: String?
+    ) async -> Bool {
+        guard Self.isAutomationPermissionRequired(bundleIdentifier: bundleIdentifier) else {
+            return true
+        }
+
+        guard let runningApplication = await MainActor.run(body: {
+            NSRunningApplication(processIdentifier: pid_t(terminalPid))
+        }), !runningApplication.isTerminated else {
+            await FocusDiagnosticsStore.shared.record(
+                "AutomationPermission focus-skip-no-running-app session=\(sessionId ?? "nil") bundle=\(bundleIdentifier) terminalPid=\(terminalPid)"
+            )
+            return false
+        }
+
+        let status = await determinePermissionStatus(
+            for: runningApplication,
+            askUserIfNeeded: true,
+            phase: "focus",
+            sessionId: sessionId
+        )
+        return status == noErr
+    }
+
+    static func scriptableTerminalBundleIdentifier(for clientInfo: SessionClientInfo) -> String? {
         switch clientInfo.terminalBundleIdentifier {
+        case "com.apple.Terminal":
+            return "com.apple.Terminal"
         case "com.googlecode.iterm2":
             if clientInfo.iTermSessionIdentifier?.isEmpty == false
                 || clientInfo.terminalSessionIdentifier?.isEmpty == false {
@@ -77,5 +67,77 @@ actor TerminalAutomationPermissionCoordinator {
         default:
             return nil
         }
+    }
+
+    static func isAutomationPermissionRequired(bundleIdentifier: String) -> Bool {
+        switch bundleIdentifier {
+        case "com.apple.Terminal", "com.googlecode.iterm2", "com.mitchellh.ghostty":
+            return true
+        default:
+            return false
+        }
+    }
+
+    private func preflightIfNeeded(bundleIdentifier: String, sessionId: String) async {
+        let runningApplication = await MainActor.run {
+            NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifier)
+                .first { !$0.isTerminated }
+        }
+
+        guard let runningApplication else {
+            await FocusDiagnosticsStore.shared.record(
+                "AutomationPermission preflight-skip-no-running-app session=\(sessionId) bundle=\(bundleIdentifier)"
+            )
+            return
+        }
+
+        guard attemptedBundleIdentifiers.insert(bundleIdentifier).inserted else {
+            return
+        }
+
+        let status = await determinePermissionStatus(
+            for: runningApplication,
+            askUserIfNeeded: true,
+            phase: "preflight",
+            sessionId: sessionId
+        )
+
+        if status != noErr {
+            attemptedBundleIdentifiers.remove(bundleIdentifier)
+        }
+    }
+
+    private func determinePermissionStatus(
+        for runningApplication: NSRunningApplication,
+        askUserIfNeeded: Bool,
+        phase: String,
+        sessionId: String?
+    ) async -> OSStatus {
+        let bundleIdentifier = runningApplication.bundleIdentifier ?? "unknown"
+        await FocusDiagnosticsStore.shared.record(
+            "AutomationPermission \(phase)-start session=\(sessionId ?? "nil") bundle=\(bundleIdentifier) pid=\(runningApplication.processIdentifier) prompt=\(askUserIfNeeded)"
+        )
+
+        let targetDescriptor = NSAppleEventDescriptor(
+            processIdentifier: runningApplication.processIdentifier
+        )
+        guard let address = targetDescriptor.aeDesc else {
+            await FocusDiagnosticsStore.shared.record(
+                "AutomationPermission \(phase)-skip-no-descriptor session=\(sessionId ?? "nil") bundle=\(bundleIdentifier) pid=\(runningApplication.processIdentifier)"
+            )
+            return OSStatus(procNotFound)
+        }
+
+        let status = AEDeterminePermissionToAutomateTarget(
+            address,
+            AEEventClass(typeWildCard),
+            AEEventID(typeWildCard),
+            askUserIfNeeded
+        )
+
+        await FocusDiagnosticsStore.shared.record(
+            "AutomationPermission \(phase)-result session=\(sessionId ?? "nil") bundle=\(bundleIdentifier) pid=\(runningApplication.processIdentifier) status=\(status)"
+        )
+        return status
     }
 }
