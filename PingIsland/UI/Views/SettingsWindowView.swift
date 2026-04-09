@@ -74,6 +74,7 @@ final class SettingsPanelViewModel: ObservableObject {
     @Published var logExportStatus = AppLocalization.string("导出最近 6 小时的 Island 诊断日志与配置")
     @Published private(set) var reinstallingHookProfileID: String?
     @Published private(set) var hookReinstallFeedbacks: [String: HookReinstallFeedback] = [:]
+    @Published private(set) var customHookInstallations: [HookInstaller.CustomHookInstallation] = []
 
     private var hookFeedbackClearTasks: [String: Task<Void, Never>] = [:]
 
@@ -101,6 +102,7 @@ final class SettingsPanelViewModel: ObservableObject {
         launchAtLogin = SMAppService.mainApp.status == .enabled
         refreshHookInstallationStates()
         refreshIDEExtensionInstallationStates()
+        refreshCustomHookInstallations()
         accessibilityEnabled = AXIsProcessTrusted()
         ScreenSelector.shared.refreshScreens()
         SoundPackCatalog.shared.refresh()
@@ -175,6 +177,20 @@ final class SettingsPanelViewModel: ObservableObject {
     func uninstallHooks(for profile: ManagedHookClientProfile) {
         HookInstaller.uninstall(profile)
         refreshHookInstallationStates()
+    }
+
+    func installCustomHook(profileID: String, directoryPath: String) {
+        HookInstaller.installCustom(profileID: profileID, directoryPath: directoryPath)
+        refreshCustomHookInstallations()
+    }
+
+    func uninstallCustomHook(id: String) {
+        HookInstaller.uninstallCustom(id: id)
+        refreshCustomHookInstallations()
+    }
+
+    func refreshCustomHookInstallations() {
+        customHookInstallations = HookInstaller.customInstallations()
     }
 
     func openHookConfigurationDirectory(for profile: ManagedHookClientProfile) {
@@ -354,6 +370,7 @@ private struct SettingsPanelContentView: View {
     @ObservedObject private var updateManager = UpdateManager.shared
     @State private var selectedCategory: SettingsCategory? = .general
     @State private var pendingHookReinstallProfile: ManagedHookClientProfile?
+    @State private var showingCustomHookInstallSheet = false
 
     var body: some View {
         ZStack {
@@ -414,6 +431,11 @@ private struct SettingsPanelContentView: View {
             }
         } message: { profile in
             Text(verbatim: AppLocalization.format(profile.reinstallDescriptionFormat, profile.title))
+        }
+        .sheet(isPresented: $showingCustomHookInstallSheet) {
+            CustomHookInstallSheet(viewModel: viewModel) {
+                showingCustomHookInstallSheet = false
+            }
         }
     }
 
@@ -984,10 +1006,51 @@ private struct SettingsPanelContentView: View {
                             uninstallAction: { viewModel.uninstallHooks(for: profile) }
                         )
 
-                        if index < profiles.count - 1 {
+                        if index < profiles.count - 1
+                            || !viewModel.customHookInstallations.isEmpty {
                             SettingsLineDivider()
                         }
                     }
+
+                    let customInstallations = viewModel.customHookInstallations
+                    ForEach(Array(customInstallations.enumerated()), id: \.element.id) { index, installation in
+                        CustomHookInstallationLine(
+                            installation: installation,
+                            uninstallAction: { viewModel.uninstallCustomHook(id: installation.id) }
+                        )
+
+                        if index < customInstallations.count - 1 {
+                            SettingsLineDivider()
+                        }
+                    }
+
+                    SettingsLineDivider()
+
+                    HStack {
+                        Spacer()
+                        Button(action: { showingCustomHookInstallSheet = true }) {
+                            HStack(spacing: 6) {
+                                Image(systemName: "plus.circle.fill")
+                                    .font(.system(size: 13, weight: .semibold))
+                                Text(appLocalized: "添加自定义配置")
+                                    .font(.system(size: 12, weight: .semibold))
+                            }
+                            .foregroundColor(.white.opacity(0.7))
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 8)
+                            .background(
+                                Capsule(style: .continuous)
+                                    .fill(.white.opacity(0.06))
+                            )
+                            .overlay(
+                                Capsule(style: .continuous)
+                                    .strokeBorder(.white.opacity(0.1), lineWidth: 1)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        Spacer()
+                    }
+                    .padding(.vertical, 8)
                 }
             }
 
@@ -1591,6 +1654,241 @@ private struct HookManagementLine: View {
 
     private var tint: Color {
         brandTint(profile.brand)
+    }
+}
+
+private struct CustomHookInstallationLine: View {
+    let installation: HookInstaller.CustomHookInstallation
+    let uninstallAction: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .center, spacing: 14) {
+                if let profile = ClientProfileRegistry.managedHookProfile(id: installation.profileID) {
+                    HookManagementIcon(profile: profile)
+                } else {
+                    Image(systemName: "folder.badge.gearshape")
+                        .font(.system(size: 18, weight: .bold))
+                        .foregroundColor(.white)
+                        .frame(width: 34, height: 34)
+                        .background(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .fill(Color.white.opacity(0.08))
+                        )
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 6) {
+                        Text(appLocalized: installation.profileTitle)
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(.white)
+
+                        Text(appLocalized: "自定义")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundColor(TerminalColors.blue)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(
+                                Capsule(style: .continuous)
+                                    .fill(TerminalColors.blue.opacity(0.18))
+                            )
+                    }
+
+                    Text(installation.customPath)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(.white.opacity(0.5))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+
+                Spacer(minLength: 12)
+
+                Text(appLocalized: "已安装")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundColor(TerminalColors.green)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(
+                        Capsule(style: .continuous)
+                            .fill(TerminalColors.green.opacity(0.18))
+                    )
+                    .overlay(
+                        Capsule(style: .continuous)
+                            .strokeBorder(TerminalColors.green.opacity(0.28), lineWidth: 1)
+                    )
+            }
+
+            HStack(spacing: 10) {
+                HookManagementButton(
+                    title: "卸载",
+                    tint: TerminalColors.amber,
+                    action: uninstallAction
+                )
+            }
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct CustomHookInstallSheet: View {
+    @ObservedObject var viewModel: SettingsPanelViewModel
+    let onDismiss: () -> Void
+
+    @State private var selectedProfileID: String = ""
+    @State private var customPath: String = ""
+
+    private var availableProfiles: [ManagedHookClientProfile] {
+        ClientProfileRegistry.managedHookProfiles
+    }
+
+    private var canInstall: Bool {
+        !selectedProfileID.isEmpty && !customPath.isEmpty
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            Text(appLocalized: "添加自定义 Hook 配置")
+                .font(.system(size: 16, weight: .bold))
+                .foregroundColor(.white)
+
+            VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(appLocalized: "选择应用")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.7))
+
+                    Picker("", selection: $selectedProfileID) {
+                        Text(appLocalized: "请选择...").tag("")
+                        ForEach(availableProfiles) { profile in
+                            Text(profile.title).tag(profile.id)
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(maxWidth: .infinity)
+                }
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(appLocalized: "配置目录")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.7))
+
+                    HStack(spacing: 8) {
+                        TextField("", text: $customPath, prompt: Text(verbatim: "例如 /path/to/.claude"))
+                            .textFieldStyle(.plain)
+                            .font(.system(size: 12, weight: .medium, design: .monospaced))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 8)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .fill(.white.opacity(0.06))
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .strokeBorder(.white.opacity(0.1), lineWidth: 1)
+                            )
+
+                        Button(action: selectDirectory) {
+                            Text(appLocalized: "选择目录")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundColor(.white.opacity(0.8))
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 8)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                        .fill(.white.opacity(0.08))
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                        .strokeBorder(.white.opacity(0.12), lineWidth: 1)
+                                )
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    if let resolvedFileName {
+                        Text(AppLocalization.format("安装后将写入: %@/%@", customPath, resolvedFileName))
+                            .font(.system(size: 10, weight: .medium, design: .monospaced))
+                            .foregroundColor(.white.opacity(0.4))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                }
+            }
+
+            HStack(spacing: 12) {
+                Spacer()
+
+                Button(action: onDismiss) {
+                    Text(appLocalized: "取消")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.7))
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 8)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .fill(.white.opacity(0.06))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .strokeBorder(.white.opacity(0.1), lineWidth: 1)
+                        )
+                }
+                .buttonStyle(.plain)
+
+                Button(action: install) {
+                    Text(appLocalized: "安装")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(canInstall ? .white : .white.opacity(0.4))
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 8)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .fill(canInstall ? TerminalColors.blue.opacity(0.5) : .white.opacity(0.04))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .strokeBorder(canInstall ? TerminalColors.blue.opacity(0.5) : .white.opacity(0.08), lineWidth: 1)
+                        )
+                }
+                .buttonStyle(.plain)
+                .disabled(!canInstall)
+            }
+        }
+        .padding(24)
+        .frame(width: 460)
+        .background(Color(nsColor: .windowBackgroundColor))
+        .preferredColorScheme(.dark)
+    }
+
+    private var resolvedFileName: String? {
+        guard let profile = ClientProfileRegistry.managedHookProfile(id: selectedProfileID),
+              !customPath.isEmpty else {
+            return nil
+        }
+        return profile.primaryConfigurationURL.lastPathComponent
+    }
+
+    private func selectDirectory() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.showsHiddenFiles = true
+        panel.message = AppLocalization.string("选择 Hook 配置目录")
+        panel.prompt = AppLocalization.string("选择")
+
+        if panel.runModal() == .OK, let url = panel.url {
+            customPath = url.path
+        }
+    }
+
+    private func install() {
+        guard canInstall else { return }
+        viewModel.installCustomHook(profileID: selectedProfileID, directoryPath: customPath)
+        onDismiss()
     }
 }
 

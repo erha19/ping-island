@@ -937,6 +937,105 @@ struct HookInstaller {
         """
     }
 
+    // MARK: - Custom Hook Installations
+
+    private static let customInstallationsDefaultsKey = "HookInstaller.customInstallations.v1"
+
+    struct CustomHookInstallation: Codable, Identifiable, Equatable {
+        let id: String
+        let profileID: String
+        let customPath: String
+        let installedAt: Date
+
+        var customURL: URL {
+            URL(fileURLWithPath: customPath)
+        }
+
+        var profileTitle: String {
+            ClientProfileRegistry.managedHookProfile(id: profileID)?.title ?? profileID
+        }
+    }
+
+    static func customInstallations() -> [CustomHookInstallation] {
+        guard let data = UserDefaults.standard.data(forKey: customInstallationsDefaultsKey),
+              let installations = try? JSONDecoder().decode([CustomHookInstallation].self, from: data) else {
+            return []
+        }
+        return installations
+    }
+
+    static func installCustom(profileID: String, directoryPath: String) {
+        guard let profile = ClientProfileRegistry.managedHookProfile(id: profileID) else {
+            return
+        }
+
+        let configFileName = profile.primaryConfigurationURL.lastPathComponent
+        let directoryURL = URL(fileURLWithPath: directoryPath)
+        let url = directoryURL.appendingPathComponent(configFileName)
+
+        installBridgeLauncherIfNeeded()
+        switch profile.installationKind {
+        case .jsonHooks:
+            updateHooks(at: url, profile: profile)
+        case .pluginFile:
+            writeManagedPlugin(at: url, profile: profile)
+        }
+
+        let installation = CustomHookInstallation(
+            id: UUID().uuidString,
+            profileID: profileID,
+            customPath: url.path,
+            installedAt: Date()
+        )
+        var existing = customInstallations()
+        existing.append(installation)
+        persistCustomInstallations(existing)
+    }
+
+    static func uninstallCustom(id: String) {
+        var installations = customInstallations()
+        guard let index = installations.firstIndex(where: { $0.id == id }) else {
+            return
+        }
+
+        let installation = installations[index]
+        let url = installation.customURL
+
+        if let profile = ClientProfileRegistry.managedHookProfile(id: installation.profileID) {
+            switch profile.installationKind {
+            case .jsonHooks:
+                removeManagedHooks(at: url)
+            case .pluginFile:
+                removeManagedPlugin(at: url, profile: profile)
+            }
+        }
+
+        installations.remove(at: index)
+        persistCustomInstallations(installations)
+    }
+
+    static func isCustomInstalled(_ installation: CustomHookInstallation) -> Bool {
+        guard let profile = ClientProfileRegistry.managedHookProfile(id: installation.profileID) else {
+            return false
+        }
+        let url = installation.customURL
+        switch profile.installationKind {
+        case .jsonHooks:
+            return containsManagedHooks(at: url)
+        case .pluginFile:
+            return containsManagedPlugin(at: url, profile: profile)
+        }
+    }
+
+    private static func persistCustomInstallations(_ installations: [CustomHookInstallation]) {
+        guard let data = try? JSONEncoder().encode(installations) else {
+            return
+        }
+        UserDefaults.standard.set(data, forKey: customInstallationsDefaultsKey)
+    }
+
+    // MARK: - JSON Utilities
+
     private static func writeJSONObject(_ json: [String: Any], to url: URL) {
         try? FileManager.default.createDirectory(
             at: url.deletingLastPathComponent(),
