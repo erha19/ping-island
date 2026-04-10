@@ -648,7 +648,7 @@ struct InstanceRow: View {
                     }
                 }
 
-                if session.phase == .idle || (session.phase == .waitingForInput && session.intervention == nil) {
+                if session.shouldShowArchiveActionInPrimaryUI {
                     IconButton(icon: "archivebox") {
                         onArchive()
                     }

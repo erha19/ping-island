@@ -36,6 +36,7 @@ enum SessionScopedApprovalAction: Equatable, Sendable {
 struct SessionState: Equatable, Identifiable, Sendable {
     private nonisolated static let minimalCompactDelay: TimeInterval = 10 * 60
     private nonisolated static let autoArchiveDelay: TimeInterval = 30 * 60
+    private nonisolated static let endedArchiveActionDelay: TimeInterval = 10 * 60
     private nonisolated static let codexContinuationPlaceholderHideWindow: TimeInterval = 10 * 60
     private nonisolated static let openCodeChildSessionHideWindow: TimeInterval = 120
 
@@ -654,6 +655,20 @@ struct SessionState: Equatable, Identifiable, Sendable {
             return false
         }
         return Date().timeIntervalSince(lastActivity) >= Self.minimalCompactDelay
+    }
+
+    /// Whether the session list should offer a manual archive action for this row.
+    nonisolated var shouldShowArchiveActionInPrimaryUI: Bool {
+        switch phase {
+        case .idle:
+            return true
+        case .waitingForInput:
+            return intervention == nil
+        case .ended:
+            return Date().timeIntervalSince(lastActivity) >= Self.endedArchiveActionDelay
+        case .processing, .compacting, .waitingForApproval:
+            return false
+        }
     }
 
     nonisolated func shouldSortBeforeInQueue(_ other: SessionState) -> Bool {

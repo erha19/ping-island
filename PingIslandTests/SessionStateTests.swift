@@ -184,6 +184,41 @@ final class SessionStateTests: XCTestCase {
         XCTAssertFalse(session.shouldHideFromPrimaryUI)
     }
 
+    func testEndedSessionShowsArchiveActionAfterTenMinutes() {
+        let session = SessionState(
+            sessionId: "ended-archive-eligible",
+            cwd: "/tmp/project",
+            phase: .ended,
+            lastActivity: Date().addingTimeInterval(-(11 * 60))
+        )
+
+        XCTAssertTrue(session.shouldShowArchiveActionInPrimaryUI)
+        XCTAssertFalse(session.shouldHideFromPrimaryUI)
+    }
+
+    func testRecentlyEndedSessionDoesNotShowArchiveActionYet() {
+        let session = SessionState(
+            sessionId: "ended-archive-waiting",
+            cwd: "/tmp/project",
+            phase: .ended,
+            lastActivity: Date().addingTimeInterval(-(9 * 60))
+        )
+
+        XCTAssertFalse(session.shouldShowArchiveActionInPrimaryUI)
+        XCTAssertFalse(session.shouldHideFromPrimaryUI)
+    }
+
+    func testIdleSessionStillShowsArchiveActionImmediately() {
+        let session = SessionState(
+            sessionId: "idle-archive-immediate",
+            cwd: "/tmp/project",
+            phase: .idle,
+            lastActivity: Date().addingTimeInterval(-60)
+        )
+
+        XCTAssertTrue(session.shouldShowArchiveActionInPrimaryUI)
+    }
+
     func testCodexAppLaunchURLUsesThreadsRoute() {
         let threadID = "019d6163-2ee9-7ae2-8c45-5f7a16209149"
 
