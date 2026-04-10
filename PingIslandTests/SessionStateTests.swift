@@ -194,6 +194,7 @@ final class SessionStateTests: XCTestCase {
 
         XCTAssertTrue(session.shouldShowArchiveActionInPrimaryUI)
         XCTAssertFalse(session.shouldHideFromPrimaryUI)
+        XCTAssertFalse(session.shouldUseMinimalCompactPresentation)
     }
 
     func testRecentlyEndedSessionDoesNotShowArchiveActionYet() {

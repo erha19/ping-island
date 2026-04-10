@@ -651,6 +651,9 @@ struct SessionState: Equatable, Identifiable, Sendable {
         if shouldAutoArchiveFromPrimaryUI {
             return false
         }
+        if phase == .ended, shouldShowArchiveActionInPrimaryUI {
+            return false
+        }
         if phase.isActive || needsManualAttention {
             return false
         }
