@@ -250,6 +250,8 @@ struct ManagedIDEExtensionProfile: Identifiable, Sendable {
     let subtitle: String
     let showsInSettings: Bool
     let alwaysVisibleInSettings: Bool
+    let logoAssetName: String?
+    let prefersBundledLogoOverAppIcon: Bool
     let sessionFocusStrategy: IDESessionFocusStrategy?
     let localAppBundleIdentifiers: [String]
     let iconSymbolName: String
@@ -266,6 +268,8 @@ struct ManagedIDEExtensionProfile: Identifiable, Sendable {
         subtitle: String,
         showsInSettings: Bool = true,
         alwaysVisibleInSettings: Bool = false,
+        logoAssetName: String? = nil,
+        prefersBundledLogoOverAppIcon: Bool = false,
         sessionFocusStrategy: IDESessionFocusStrategy? = nil,
         localAppBundleIdentifiers: [String] = [],
         iconSymbolName: String,
@@ -282,6 +286,8 @@ struct ManagedIDEExtensionProfile: Identifiable, Sendable {
             subtitle: subtitle,
             showsInSettings: showsInSettings,
             alwaysVisibleInSettings: alwaysVisibleInSettings,
+            logoAssetName: logoAssetName,
+            prefersBundledLogoOverAppIcon: prefersBundledLogoOverAppIcon,
             sessionFocusStrategy: sessionFocusStrategy,
             localAppBundleIdentifiers: localAppBundleIdentifiers,
             iconSymbolName: iconSymbolName,
@@ -300,6 +306,8 @@ struct ManagedIDEExtensionProfile: Identifiable, Sendable {
         subtitle: String,
         showsInSettings: Bool = true,
         alwaysVisibleInSettings: Bool = false,
+        logoAssetName: String? = nil,
+        prefersBundledLogoOverAppIcon: Bool = false,
         sessionFocusStrategy: IDESessionFocusStrategy? = nil,
         localAppBundleIdentifiers: [String] = [],
         iconSymbolName: String,
@@ -315,6 +323,8 @@ struct ManagedIDEExtensionProfile: Identifiable, Sendable {
         self.subtitle = subtitle
         self.showsInSettings = showsInSettings
         self.alwaysVisibleInSettings = alwaysVisibleInSettings
+        self.logoAssetName = logoAssetName
+        self.prefersBundledLogoOverAppIcon = prefersBundledLogoOverAppIcon
         self.sessionFocusStrategy = sessionFocusStrategy
         self.localAppBundleIdentifiers = localAppBundleIdentifiers
         self.iconSymbolName = iconSymbolName
@@ -377,6 +387,7 @@ enum ClientProfileRegistry {
             subtitle: "管理 ~/.claude/settings.json，使用统一 PingIslandBridge hooks 入口",
             alwaysVisibleInSettings: true,
             logoAssetName: "ClaudeLogo",
+            prefersBundledLogoOverAppIcon: true,
             localAppBundleIdentifiers: ["com.anthropic.claudefordesktop"],
             iconSymbolName: "moon.stars.fill",
             configurationRelativePath: ".claude/settings.json",
@@ -403,6 +414,7 @@ enum ClientProfileRegistry {
             subtitle: "管理 ~/.codex/hooks.json",
             alwaysVisibleInSettings: true,
             logoAssetName: "CodexLogo",
+            prefersBundledLogoOverAppIcon: true,
             localAppBundleIdentifiers: ["com.openai.codex"],
             iconSymbolName: "apple.terminal.fill",
             configurationRelativePath: ".codex/hooks.json",
@@ -453,6 +465,8 @@ enum ClientProfileRegistry {
             id: "codebuddy-hooks",
             title: "CodeBuddy",
             subtitle: "管理 ~/.codebuddy/settings.json，按 CodeBuddy Hooks 协议接入 Island",
+            logoAssetName: "CodeBuddyLogo",
+            prefersBundledLogoOverAppIcon: true,
             localAppBundleIdentifiers: ["com.tencent.codebuddy", "com.codebuddy.app"],
             iconSymbolName: "bubble.left.and.bubble.right.fill",
             configurationRelativePath: ".codebuddy/settings.json",
@@ -480,6 +494,8 @@ enum ClientProfileRegistry {
             id: "cursor-hooks",
             title: "Cursor",
             subtitle: "管理 ~/Library/Application Support/Cursor/User/settings.json，按 Claude Hooks 协议接入 Island",
+            logoAssetName: "CursorLogo",
+            prefersBundledLogoOverAppIcon: true,
             localAppBundleIdentifiers: ["com.todesktop.230313mzl4w4u92"],
             iconSymbolName: "cursorarrow.rays",
             configurationRelativePath: "Library/Application Support/Cursor/User/settings.json",
@@ -509,6 +525,7 @@ enum ClientProfileRegistry {
             title: "Qoder",
             subtitle: "管理 ~/.qoder/settings.json，支持 Qoder 会话、提问与权限提醒事件",
             logoAssetName: "QoderLogo",
+            prefersBundledLogoOverAppIcon: true,
             localAppBundleIdentifiers: ["com.qoder.ide"],
             iconSymbolName: "bolt.horizontal.circle.fill",
             configurationRelativePath: ".qoder/settings.json",
@@ -531,6 +548,7 @@ enum ClientProfileRegistry {
             title: "QoderWork",
             subtitle: "管理 ~/.qoderwork/settings.json，按 Qoder CLI 同款 Claude Hooks 协议接入 Island",
             logoAssetName: "QoderLogo",
+            prefersBundledLogoOverAppIcon: true,
             localAppBundleIdentifiers: ["com.qoder.work"],
             iconSymbolName: "bolt.horizontal.circle.fill",
             configurationRelativePath: ".qoderwork/settings.json",
@@ -583,6 +601,7 @@ enum ClientProfileRegistry {
             installationKind: .pluginFile,
             alwaysVisibleInSettings: true,
             logoAssetName: "OpenCodeLogo",
+            prefersBundledLogoOverAppIcon: true,
             localAppBundleIdentifiers: ["ai.opencode.desktop"],
             iconSymbolName: "waveform.path.ecg.text",
             configurationRelativePath: ".config/opencode/plugins/ping-island.js",
@@ -818,6 +837,8 @@ enum ClientProfileRegistry {
             id: "vscode-extension",
             title: "VS Code",
             subtitle: "安装 Ping Island，支持终端精准聚焦",
+            logoAssetName: "VSCodeLogo",
+            prefersBundledLogoOverAppIcon: true,
             localAppBundleIdentifiers: ["com.microsoft.VSCode", "com.microsoft.VSCodeInsiders"],
             iconSymbolName: "square.stack.3d.up.fill",
             extensionRootRelativePath: ".vscode/extensions",
@@ -831,6 +852,8 @@ enum ClientProfileRegistry {
             id: "cursor-extension",
             title: "Cursor",
             subtitle: "安装 Ping Island，支持终端精准聚焦",
+            logoAssetName: "CursorLogo",
+            prefersBundledLogoOverAppIcon: true,
             localAppBundleIdentifiers: ["com.todesktop.230313mzl4w4u92"],
             iconSymbolName: "cursorarrow.rays",
             extensionRootRelativePath: ".cursor/extensions",
@@ -844,6 +867,8 @@ enum ClientProfileRegistry {
             id: "codebuddy-extension",
             title: "CodeBuddy",
             subtitle: "安装 Ping Island，支持终端精准聚焦",
+            logoAssetName: "CodeBuddyLogo",
+            prefersBundledLogoOverAppIcon: true,
             localAppBundleIdentifiers: ["com.tencent.codebuddy", "com.codebuddy.app"],
             iconSymbolName: "bubble.left.and.bubble.right.fill",
             extensionRootRelativePaths: [
@@ -877,6 +902,8 @@ enum ClientProfileRegistry {
             id: "qoder-extension",
             title: "Qoder",
             subtitle: "安装 Ping Island，支持会话跳转与终端精准聚焦",
+            logoAssetName: "QoderLogo",
+            prefersBundledLogoOverAppIcon: true,
             sessionFocusStrategy: .qoderChatHistory,
             localAppBundleIdentifiers: ["com.qoder.ide"],
             iconSymbolName: "bolt.horizontal.circle.fill",
@@ -892,6 +919,8 @@ enum ClientProfileRegistry {
             title: "QoderWork",
             subtitle: "安装 Ping Island，支持会话跳转与终端精准聚焦",
             showsInSettings: false,
+            logoAssetName: "QoderLogo",
+            prefersBundledLogoOverAppIcon: true,
             sessionFocusStrategy: .qoderChatHistory,
             localAppBundleIdentifiers: ["com.qoder.work"],
             iconSymbolName: "bolt.horizontal.circle.fill",

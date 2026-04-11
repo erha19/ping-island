@@ -2003,44 +2003,12 @@ private struct HookManagementIcon: View {
     let profile: ManagedHookClientProfile
 
     var body: some View {
-        if let logoAssetName = preferredLogoAssetName {
-            Image(logoAssetName)
-                .resizable()
-                .interpolation(.high)
-                .scaledToFit()
-                .frame(width: 34, height: 34)
-                .shadow(color: Color.black.opacity(0.18), radius: 8, y: 3)
-        } else if let appIcon = resolvedAppIcon {
-            Image(nsImage: appIcon)
-                .resizable()
-                .interpolation(.high)
-                .scaledToFit()
-                .frame(width: 34, height: 34)
-                .shadow(color: Color.black.opacity(0.18), radius: 8, y: 3)
-        } else {
-            Image(systemName: profile.iconSymbolName)
-                .font(.system(size: 18, weight: .bold))
-                .foregroundColor(.white)
-                .frame(width: 34, height: 34)
-                .background(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(Color.white.opacity(0.08))
-                )
-        }
-    }
-
-    private var resolvedAppIcon: NSImage? {
-        ClientAppLocator.icon(bundleIdentifiers: profile.localAppBundleIdentifiers)
-    }
-
-    private var preferredLogoAssetName: String? {
-        guard let logoAssetName = profile.logoAssetName else {
-            return nil
-        }
-
-        return profile.prefersBundledLogoOverAppIcon || resolvedAppIcon == nil
-            ? logoAssetName
-            : nil
+        SettingsClientIcon(
+            logoAssetName: profile.logoAssetName,
+            prefersBundledLogoOverAppIcon: profile.prefersBundledLogoOverAppIcon,
+            localAppBundleIdentifiers: profile.localAppBundleIdentifiers,
+            iconSymbolName: profile.iconSymbolName
+        )
     }
 }
 
@@ -2475,15 +2443,38 @@ private struct IDEExtensionManagementIcon: View {
     let profile: ManagedIDEExtensionProfile
 
     var body: some View {
-        if let appIcon = ClientAppLocator.icon(bundleIdentifiers: profile.localAppBundleIdentifiers) {
-            Image(nsImage: appIcon)
+        SettingsClientIcon(
+            logoAssetName: profile.logoAssetName,
+            prefersBundledLogoOverAppIcon: profile.prefersBundledLogoOverAppIcon,
+            localAppBundleIdentifiers: profile.localAppBundleIdentifiers,
+            iconSymbolName: profile.iconSymbolName
+        )
+    }
+}
+
+private struct SettingsClientIcon: View {
+    let logoAssetName: String?
+    let prefersBundledLogoOverAppIcon: Bool
+    let localAppBundleIdentifiers: [String]
+    let iconSymbolName: String
+
+    var body: some View {
+        if let preferredLogoAssetName {
+            Image(preferredLogoAssetName)
+                .resizable()
+                .interpolation(.high)
+                .scaledToFit()
+                .frame(width: 34, height: 34)
+                .shadow(color: Color.black.opacity(0.18), radius: 8, y: 3)
+        } else if let resolvedAppIcon {
+            Image(nsImage: resolvedAppIcon)
                 .resizable()
                 .interpolation(.high)
                 .scaledToFit()
                 .frame(width: 34, height: 34)
                 .shadow(color: Color.black.opacity(0.18), radius: 8, y: 3)
         } else {
-            Image(systemName: profile.iconSymbolName)
+            Image(systemName: iconSymbolName)
                 .font(.system(size: 18, weight: .bold))
                 .foregroundColor(.white)
                 .frame(width: 34, height: 34)
@@ -2492,6 +2483,20 @@ private struct IDEExtensionManagementIcon: View {
                         .fill(Color.white.opacity(0.08))
                 )
         }
+    }
+
+    private var resolvedAppIcon: NSImage? {
+        ClientAppLocator.icon(bundleIdentifiers: localAppBundleIdentifiers)
+    }
+
+    private var preferredLogoAssetName: String? {
+        guard let logoAssetName else {
+            return nil
+        }
+
+        return prefersBundledLogoOverAppIcon || resolvedAppIcon == nil
+            ? logoAssetName
+            : nil
     }
 }
 
