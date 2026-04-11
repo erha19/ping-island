@@ -65,33 +65,27 @@ enum DiagnosticsCommandRunner {
                 state.appendStderr(data)
             }
 
-            @Sendable
-            func finish(_ result: Result<DiagnosticsCommandResult, DiagnosticsCommandError>) {
-                guard state.markFinished() else { return }
+            func cleanupHandlers() {
                 stdoutPipe.fileHandleForReading.readabilityHandler = nil
                 stderrPipe.fileHandleForReading.readabilityHandler = nil
+                process.terminationHandler = nil
+            }
 
-                switch result {
-                case .success(let output):
-                    continuation.resume(returning: output)
-                case .failure(let error):
-                    continuation.resume(throwing: error)
-                }
+            func complete(_ result: Result<DiagnosticsCommandResult, DiagnosticsCommandError>) {
+                cleanupHandlers()
+                state.resume(continuation: continuation, with: result)
             }
 
             do {
                 process.terminationHandler = { process in
-                    stdoutPipe.fileHandleForReading.readabilityHandler = nil
-                    stderrPipe.fileHandleForReading.readabilityHandler = nil
-
                     state.appendStdout(stdoutPipe.fileHandleForReading.readDataToEndOfFile())
                     state.appendStderr(stderrPipe.fileHandleForReading.readDataToEndOfFile())
 
                     let result = state.makeResult(exitCode: process.terminationStatus)
                     if process.terminationStatus == 0 {
-                        finish(.success(result))
+                        complete(.success(result))
                     } else {
-                        finish(.failure(.executionFailed(
+                        complete(.failure(.executionFailed(
                             executable: executable,
                             exitCode: process.terminationStatus,
                             stderr: result.stderr
@@ -105,12 +99,16 @@ enum DiagnosticsCommandRunner {
                     let deadline = DispatchTime.now() + timeout
                     DispatchQueue.global(qos: .utility).asyncAfter(deadline: deadline) {
                         guard !state.isFinished else { return }
+                        cleanupHandlers()
                         terminateDiagnosticsProcess(process)
-                        finish(.failure(.timedOut(executable: executable, timeout: timeout)))
+                        state.resume(
+                            continuation: continuation,
+                            with: .failure(.timedOut(executable: executable, timeout: timeout))
+                        )
                     }
                 }
             } catch {
-                finish(.failure(.launchFailed(executable: executable, underlying: error)))
+                complete(.failure(.launchFailed(executable: executable, underlying: error)))
             }
         }
     }
@@ -148,6 +146,20 @@ private final class DiagnosticsCommandState: @unchecked Sendable {
         guard !finished else { return false }
         finished = true
         return true
+    }
+
+    func resume(
+        continuation: CheckedContinuation<DiagnosticsCommandResult, Error>,
+        with result: Result<DiagnosticsCommandResult, DiagnosticsCommandError>
+    ) {
+        guard markFinished() else { return }
+
+        switch result {
+        case .success(let output):
+            continuation.resume(returning: output)
+        case .failure(let error):
+            continuation.resume(throwing: error)
+        }
     }
 
     func makeResult(exitCode: Int32) -> DiagnosticsCommandResult {

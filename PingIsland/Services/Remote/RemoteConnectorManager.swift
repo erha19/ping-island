@@ -605,7 +605,7 @@ final class RemoteConnectorManager: ObservableObject {
         return Self.shouldBootstrapRemoteAgent(endpoint: endpoint, forceBootstrap: forceBootstrap)
     }
 
-    static func shouldBootstrapRemoteAgent(endpoint: RemoteEndpoint, forceBootstrap: Bool) -> Bool {
+    nonisolated static func shouldBootstrapRemoteAgent(endpoint: RemoteEndpoint, forceBootstrap: Bool) -> Bool {
         if forceBootstrap {
             return true
         }
@@ -739,7 +739,7 @@ final class RemoteConnectorManager: ObservableObject {
         }
     }
 
-    static func remoteBootstrapPrepareCommand(
+    nonisolated static func remoteBootstrapPrepareCommand(
         installRoot: String,
         controlSocketPath: String,
         hookSocketPath: String,
@@ -758,7 +758,7 @@ final class RemoteConnectorManager: ObservableObject {
         """
     }
 
-    static func remoteBootstrapInstallCommand(
+    nonisolated static func remoteBootstrapInstallCommand(
         installRoot: String,
         stagedBridgePath: String
     ) -> String {
@@ -768,7 +768,7 @@ final class RemoteConnectorManager: ObservableObject {
         """
     }
 
-    static func remoteManagedHookProfiles() -> [ManagedHookClientProfile] {
+    nonisolated static func remoteManagedHookProfiles() -> [ManagedHookClientProfile] {
         let supportedProfileIDs: Set<String> = [
             "claude-hooks",
             "codex-hooks",
@@ -780,7 +780,7 @@ final class RemoteConnectorManager: ObservableObject {
         }
     }
 
-    static func remoteManagedHookConfigDirectoryPaths(
+    nonisolated static func remoteManagedHookConfigDirectoryPaths(
         homeDirectory: String,
         profiles: [ManagedHookClientProfile]
     ) -> [String] {
@@ -791,7 +791,7 @@ final class RemoteConnectorManager: ObservableObject {
             .uniquedPreservingOrder()
     }
 
-    static func remoteConfigurationPath(relativePath: String, homeDirectory: String) -> String {
+    nonisolated static func remoteConfigurationPath(relativePath: String, homeDirectory: String) -> String {
         guard !relativePath.isEmpty else { return homeDirectory }
         return relativePath
             .split(separator: "/")
@@ -804,7 +804,7 @@ final class RemoteConnectorManager: ObservableObject {
         Self.shellQuote(value)
     }
 
-    private static func shellQuote(_ value: String) -> String {
+    nonisolated private static func shellQuote(_ value: String) -> String {
         "'" + value.replacingOccurrences(of: "'", with: "'\"'\"'") + "'"
     }
 }
