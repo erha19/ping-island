@@ -80,6 +80,10 @@ final class SettingsPanelViewModel: ObservableObject {
     @Published private(set) var reinstallingHookProfileID: String?
     @Published private(set) var hookReinstallFeedbacks: [String: HookReinstallFeedback] = [:]
     @Published private(set) var customHookInstallations: [HookInstaller.CustomHookInstallation] = []
+    @Published var nativeClaudeRuntimeEnabled = FeatureFlags.nativeClaudeRuntime
+    @Published var nativeCodexRuntimeEnabled = FeatureFlags.nativeCodexRuntime
+    @Published var nativeRuntimeWorkingDirectory = FileManager.default.homeDirectoryForCurrentUser.path
+    @Published var nativeRuntimeStatusMessage: String?
 
     private var hookFeedbackClearTasks: [String: Task<Void, Never>] = [:]
 
@@ -112,6 +116,8 @@ final class SettingsPanelViewModel: ObservableObject {
         ScreenSelector.shared.refreshScreens()
         SoundPackCatalog.shared.refresh()
         refreshLocalizedState()
+        nativeClaudeRuntimeEnabled = FeatureFlags.nativeClaudeRuntime
+        nativeCodexRuntimeEnabled = FeatureFlags.nativeCodexRuntime
     }
 
     func refreshLocalizedState() {
@@ -238,6 +244,60 @@ final class SettingsPanelViewModel: ObservableObject {
             return
         }
         NSWorkspace.shared.open(url)
+    }
+
+    func setNativeRuntimeEnabled(_ enabled: Bool, for provider: SessionProvider) {
+        switch provider {
+        case .claude:
+            FeatureFlags.setEnabled(enabled, for: .nativeClaudeRuntime)
+            nativeClaudeRuntimeEnabled = enabled
+        case .codex:
+            FeatureFlags.setEnabled(enabled, for: .nativeCodexRuntime)
+            nativeCodexRuntimeEnabled = enabled
+        case .copilot:
+            break
+        }
+    }
+
+    func selectNativeRuntimeDirectory() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.showsHiddenFiles = true
+        panel.directoryURL = URL(fileURLWithPath: nativeRuntimeWorkingDirectory)
+        panel.message = "选择 Native Runtime 工作目录"
+        panel.prompt = "选择"
+
+        if panel.runModal() == .OK, let url = panel.url {
+            nativeRuntimeWorkingDirectory = url.path
+        }
+    }
+
+    func startNativeRuntimeSession(provider: SessionProvider) {
+        let cwd = nativeRuntimeWorkingDirectory.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cwd.isEmpty else {
+            nativeRuntimeStatusMessage = "请先选择工作目录"
+            return
+        }
+
+        guard FileManager.default.fileExists(atPath: cwd) else {
+            nativeRuntimeStatusMessage = "目录不存在：\(cwd)"
+            return
+        }
+
+        Task {
+            do {
+                _ = try await RuntimeCoordinator.shared.startSession(provider: provider, cwd: cwd)
+                await MainActor.run {
+                    nativeRuntimeStatusMessage = "\(provider.displayName) Native Runtime 已启动"
+                }
+            } catch {
+                await MainActor.run {
+                    nativeRuntimeStatusMessage = error.localizedDescription
+                }
+            }
+        }
     }
 
     func exportLogs() {
@@ -1123,6 +1183,10 @@ private struct SettingsPanelContentView: View {
                         viewModel.openAccessibilitySettings()
                     }
                 }
+            }
+
+            SettingsSectionCard(title: "Native Runtime Preview") {
+                NativeRuntimePreviewSection(viewModel: viewModel)
             }
         }
     }
@@ -2583,6 +2647,99 @@ private struct SettingsClientIcon: View {
         return prefersBundledLogoOverAppIcon || resolvedAppIcon == nil
             ? logoAssetName
             : nil
+    }
+}
+
+private struct NativeRuntimePreviewSection: View {
+    @ObservedObject var viewModel: SettingsPanelViewModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("独立于当前默认实现，仅用于手动体验新的原生 Claude/Codex runtime。")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.white.opacity(0.58))
+                    .fixedSize(horizontal: false, vertical: true)
+
+                HStack(spacing: 10) {
+                    Toggle(isOn: Binding(
+                        get: { viewModel.nativeClaudeRuntimeEnabled },
+                        set: { viewModel.setNativeRuntimeEnabled($0, for: .claude) }
+                    )) {
+                        Text("Claude Native Runtime")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(.white)
+                    }
+                    .toggleStyle(.switch)
+
+                    Toggle(isOn: Binding(
+                        get: { viewModel.nativeCodexRuntimeEnabled },
+                        set: { viewModel.setNativeRuntimeEnabled($0, for: .codex) }
+                    )) {
+                        Text("Codex Native Runtime")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(.white)
+                    }
+                    .toggleStyle(.switch)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("工作目录")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.7))
+
+                HStack(spacing: 8) {
+                    TextField("", text: $viewModel.nativeRuntimeWorkingDirectory)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 8)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .fill(.white.opacity(0.06))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .strokeBorder(.white.opacity(0.1), lineWidth: 1)
+                        )
+
+                    HookManagementButton(
+                        title: "选择目录",
+                        tint: TerminalColors.blue,
+                        action: viewModel.selectNativeRuntimeDirectory
+                    )
+                }
+            }
+
+            HStack(spacing: 10) {
+                HookManagementButton(
+                    title: "启动 Claude",
+                    tint: brandTint(.claude),
+                    isDisabled: !viewModel.nativeClaudeRuntimeEnabled,
+                    action: { viewModel.startNativeRuntimeSession(provider: .claude) }
+                )
+
+                HookManagementButton(
+                    title: "启动 Codex",
+                    tint: brandTint(.codex),
+                    isDisabled: !viewModel.nativeCodexRuntimeEnabled,
+                    action: { viewModel.startNativeRuntimeSession(provider: .codex) }
+                )
+            }
+
+            if let nativeRuntimeStatusMessage = viewModel.nativeRuntimeStatusMessage,
+               !nativeRuntimeStatusMessage.isEmpty {
+                Text(nativeRuntimeStatusMessage)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.white.opacity(0.68))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 14)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

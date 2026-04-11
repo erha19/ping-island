@@ -187,6 +187,84 @@ actor CodexAppServerMonitor {
         return snapshot
     }
 
+    func startThread(cwd: String, model: String? = nil) async throws -> CodexThreadSnapshot {
+        if websocket == nil {
+            await start()
+        }
+
+        let response = try await sendRequest(
+            method: "thread/start",
+            params: [
+                "model": model as Any,
+                "modelProvider": NSNull(),
+                "profile": NSNull(),
+                "cwd": cwd,
+                "approvalPolicy": NSNull(),
+                "sandbox": NSNull(),
+                "config": NSNull(),
+                "baseInstructions": NSNull(),
+                "developerInstructions": NSNull(),
+                "compactPrompt": NSNull(),
+                "includeApplyPatchTool": NSNull(),
+                "experimentalRawEvents": false,
+                "persistExtendedHistory": true,
+            ]
+        )
+
+        guard let thread = response["thread"] as? [String: Any],
+              let threadId = thread["id"] as? String else {
+            throw NSError(domain: "CodexAppServer", code: 4, userInfo: [
+                NSLocalizedDescriptionKey: "Invalid thread/start response"
+            ])
+        }
+
+        return try await readThread(threadId: threadId, includeTurns: true)
+    }
+
+    func resumeThread(threadId: String, cwd: String? = nil, model: String? = nil) async throws -> CodexThreadSnapshot {
+        if websocket == nil {
+            await start()
+        }
+
+        let response = try await sendRequest(
+            method: "thread/resume",
+            params: [
+                "threadId": threadId,
+                "model": model as Any,
+                "modelProvider": NSNull(),
+                "cwd": cwd as Any,
+                "approvalPolicy": NSNull(),
+                "sandbox": NSNull(),
+                "config": NSNull(),
+                "baseInstructions": NSNull(),
+                "developerInstructions": NSNull(),
+                "persistExtendedHistory": true,
+            ]
+        )
+
+        guard let thread = response["thread"] as? [String: Any],
+              let resumedThreadID = thread["id"] as? String else {
+            throw NSError(domain: "CodexAppServer", code: 5, userInfo: [
+                NSLocalizedDescriptionKey: "Invalid thread/resume response"
+            ])
+        }
+
+        return try await readThread(threadId: resumedThreadID, includeTurns: true)
+    }
+
+    func archiveThread(threadId: String) async throws {
+        if websocket == nil {
+            await start()
+        }
+
+        _ = try await sendRequest(
+            method: "thread/archive",
+            params: [
+                "threadId": threadId
+            ]
+        )
+    }
+
     func continueThread(threadId: String, expectedTurnId: String, text: String) async throws {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }

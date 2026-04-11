@@ -15,11 +15,13 @@ class SessionMonitor: ObservableObject {
     @Published var instances: [SessionState] = []
     @Published var pendingInstances: [SessionState] = []
 
+    private let runtimeCoordinator: any RuntimeCoordinating
     private var cancellables = Set<AnyCancellable>()
     private var hasStarted = false
     private var allSessions: [SessionState] = []
 
-    init() {
+    init(runtimeCoordinator: any RuntimeCoordinating = RuntimeCoordinator.shared) {
+        self.runtimeCoordinator = runtimeCoordinator
         SessionStore.shared.sessionsPublisher
             .receive(on: DispatchQueue.main)
             .sink { [weak self] sessions in
@@ -48,107 +50,9 @@ class SessionMonitor: ObservableObject {
         guard !hasStarted else { return }
         hasStarted = true
 
-        let handleHookEvent: @Sendable (HookEvent) -> Void = { event in
-            Task {
-                let shouldAutoApprovePermission = await Self.shouldAutoApproveClaudePermission(for: event)
-
-                if !shouldAutoApprovePermission {
-                    await MainActor.run {
-                        SoundManager.shared.handleEvent(event.event)
-                    }
-                }
-
-                await SessionStore.shared.process(.hookReceived(event))
-
-                if shouldAutoApprovePermission,
-                   let approvedToolUseId = await Self.resolvePendingApprovalToolUseId(for: event.sessionId, fallback: event.toolUseId) {
-                    if event.ingress == .remoteBridge {
-                        await MainActor.run {
-                            RemoteConnectorManager.shared.respondToPermission(
-                                toolUseId: approvedToolUseId,
-                                decision: "approveForSession"
-                            )
-                        }
-                    } else {
-                        await MainActor.run {
-                            HookSocketServer.shared.respondToPermission(
-                                toolUseId: approvedToolUseId,
-                                decision: "approveForSession"
-                            )
-                        }
-                    }
-                    await SessionStore.shared.process(
-                        .permissionApproved(sessionId: event.sessionId, toolUseId: approvedToolUseId)
-                    )
-                    return
-                }
-
-                if let autoAnswer = await MainActor.run(body: { Self.defaultQoderAutoAnswer(for: event) }) {
-                    await MainActor.run {
-                        if event.ingress == .remoteBridge {
-                            RemoteConnectorManager.shared.respondToIntervention(
-                                toolUseId: autoAnswer.toolUseId,
-                                decision: "answer",
-                                updatedInput: autoAnswer.updatedInput
-                            )
-                        } else {
-                            HookSocketServer.shared.respondToIntervention(
-                                toolUseId: autoAnswer.toolUseId,
-                                decision: "answer",
-                                updatedInput: autoAnswer.updatedInput
-                            )
-                        }
-                    }
-                    await SessionStore.shared.process(
-                        .interventionResolved(
-                            sessionId: event.sessionId,
-                            nextPhase: .processing,
-                            submittedAnswers: autoAnswer.answers
-                        )
-                    )
-                }
-
-                if event.event == "PostToolUse",
-                   let toolUseId = event.toolUseId,
-                   let session = await SessionStore.shared.session(for: event.sessionId),
-                   session.activePermission?.toolUseId != toolUseId {
-                    await MainActor.run {
-                        if event.ingress == .remoteBridge {
-                            RemoteConnectorManager.shared.respondToPermission(
-                                toolUseId: toolUseId,
-                                decision: "cancel"
-                            )
-                        } else {
-                            HookSocketServer.shared.cancelPendingPermission(toolUseId: toolUseId)
-                        }
-                    }
-                }
-            }
-
-            let sessionPhase = event.sessionPhase
-            if Self.shouldWatchTranscript(for: event, phase: sessionPhase) {
-                Task {
-                    let session = await SessionStore.shared.session(for: event.sessionId)
-                    await MainActor.run {
-                        InterruptWatcherManager.shared.startWatching(
-                            sessionId: event.sessionId,
-                            cwd: event.cwd,
-                            explicitFilePath: session?.clientInfo.sessionFilePath
-                        )
-                    }
-                }
-            }
-
-            if Self.shouldStopWatchingTranscript(for: event) {
-                Task { @MainActor in
-                    InterruptWatcherManager.shared.stopWatching(sessionId: event.sessionId)
-                }
-            }
-
-            if event.event == "Stop", event.ingress != .remoteBridge {
-                Task { @MainActor in
-                    HookSocketServer.shared.cancelPendingPermissions(sessionId: event.sessionId)
-                }
+        let handleHookEvent: @Sendable (HookEvent) -> Void = { [self] event in
+            Task { @MainActor in
+                await self.handleIncomingHookEvent(event)
             }
         }
 
@@ -166,6 +70,10 @@ class SessionMonitor: ObservableObject {
         Task {
             await CodexAppServerMonitor.shared.start()
         }
+
+        Task {
+            await runtimeCoordinator.start()
+        }
         RemoteConnectorManager.shared.start(
             onEvent: handleHookEvent,
             onPermissionFailure: { sessionId, toolUseId in
@@ -178,12 +86,133 @@ class SessionMonitor: ObservableObject {
         )
     }
 
+    func handleIncomingHookEvent(_ event: HookEvent) async {
+        let effectiveEvent: HookEvent
+        if await runtimeCoordinator.managesNativeSession(sessionID: event.sessionId, provider: event.provider) {
+            effectiveEvent = event.withIngress(.nativeRuntime)
+        } else {
+            effectiveEvent = event
+        }
+
+        let shouldAutoApprovePermission = await Self.shouldAutoApproveClaudePermission(for: effectiveEvent)
+
+        if !shouldAutoApprovePermission {
+            SoundManager.shared.handleEvent(effectiveEvent.event)
+        }
+
+        await SessionStore.shared.process(.hookReceived(effectiveEvent))
+
+        if shouldAutoApprovePermission,
+           let approvedToolUseId = await Self.resolvePendingApprovalToolUseId(for: effectiveEvent.sessionId, fallback: effectiveEvent.toolUseId) {
+            if effectiveEvent.ingress == .remoteBridge {
+                RemoteConnectorManager.shared.respondToPermission(
+                    toolUseId: approvedToolUseId,
+                    decision: "approveForSession"
+                )
+            } else {
+                HookSocketServer.shared.respondToPermission(
+                    toolUseId: approvedToolUseId,
+                    decision: "approveForSession"
+                )
+            }
+            await SessionStore.shared.process(
+                .permissionApproved(sessionId: effectiveEvent.sessionId, toolUseId: approvedToolUseId)
+            )
+            return
+        }
+
+        if let autoAnswer = Self.defaultQoderAutoAnswer(for: effectiveEvent) {
+            if effectiveEvent.ingress == .remoteBridge {
+                RemoteConnectorManager.shared.respondToIntervention(
+                    toolUseId: autoAnswer.toolUseId,
+                    decision: "answer",
+                    updatedInput: autoAnswer.updatedInput
+                )
+            } else {
+                HookSocketServer.shared.respondToIntervention(
+                    toolUseId: autoAnswer.toolUseId,
+                    decision: "answer",
+                    updatedInput: autoAnswer.updatedInput
+                )
+            }
+            await SessionStore.shared.process(
+                .interventionResolved(
+                    sessionId: effectiveEvent.sessionId,
+                    nextPhase: .processing,
+                    submittedAnswers: autoAnswer.answers
+                )
+            )
+        }
+
+        if effectiveEvent.event == "PostToolUse",
+           let toolUseId = effectiveEvent.toolUseId,
+           let session = await SessionStore.shared.session(for: effectiveEvent.sessionId),
+           session.activePermission?.toolUseId != toolUseId {
+            if effectiveEvent.ingress == .remoteBridge {
+                RemoteConnectorManager.shared.respondToPermission(
+                    toolUseId: toolUseId,
+                    decision: "cancel"
+                )
+            } else {
+                HookSocketServer.shared.cancelPendingPermission(toolUseId: toolUseId)
+            }
+        }
+
+        let sessionPhase = effectiveEvent.sessionPhase
+        if Self.shouldWatchTranscript(for: effectiveEvent, phase: sessionPhase) {
+            let session = await SessionStore.shared.session(for: effectiveEvent.sessionId)
+            InterruptWatcherManager.shared.startWatching(
+                sessionId: effectiveEvent.sessionId,
+                cwd: effectiveEvent.cwd,
+                explicitFilePath: session?.clientInfo.sessionFilePath
+            )
+        }
+
+        if Self.shouldStopWatchingTranscript(for: effectiveEvent) {
+            InterruptWatcherManager.shared.stopWatching(sessionId: effectiveEvent.sessionId)
+        }
+
+        if effectiveEvent.event == "Stop", effectiveEvent.ingress != .remoteBridge {
+            HookSocketServer.shared.cancelPendingPermissions(sessionId: effectiveEvent.sessionId)
+        }
+    }
+
     func stopMonitoring() {
         hasStarted = false
         HookSocketServer.shared.stop()
         RemoteConnectorManager.shared.stop()
         Task {
             await CodexAppServerMonitor.shared.stop()
+        }
+        Task {
+            await runtimeCoordinator.stop()
+        }
+    }
+
+    // MARK: - Native Runtime
+
+    func startNativeSession(provider: SessionProvider, cwd: String, preferredSessionID: String? = nil) {
+        Task {
+            _ = try? await runtimeCoordinator.startSession(
+                provider: provider,
+                cwd: cwd,
+                preferredSessionID: preferredSessionID,
+                metadata: [:]
+            )
+        }
+    }
+
+    func terminateNativeSession(sessionId: String) {
+        Task {
+            guard let session = await SessionStore.shared.session(for: sessionId),
+                  session.ingress == .nativeRuntime else {
+                return
+            }
+
+            try? await runtimeCoordinator.terminateSession(
+                provider: session.provider,
+                sessionID: session.sessionId
+            )
         }
     }
 
@@ -192,6 +221,15 @@ class SessionMonitor: ObservableObject {
     func approvePermission(sessionId: String, forSession: Bool = false) {
         Task {
             guard let session = await SessionStore.shared.session(for: sessionId) else {
+                return
+            }
+
+            if session.ingress == .nativeRuntime {
+                try? await runtimeCoordinator.approveSession(
+                    provider: session.provider,
+                    sessionID: session.sessionId,
+                    forSession: forSession
+                )
                 return
             }
 
@@ -248,6 +286,15 @@ class SessionMonitor: ObservableObject {
                 return
             }
 
+            if session.ingress == .nativeRuntime {
+                try? await runtimeCoordinator.denySession(
+                    provider: session.provider,
+                    sessionID: session.sessionId,
+                    reason: reason
+                )
+                return
+            }
+
             if session.ingress == .codexAppServer {
                 let resolvedSessionId = await SessionStore.shared.resolvedCodexSessionId(for: sessionId)
                 await CodexAppServerMonitor.shared.deny(threadId: resolvedSessionId)
@@ -279,6 +326,15 @@ class SessionMonitor: ObservableObject {
     func answerIntervention(sessionId: String, answers: [String: [String]]) {
         Task {
             guard let session = await SessionStore.shared.session(for: sessionId) else {
+                return
+            }
+
+            if session.ingress == .nativeRuntime {
+                try? await runtimeCoordinator.answerSession(
+                    provider: session.provider,
+                    sessionID: session.sessionId,
+                    answers: answers
+                )
                 return
             }
 
@@ -356,12 +412,38 @@ class SessionMonitor: ObservableObject {
     }
 
     func continueCodexThread(sessionId: String, expectedTurnId: String, text: String) async throws {
+        if let session = await SessionStore.shared.session(for: sessionId),
+           session.ingress == .nativeRuntime {
+            try await runtimeCoordinator.continueSession(
+                provider: session.provider,
+                sessionID: session.sessionId,
+                expectedTurnId: expectedTurnId,
+                text: text
+            )
+            return
+        }
+
         let resolvedSessionId = await SessionStore.shared.resolvedCodexSessionId(for: sessionId)
         try await CodexAppServerMonitor.shared.continueThread(
             threadId: resolvedSessionId,
             expectedTurnId: expectedTurnId,
             text: text
         )
+    }
+
+    func sendNativeSessionInput(sessionId: String, text: String) {
+        Task {
+            guard let session = await SessionStore.shared.session(for: sessionId),
+                  session.ingress == .nativeRuntime else {
+                return
+            }
+
+            try? await runtimeCoordinator.sendUserInput(
+                provider: session.provider,
+                sessionID: session.sessionId,
+                text: text
+            )
+        }
     }
 
     /// Archive (remove) a session from the instances list

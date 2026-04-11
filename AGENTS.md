@@ -21,6 +21,7 @@ This file is a routing layer for coding agents working in this repo. Keep it sho
 - App entry: `PingIsland/App/PingIslandApp.swift`, `PingIsland/App/AppDelegate.swift`
 - Main state hub: `PingIsland/Services/State/SessionStore.swift`
 - Session association cache: `PingIsland/Services/State/SessionAssociationStore.swift`
+- Native runtime rollout scaffold: `PingIsland/Services/Runtime/`, `PingIsland/Core/FeatureFlags.swift`
 - Session bridge for UI: `PingIsland/Services/Session/SessionMonitor.swift`
 - Notch state and layout: `PingIsland/Core/NotchViewModel.swift`, `PingIsland/UI/Views/NotchView.swift`
 - Claude hook ingress: `Prototype/Sources/IslandBridge/`, `PingIsland/Services/Hooks/HookInstaller.swift`, `PingIsland/Services/Hooks/HookSocketServer.swift`
@@ -45,6 +46,7 @@ This file is a routing layer for coding agents working in this repo. Keep it sho
 - `PingIsland/Core`: notch geometry, shared state, app settings, selectors
 - `PingIsland/Models`: domain models for sessions, events, tools, phases
 - `PingIsland/Services`: ingestion, socket handling, state management, tmux, windows, updates
+- `PingIsland/Services/Runtime`: isolated native Claude/Codex runtime work. This path should coexist with the current implementation behind feature flags until parity is proven.
 - `PingIsland/Services/Remote`: remote endpoint persistence, SSH bootstrap / attach, and remote hook forwarding
 - `PingIsland/Services/Update`: Sparkle updater bridge, appcast/release-notes loading, update state publishing
 - `PingIsland/Services/Window/IDEExtensionInstaller.swift`: installs the VS Code-compatible terminal-focus extension used by Cursor / VS Code / CodeBuddy / Qoder style IDE hosts (`QoderWork` is hook-only, not an IDE extension host)
@@ -72,6 +74,7 @@ This file is a routing layer for coding agents working in this repo. Keep it sho
   - OpenCode is managed as a generated plugin file under `~/.config/opencode/plugins/ping-island.js`; treat it as a plugin-based integration, not a JSON hooks file.
   - `QoderWork` should not be added to `ideExtensionProfiles` unless it actually ships VS Code-compatible extension support in the future.
 - If you change how sessions are associated across relaunches or between hook/app-server ingress paths, inspect both `SessionStore` and `SessionAssociationStore` so cached client metadata stays compatible.
+- If you change the new native runtime rollout path, keep it isolated from the legacy hook/app-server flow. Reuse shared `SessionState`-driven views, but keep runtime orchestration, persistence, and feature gating under `PingIsland/Services/Runtime/` and `PingIsland/Core/FeatureFlags.swift`.
 - If you change session lifecycle or transitions, start in `SessionStore`. Avoid ad-hoc state mutation elsewhere.
   - Current rule: provider-originated end events should preserve the session in `.ended` so it stays visible in the list; only explicit user archive/removal should delete it from `SessionStore`.
   - Primary list rule: sessions with no new activity for 30 minutes should auto-hide from the primary list until fresh hook/file/app-server activity updates `lastActivity`; sessions that need manual attention should stay visible.

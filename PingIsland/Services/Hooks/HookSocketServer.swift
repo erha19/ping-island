@@ -97,8 +97,27 @@ struct HookEvent: Sendable {
     }
 }
 
-private extension HookEvent {
-    func withToolUseId(_ toolUseId: String) -> HookEvent {
+extension HookEvent {
+    nonisolated func withToolUseId(_ toolUseId: String) -> HookEvent {
+        HookEvent(
+            sessionId: sessionId,
+            cwd: cwd,
+            event: event,
+            status: status,
+            provider: provider,
+            clientInfo: clientInfo,
+            pid: pid,
+            tty: tty,
+            tool: tool,
+            toolInput: toolInput,
+            toolUseId: toolUseId,
+            notificationType: notificationType,
+            message: message,
+            ingress: ingress
+        )
+    }
+
+    nonisolated func withIngress(_ ingress: SessionIngress) -> HookEvent {
         HookEvent(
             sessionId: sessionId,
             cwd: cwd,

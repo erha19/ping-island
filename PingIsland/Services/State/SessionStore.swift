@@ -88,6 +88,12 @@ actor SessionStore {
         case .hookReceived(let hookEvent):
             await processHookEvent(hookEvent)
 
+        case .runtimeSessionStarted(let handle):
+            processNativeRuntimeSessionStarted(handle)
+
+        case .runtimeSessionStopped(let sessionId, _):
+            await processSessionEnd(sessionId: sessionId)
+
         case .permissionApproved(let sessionId, let toolUseId):
             await processPermissionApproved(sessionId: sessionId, toolUseId: toolUseId)
 
@@ -164,6 +170,73 @@ actor SessionStore {
     }
 
     // MARK: - Hook Event Processing
+
+    private func processNativeRuntimeSessionStarted(_ handle: SessionRuntimeHandle) {
+        let restoredAssociation = persistedAssociation(for: handle.provider, sessionId: handle.sessionID)
+        let projectName = restoredAssociation?.projectName
+            ?? Self.projectName(for: handle.cwd, fallback: handle.provider.displayName)
+
+        let runtimeClientInfo: SessionClientInfo
+        switch handle.provider {
+        case .claude:
+            runtimeClientInfo = SessionClientInfo(
+                kind: .claudeCode,
+                name: "Claude Native",
+                origin: "native-runtime",
+                sessionFilePath: handle.sessionFilePath,
+                processName: "claude"
+            )
+        case .codex:
+            runtimeClientInfo = SessionClientInfo(
+                kind: .codexCLI,
+                name: "Codex Native",
+                origin: "native-runtime",
+                sessionFilePath: handle.sessionFilePath,
+                processName: "codex"
+            )
+        case .copilot:
+            runtimeClientInfo = SessionClientInfo.default(for: .copilot)
+        }
+
+        let resolvedClientInfo = normalizedClientInfo(
+            (restoredAssociation?.clientInfo ?? runtimeClientInfo).merged(with: runtimeClientInfo),
+            provider: handle.provider,
+            sessionId: handle.sessionID
+        )
+
+        let existing = sessions[handle.sessionID]
+        let session = SessionState(
+            sessionId: handle.sessionID,
+            cwd: handle.cwd,
+            projectName: projectName,
+            provider: handle.provider,
+            clientInfo: resolvedClientInfo,
+            ingress: .nativeRuntime,
+            sessionName: restoredAssociation?.sessionName ?? existing?.sessionName,
+            pid: existing?.pid,
+            tty: existing?.tty,
+            isInTmux: existing?.isInTmux ?? false,
+            autoApprovePermissions: existing?.autoApprovePermissions ?? false,
+            phase: existing?.phase == .ended ? .idle : (existing?.phase ?? .idle),
+            chatItems: existing?.chatItems ?? [],
+            toolTracker: existing?.toolTracker ?? ToolTracker(),
+            completedErrorToolIDs: existing?.completedErrorToolIDs ?? [],
+            subagentState: existing?.subagentState ?? SubagentState(),
+            conversationInfo: existing?.conversationInfo ?? ConversationInfo(
+                summary: nil,
+                lastMessage: nil,
+                lastMessageRole: nil,
+                lastToolName: nil,
+                firstUserMessage: nil,
+                lastUserMessageDate: nil
+            ),
+            needsClearReconciliation: existing?.needsClearReconciliation ?? false,
+            lastActivity: Date(),
+            createdAt: existing?.createdAt ?? handle.createdAt
+        )
+
+        sessions[handle.sessionID] = session
+    }
 
     private func processHookEvent(_ event: HookEvent) async {
         let sessionId = event.provider == .codex
@@ -2723,6 +2796,8 @@ actor SessionStore {
         case .remoteBridge:
             return codexHookPlaceholderPruneDelayNs
         case .codexAppServer:
+            return codexAppServerPlaceholderPruneDelayNs
+        case .nativeRuntime:
             return codexAppServerPlaceholderPruneDelayNs
         }
     }

@@ -630,6 +630,11 @@ struct ChatView: View {
     }
 
     private func sendToSession(_ text: String) async {
+        if session.ingress == .nativeRuntime {
+            sessionMonitor.sendNativeSessionInput(sessionId: session.sessionId, text: text)
+            return
+        }
+
         guard session.isInTmux else { return }
         guard let tty = session.tty else { return }
 

@@ -21,6 +21,7 @@ enum SessionIngress: String, Equatable, Sendable {
     case hookBridge
     case remoteBridge
     case codexAppServer
+    case nativeRuntime
 }
 
 enum SessionClientKind: String, Codable, Equatable, Sendable {

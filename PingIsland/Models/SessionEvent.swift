@@ -16,6 +16,14 @@ enum SessionEvent: Sendable {
     /// A hook event was received from a hook-based provider
     case hookReceived(HookEvent)
 
+    // MARK: - Native Runtime Events
+
+    /// A native runtime session was started.
+    case runtimeSessionStarted(SessionRuntimeHandle)
+
+    /// A native runtime session was stopped.
+    case runtimeSessionStopped(sessionId: String, reason: SessionRuntimeStopReason)
+
     // MARK: - Permission Events (user actions)
 
     /// User approved a permission request
@@ -385,6 +393,10 @@ extension SessionEvent: CustomStringConvertible {
         switch self {
         case .hookReceived(let event):
             return "hookReceived(\(event.event), session: \(event.sessionId.prefix(8)))"
+        case .runtimeSessionStarted(let handle):
+            return "runtimeSessionStarted(provider: \(handle.provider.rawValue), session: \(handle.sessionID.prefix(8)))"
+        case .runtimeSessionStopped(let sessionId, let reason):
+            return "runtimeSessionStopped(session: \(sessionId.prefix(8)), reason: \(reason.rawValue))"
         case .permissionApproved(let sessionId, let toolUseId):
             return "permissionApproved(session: \(sessionId.prefix(8)), tool: \(toolUseId.prefix(12)))"
         case .permissionAutoApprovalChanged(let sessionId, let isEnabled):

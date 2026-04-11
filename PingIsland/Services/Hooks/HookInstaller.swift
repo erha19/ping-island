@@ -241,6 +241,33 @@ struct HookInstaller {
         install(profile, persistPreference: true)
     }
 
+    static func createTemporarySettingsFile(for profileID: String) -> URL? {
+        guard let profile = ClientProfileRegistry.managedHookProfile(id: profileID) else {
+            return nil
+        }
+
+        installBridgeLauncherIfNeeded()
+
+        let directory = islandSupportDirectory()
+            .appendingPathComponent("tmp", isDirectory: true)
+            .appendingPathComponent("native-runtime-hooks", isDirectory: true)
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        let fileURL = directory.appendingPathComponent("\(profile.id)-\(UUID().uuidString).json")
+        let command = bridgeCommand(source: profile.bridgeSource, extraArguments: profile.bridgeExtraArguments)
+        var hooks: [String: Any] = [:]
+        for event in profile.events {
+            hooks[event.name] = makeHookEntries(command: command, event: event)
+        }
+        writeJSONObject(["hooks": hooks], to: fileURL)
+        return fileURL
+    }
+
+    static func removeTemporarySettingsFile(at url: URL?) {
+        guard let url else { return }
+        try? FileManager.default.removeItem(at: url)
+    }
+
     static func reinstall(_ profile: ManagedHookClientProfile) {
         uninstall(profile, persistPreference: false)
         install(profile, persistPreference: true)
