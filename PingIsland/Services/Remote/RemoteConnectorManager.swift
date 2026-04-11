@@ -593,7 +593,7 @@ final class RemoteConnectorManager: ObservableObject {
         endpoints.first { $0.id == id }
     }
 
-    static func resolvedRemoteHostHint(
+    nonisolated static func resolvedRemoteHostHint(
         payloadRemoteHost: String?,
         endpoint: RemoteEndpoint?
     ) -> String? {
@@ -697,7 +697,7 @@ final class RemoteConnectorManager: ObservableObject {
         defaults.set(data, forKey: persistenceKey)
     }
 
-    private static func sanitizedNonEmpty(_ value: String?) -> String? {
+    nonisolated private static func sanitizedNonEmpty(_ value: String?) -> String? {
         guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines),
               !trimmed.isEmpty else {
             return nil
@@ -705,7 +705,7 @@ final class RemoteConnectorManager: ObservableObject {
         return trimmed
     }
 
-    private static func isIPAddressLike(_ value: String) -> Bool {
+    nonisolated private static func isIPAddressLike(_ value: String) -> Bool {
         let candidate = value.trimmingCharacters(in: .whitespacesAndNewlines)
         let ipv4Parts = candidate.split(separator: ".")
         if ipv4Parts.count == 4,
