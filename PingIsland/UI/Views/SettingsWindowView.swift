@@ -2082,11 +2082,27 @@ private struct RemoteHostManagementLine: View {
                             )
                     }
 
-                    Text(endpoint.sshTarget)
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundColor(.white.opacity(0.52))
-                        .lineLimit(1)
-                        .truncationMode(.middle)
+                    if let sshURL = endpoint.sshURL {
+                        Link(destination: sshURL) {
+                            HStack(spacing: 4) {
+                                Text(endpoint.sshURL?.absoluteString ?? endpoint.sshTarget)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+
+                                Image(systemName: "arrow.up.right.square")
+                                    .font(.system(size: 9, weight: .semibold))
+                            }
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(.white.opacity(0.52))
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        Text(endpoint.sshTarget)
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(.white.opacity(0.52))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
 
                     Text(detailText)
                         .font(.system(size: 11, weight: .medium))
@@ -2206,7 +2222,7 @@ private struct AddRemoteHostSheet: View {
 
                 VStack(alignment: .leading, spacing: 14) {
                 remoteField(title: "显示名称（可选）", placeholder: "例如 GPU Box", text: $displayName)
-                remoteField(title: "SSH 目标", placeholder: "例如 dev@10.0.0.8 或 my-server", text: $sshTarget)
+                remoteField(title: "SSH 目标", placeholder: "例如 dev@10.0.0.8:2222 或 my-server", text: $sshTarget)
 
                 VStack(alignment: .leading, spacing: 6) {
                     Text(appLocalized: "密码（可选）")
@@ -2328,9 +2344,25 @@ private struct RemotePasswordPromptSheet: View {
                 .font(.system(size: 16, weight: .bold))
                 .foregroundColor(.white)
 
-            Text(endpoint.sshTarget)
-                .font(.system(size: 12, weight: .medium, design: .monospaced))
-                .foregroundColor(.white.opacity(0.56))
+            if let sshURL = endpoint.sshURL {
+                Link(destination: sshURL) {
+                    HStack(spacing: 4) {
+                        Text(endpoint.sshURL?.absoluteString ?? endpoint.sshTarget)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+
+                        Image(systemName: "arrow.up.right.square")
+                            .font(.system(size: 9, weight: .semibold))
+                    }
+                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .foregroundColor(.white.opacity(0.56))
+                }
+                .buttonStyle(.plain)
+            } else {
+                Text(endpoint.sshTarget)
+                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .foregroundColor(.white.opacity(0.56))
+            }
 
             SecureField("", text: $password, prompt: Text(appLocalized: "输入 SSH 密码"))
                 .textFieldStyle(.plain)

@@ -1,5 +1,72 @@
 import Foundation
 
+struct RemoteSSHLink: Equatable, Sendable {
+    let username: String?
+    let host: String
+    let port: Int
+
+    init?(sshTarget: String) {
+        let trimmedTarget = sshTarget.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedTarget.isEmpty else { return nil }
+
+        let userSplit = trimmedTarget.split(separator: "@", maxSplits: 1, omittingEmptySubsequences: false)
+        let username: String?
+        let hostPortSegment: String
+
+        if userSplit.count == 2 {
+            let rawUsername = String(userSplit[0]).trimmingCharacters(in: .whitespacesAndNewlines)
+            username = rawUsername.isEmpty ? nil : rawUsername
+            hostPortSegment = String(userSplit[1])
+        } else {
+            username = nil
+            hostPortSegment = trimmedTarget
+        }
+
+        let parsedHostPort = Self.parseHostAndPort(hostPortSegment)
+        guard let host = parsedHostPort.host else { return nil }
+
+        self.username = username
+        self.host = host
+        self.port = parsedHostPort.port ?? 22
+    }
+
+    var urlString: String {
+        let encodedUsername = username?
+            .addingPercentEncoding(withAllowedCharacters: .urlUserAllowed)
+        let hostComponent = host.contains(":") && !host.hasPrefix("[") ? "[\(host)]" : host
+        let userPrefix = encodedUsername.map { "\($0)@" } ?? ""
+        return "ssh://\(userPrefix)\(hostComponent):\(port)"
+    }
+
+    var url: URL? {
+        URL(string: urlString)
+    }
+
+    private static func parseHostAndPort(_ value: String) -> (host: String?, port: Int?) {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return (nil, nil) }
+
+        if trimmed.hasPrefix("["),
+           let closingBracketIndex = trimmed.firstIndex(of: "]") {
+            let hostStart = trimmed.index(after: trimmed.startIndex)
+            let host = String(trimmed[hostStart..<closingBracketIndex])
+            let remainder = trimmed[trimmed.index(after: closingBracketIndex)...]
+            let port = remainder.first == ":" ? Int(remainder.dropFirst()) : nil
+            return (host.isEmpty ? nil : host, port)
+        }
+
+        if let colonIndex = trimmed.lastIndex(of: ":"),
+           !trimmed[trimmed.index(after: colonIndex)...].isEmpty,
+           let port = Int(trimmed[trimmed.index(after: colonIndex)...]),
+           !trimmed[..<colonIndex].contains(":") {
+            let host = String(trimmed[..<colonIndex])
+            return (host.isEmpty ? nil : host, port)
+        }
+
+        return (trimmed, nil)
+    }
+}
+
 enum RemoteEndpointAuthMode: String, Codable, CaseIterable, Identifiable, Sendable {
     case unknown
     case publicKey
@@ -102,6 +169,14 @@ struct RemoteEndpoint: Identifiable, Codable, Equatable, Sendable {
             return trimmed
         }
         return sshTarget
+    }
+
+    var sshLink: RemoteSSHLink? {
+        RemoteSSHLink(sshTarget: sshTarget)
+    }
+
+    var sshURL: URL? {
+        sshLink?.url
     }
 }
 
