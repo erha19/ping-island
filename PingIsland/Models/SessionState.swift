@@ -639,6 +639,14 @@ struct SessionState: Equatable, Identifiable, Sendable {
         scopedApprovalAction != nil
     }
 
+    nonisolated var isNativeRuntimeSession: Bool {
+        ingress == .nativeRuntime
+    }
+
+    nonisolated var shouldShowTerminateActionInPrimaryUI: Bool {
+        isNativeRuntimeSession && phase != .ended
+    }
+
     /// Timestamp used when sorting sessions that need manual attention.
     nonisolated var attentionRequestedAt: Date? {
         if let permission = activePermission {

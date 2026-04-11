@@ -5,6 +5,7 @@
 //  Minimal instances list matching Dynamic Island aesthetic
 //
 
+import AppKit
 import Combine
 import SwiftUI
 
@@ -32,6 +33,37 @@ struct SessionListView: View {
             Text("Run Claude Code, Codex CLI, or Codex App")
                 .font(.system(size: 11))
                 .foregroundColor(.white.opacity(0.25))
+
+            if FeatureFlags.nativeClaudeRuntime || FeatureFlags.nativeCodexRuntime {
+                HStack(spacing: 8) {
+                    if FeatureFlags.nativeClaudeRuntime {
+                        Button(action: { launchNativeRuntime(.claude) }) {
+                            Text("Launch Claude Native")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundColor(.white.opacity(0.86))
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 7)
+                                .background(nativeRuntimeTint(for: .claude).opacity(0.26))
+                                .clipShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    if FeatureFlags.nativeCodexRuntime {
+                        Button(action: { launchNativeRuntime(.codex) }) {
+                            Text("Launch Codex Native")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundColor(.white.opacity(0.86))
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 7)
+                                .background(nativeRuntimeTint(for: .codex).opacity(0.26))
+                                .clipShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.top, 8)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(
@@ -65,6 +97,7 @@ struct SessionListView: View {
                     onFocus: { activateSession(session) },
                     onChat: { openChat(session) },
                     onArchive: { archiveSession(session) },
+                    onTerminate: { terminateSession(session) },
                     onApprove: { approveSession(session) },
                     onApproveForSession: { approveSessionForScope(session) },
                     onReject: { rejectSession(session) }
@@ -137,6 +170,35 @@ struct SessionListView: View {
     private func archiveSession(_ session: SessionState) {
         sessionMonitor.archiveSession(sessionId: session.sessionId)
     }
+
+    private func terminateSession(_ session: SessionState) {
+        sessionMonitor.terminateNativeSession(sessionId: session.sessionId)
+    }
+
+    private func launchNativeRuntime(_ provider: SessionProvider) {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.showsHiddenFiles = true
+        panel.directoryURL = FileManager.default.homeDirectoryForCurrentUser
+        panel.message = "选择 \(provider.displayName) Native Runtime 工作目录"
+        panel.prompt = "启动"
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        sessionMonitor.startNativeSession(provider: provider, cwd: url.path)
+    }
+
+    private func nativeRuntimeTint(for provider: SessionProvider) -> Color {
+        switch provider {
+        case .claude:
+            return Color(red: 0.95, green: 0.67, blue: 0.28)
+        case .codex:
+            return Color(red: 0.34, green: 0.72, blue: 0.96)
+        case .copilot:
+            return Color.white.opacity(0.5)
+        }
+    }
 }
 
 // MARK: - Instance Row
@@ -149,6 +211,7 @@ struct InstanceRow: View {
     let onFocus: () -> Void
     let onChat: () -> Void
     let onArchive: () -> Void
+    let onTerminate: () -> Void
     let onApprove: () -> Void
     let onApproveForSession: () -> Void
     let onReject: () -> Void
@@ -189,6 +252,10 @@ struct InstanceRow: View {
 
     private var terminalSourceLabel: String? {
         session.terminalSourceBadgeLabel
+    }
+
+    private var showsNativeRuntimeBadge: Bool {
+        session.ingress == .nativeRuntime
     }
 
     private var titleFontSize: CGFloat {
@@ -238,6 +305,14 @@ struct InstanceRow: View {
                             fontDesign: .monospaced
                         )
                         metaBadge(providerLabel, tint: providerColor.opacity(0.2))
+                        if showsNativeRuntimeBadge {
+                            metaBadge(
+                                "NATIVE",
+                                tint: Color.white.opacity(0.12),
+                                foreground: .white.opacity(0.92),
+                                fontDesign: .monospaced
+                            )
+                        }
                         if session.isRemoteSession {
                             remoteSessionBadge()
                         }
@@ -479,6 +554,16 @@ struct InstanceRow: View {
                 compact: true
             )
 
+            if showsNativeRuntimeBadge {
+                metaBadge(
+                    "NATIVE",
+                    tint: Color.white.opacity(0.12),
+                    foreground: .white.opacity(0.9),
+                    fontDesign: .monospaced,
+                    compact: true
+                )
+            }
+
             if session.isRemoteSession {
                 remoteSessionBadge(compact: true)
             }
@@ -617,6 +702,9 @@ struct InstanceRow: View {
         }
 
         if session.phase == .processing {
+            if session.isNativeRuntimeSession {
+                return sanitized(session.lastMessage) ?? AppLocalization.string("Native runtime 正在处理…")
+            }
             return sanitized(session.lastMessage) ?? AppLocalization.string("工作中...")
         }
 
@@ -625,6 +713,9 @@ struct InstanceRow: View {
         }
 
         if session.phase == .waitingForInput, session.intervention == nil {
+            if session.isNativeRuntimeSession {
+                return sanitized(session.lastMessage) ?? AppLocalization.string("Native session 已就绪")
+            }
             return sanitized(session.lastMessage) ?? AppLocalization.string("等待你的下一条消息")
         }
 
@@ -666,6 +757,12 @@ struct InstanceRow: View {
                 if session.isInTmux && isYabaiAvailable {
                     IconButton(icon: "eye") {
                         onFocus()
+                    }
+                }
+
+                if session.shouldShowTerminateActionInPrimaryUI {
+                    IconButton(icon: "stop.circle") {
+                        onTerminate()
                     }
                 }
 
@@ -712,7 +809,9 @@ struct InstanceRow: View {
     private var compactDetailSummary: String? {
         switch session.phase {
         case .processing:
-            return AppLocalization.string("工作中...")
+            return session.isNativeRuntimeSession
+                ? AppLocalization.string("Native runtime 正在处理…")
+                : AppLocalization.string("工作中...")
         case .compacting:
             return AppLocalization.string("正在压缩上下文...")
         case .waitingForApproval:
@@ -720,11 +819,16 @@ struct InstanceRow: View {
                 ? AppLocalization.string("需要你的输入")
                 : AppLocalization.string("等待批准")
         case .waitingForInput:
-            return session.needsQuestionResponse
-                ? AppLocalization.string("需要你的输入")
+            if session.needsQuestionResponse {
+                return AppLocalization.string("需要你的输入")
+            }
+            return session.isNativeRuntimeSession
+                ? AppLocalization.string("Native session 已就绪")
                 : AppLocalization.string("等待你的下一条消息")
         case .ended:
-            return AppLocalization.string("会话已结束")
+            return session.isNativeRuntimeSession
+                ? AppLocalization.string("Native session 已结束")
+                : AppLocalization.string("会话已结束")
         case .idle:
             return sanitized(session.lastMessage) ?? session.projectName
         }

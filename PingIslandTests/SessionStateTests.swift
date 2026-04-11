@@ -220,6 +220,26 @@ final class SessionStateTests: XCTestCase {
         XCTAssertTrue(session.shouldShowArchiveActionInPrimaryUI)
     }
 
+    func testNativeRuntimeSessionExposesTerminateActionUntilEnded() {
+        let activeSession = SessionState(
+            sessionId: "native-active",
+            cwd: "/tmp/project",
+            ingress: .nativeRuntime,
+            phase: .processing
+        )
+        let endedSession = SessionState(
+            sessionId: "native-ended",
+            cwd: "/tmp/project",
+            ingress: .nativeRuntime,
+            phase: .ended
+        )
+
+        XCTAssertTrue(activeSession.isNativeRuntimeSession)
+        XCTAssertTrue(activeSession.shouldShowTerminateActionInPrimaryUI)
+        XCTAssertTrue(endedSession.isNativeRuntimeSession)
+        XCTAssertFalse(endedSession.shouldShowTerminateActionInPrimaryUI)
+    }
+
     func testCodexAppLaunchURLUsesThreadsRoute() {
         let threadID = "019d6163-2ee9-7ae2-8c45-5f7a16209149"
 
