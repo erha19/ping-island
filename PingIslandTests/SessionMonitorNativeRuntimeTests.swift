@@ -66,6 +66,15 @@ final class SessionMonitorNativeRuntimeTests: XCTestCase {
         func managesNativeSession(sessionID: String, provider: SessionProvider?) async -> Bool {
             managedSessionIDs.contains(sessionID)
         }
+
+        func launchPreferredSession(provider: SessionProvider, cwd: String) async throws -> SessionRuntimeHandle {
+            try await startSession(
+                provider: provider,
+                cwd: cwd,
+                preferredSessionID: nil,
+                metadata: [:]
+            )
+        }
     }
 
     func testHandleIncomingHookEventRoutesManagedSessionToNativeIngress() async {
