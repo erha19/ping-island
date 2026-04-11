@@ -24,6 +24,7 @@ protocol RuntimeCoordinating: Sendable {
     func answerSession(provider: SessionProvider, sessionID: String, answers: [String: [String]]) async throws
     func continueSession(provider: SessionProvider, sessionID: String, expectedTurnId: String?, text: String) async throws
     func managesNativeSession(sessionID: String, provider: SessionProvider?) async -> Bool
+    func launchPreferredSession(provider: SessionProvider, cwd: String) async throws -> SessionRuntimeHandle
 }
 
 actor RuntimeCoordinator {
@@ -56,7 +57,7 @@ actor RuntimeCoordinator {
         for flag in RuntimeFeatureFlag.allCases where FeatureFlags.isEnabled(flag) {
             if let provider = provider(for: flag), let runtime = runtimes[provider] {
                 if listenerTasks[provider] == nil {
-                    let events = runtime.events
+                    let events = await runtime.events
                     listenerTasks[provider] = Task { [weak self] in
                         for await event in events {
                             await self?.handleRuntimeEvent(event)
@@ -189,6 +190,11 @@ actor RuntimeCoordinator {
             return record.provider == provider
         }
         return true
+    }
+
+    @discardableResult
+    func launchPreferredSession(provider: SessionProvider, cwd: String) async throws -> SessionRuntimeHandle {
+        try await startSession(provider: provider, cwd: cwd, preferredSessionID: nil, metadata: [:])
     }
 
     private func handleRuntimeEvent(_ event: SessionRuntimeEvent) async {

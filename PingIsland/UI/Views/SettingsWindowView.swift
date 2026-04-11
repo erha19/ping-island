@@ -4,6 +4,16 @@ import ServiceManagement
 import SwiftUI
 import UniformTypeIdentifiers
 
+protocol NativeRuntimeLaunching {
+    func startSession(provider: SessionProvider, cwd: String) async throws
+}
+
+struct SharedRuntimeLauncher: NativeRuntimeLaunching {
+    func startSession(provider: SessionProvider, cwd: String) async throws {
+        _ = try await RuntimeCoordinator.shared.launchPreferredSession(provider: provider, cwd: cwd)
+    }
+}
+
 private enum SettingsCategory: String, CaseIterable, Identifiable {
     case general
     case display
@@ -86,6 +96,28 @@ final class SettingsPanelViewModel: ObservableObject {
     @Published var nativeRuntimeStatusMessage: String?
 
     private var hookFeedbackClearTasks: [String: Task<Void, Never>] = [:]
+    private let runtimeLauncher: any NativeRuntimeLaunching
+    private let fileExists: @Sendable (String) -> Bool
+    private let setFeatureFlagEnabled: @Sendable (Bool, SessionProvider) -> Void
+
+    init(
+        runtimeLauncher: (any NativeRuntimeLaunching)? = nil,
+        fileExists: @escaping @Sendable (String) -> Bool = { FileManager.default.fileExists(atPath: $0) },
+        setFeatureFlagEnabled: @escaping @Sendable (Bool, SessionProvider) -> Void = { enabled, provider in
+            switch provider {
+            case .claude:
+                FeatureFlags.setEnabled(enabled, for: .nativeClaudeRuntime)
+            case .codex:
+                FeatureFlags.setEnabled(enabled, for: .nativeCodexRuntime)
+            case .copilot:
+                break
+            }
+        }
+    ) {
+        self.runtimeLauncher = runtimeLauncher ?? SharedRuntimeLauncher()
+        self.fileExists = fileExists
+        self.setFeatureFlagEnabled = setFeatureFlagEnabled
+    }
 
     var visibleHookProfiles: [ManagedHookClientProfile] {
         let profiles = ClientProfileRegistry.managedHookProfiles.filter { profile in
@@ -247,12 +279,11 @@ final class SettingsPanelViewModel: ObservableObject {
     }
 
     func setNativeRuntimeEnabled(_ enabled: Bool, for provider: SessionProvider) {
+        setFeatureFlagEnabled(enabled, provider)
         switch provider {
         case .claude:
-            FeatureFlags.setEnabled(enabled, for: .nativeClaudeRuntime)
             nativeClaudeRuntimeEnabled = enabled
         case .codex:
-            FeatureFlags.setEnabled(enabled, for: .nativeCodexRuntime)
             nativeCodexRuntimeEnabled = enabled
         case .copilot:
             break
@@ -281,14 +312,14 @@ final class SettingsPanelViewModel: ObservableObject {
             return
         }
 
-        guard FileManager.default.fileExists(atPath: cwd) else {
+        guard fileExists(cwd) else {
             nativeRuntimeStatusMessage = "目录不存在：\(cwd)"
             return
         }
 
         Task {
             do {
-                _ = try await RuntimeCoordinator.shared.startSession(provider: provider, cwd: cwd)
+                try await runtimeLauncher.startSession(provider: provider, cwd: cwd)
                 await MainActor.run {
                     nativeRuntimeStatusMessage = "\(provider.displayName) Native Runtime 已启动"
                 }
