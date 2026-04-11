@@ -14,7 +14,7 @@ struct SharedRuntimeLauncher: NativeRuntimeLaunching {
     }
 }
 
-private enum SettingsCategory: String, CaseIterable, Identifiable {
+enum SettingsCategory: String, CaseIterable, Identifiable {
     case general
     case display
     case mascot
@@ -70,6 +70,31 @@ private enum SettingsCategory: String, CaseIterable, Identifiable {
         case .integration: return Color(red: 0.16, green: 0.76, blue: 0.72)
         case .remote: return Color(red: 0.95, green: 0.54, blue: 0.20)
         case .about: return Color(red: 0.17, green: 0.60, blue: 0.96)
+        }
+    }
+}
+
+struct NativeRuntimePreviewUnlockState: Equatable {
+    private(set) var tapCount: Int = 0
+    private(set) var isUnlocked: Bool = false
+    let requiredTapCount: Int
+
+    init(tapCount: Int = 0, isUnlocked: Bool = false, requiredTapCount: Int = 6) {
+        self.tapCount = tapCount
+        self.isUnlocked = isUnlocked
+        self.requiredTapCount = requiredTapCount
+    }
+
+    mutating func registerTap(on category: SettingsCategory) {
+        guard !isUnlocked else { return }
+
+        if category == .general {
+            tapCount += 1
+            if tapCount >= requiredTapCount {
+                isUnlocked = true
+            }
+        } else {
+            tapCount = 0
         }
     }
 }
@@ -460,6 +485,7 @@ private struct SettingsPanelContentView: View {
     let presentation: SettingsPanelPresentation
     var onClose: (() -> Void)? = nil
     var onMinimize: (() -> Void)? = nil
+    @AppStorage("settings.nativeRuntimePreviewUnlocked") private var nativeRuntimePreviewUnlocked = false
 
     @StateObject private var viewModel = SettingsPanelViewModel()
     @ObservedObject private var settings = AppSettings.shared
@@ -468,6 +494,7 @@ private struct SettingsPanelContentView: View {
     @ObservedObject private var updateManager = UpdateManager.shared
     @ObservedObject private var remoteManager = RemoteConnectorManager.shared
     @State private var selectedCategory: SettingsCategory? = .general
+    @State private var nativeRuntimePreviewUnlockState = NativeRuntimePreviewUnlockState()
     @State private var pendingHookReinstallProfile: ManagedHookClientProfile?
     @State private var showingCustomHookInstallSheet = false
     @State private var showingRemoteHostSheet = false
@@ -504,6 +531,10 @@ private struct SettingsPanelContentView: View {
         .onAppear {
             viewModel.refresh()
             ensureValidSelectedSoundPack()
+            nativeRuntimePreviewUnlockState = NativeRuntimePreviewUnlockState(
+                tapCount: nativeRuntimePreviewUnlockState.tapCount,
+                isUnlocked: nativeRuntimePreviewUnlocked
+            )
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             viewModel.refresh()
@@ -659,6 +690,10 @@ private struct SettingsPanelContentView: View {
                         VStack(alignment: .leading, spacing: 4) {
                             ForEach(section.categories) { category in
                                 Button {
+                                    nativeRuntimePreviewUnlockState.registerTap(on: category)
+                                    if nativeRuntimePreviewUnlockState.isUnlocked {
+                                        nativeRuntimePreviewUnlocked = true
+                                    }
                                     selectedCategory = category
                                 } label: {
                                     SidebarItemView(
@@ -1216,8 +1251,10 @@ private struct SettingsPanelContentView: View {
                 }
             }
 
-            SettingsSectionCard(title: "Native Runtime Preview") {
-                NativeRuntimePreviewSection(viewModel: viewModel)
+            if nativeRuntimePreviewUnlocked {
+                SettingsSectionCard(title: "Native Runtime Preview") {
+                    NativeRuntimePreviewSection(viewModel: viewModel)
+                }
             }
         }
     }
