@@ -13,12 +13,36 @@ import SwiftUI
 class PassThroughHostingView<Content: View>: NSHostingView<Content> {
     var hitTestRect: () -> CGRect = { .zero }
 
+    override var isOpaque: Bool { false }
+
+    required init(rootView: Content) {
+        super.init(rootView: rootView)
+        configureTransparency()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
     override func hitTest(_ point: NSPoint) -> NSView? {
         // Only accept hits within the panel rect
         guard hitTestRect().contains(point) else {
             return nil  // Pass through to windows behind
         }
         return super.hitTest(point)
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        configureTransparency()
+    }
+
+    private func configureTransparency() {
+        wantsLayer = true
+        layerContentsRedrawPolicy = .onSetNeedsDisplay
+        layer?.backgroundColor = NSColor.clear.cgColor
+        layer?.isOpaque = false
     }
 }
 
