@@ -5,6 +5,7 @@ struct ReleaseNotesWindowView: View {
     let notes: UpdateReleaseNotes
     let onClose: () -> Void
 
+    @Environment(\.locale) private var locale
     @State private var expandedSectionIDs: Set<String> = []
 
     var body: some View {
@@ -43,12 +44,12 @@ struct ReleaseNotesWindowView: View {
             RoundedRectangle(cornerRadius: 30, style: .continuous)
                 .stroke(Color.white.opacity(0.08), lineWidth: 1)
         )
-        .preferredColorScheme(.dark)
-        .onAppear {
-            if expandedSectionIDs.isEmpty {
-                expandedSectionIDs = Set(notes.sections.map(\.id))
+            .preferredColorScheme(.dark)
+            .onAppear {
+                if expandedSectionIDs.isEmpty {
+                    expandedSectionIDs = Set(displayedSections.map(\.id))
+                }
             }
-        }
     }
 
     private var appIcon: some View {
@@ -87,7 +88,7 @@ struct ReleaseNotesWindowView: View {
     private var releaseNotesContent: some View {
         ScrollView {
             VStack(spacing: 14) {
-                ForEach(notes.sections.isEmpty ? [fallbackSection] : notes.sections) { section in
+                ForEach(displayedSections.isEmpty ? [fallbackSection] : displayedSections) { section in
                     ReleaseNotesSectionCard(
                         section: section,
                         isExpanded: expandedSectionIDs.contains(section.id),
@@ -100,11 +101,15 @@ struct ReleaseNotesWindowView: View {
         .frame(maxHeight: 430)
     }
 
+    private var displayedSections: [UpdateReleaseNotesSection] {
+        notes.sections(locale: locale)
+    }
+
     private var fallbackSection: UpdateReleaseNotesSection {
         UpdateReleaseNotesSection(
             id: "fallback",
             title: AppLocalization.string("更新内容"),
-            markdown: notes.markdown
+            markdown: notes.localizedMarkdown(locale: locale)
         )
     }
 

@@ -30,4 +30,60 @@ final class UpdateReleaseNotesParserTests: XCTestCase {
         XCTAssertEqual(sections[0].title, "更新内容")
         XCTAssertTrue(sections[0].markdown.contains("第一条"))
     }
+
+    func testParserPrefersChineseLocalizedBlockForChineseLocale() {
+        let markdown = """
+        <!-- zh-Hans -->
+        ## 亮点
+        - 中文内容
+
+        <!-- en -->
+        ## Highlights
+        - English content
+        """
+
+        let sections = UpdateReleaseNotesParser.sections(
+            from: markdown,
+            locale: Locale(identifier: "zh-Hans")
+        )
+
+        XCTAssertEqual(sections.map(\.title), ["亮点"])
+        XCTAssertEqual(sections.first?.markdown, "- 中文内容")
+    }
+
+    func testParserPrefersEnglishLocalizedBlockForEnglishLocale() {
+        let markdown = """
+        <!-- zh-Hans -->
+        ## 亮点
+        - 中文内容
+
+        <!-- en -->
+        ## Highlights
+        - English content
+        """
+
+        let sections = UpdateReleaseNotesParser.sections(
+            from: markdown,
+            locale: Locale(identifier: "en")
+        )
+
+        XCTAssertEqual(sections.map(\.title), ["Highlights"])
+        XCTAssertEqual(sections.first?.markdown, "- English content")
+    }
+
+    func testParserFallsBackToEnglishBlockWhenChineseBlockIsMissing() {
+        let markdown = """
+        <!-- en -->
+        ## Highlights
+        - English only
+        """
+
+        let sections = UpdateReleaseNotesParser.sections(
+            from: markdown,
+            locale: Locale(identifier: "zh-Hans")
+        )
+
+        XCTAssertEqual(sections.map(\.title), ["Highlights"])
+        XCTAssertEqual(sections.first?.markdown, "- English only")
+    }
 }
