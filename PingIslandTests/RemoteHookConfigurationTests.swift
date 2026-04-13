@@ -388,4 +388,49 @@ final class RemoteHookConfigurationTests: XCTestCase {
             ["ISLAND_SOCKET_PATH": "/root/.ping-island/run/agent-hook.sock"]
         )
     }
+
+    func testRemotePendingRequestStoreKeepsDuplicateRequestsForSameToolUseID() {
+        let endpointID = UUID()
+        let firstRequest = PendingRemoteRequest(
+            endpointID: endpointID,
+            requestID: UUID(),
+            sessionID: "remote-session"
+        )
+        let secondRequest = PendingRemoteRequest(
+            endpointID: endpointID,
+            requestID: UUID(),
+            sessionID: "remote-session"
+        )
+
+        var store = RemotePendingRequestStore()
+        store.append(firstRequest, for: "tool-1")
+        store.append(secondRequest, for: "tool-1")
+
+        XCTAssertEqual(store.requests(for: "tool-1"), [firstRequest, secondRequest])
+        XCTAssertEqual(store.removeAll(for: "tool-1"), [firstRequest, secondRequest])
+        XCTAssertTrue(store.requests(for: "tool-1").isEmpty)
+    }
+
+    func testRemotePendingRequestStoreRemovesOnlyDisconnectedEndpointRequests() {
+        let disconnectedEndpointID = UUID()
+        let survivingEndpointID = UUID()
+        let disconnectedRequest = PendingRemoteRequest(
+            endpointID: disconnectedEndpointID,
+            requestID: UUID(),
+            sessionID: "remote-session"
+        )
+        let survivingRequest = PendingRemoteRequest(
+            endpointID: survivingEndpointID,
+            requestID: UUID(),
+            sessionID: "remote-session"
+        )
+
+        var store = RemotePendingRequestStore()
+        store.append(disconnectedRequest, for: "tool-1")
+        store.append(survivingRequest, for: "tool-1")
+
+        store.removeAll(for: disconnectedEndpointID)
+
+        XCTAssertEqual(store.requests(for: "tool-1"), [survivingRequest])
+    }
 }

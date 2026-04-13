@@ -17,7 +17,7 @@ final class RemoteConnectorManager: ObservableObject {
     private var eventHandler: (@Sendable (HookEvent) -> Void)?
     private var permissionFailureHandler: (@Sendable (_ sessionId: String, _ toolUseId: String) -> Void)?
     private var connectors: [UUID: RemoteAttachConnector] = [:]
-    private var pendingRequests: [String: PendingRemoteRequest] = [:]
+    private var pendingRequests = RemotePendingRequestStore()
     private var ephemeralPasswords: [UUID: String] = [:]
     private var hasStarted = false
     private let assetResolver = RemoteBridgeAssetResolver()
@@ -69,9 +69,7 @@ final class RemoteConnectorManager: ObservableObject {
         runtimeStates.removeValue(forKey: id)
         ephemeralPasswords.removeValue(forKey: id)
         credentialStore.deletePassword(for: id)
-        pendingRequests = pendingRequests.filter { _, value in
-            value.endpointID != id
-        }
+        pendingRequests.removeAll(for: id)
         persistEndpoints()
     }
 
@@ -207,29 +205,34 @@ final class RemoteConnectorManager: ObservableObject {
 
     func disconnect(endpointID: UUID) {
         connectors.removeValue(forKey: endpointID)?.stop()
-        pendingRequests = pendingRequests.filter { _, request in
-            request.endpointID != endpointID
-        }
+        pendingRequests.removeAll(for: endpointID)
         setState(for: endpointID, phase: .disconnected, detail: "已断开远程转发连接")
     }
 
     func respondToPermission(toolUseId: String, decision: String, reason: String? = nil) {
-        guard let pending = pendingRequests[toolUseId],
-              let connector = connectors[pending.endpointID] else {
+        let requests = self.pendingRequests.removeAll(for: toolUseId)
+        guard !requests.isEmpty else {
             return
         }
 
-        Task {
-            do {
-                try await connector.sendDecision(
-                    requestID: pending.requestID,
-                    decision: decision,
-                    reason: reason,
-                    updatedInput: nil
-                )
-            } catch {
-                await MainActor.run {
-                    self.permissionFailureHandler?(pending.sessionID, toolUseId)
+        for pending in requests {
+            guard let connector = connectors[pending.endpointID] else {
+                permissionFailureHandler?(pending.sessionID, toolUseId)
+                continue
+            }
+
+            Task {
+                do {
+                    try await connector.sendDecision(
+                        requestID: pending.requestID,
+                        decision: decision,
+                        reason: reason,
+                        updatedInput: nil
+                    )
+                } catch {
+                    await MainActor.run {
+                        self.permissionFailureHandler?(pending.sessionID, toolUseId)
+                    }
                 }
             }
         }
@@ -241,23 +244,30 @@ final class RemoteConnectorManager: ObservableObject {
         updatedInput: [String: Any]?,
         reason: String? = nil
     ) {
-        guard let pending = pendingRequests[toolUseId],
-              let connector = connectors[pending.endpointID] else {
+        let requests = self.pendingRequests.removeAll(for: toolUseId)
+        guard !requests.isEmpty else {
             return
         }
 
         let encodedInput = updatedInput?.mapValues { RemoteJSONValue.fromFoundationObject($0) }
-        Task {
-            do {
-                try await connector.sendDecision(
-                    requestID: pending.requestID,
-                    decision: decision,
-                    reason: reason,
-                    updatedInput: encodedInput
-                )
-            } catch {
-                await MainActor.run {
-                    self.permissionFailureHandler?(pending.sessionID, toolUseId)
+        for pending in requests {
+            guard let connector = connectors[pending.endpointID] else {
+                permissionFailureHandler?(pending.sessionID, toolUseId)
+                continue
+            }
+
+            Task {
+                do {
+                    try await connector.sendDecision(
+                        requestID: pending.requestID,
+                        decision: decision,
+                        reason: reason,
+                        updatedInput: encodedInput
+                    )
+                } catch {
+                    await MainActor.run {
+                        self.permissionFailureHandler?(pending.sessionID, toolUseId)
+                    }
                 }
             }
         }
@@ -417,11 +427,11 @@ final class RemoteConnectorManager: ObservableObject {
             )
 
             if payload.expectsResponse, let toolUseID = payload.toolUseID {
-                pendingRequests[toolUseID] = PendingRemoteRequest(
+                pendingRequests.append(PendingRemoteRequest(
                     endpointID: endpointID,
                     requestID: payload.requestID,
                     sessionID: payload.sessionID
-                )
+                ), for: toolUseID)
             }
 
             eventHandler?(event)
@@ -979,10 +989,39 @@ private extension Array where Element: Hashable {
     }
 }
 
-private struct PendingRemoteRequest {
+struct PendingRemoteRequest: Equatable {
     let endpointID: UUID
     let requestID: UUID
     let sessionID: String
+}
+
+struct RemotePendingRequestStore {
+    private var requestsByToolUseID: [String: [PendingRemoteRequest]] = [:]
+
+    mutating func append(_ request: PendingRemoteRequest, for toolUseID: String) {
+        requestsByToolUseID[toolUseID, default: []].append(request)
+    }
+
+    mutating func removeAll() {
+        requestsByToolUseID.removeAll()
+    }
+
+    mutating func removeAll(for toolUseID: String) -> [PendingRemoteRequest] {
+        requestsByToolUseID.removeValue(forKey: toolUseID) ?? []
+    }
+
+    mutating func removeAll(for endpointID: UUID) {
+        requestsByToolUseID = requestsByToolUseID.reduce(into: [:]) { partialResult, entry in
+            let remainingRequests = entry.value.filter { $0.endpointID != endpointID }
+            if !remainingRequests.isEmpty {
+                partialResult[entry.key] = remainingRequests
+            }
+        }
+    }
+
+    func requests(for toolUseID: String) -> [PendingRemoteRequest] {
+        requestsByToolUseID[toolUseID] ?? []
+    }
 }
 
 private struct RemoteEndpointCredential {
