@@ -6,7 +6,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 BACKGROUND_GENERATOR="$SCRIPT_DIR/generate-dmg-background.swift"
 BRAND_LOGO_SOURCE="${PING_ISLAND_DMG_LOGO_SOURCE:-$PROJECT_DIR/docs/images/ping-island-icon-transparent.svg}"
-DMG_ICON_SOURCE="${PING_ISLAND_DMG_ICON_SOURCE:-$BRAND_LOGO_SOURCE}"
+DMG_ICON_SOURCE="${PING_ISLAND_DMG_ICON_SOURCE:-}"
 FALLBACK_ICON_PNG="$PROJECT_DIR/PingIsland/Assets.xcassets/AppIcon.appiconset/icon_1024x1024.png"
 
 VOLNAME=""
@@ -39,12 +39,68 @@ resolve_image_source() {
   return 1
 }
 
+resolve_app_bundle_icon_source() {
+  local app_bundle_path="$1"
+  local info_plist="$app_bundle_path/Contents/Info.plist"
+  local resources_dir="$app_bundle_path/Contents/Resources"
+  local icon_file=""
+  local icon_path=""
+
+  if [[ ! -d "$app_bundle_path" || ! -d "$resources_dir" ]]; then
+    return 1
+  fi
+
+  if [[ -f "$info_plist" ]]; then
+    icon_file="$(/usr/libexec/PlistBuddy -c "Print :CFBundleIconFile" "$info_plist" 2>/dev/null || true)"
+    if [[ -n "$icon_file" ]]; then
+      if [[ "$icon_file" != *.icns ]]; then
+        icon_file="${icon_file}.icns"
+      fi
+      icon_path="$resources_dir/$icon_file"
+      if [[ -f "$icon_path" ]]; then
+        printf '%s\n' "$icon_path"
+        return 0
+      fi
+    fi
+  fi
+
+  icon_path="$resources_dir/AppIcon.icns"
+  if [[ -f "$icon_path" ]]; then
+    printf '%s\n' "$icon_path"
+    return 0
+  fi
+
+  icon_path="$(find "$resources_dir" -maxdepth 1 -type f -name '*.icns' | head -n 1)"
+  if [[ -n "$icon_path" ]]; then
+    printf '%s\n' "$icon_path"
+    return 0
+  fi
+
+  return 1
+}
+
+resolve_dmg_icon_source() {
+  local app_bundle_path="$SOURCE_DIR/$APP_NAME"
+  local requested_icon_source="${DMG_ICON_SOURCE:-}"
+
+  if [[ -n "$requested_icon_source" ]]; then
+    resolve_image_source "$requested_icon_source"
+    return $?
+  fi
+
+  if resolve_app_bundle_icon_source "$app_bundle_path"; then
+    return 0
+  fi
+
+  resolve_image_source "$FALLBACK_ICON_PNG"
+}
+
 rasterize_to_png() {
   local source_path="$1"
   local output_path="$2"
 
   case "$source_path" in
-    *.svg|*.SVG)
+    *.svg|*.SVG|*.icns|*.ICNS)
       sips -s format png "$source_path" --out "$output_path" >/dev/null
       ;;
     *.png|*.PNG)
@@ -153,7 +209,7 @@ background_args=(
 
 swift "$BACKGROUND_GENERATOR" "${background_args[@]}"
 
-if icon_source="$(resolve_image_source "$DMG_ICON_SOURCE")"; then
+if icon_source="$(resolve_dmg_icon_source)"; then
   rasterize_to_png "$icon_source" "$ICON_WORK_PNG"
   sips -i "$ICON_WORK_PNG" >/dev/null
   DeRez -only icns "$ICON_WORK_PNG" > "$ICON_RESOURCE_PATH"
