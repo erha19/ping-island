@@ -4,6 +4,7 @@ enum MascotClient: String, CaseIterable, Identifiable, Sendable {
     case claude
     case codex
     case gemini
+    case hermes
     case qwen
     case openclaw
     case opencode
@@ -17,6 +18,7 @@ enum MascotClient: String, CaseIterable, Identifiable, Sendable {
         .claude,
         .codex,
         .gemini,
+        .hermes,
         .qwen,
         .openclaw,
         .opencode,
@@ -36,6 +38,8 @@ enum MascotClient: String, CaseIterable, Identifiable, Sendable {
             return "Codex"
         case .gemini:
             return "Gemini CLI"
+        case .hermes:
+            return "Hermes Agent"
         case .qwen:
             return "Qwen Code"
         case .openclaw:
@@ -63,6 +67,8 @@ enum MascotClient: String, CaseIterable, Identifiable, Sendable {
             return "Codex App 与 Codex CLI"
         case .gemini:
             return "Gemini CLI hooks 与默认 Gemini CLI 会话"
+        case .hermes:
+            return "Hermes plugin hooks 与翼盔信使狐"
         case .qwen:
             return "Qwen Code 官方 hooks 与青羽问答燕"
         case .openclaw:
@@ -90,6 +96,8 @@ enum MascotClient: String, CaseIterable, Identifiable, Sendable {
             return .codex
         case .gemini:
             return .gemini
+        case .hermes:
+            return .hermes
         case .qwen:
             return .qwen
         case .openclaw:
@@ -125,6 +133,8 @@ enum MascotClient: String, CaseIterable, Identifiable, Sendable {
             let resolvedClient: MascotClient? = switch profileID {
             case "cursor":
                 .cursor
+            case "hermes":
+                .hermes
             case "qwen-code":
                 .qwen
             case "openclaw":
@@ -158,11 +168,17 @@ enum MascotClient: String, CaseIterable, Identifiable, Sendable {
             self = .codex
         case .gemini:
             self = .gemini
+        case .hermes:
+            self = .hermes
         case .qwen:
             self = .qwen
         case .neutral:
             if clientInfo.resolvedProfile(for: provider)?.id == "openclaw" {
                 self = .openclaw
+                return
+            }
+            if clientInfo.resolvedProfile(for: provider)?.id == "hermes" {
+                self = .hermes
                 return
             }
             if clientInfo.resolvedProfile(for: provider)?.id == "qwen-code" {
@@ -200,6 +216,7 @@ enum MascotKind: String, CaseIterable, Identifiable, Sendable {
     case claude
     case codex
     case gemini
+    case hermes
     case qwen
     case openclaw
     case opencode
@@ -218,6 +235,8 @@ enum MascotKind: String, CaseIterable, Identifiable, Sendable {
             return "Codex"
         case .gemini:
             return "Gemini CLI"
+        case .hermes:
+            return "Hermes Agent"
         case .qwen:
             return "Qwen Code"
         case .openclaw:
@@ -243,6 +262,8 @@ enum MascotKind: String, CaseIterable, Identifiable, Sendable {
             return "终端云团"
         case .gemini:
             return "蓝色双子星灵"
+        case .hermes:
+            return "翼盔信使狐"
         case .qwen:
             return "青羽问答燕"
         case .openclaw:
@@ -268,6 +289,8 @@ enum MascotKind: String, CaseIterable, Identifiable, Sendable {
             return Color(red: 1.0, green: 0.67, blue: 0.12)
         case .gemini:
             return Color(red: 0.26, green: 0.52, blue: 0.96)
+        case .hermes:
+            return Color(red: 0.96, green: 0.70, blue: 0.22)
         case .qwen:
             return Color(red: 0.12, green: 0.78, blue: 0.90)
         case .openclaw:
@@ -411,6 +434,8 @@ struct MascotView: View {
             drawCodex(in: context, canvasSize: canvasSize, time: time, mode: mode)
         case .gemini:
             drawGemini(in: context, canvasSize: canvasSize, time: time, mode: mode)
+        case .hermes:
+            drawHermes(in: context, canvasSize: canvasSize, time: time, mode: mode)
         case .qwen:
             drawQwen(in: context, canvasSize: canvasSize, time: time, mode: mode)
         case .openclaw:
@@ -718,6 +743,130 @@ struct MascotView: View {
             context.fill(Path(space.rect(3.0 + motion.shake, 8.1 + motion.vertical, 0.6, 1.2)), with: .color(sparkle.opacity(0.78)))
             context.fill(Path(space.rect(2.7 + motion.shake, 8.4 + motion.vertical, 1.2, 0.6)), with: .color(sparkle.opacity(0.78)))
             drawAlertGlyph(in: context, space: space, x: 12.7 + motion.shake, y: 2.1, color: kind.alertColor)
+        }
+    }
+
+    private func drawHermes(
+        in context: GraphicsContext,
+        canvasSize: CGSize,
+        time: TimeInterval,
+        mode: MascotRenderMode
+    ) {
+        let space = PixelSpace(canvasSize, logicalWidth: 17, logicalHeight: 15, yOffset: 1.5)
+        let motion = motionValues(for: mode, time: time)
+        let body = Color(red: 0.93, green: 0.66, blue: 0.23)
+        let deep = Color(red: 0.73, green: 0.44, blue: 0.12)
+        let belly = Color(red: 0.99, green: 0.93, blue: 0.82)
+        let helmet = Color(red: 0.95, green: 0.98, blue: 1.0)
+        let eye = Color(red: 0.16, green: 0.10, blue: 0.08)
+        let satchel = Color(red: 0.28, green: 0.73, blue: 0.86)
+        let scroll = Color(red: 0.87, green: 0.95, blue: 1.0)
+
+        drawShadow(in: context, space: space, centerX: 8.8, y: 15.7, width: 7.2 - abs(motion.bounce) * 0.22, opacity: 0.19)
+
+        if mode == .working {
+            drawKeyboard(
+                in: context,
+                space: space,
+                y: 13.2,
+                base: Color(red: 0.17, green: 0.14, blue: 0.12),
+                key: Color(red: 0.35, green: 0.27, blue: 0.21),
+                highlight: helmet,
+                flashIndex: keyboardFlashIndex(time: time)
+            )
+        }
+
+        let bodyRows: [(CGFloat, CGFloat, CGFloat)] = [
+            (5.0, 6.8, 2.0),
+            (6.0, 5.8, 4.2),
+            (7.0, 4.9, 6.4),
+            (8.0, 4.1, 7.8),
+            (9.0, 3.8, 8.4),
+            (10.0, 4.0, 8.0),
+            (11.0, 4.7, 6.8),
+            (12.0, 5.7, 5.2),
+            (13.0, 6.8, 3.2)
+        ]
+        for row in bodyRows {
+            context.fill(
+                Path(space.rect(row.1 + motion.shake, row.0 + motion.vertical, row.2 * motion.squashX, 1.0 * motion.squashY)),
+                with: .color(body)
+            )
+        }
+
+        context.fill(Path(space.rect(5.5 + motion.shake, 4.1 + motion.vertical, 1.0, 1.5)), with: .color(deep))
+        context.fill(Path(space.rect(10.9 + motion.shake, 4.0 + motion.vertical, 1.0, 1.6)), with: .color(deep))
+
+        let helmetRows: [(CGFloat, CGFloat, CGFloat)] = [
+            (4.1, 6.0, 4.8),
+            (5.0, 5.2, 6.4),
+            (5.9, 5.5, 5.8)
+        ]
+        for row in helmetRows {
+            context.fill(
+                Path(space.rect(row.1 + motion.shake, row.0 + motion.vertical, row.2, 0.85)),
+                with: .color(helmet)
+            )
+        }
+
+        let wingRows: [(CGFloat, CGFloat, CGFloat)] = [
+            (4.5, 3.8, 1.0),
+            (5.1, 3.0, 1.4),
+            (5.7, 2.5, 1.8),
+            (4.5, 11.6, 1.0),
+            (5.1, 12.0, 1.4),
+            (5.7, 12.3, 1.8)
+        ]
+        for row in wingRows {
+            context.fill(
+                Path(space.rect(row.1 + motion.shake, row.0 + motion.vertical, row.2, 0.45)),
+                with: .color(helmet.opacity(0.95))
+            )
+        }
+
+        let bellyRows: [(CGFloat, CGFloat, CGFloat)] = [
+            (8.1, 6.1, 2.3),
+            (9.1, 5.7, 3.4),
+            (10.1, 5.8, 3.2),
+            (11.1, 6.3, 2.3)
+        ]
+        for row in bellyRows {
+            context.fill(
+                Path(space.rect(row.1 + motion.shake, row.0 + motion.vertical, row.2, 0.85)),
+                with: .color(belly)
+            )
+        }
+
+        let tailRows: [(CGFloat, CGFloat, CGFloat)] = [
+            (10.2, 11.0, 2.1),
+            (11.1, 11.8, 1.7),
+            (12.0, 12.4, 1.2)
+        ]
+        for row in tailRows {
+            context.fill(
+                Path(space.rect(row.1 + motion.shake, row.0 + motion.vertical, row.2, 0.9)),
+                with: .color(deep)
+            )
+        }
+
+        context.fill(Path(space.rect(6.6 + motion.shake, 8.0 + motion.vertical, 0.7, blinkHeight(time: time, closedHeight: 0.16, openHeight: mode == .warning ? 1.0 : 0.88))), with: .color(eye))
+        context.fill(Path(space.rect(9.3 + motion.shake, 8.0 + motion.vertical, 0.7, blinkHeight(time: time + 0.04, closedHeight: 0.16, openHeight: mode == .warning ? 1.0 : 0.88))), with: .color(eye))
+        context.fill(Path(space.rect(8.0 + motion.shake, 9.4 + motion.vertical, 0.8, 0.35)), with: .color(eye.opacity(0.76)))
+
+        context.fill(Path(space.rect(4.0 + motion.shake, 10.1 + motion.vertical, 1.6, 1.8)), with: .color(satchel))
+        context.fill(Path(space.rect(4.5 + motion.shake, 10.7 + motion.vertical, 0.7, 0.7)), with: .color(scroll))
+        context.fill(Path(space.rect(4.3 + motion.shake, 8.5 + motion.vertical, 0.4, 2.0)), with: .color(satchel.opacity(0.72)))
+
+        if mode == .idle {
+            context.fill(Path(space.rect(7.3 + motion.shake, 11.1 + motion.vertical, 2.4, 0.18)), with: .color(eye.opacity(0.22)))
+        } else {
+            context.fill(Path(space.rect(7.1 + motion.shake, 10.8 + motion.vertical, 2.8, 0.3)), with: .color(belly.opacity(0.9)))
+        }
+
+        if mode == .warning {
+            context.fill(Path(space.rect(12.2 + motion.shake, 5.1 + motion.vertical, 1.1, 1.1)), with: .color(scroll.opacity(0.95)))
+            context.fill(Path(space.rect(12.5 + motion.shake, 5.45 + motion.vertical, 0.16, 0.48)), with: .color(deep))
+            drawAlertGlyph(in: context, space: space, x: 12.4 + motion.shake, y: 2.0, color: kind.alertColor)
         }
     }
 

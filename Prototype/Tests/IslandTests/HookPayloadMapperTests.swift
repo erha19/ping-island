@@ -1020,6 +1020,63 @@ func qwenCodeStopUsesLastAssistantMessageAsPreview() throws {
 }
 
 @Test
+func hermesUserPromptSubmitMapsFromPluginHookPayload() throws {
+    let payload = """
+    {
+      "hook_event_name": "UserPromptSubmit",
+      "session_id": "hermes-1",
+      "prompt": "Summarize the failing tests and next fix."
+    }
+    """.data(using: .utf8)!
+
+    let envelope = HookPayloadMapper.makeEnvelope(
+        source: .claude,
+        arguments: [
+            "island-bridge",
+            "--source", "claude",
+            "--client-kind", "hermes",
+            "--client-name", "Hermes",
+            "--thread-source", "hermes-plugin"
+        ],
+        environment: ["PWD": "/tmp/demo"],
+        stdinData: payload
+    )
+
+    #expect(envelope.eventType == "UserPromptSubmit")
+    #expect(envelope.status?.kind == .thinking)
+    #expect(envelope.preview == "Summarize the failing tests and next fix.")
+    #expect(envelope.metadata["client_kind"] == "hermes")
+}
+
+@Test
+func hermesSessionEndUsesLastAssistantMessageAsPreview() throws {
+    let payload = """
+    {
+      "hook_event_name": "SessionEnd",
+      "session_id": "hermes-2",
+      "last_assistant_message": "Done. I inspected the tool calls and wrote the follow-up notes."
+    }
+    """.data(using: .utf8)!
+
+    let envelope = HookPayloadMapper.makeEnvelope(
+        source: .claude,
+        arguments: [
+            "island-bridge",
+            "--source", "claude",
+            "--client-kind", "hermes-agent",
+            "--client-name", "Hermes Agent",
+            "--thread-source", "hermes-plugin"
+        ],
+        environment: ["PWD": "/tmp/demo"],
+        stdinData: payload
+    )
+
+    #expect(envelope.eventType == "SessionEnd")
+    #expect(envelope.status?.kind == .completed)
+    #expect(envelope.preview == "Done. I inspected the tool calls and wrote the follow-up notes.")
+}
+
+@Test
 func mapsCopilotPreToolUsePayloadFromOfficialFields() throws {
     let payload = """
     {

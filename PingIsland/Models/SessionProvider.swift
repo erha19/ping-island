@@ -172,8 +172,17 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
             || originator?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "qwen-code"
     }
 
+    nonisolated var isHermesClient: Bool {
+        profileID == "hermes"
+            || threadSource?.lowercased() == "hermes-plugin"
+            || name?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "hermes"
+            || name?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "hermes agent"
+            || originator?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "hermes"
+            || originator?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "hermes agent"
+    }
+
     nonisolated var prefersHookMessageAsLastMessageFallback: Bool {
-        isOpenClawGatewayClient || isQwenCodeClient
+        isOpenClawGatewayClient || isQwenCodeClient || isHermesClient
     }
 
     nonisolated var suppressesActivationNavigation: Bool {

@@ -607,7 +607,7 @@ final class RemoteConnectorManager: ObservableObject {
                         password: password
                     )
                 }
-            case .pluginFile:
+            case .pluginFile, .pluginDirectory:
                 continue
             }
         }
@@ -939,7 +939,7 @@ final class RemoteConnectorManager: ObservableObject {
         switch profile.installationKind {
         case .hookDirectory:
             paths = [configurationPath, NSString(string: configurationPath).deletingLastPathComponent]
-        case .jsonHooks, .pluginFile:
+        case .jsonHooks, .pluginFile, .pluginDirectory:
             paths = [NSString(string: configurationPath).deletingLastPathComponent]
         }
 

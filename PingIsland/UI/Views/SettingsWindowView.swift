@@ -2376,17 +2376,25 @@ private struct CustomHookInstallSheet: View {
             return "例如 /path/to/.claude"
         case .pluginFile:
             return "例如 /path/to/plugins"
+        case .pluginDirectory:
+            return "例如 /path/to/.hermes 或 /path/to/plugins"
         case .hookDirectory:
             return "例如 /path/to/.openclaw 或 /path/to/hooks"
         }
     }
 
     private var installHint: String? {
-        guard let profile = ClientProfileRegistry.managedHookProfile(id: selectedProfileID),
-              profile.installationKind == .hookDirectory else {
+        guard let profile = ClientProfileRegistry.managedHookProfile(id: selectedProfileID) else {
             return nil
         }
-        return AppLocalization.string("OpenClaw 可选择 ~/.openclaw 根目录，或已配置到 extraDirs 的 hooks 目录。")
+        switch profile.installationKind {
+        case .hookDirectory:
+            return AppLocalization.string("OpenClaw 可选择 ~/.openclaw 根目录，或已配置到 extraDirs 的 hooks 目录。")
+        case .pluginDirectory:
+            return AppLocalization.string("Hermes 可选择 ~/.hermes 根目录，或 plugins 目录。")
+        case .jsonHooks, .pluginFile:
+            return nil
+        }
     }
 
     private func resolvedInstallTargetDescription(resolvedFileName: String) -> String {
@@ -2399,6 +2407,16 @@ private struct CustomHookInstallSheet: View {
         switch profile.installationKind {
         case .jsonHooks, .pluginFile:
             targetURL = baseURL.appendingPathComponent(resolvedFileName)
+        case .pluginDirectory:
+            if baseURL.lastPathComponent == ".hermes" {
+                targetURL = baseURL
+                    .appendingPathComponent("plugins", isDirectory: true)
+                    .appendingPathComponent(resolvedFileName, isDirectory: true)
+            } else if baseURL.lastPathComponent == "plugins" {
+                targetURL = baseURL.appendingPathComponent(resolvedFileName, isDirectory: true)
+            } else {
+                targetURL = baseURL.appendingPathComponent(resolvedFileName, isDirectory: true)
+            }
         case .hookDirectory:
             if baseURL.lastPathComponent == ".openclaw" {
                 targetURL = baseURL

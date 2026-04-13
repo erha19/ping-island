@@ -10,6 +10,7 @@ enum SessionClientBrand {
     case codebuddy
     case codex
     case gemini
+    case hermes
     case qwen
     case opencode
     case qoder

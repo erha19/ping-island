@@ -11,6 +11,7 @@ enum SessionClientBrand: String, Codable, Equatable, Sendable {
     case codebuddy
     case codex
     case gemini
+    case hermes
     case qwen
     case opencode
     case qoder
@@ -31,6 +32,7 @@ enum HookInstallEntryTemplate: Sendable {
 enum ManagedHookInstallationKind: Sendable, Equatable {
     case jsonHooks
     case pluginFile
+    case pluginDirectory
     case hookDirectory
 }
 
@@ -164,6 +166,8 @@ struct ManagedHookClientProfile: Identifiable, Sendable {
             return "这会重新写入 %@ 的 Island hooks 配置，并保留其他非 Island hooks。"
         case .pluginFile:
             return "这会重新生成 %@ 的 Island 插件文件，并覆盖旧的 Island 托管版本。"
+        case .pluginDirectory:
+            return "这会重新生成 %@ 的 Island 插件目录，并覆盖旧的 Island 托管版本。"
         case .hookDirectory:
             return "这会重新生成 %@ 的 Island hook 目录，并刷新 OpenClaw 的启用状态。"
         }
@@ -481,6 +485,26 @@ enum ClientProfileRegistry {
                 HookInstallEventDescriptor(name: "Notification", templates: [.plain]),
                 HookInstallEventDescriptor(name: "PreCompress", templates: [.plain]),
             ]
+        ),
+        ManagedHookClientProfile(
+            id: "hermes-hooks",
+            title: "Hermes Agent",
+            subtitle: "管理 ~/.hermes/plugins/ping_island，按 Hermes 官方 plugin hooks 协议接入 Island",
+            installationKind: .pluginDirectory,
+            alwaysVisibleInSettings: true,
+            iconSymbolName: "paperplane.circle.fill",
+            configurationRelativePath: ".hermes/plugins/ping_island",
+            bridgeSource: "claude",
+            bridgeExtraArguments: [
+                "--client-kind", "hermes",
+                "--client-name", "Hermes",
+                "--client-origin", "cli",
+                "--client-originator", "Hermes",
+                "--thread-source", "hermes-plugin"
+            ],
+            defaultEnabled: false,
+            brand: .hermes,
+            events: []
         ),
         ManagedHookClientProfile(
             id: "qwen-code-hooks",
@@ -869,6 +893,21 @@ enum ClientProfileRegistry {
             recognizedKinds: ["jetbrains", "jetbrains-plugin", "jb", "jb-plugin", "jb plugin"],
             exactAliases: ["jetbrains", "jetbrains-plugin", "jetbrains plugin", "jb", "jb-plugin", "jb plugin"],
             keywordAliases: ["jetbrains", "jb plugin"],
+            bundleIdentifiers: []
+        ),
+        SessionClientProfile(
+            id: "hermes",
+            provider: .claude,
+            family: .claudeHooks,
+            kind: .custom,
+            displayName: "Hermes",
+            assistantLabelMode: .badgeLabel,
+            brand: .hermes,
+            defaultBundleIdentifier: nil,
+            defaultOrigin: "cli",
+            recognizedKinds: ["hermes", "hermes-agent", "hermes_agent", "hermes agent"],
+            exactAliases: ["hermes", "hermes-agent", "hermes agent"],
+            keywordAliases: ["hermes", "hermes agent"],
             bundleIdentifiers: []
         ),
         SessionClientProfile(
