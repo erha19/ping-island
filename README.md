@@ -35,13 +35,14 @@
 </p>
 
 <p align="center">
-  <sub>Official website: <a href="https://erha19.github.io/">erha19.github.io</a></sub>
+  <sub>Official website: <a href="https://erha19.github.io/ping-island/">erha19.github.io/ping-island</a></sub>
 </p>
 
 <p align="center">
   <img src="docs/images/mascots/claude.gif" width="36" alt="Claude mascot" title="Claude Code">&nbsp;
   <img src="docs/images/mascots/codex.gif" width="36" alt="Codex mascot" title="Codex">&nbsp;
   <img src="docs/images/mascots/gemini.gif" width="36" alt="Gemini CLI mascot" title="Gemini CLI">&nbsp;
+  <img src="docs/images/mascots/qwen.gif" width="36" alt="Qwen Code mascot" title="Qwen Code">&nbsp;
   <img src="docs/images/mascots/openclaw.gif" width="36" alt="OpenClaw mascot" title="OpenClaw">&nbsp;
   <img src="docs/images/mascots/opencode.gif" width="36" alt="OpenCode mascot" title="OpenCode">&nbsp;
   <img src="docs/images/mascots/cursor.gif" width="36" alt="Cursor mascot" title="Cursor">&nbsp;
@@ -50,7 +51,7 @@
   <img src="docs/images/mascots/copilot.gif" width="36" alt="GitHub Copilot mascot" title="GitHub Copilot">
 </p>
 <p align="center">
-  <sub>Claude Code · Codex · Gemini CLI · OpenClaw · OpenCode · Cursor · Qoder · CodeBuddy · GitHub Copilot</sub>
+  <sub>Claude Code · Codex · Gemini CLI · Qwen Code · OpenClaw · OpenCode · Cursor · Qoder · CodeBuddy · GitHub Copilot</sub>
 </p>
 
 ## What is Ping Island?
@@ -73,6 +74,7 @@ Ping Island focuses on the moments that actually interrupt coding flow, then kee
 - **Codex hook + app-server sync** - Support Codex CLI hooks, live app-server threads, and rollout parsing fallback when needed.
 - **Custom sounds** - Pick per-event macOS sounds or import local sound packs for your own notification style.
 - **Custom agent mascots** - Give each client its own animated mascot override across the notch, session list, and hover UI.
+- **Qwen messenger-bird mascot** - Qwen Code now ships with an aqua messenger-bird mascot tuned for prompt, reply, and notification-heavy flows.
 
 <a id="supported-tools"></a>
 ## Supported Tools
@@ -82,6 +84,8 @@ Ping Island focuses on the moments that actually interrupt coding flow, then kee
 </p>
 
 Ping Island also ships VS Code-compatible focus extensions for VS Code, Cursor, CodeBuddy, WorkBuddy, and Qoder. `QoderWork` is hook-only today and does not participate in the IDE extension path.
+
+Qwen Code is supported as a first-class hook client through `~/.qwen/settings.json`, and its built-in mascot is the aqua messenger-bird shown in the README GIF strip. The visual is meant to read as a lightweight reply courier rather than another generic blob or cat.
 
 OpenClaw is supported through a managed internal hook directory under `~/.openclaw/hooks/` plus transcript-aware session refresh from `~/.openclaw/agents/main/sessions/`. That combination lets Ping Island surface OpenClaw's lightweight message hooks quickly, then backfill the full conversation from the local session log once the assistant reply lands.
 
@@ -95,7 +99,7 @@ The OpenClaw feature poster in `docs/images/ping-island-openclaw-poster.png` is 
 
 ### Download a Release
 
-1. Visit the [official website](https://erha19.github.io/) for the product overview and latest download link, or go straight to [Releases](https://github.com/erha19/ping-island/releases).
+1. Visit the [official website](https://erha19.github.io/ping-island/) for the product overview and latest download link, or go straight to [Releases](https://github.com/erha19/ping-island/releases).
 2. Download the latest DMG.
 3. Move `Ping Island.app` into your Applications folder.
 4. Launch the app and start the clients you want Ping Island to monitor.
