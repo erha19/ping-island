@@ -496,8 +496,13 @@ class SessionMonitor: ObservableObject {
 
         if profileID == "qoder"
             || profileID == "qoderwork"
+            || profileID == "codebuddy"
+            || profileID == "workbuddy"
             || bundleIdentifier == "com.qoder.ide"
-            || bundleIdentifier == "com.qoder.work" {
+            || bundleIdentifier == "com.qoder.work"
+            || bundleIdentifier == "com.tencent.codebuddy"
+            || bundleIdentifier == "com.codebuddy.app"
+            || bundleIdentifier == "com.workbuddy.workbuddy" {
             return .lookupAliases
         }
 
