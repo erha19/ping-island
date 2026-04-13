@@ -278,6 +278,9 @@ public enum HookPayloadMapper {
         if lowered.contains("question") || lowered.contains("userinput") {
             return SessionStatus(kind: .waitingForInput)
         }
+        if lowered.contains("notification") {
+            return SessionStatus(kind: .notification)
+        }
         if lowered.contains("pretool") {
             return SessionStatus(kind: .runningTool)
         }

@@ -565,9 +565,9 @@ struct SessionState: Equatable, Identifiable, Sendable {
     /// Last message content
     nonisolated var lastMessage: String? {
         SessionTextSanitizer.sanitizedDisplayText(conversationInfo.lastMessage)
-            ?? (clientInfo.isOpenClawGatewayClient ? compactHookMessage : nil)
+            ?? (clientInfo.prefersHookMessageAsLastMessageFallback ? compactHookMessage : nil)
             ?? SessionTextSanitizer.sanitizedDisplayText(previewText)
-            ?? (!clientInfo.isOpenClawGatewayClient ? compactHookMessage : nil)
+            ?? (!clientInfo.prefersHookMessageAsLastMessageFallback ? compactHookMessage : nil)
             ?? SessionTextSanitizer.sanitizedDisplayText(intervention?.summaryText)
     }
 

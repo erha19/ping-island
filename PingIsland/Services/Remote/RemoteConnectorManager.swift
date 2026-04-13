@@ -889,6 +889,7 @@ final class RemoteConnectorManager: ObservableObject {
         let supportedProfileIDs: Set<String> = [
             "claude-hooks",
             "codex-hooks",
+            "qwen-code-hooks",
             "openclaw-hooks",
             "qoder-hooks",
             "qoderwork-hooks"

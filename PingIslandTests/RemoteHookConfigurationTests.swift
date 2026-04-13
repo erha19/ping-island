@@ -33,6 +33,7 @@ final class RemoteHookConfigurationTests: XCTestCase {
         XCTAssertEqual(profileIDs, [
             "claude-hooks",
             "codex-hooks",
+            "qwen-code-hooks",
             "openclaw-hooks",
             "qoder-hooks",
             "qoderwork-hooks",
@@ -47,6 +48,7 @@ final class RemoteHookConfigurationTests: XCTestCase {
 
         XCTAssertTrue(directories.contains("/root/.claude"))
         XCTAssertTrue(directories.contains("/root/.codex"))
+        XCTAssertTrue(directories.contains("/root/.qwen"))
         XCTAssertTrue(directories.contains("/root/.openclaw"))
         XCTAssertTrue(directories.contains("/root/.openclaw/hooks"))
         XCTAssertTrue(directories.contains("/root/.openclaw/hooks/ping-island-openclaw"))

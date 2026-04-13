@@ -163,6 +163,19 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
             || originator?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "openclaw"
     }
 
+    nonisolated var isQwenCodeClient: Bool {
+        profileID == "qwen-code"
+            || threadSource?.lowercased() == "qwen-code-hooks"
+            || name?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "qwen code"
+            || name?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "qwen-code"
+            || originator?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "qwen code"
+            || originator?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "qwen-code"
+    }
+
+    nonisolated var prefersHookMessageAsLastMessageFallback: Bool {
+        isOpenClawGatewayClient || isQwenCodeClient
+    }
+
     nonisolated var suppressesActivationNavigation: Bool {
         isOpenClawGatewayClient
     }

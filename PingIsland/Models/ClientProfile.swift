@@ -11,6 +11,7 @@ enum SessionClientBrand: String, Codable, Equatable, Sendable {
     case codebuddy
     case codex
     case gemini
+    case qwen
     case opencode
     case qoder
     case copilot
@@ -482,6 +483,38 @@ enum ClientProfileRegistry {
             ]
         ),
         ManagedHookClientProfile(
+            id: "qwen-code-hooks",
+            title: "Qwen Code",
+            subtitle: "管理 ~/.qwen/settings.json，按 Qwen Code 官方 hooks 协议接入 Island",
+            alwaysVisibleInSettings: true,
+            iconSymbolName: "sparkles.square.filled.on.square",
+            configurationRelativePath: ".qwen/settings.json",
+            bridgeSource: "claude",
+            bridgeExtraArguments: [
+                "--client-kind", "qwen-code",
+                "--client-name", "Qwen Code",
+                "--client-origin", "cli",
+                "--client-originator", "Qwen Code",
+                "--thread-source", "qwen-code-hooks"
+            ],
+            defaultEnabled: false,
+            brand: .qwen,
+            events: [
+                HookInstallEventDescriptor(name: "UserPromptSubmit", templates: [.plain]),
+                HookInstallEventDescriptor(name: "PreToolUse", templates: [.matcher("*")]),
+                HookInstallEventDescriptor(name: "PostToolUse", templates: [.matcher("*")]),
+                HookInstallEventDescriptor(name: "PostToolUseFailure", templates: [.matcher("*")]),
+                HookInstallEventDescriptor(name: "Notification", templates: [.matcher("*")]),
+                HookInstallEventDescriptor(name: "SessionStart", templates: [.matcher("*")]),
+                HookInstallEventDescriptor(name: "SessionEnd", templates: [.matcher("*")]),
+                HookInstallEventDescriptor(name: "Stop", templates: [.plain]),
+                HookInstallEventDescriptor(name: "SubagentStart", templates: [.matcher("*")]),
+                HookInstallEventDescriptor(name: "SubagentStop", templates: [.matcher("*")]),
+                HookInstallEventDescriptor(name: "PreCompact", templates: [.matcher("manual"), .matcher("auto")]),
+                HookInstallEventDescriptor(name: "PermissionRequest", templates: [.matcher("*")], timeout: 86_400),
+            ]
+        ),
+        ManagedHookClientProfile(
             id: "openclaw-hooks",
             title: "OpenClaw",
             subtitle: "管理 ~/.openclaw/hooks/ping-island-openclaw，并自动启用内部 hook",
@@ -836,6 +869,21 @@ enum ClientProfileRegistry {
             recognizedKinds: ["jetbrains", "jetbrains-plugin", "jb", "jb-plugin", "jb plugin"],
             exactAliases: ["jetbrains", "jetbrains-plugin", "jetbrains plugin", "jb", "jb-plugin", "jb plugin"],
             keywordAliases: ["jetbrains", "jb plugin"],
+            bundleIdentifiers: []
+        ),
+        SessionClientProfile(
+            id: "qwen-code",
+            provider: .claude,
+            family: .claudeHooks,
+            kind: .custom,
+            displayName: "Qwen Code",
+            assistantLabelMode: .badgeLabel,
+            brand: .qwen,
+            defaultBundleIdentifier: nil,
+            defaultOrigin: "cli",
+            recognizedKinds: ["qwen", "qwen-code", "qwen_code", "qwen code"],
+            exactAliases: ["qwen", "qwen-code", "qwen code"],
+            keywordAliases: ["qwen", "qwen code"],
             bundleIdentifiers: []
         ),
         SessionClientProfile(

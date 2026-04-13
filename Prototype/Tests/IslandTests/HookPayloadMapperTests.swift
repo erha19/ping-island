@@ -958,6 +958,68 @@ func geminiNotificationStaysObservabilityOnly() throws {
 }
 
 @Test
+func qwenCodeNotificationMapsFromOfficialHookFields() throws {
+    let payload = """
+    {
+      "hook_event_name": "Notification",
+      "notification_type": "idle_prompt",
+      "message": "Qwen Code is waiting for your next prompt",
+      "title": "Need Input",
+      "session_id": "qwen-code-1",
+      "transcript_path": "/tmp/qwen-code-1.jsonl"
+    }
+    """.data(using: .utf8)!
+
+    let envelope = HookPayloadMapper.makeEnvelope(
+        source: .claude,
+        arguments: [
+            "island-bridge",
+            "--source", "claude",
+            "--client-kind", "qwen-code",
+            "--client-name", "Qwen Code",
+            "--thread-source", "qwen-code-hooks"
+        ],
+        environment: ["PWD": "/tmp/demo"],
+        stdinData: payload
+    )
+
+    #expect(envelope.eventType == "Notification")
+    #expect(envelope.status?.kind == .notification)
+    #expect(envelope.preview == "Qwen Code is waiting for your next prompt")
+    #expect(envelope.metadata["notification_type"] == "idle_prompt")
+    #expect(envelope.metadata["transcript_path"] == "/tmp/qwen-code-1.jsonl")
+    #expect(envelope.metadata["client_kind"] == "qwen-code")
+}
+
+@Test
+func qwenCodeStopUsesLastAssistantMessageAsPreview() throws {
+    let payload = """
+    {
+      "hook_event_name": "Stop",
+      "session_id": "qwen-code-2",
+      "last_assistant_message": "Done. I updated the files and left notes in the summary."
+    }
+    """.data(using: .utf8)!
+
+    let envelope = HookPayloadMapper.makeEnvelope(
+        source: .claude,
+        arguments: [
+            "island-bridge",
+            "--source", "claude",
+            "--client-kind", "qwen-code",
+            "--client-name", "Qwen Code",
+            "--thread-source", "qwen-code-hooks"
+        ],
+        environment: ["PWD": "/tmp/demo"],
+        stdinData: payload
+    )
+
+    #expect(envelope.eventType == "Stop")
+    #expect(envelope.status?.kind == .completed)
+    #expect(envelope.preview == "Done. I updated the files and left notes in the summary.")
+}
+
+@Test
 func mapsCopilotPreToolUsePayloadFromOfficialFields() throws {
     let payload = """
     {
