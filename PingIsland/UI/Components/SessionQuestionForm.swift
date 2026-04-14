@@ -15,6 +15,25 @@ struct SessionQuestionForm: View {
         intervention.resolvedQuestions
     }
 
+    nonisolated static func shouldUseScrollableQuestionList(
+        for questions: [SessionInterventionQuestion]
+    ) -> Bool {
+        if questions.count > 1 {
+            return true
+        }
+
+        return questions.contains { question in
+            let weightedOptions = question.options.reduce(0) { partial, option in
+                partial + (option.detail == nil ? 1 : 2)
+            }
+            return weightedOptions >= 3 || question.allowsOther || question.isSecret
+        }
+    }
+
+    private var shouldUseScrollableQuestionList: Bool {
+        Self.shouldUseScrollableQuestionList(for: displayQuestions)
+    }
+
     init(
         intervention: SessionIntervention,
         submitLabel: String? = nil,
@@ -34,6 +53,47 @@ struct SessionQuestionForm: View {
     }
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Group {
+                if shouldUseScrollableQuestionList {
+                    ScrollView(.vertical, showsIndicators: false) {
+                        questionsContent
+                            .padding(.vertical, 1)
+                    }
+                    .scrollBounceBehavior(.basedOnSize)
+                    .frame(maxHeight: 230)
+                } else {
+                    questionsContent
+                }
+            }
+
+            HStack(spacing: 8) {
+                if let submitLabel {
+                    Button {
+                        onSubmit(submissionPayload())
+                    }
+                    label: {
+                        Text(appLocalized: submitLabel)
+                    }
+                    .buttonStyle(SessionQuestionButtonStyle(background: Color.white.opacity(0.9), foreground: .black))
+                    .disabled(!canSubmit || !isEditable)
+                }
+
+                if let secondaryActionTitle, let onSecondaryAction {
+                    Button {
+                        onSecondaryAction()
+                    }
+                    label: {
+                        Text(verbatim: secondaryActionTitle)
+                    }
+                    .buttonStyle(SessionQuestionButtonStyle(background: Color.white.opacity(0.1)))
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var questionsContent: some View {
         VStack(alignment: .leading, spacing: 12) {
             ForEach(displayQuestions) { question in
                 VStack(alignment: .leading, spacing: 8) {
@@ -69,31 +129,7 @@ struct SessionQuestionForm: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-
-            HStack(spacing: 8) {
-                if let submitLabel {
-                    Button {
-                        onSubmit(submissionPayload())
-                    }
-                    label: {
-                        Text(appLocalized: submitLabel)
-                    }
-                    .buttonStyle(SessionQuestionButtonStyle(background: Color.white.opacity(0.9), foreground: .black))
-                    .disabled(!canSubmit || !isEditable)
-                }
-
-                if let secondaryActionTitle, let onSecondaryAction {
-                    Button {
-                        onSecondaryAction()
-                    }
-                    label: {
-                        Text(verbatim: secondaryActionTitle)
-                    }
-                    .buttonStyle(SessionQuestionButtonStyle(background: Color.white.opacity(0.1)))
-                }
-            }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     @ViewBuilder
