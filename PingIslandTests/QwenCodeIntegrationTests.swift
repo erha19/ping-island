@@ -8,7 +8,7 @@ final class QwenCodeIntegrationTests: XCTestCase {
         XCTAssertNotNil(profile)
         XCTAssertEqual(profile?.title, "Qwen Code")
         XCTAssertEqual(profile?.brand, .qwen)
-        XCTAssertNil(profile?.logoAssetName)
+        XCTAssertEqual(profile?.logoAssetName, "QwenLogo")
         XCTAssertEqual(profile?.primaryConfigurationURL.path, NSHomeDirectory() + "/.qwen/settings.json")
         XCTAssertTrue(profile?.alwaysVisibleInSettings == true)
     }
