@@ -11,6 +11,60 @@ import os.log
 
 private let logger = Logger(subsystem: "com.wudanwu.pingisland", category: "Hooks")
 
+private actor HermesHookDebugStore {
+    static let shared = HermesHookDebugStore()
+
+    private let fileManager = FileManager.default
+    private let formatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter
+    }()
+
+    nonisolated static var debugDirectoryURL: URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".ping-island-debug", isDirectory: true)
+            .appendingPathComponent("hermes-hooks", isDirectory: true)
+    }
+
+    private init() {}
+
+    func recordRuntime(_ message: String) {
+        let line = "[\(formatter.string(from: Date()))] \(message)\n"
+        append(data: Data(line.utf8), to: Self.debugDirectoryURL.appendingPathComponent("receiver.log"))
+    }
+
+    func recordEvent(_ fields: [String: Any]) {
+        guard JSONSerialization.isValidJSONObject(fields),
+              let data = try? JSONSerialization.data(withJSONObject: fields, options: [.sortedKeys])
+        else {
+            return
+        }
+
+        var line = data
+        line.append(0x0A)
+        let dateKey = formatter.string(from: Date()).prefix(10).replacingOccurrences(of: "-", with: "")
+        append(data: line, to: Self.debugDirectoryURL.appendingPathComponent("\(dateKey)-receiver.jsonl"))
+    }
+
+    private func append(data: Data, to url: URL) {
+        do {
+            try fileManager.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            if !fileManager.fileExists(atPath: url.path) {
+                try data.write(to: url, options: .atomic)
+                return
+            }
+
+            let handle = try FileHandle(forWritingTo: url)
+            defer { try? handle.close() }
+            try handle.seekToEnd()
+            try handle.write(contentsOf: data)
+        } catch {
+            // Keep Hermes diagnostics best-effort so hook delivery never depends on local debug writes.
+        }
+    }
+}
+
 /// Event received from hook clients after bridge-envelope mapping.
 struct HookEvent: Sendable {
     let sessionId: String
@@ -1128,6 +1182,26 @@ class HookSocketServer {
             logger.info(
                 "Hermes bridge envelope event=\(envelope.eventType, privacy: .public) session=\(event.sessionId, privacy: .public) status=\(event.status, privacy: .public) message=\((event.message ?? "").prefix(120), privacy: .public)"
             )
+            Task {
+                await HermesHookDebugStore.shared.recordRuntime(
+                    "socket received event=\(envelope.eventType) session=\(event.sessionId) status=\(event.status) expectsResponse=\(expectsResponse)"
+                )
+                await HermesHookDebugStore.shared.recordEvent([
+                    "timestamp": ISO8601DateFormatter().string(from: Date()),
+                    "stage": "socket_received",
+                    "event_type": envelope.eventType,
+                    "session_id": event.sessionId,
+                    "status": event.status,
+                    "message": event.message ?? "",
+                    "preview": envelope.preview ?? "",
+                    "cwd": event.cwd,
+                    "tool_name": event.tool ?? "",
+                    "tool_use_id": event.toolUseId ?? "",
+                    "originator": event.clientInfo.originator ?? "",
+                    "thread_source": event.clientInfo.threadSource ?? "",
+                    "terminal_bundle_id": event.clientInfo.terminalBundleIdentifier ?? "",
+                ])
+            }
         }
 
         if event.event == "PreToolUse" && event.toolUseId == nil {

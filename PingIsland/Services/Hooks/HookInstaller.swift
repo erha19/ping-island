@@ -1736,6 +1736,12 @@ struct HookInstaller {
             if not prompt:
                 return None
 
+            _emit_session_start(
+                resolved_id,
+                platform=kwargs.get("platform"),
+                model=kwargs.get("model"),
+                **kwargs,
+            )
             _state_for(resolved_id)["last_user"] = prompt
             _emit(
                 _bridge_payload(
@@ -1787,6 +1793,17 @@ struct HookInstaller {
             reply = _stable_text(assistant_response) or _extract_assistant_message(kwargs)
             if reply:
                 _state_for(resolved_id)["last_assistant"] = reply
+                _emit(
+                    _bridge_payload(
+                        resolved_id,
+                        hook_event_name="Notification",
+                        notification_type="assistant_message",
+                        message=reply,
+                        platform=_stable_text(kwargs.get("platform")),
+                        model=_stable_text(kwargs.get("model")),
+                        cwd=_resolve_cwd(kwargs),
+                    )
+                )
 
 
         def _on_session_end(session_id=None, completed=None, interrupted=None, platform=None, model=None, **kwargs):
