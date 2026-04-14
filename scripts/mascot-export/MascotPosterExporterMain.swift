@@ -353,6 +353,11 @@ private struct MascotPosterView: View {
     private func mascotCard(for kind: MascotKind) -> some View {
         VStack(spacing: 20) {
             ZStack {
+                Circle()
+                    .fill(kind.alertColor.opacity(0.20))
+                    .frame(width: 176, height: 176)
+                    .blur(radius: 16)
+
                 MascotView(
                     kind: kind,
                     status: .working,
