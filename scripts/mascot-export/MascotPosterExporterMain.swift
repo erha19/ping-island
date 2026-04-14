@@ -353,27 +353,6 @@ private struct MascotPosterView: View {
     private func mascotCard(for kind: MascotKind) -> some View {
         VStack(spacing: 20) {
             ZStack {
-                RoundedRectangle(cornerRadius: 34, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                .white.opacity(0.95),
-                                Color(red: 0.98, green: 0.98, blue: 0.99).opacity(0.92),
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 34, style: .continuous)
-                            .stroke(.white.opacity(0.95), lineWidth: 2)
-                    )
-
-                Circle()
-                    .fill(kind.alertColor.opacity(0.20))
-                    .frame(width: 176, height: 176)
-                    .blur(radius: 16)
-
                 MascotView(
                     kind: kind,
                     status: .working,
