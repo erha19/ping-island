@@ -27,6 +27,21 @@ final class RemoteHookConfigurationTests: XCTestCase {
         XCTAssertTrue(command.contains("chmod 755 '/root/.ping-island/bin/PingIslandBridge' '/root/.ping-island/bin/ping-island-bridge'"))
     }
 
+    func testRemoteLinuxBridgeAssetNamesPreferZipArchiveDownload() {
+        XCTAssertEqual(
+            RemoteConnectorManager.normalizedLinuxBridgeArchitecture("amd64"),
+            "x86_64"
+        )
+        XCTAssertEqual(
+            RemoteConnectorManager.remoteLinuxBridgeBinaryAssetName(normalizedArchitecture: "x86_64"),
+            "PingIslandBridge-linux-x86_64"
+        )
+        XCTAssertEqual(
+            RemoteConnectorManager.remoteLinuxBridgeArchiveAssetName(normalizedArchitecture: "x86_64"),
+            "PingIslandBridge-linux-x86_64.zip"
+        )
+    }
+
     func testRemoteManagedHookProfilesIncludeSupportedCliIntegrations() {
         let profileIDs = Set(RemoteConnectorManager.remoteManagedHookProfiles().map(\.id))
 

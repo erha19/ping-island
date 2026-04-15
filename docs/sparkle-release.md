@@ -66,7 +66,7 @@ base64 -i developer-id-application.p12 | pbcopy
 
 Important: `https://github.com/<owner>/<repo>/releases/latest/download/appcast.xml` only resolves for the latest published release. If the newest release is still a draft, or the published release was created without the `appcast.xml` asset, Sparkle clients will receive a 404 and update checks will fail.
 
-The workflow will upload the signed `.dmg`, `.zip`, and Linux bridge binary to the matching GitHub Release draft and add a short note that the artifacts were signed and notarized in CI.
+The workflow will upload the signed `.dmg`, `.zip`, and a zipped Linux bridge payload to the matching GitHub Release draft and add a short note that the artifacts were signed and notarized in CI.
 When Sparkle secrets are present, the same draft Release will also include:
 
 - `appcast.xml`

@@ -58,12 +58,17 @@ jobs:
           mkdir -p releases/unsigned
           cp Prototype/.build/release/PingIslandBridge releases/unsigned/PingIslandBridge-linux-x86_64
           chmod +x releases/unsigned/PingIslandBridge-linux-x86_64
+          (
+            cd releases/unsigned
+            python3 -m zipfile -c PingIslandBridge-linux-x86_64.zip PingIslandBridge-linux-x86_64
+          )
+          rm -f releases/unsigned/PingIslandBridge-linux-x86_64
 
       - name: Upload Linux bridge artifact
         uses: actions/upload-artifact@v4
         with:
-          name: PingIslandBridge-linux-x86_64
-          path: releases/unsigned/PingIslandBridge-linux-x86_64
+          name: PingIslandBridge-linux-x86_64.zip
+          path: releases/unsigned/PingIslandBridge-linux-x86_64.zip
           if-no-files-found: error
 
   release:
@@ -222,7 +227,7 @@ jobs:
       - name: Download Linux bridge artifact
         uses: actions/download-artifact@v4
         with:
-          name: PingIslandBridge-linux-x86_64
+          name: PingIslandBridge-linux-x86_64.zip
           path: releases/bridge
 
       - name: Collect release metadata

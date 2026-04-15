@@ -119,7 +119,7 @@ This file is a routing layer for coding agents working in this repo. Keep it sho
   - `./scripts/package-unsigned.sh`
   - `./scripts/create-release.sh`
   - `./scripts/generate-keys.sh`
-  - GitHub Actions: `.github/workflows/release-packages.yml` imports a Developer ID certificate from repository secrets, notarizes the exported app, publishes signed `dmg` / `zip` assets plus a Linux `PingIslandBridge` remote-agent binary to the matching GitHub Release for a `v*` tag or manual dispatch, and should treat the DMG as the primary manual-install artifact
+  - GitHub Actions: `.github/workflows/release-packages.yml` imports a Developer ID certificate from repository secrets, notarizes the exported app, publishes signed `dmg` / `zip` assets plus a zipped Linux `PingIslandBridge` remote-agent payload to the matching GitHub Release for a `v*` tag or manual dispatch, and should treat the DMG as the primary manual-install artifact
 - Release scripts assume local signing and notarization tooling. They may modify `build/`, `releases/`, and `.sparkle-keys/`.
 
 ## Working Rules
