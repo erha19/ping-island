@@ -11,7 +11,7 @@
     <meta property="og:title" content="Ping Island" />
     <meta
       property="og:description"
-      content="A premium dark control surface for Claude Code, Codex, Gemini CLI, and other AI coding clients on macOS."
+      content="A premium dark control surface for Claude Code, Codex, Gemini CLI, Hermes Agent, Qwen Code, OpenClaw, and other AI coding clients on macOS."
     />
     <meta property="og:type" content="website" />
     <link rel="icon" href="./assets/ping-island-icon.svg" type="image/svg+xml" />
@@ -39,6 +39,7 @@
 
       <nav class="site-nav" aria-label="Primary">
         <a href="#features">Features</a>
+        <a href="#clients">Clients</a>
         <a href="#mascots">Mascots</a>
         <a href="#install">Install</a>
       </nav>
@@ -70,7 +71,7 @@
               Live routing
             </span>
             <span class="status-badge">macOS 14+</span>
-            <span class="status-badge">Codex / Claude / Gemini / OpenClaw <span class="new-badge">New</span></span>
+            <span class="status-badge">Claude / Codex / Gemini / Hermes / Qwen / OpenClaw / OpenCode <span class="new-badge">0.2.0</span></span>
           </div>
 
           <h1 class="hero-title">
@@ -316,6 +317,41 @@
         </div>
       </section>
 
+      <section id="clients" class="content-section">
+        <div class="section-head">
+          <span class="mono-label">Supported Clients</span>
+          <h2>From classic terminal agents to the new 0.2.0 integrations.</h2>
+          <p>Ping Island now covers the core local and remote workflows across Claude-style hooks, app-server sessions, plugin hooks, and official settings-based integrations.</p>
+        </div>
+
+        <div class="feature-grid">
+          <article class="panel feature-card">
+            <h3>Claude Code / Codex / Gemini CLI</h3>
+            <p>First-class session monitoring, approvals, follow-up prompts, and focus return for the primary terminal-based workflows.</p>
+          </article>
+          <article class="panel feature-card">
+            <h3>Hermes Agent <span class="new-badge">0.2.0</span></h3>
+            <p>Integrated through the official plugin-hooks path so Hermes CLI events surface cleanly inside the Island UI without relying on gateway-only hooks.</p>
+          </article>
+          <article class="panel feature-card">
+            <h3>Qwen Code <span class="new-badge">0.2.0</span></h3>
+            <p>Managed through <code>~/.qwen/settings.json</code> with support for notifications, follow-up prompts, stop summaries, and session-state tracking.</p>
+          </article>
+          <article class="panel feature-card">
+            <h3>OpenClaw / OpenCode</h3>
+            <p>OpenClaw combines managed internal hooks with transcript refill, while OpenCode uses a plugin bridge that keeps app and terminal activity in sync.</p>
+          </article>
+          <article class="panel feature-card">
+            <h3>Cursor / Qoder</h3>
+            <p>IDE-hosted sessions stay visible through the same monitor layer, with focus-return paths back to the exact project window or terminal surface.</p>
+          </article>
+          <article class="panel feature-card">
+            <h3>CodeBuddy / Copilot</h3>
+            <p>Compatible hook-driven sessions keep their own identity, mascot, and workflow hints so mixed-client environments still feel organized.</p>
+          </article>
+        </div>
+      </section>
+
       <section id="mascots" class="content-section">
         <div class="section-head">
           <span class="mono-label">Pet GIF Showcase</span>
@@ -343,6 +379,20 @@
             <figcaption>
               <span class="mono-label">Gemini CLI</span>
               <strong>Fast signal scout</strong>
+            </figcaption>
+          </figure>
+          <figure class="glass-card mascot-card mascot-card-new">
+            <img src="./assets/mascots/hermes.gif" alt="Hermes Agent mascot gif" />
+            <figcaption>
+              <span class="mono-label">Hermes Agent <span class="new-badge">0.2.0</span></span>
+              <strong>Courier fox</strong>
+            </figcaption>
+          </figure>
+          <figure class="glass-card mascot-card mascot-card-new">
+            <img src="./assets/mascots/qwen.gif" alt="Qwen Code mascot gif" />
+            <figcaption>
+              <span class="mono-label">Qwen Code <span class="new-badge">0.2.0</span></span>
+              <strong>Mint-scarf capybara</strong>
             </figcaption>
           </figure>
           <figure class="glass-card mascot-card mascot-card-new">
