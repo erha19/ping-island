@@ -26,14 +26,14 @@ final class GlobalShortcutTests: XCTestCase {
         )
     }
 
-    func testDefaultShortcutsUseOptionCommand() {
+    func testDefaultShortcutsUseOptionModifier() {
         XCTAssertEqual(
             GlobalShortcutAction.openActiveSession.defaultShortcut?.modifierFlags,
-            [.option, .command]
+            [.option]
         )
         XCTAssertEqual(
             GlobalShortcutAction.openSessionList.defaultShortcut?.modifierFlags,
-            [.option, .command]
+            [.option]
         )
     }
 }
