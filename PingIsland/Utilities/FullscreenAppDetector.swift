@@ -27,16 +27,32 @@ struct FullscreenAppDetector {
                 continue
             }
 
-            let visibleBounds = bounds.intersection(screenFrame)
-            guard !visibleBounds.isNull else { continue }
-
-            let widthRatio = visibleBounds.width / screenFrame.width
-            let heightRatio = visibleBounds.height / screenFrame.height
-            if widthRatio >= 0.96 && heightRatio >= 0.94 {
+            if isLikelyFullscreenWindow(bounds: bounds, screenFrame: screenFrame) {
                 return true
             }
         }
 
         return false
+    }
+
+    static func isLikelyFullscreenWindow(bounds: CGRect, screenFrame: CGRect, tolerance: CGFloat = 2) -> Bool {
+        let visibleBounds = bounds.intersection(screenFrame)
+        guard !visibleBounds.isNull else { return false }
+
+        let widthRatio = visibleBounds.width / screenFrame.width
+        let heightRatio = visibleBounds.height / screenFrame.height
+        guard widthRatio >= 0.985, heightRatio >= 0.985 else {
+            return false
+        }
+
+        let leftInset = abs(visibleBounds.minX - screenFrame.minX)
+        let rightInset = abs(screenFrame.maxX - visibleBounds.maxX)
+        let bottomInset = abs(visibleBounds.minY - screenFrame.minY)
+        let topInset = abs(screenFrame.maxY - visibleBounds.maxY)
+
+        return leftInset <= tolerance
+            && rightInset <= tolerance
+            && bottomInset <= tolerance
+            && topInset <= tolerance
     }
 }
