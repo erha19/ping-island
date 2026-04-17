@@ -108,6 +108,72 @@ final class NotchViewModelTests: XCTestCase {
         }
     }
 
+    func testPhysicalNotchFullscreenStateWaitsForStableExitSignal() async {
+        var isFullscreenActive = true
+
+        let viewModel = await MainActor.run {
+            NotchViewModel(
+                deviceNotchRect: CGRect(x: 0, y: 0, width: 220, height: 38),
+                screenRect: CGRect(x: 0, y: 0, width: 1512, height: 982),
+                windowHeight: 320,
+                hasPhysicalNotch: true,
+                enableEventMonitoring: false,
+                observeSystemEnvironment: false,
+                fullscreenActivityProvider: { _ in isFullscreenActive },
+                fullscreenStateSettleDelay: 0.05
+            )
+        }
+
+        await MainActor.run {
+            XCTAssertTrue(viewModel.isFullscreenPhysicalNotchCompactActive)
+            isFullscreenActive = false
+            viewModel.refreshFullscreenPresentationStateForTesting()
+            XCTAssertTrue(viewModel.isFullscreenPhysicalNotchCompactActive)
+        }
+
+        try? await Task.sleep(nanoseconds: 120_000_000)
+
+        await MainActor.run {
+            XCTAssertFalse(viewModel.isFullscreenPhysicalNotchCompactActive)
+        }
+    }
+
+    func testPhysicalNotchFullscreenStateIgnoresTransientWindowAnimationGap() async {
+        var isFullscreenActive = true
+
+        let viewModel = await MainActor.run {
+            NotchViewModel(
+                deviceNotchRect: CGRect(x: 0, y: 0, width: 220, height: 38),
+                screenRect: CGRect(x: 0, y: 0, width: 1512, height: 982),
+                windowHeight: 320,
+                hasPhysicalNotch: true,
+                enableEventMonitoring: false,
+                observeSystemEnvironment: false,
+                fullscreenActivityProvider: { _ in isFullscreenActive },
+                fullscreenStateSettleDelay: 0.05
+            )
+        }
+
+        await MainActor.run {
+            XCTAssertTrue(viewModel.isFullscreenPhysicalNotchCompactActive)
+            isFullscreenActive = false
+            viewModel.refreshFullscreenPresentationStateForTesting()
+        }
+
+        try? await Task.sleep(nanoseconds: 20_000_000)
+
+        await MainActor.run {
+            isFullscreenActive = true
+            viewModel.refreshFullscreenPresentationStateForTesting()
+        }
+
+        try? await Task.sleep(nanoseconds: 120_000_000)
+
+        await MainActor.run {
+            XCTAssertTrue(viewModel.isFullscreenPhysicalNotchCompactActive)
+        }
+    }
+
     func testToggleChatClosesWhenSameSessionIsAlreadyVisible() async {
         await MainActor.run {
             let viewModel = makeViewModel()

@@ -164,6 +164,8 @@ class NotchViewModel: ObservableObject {
     private let fullscreenHoverActivationDelay: TimeInterval = 0.18
     private let fullscreenRevealZoneHeight: CGFloat = 8
     private let fullscreenRevealZoneHorizontalInset: CGFloat = 36
+    private let fullscreenStateSettleDelay: TimeInterval
+    private var fullscreenPhysicalNotchCollapseWorkItem: DispatchWorkItem?
 
     // MARK: - Initialization
 
@@ -174,7 +176,8 @@ class NotchViewModel: ObservableObject {
         hasPhysicalNotch: Bool,
         enableEventMonitoring: Bool = true,
         observeSystemEnvironment: Bool = true,
-        fullscreenActivityProvider: @escaping @MainActor (CGRect) -> Bool = FullscreenAppDetector.isFullscreenAppActive
+        fullscreenActivityProvider: @escaping @MainActor (CGRect) -> Bool = FullscreenAppDetector.isFullscreenAppActive,
+        fullscreenStateSettleDelay: TimeInterval = 0.18
     ) {
         self.geometry = NotchGeometry(
             deviceNotchRect: deviceNotchRect,
@@ -188,6 +191,7 @@ class NotchViewModel: ObservableObject {
         )
         self.events = enableEventMonitoring ? EventMonitors.shared : nil
         self.fullscreenActivityProvider = fullscreenActivityProvider
+        self.fullscreenStateSettleDelay = fullscreenStateSettleDelay
         if enableEventMonitoring {
             setupEventHandlers()
         }
@@ -232,9 +236,7 @@ class NotchViewModel: ObservableObject {
             isFullscreenActive
         let shouldUsePhysicalNotchCompact = hasPhysicalNotch && isFullscreenActive
 
-        if shouldUsePhysicalNotchCompact != isFullscreenPhysicalNotchCompactActive {
-            isFullscreenPhysicalNotchCompactActive = shouldUsePhysicalNotchCompact
-        }
+        applyPhysicalNotchFullscreenState(shouldUsePhysicalNotchCompact)
 
         guard shouldUseEdgeReveal != isFullscreenEdgeRevealActive else { return }
         isFullscreenEdgeRevealActive = shouldUseEdgeReveal
@@ -247,6 +249,37 @@ class NotchViewModel: ObservableObject {
                 notchClose()
             }
         }
+    }
+
+    func refreshFullscreenPresentationStateForTesting() {
+        refreshFullscreenPresentationState()
+    }
+
+    private func applyPhysicalNotchFullscreenState(_ shouldUsePhysicalNotchCompact: Bool) {
+        if shouldUsePhysicalNotchCompact {
+            fullscreenPhysicalNotchCollapseWorkItem?.cancel()
+            fullscreenPhysicalNotchCollapseWorkItem = nil
+            if !isFullscreenPhysicalNotchCompactActive {
+                isFullscreenPhysicalNotchCompactActive = true
+            }
+            return
+        }
+
+        guard isFullscreenPhysicalNotchCompactActive else { return }
+
+        fullscreenPhysicalNotchCollapseWorkItem?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.fullscreenPhysicalNotchCollapseWorkItem = nil
+            let isFullscreenActive = self.fullscreenActivityProvider(self.screenRect)
+            if self.hasPhysicalNotch && isFullscreenActive {
+                self.isFullscreenPhysicalNotchCompactActive = true
+            } else {
+                self.isFullscreenPhysicalNotchCompactActive = false
+            }
+        }
+        fullscreenPhysicalNotchCollapseWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + fullscreenStateSettleDelay, execute: workItem)
     }
 
     // MARK: - Event Handling
