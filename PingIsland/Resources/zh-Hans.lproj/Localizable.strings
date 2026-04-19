@@ -263,6 +263,7 @@
 "Loading messages..." = "正在加载消息...";
 "No messages yet" = "还没有消息";
 "Message Claude..." = "给 Claude 发送消息...";
+"Message %@..." = "给 %@ 发送消息...";
 "Open Claude Code in tmux to enable messaging" = "在 tmux 中打开 Claude Code 以启用发消息";
 "Processing" = "处理中";
 "Working" = "工作中";

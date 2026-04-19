@@ -230,7 +230,21 @@ struct CodexThreadInspectorView: View {
     @ObservedObject private var settings = AppSettings.shared
     @State private var snapshot: CodexThreadSnapshot?
     @State private var isLoading = false
+    @State private var isSendingFollowUp = false
+    @State private var followUpText = ""
     @State private var loadError: String?
+    @FocusState private var isFollowUpFocused: Bool
+
+    private var canSendFollowUp: Bool {
+        guard mode == .chat else { return false }
+        guard session.phase != .ended else { return false }
+        guard session.intervention == nil else { return false }
+        return session.clientInfo.kind == .codexCLI || session.isNativeRuntimeSession
+    }
+
+    private var followUpPlaceholder: String {
+        AppLocalization.format("Message %@...", session.providerDisplayName)
+    }
 
     private var primaryResultText: String? {
         session.codexSubagentSummaryText(
@@ -293,6 +307,10 @@ struct CodexThreadInspectorView: View {
                 }
             }
 
+            if canSendFollowUp {
+                followUpComposer
+            }
+
             if let loadError {
                 Text(loadError)
                     .font(.system(size: max(10, bodyFontSize - 2), weight: .medium))
@@ -339,6 +357,43 @@ struct CodexThreadInspectorView: View {
             .foregroundColor(.white.opacity(0.56))
     }
 
+    private var followUpComposer: some View {
+        HStack(spacing: 10) {
+            TextField(followUpPlaceholder, text: $followUpText)
+                .textFieldStyle(.plain)
+                .font(.system(size: max(12, bodyFontSize - 1)))
+                .foregroundColor(.white)
+                .focused($isFollowUpFocused)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(
+                    RoundedRectangle(cornerRadius: 20)
+                        .fill(Color.white.opacity(0.08))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 20)
+                                .strokeBorder(Color.white.opacity(0.1), lineWidth: 1)
+                        )
+                )
+                .onSubmit {
+                    submitFollowUp()
+                }
+
+            Button {
+                submitFollowUp()
+            } label: {
+                Image(systemName: "arrow.up.circle.fill")
+                    .font(.system(size: 28))
+                    .foregroundColor(canSubmitFollowUp ? .white.opacity(0.9) : .white.opacity(0.2))
+            }
+            .buttonStyle(.plain)
+            .disabled(!canSubmitFollowUp)
+        }
+    }
+
+    private var canSubmitFollowUp: Bool {
+        !followUpText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isSendingFollowUp
+    }
+
     private func conversationRow(for item: ChatHistoryItem) -> some View {
         let row = rowContent(for: item)
         return HStack(alignment: .top, spacing: 8) {
@@ -379,6 +434,37 @@ struct CodexThreadInspectorView: View {
         }
 
         isLoading = false
+    }
+
+    private func submitFollowUp() {
+        let text = followUpText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, !isSendingFollowUp else { return }
+
+        followUpText = ""
+        loadError = nil
+        isSendingFollowUp = true
+
+        Task {
+            do {
+                try await sessionMonitor.sendSessionMessage(
+                    sessionId: session.sessionId,
+                    text: text,
+                    expectedTurnId: snapshot?.latestTurnId
+                )
+            } catch {
+                await MainActor.run {
+                    loadError = error.localizedDescription
+                    followUpText = text
+                }
+            }
+
+            await MainActor.run {
+                isSendingFollowUp = false
+                if canSendFollowUp {
+                    isFollowUpFocused = true
+                }
+            }
+        }
     }
 }
 

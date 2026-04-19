@@ -428,14 +428,18 @@ struct ChatView: View {
 
     // MARK: - Input Bar
 
-    /// Can send messages only if session is in tmux
+    /// Inline follow-up is available for native runtime sessions and terminal-backed tmux sessions.
     private var canSendMessages: Bool {
-        session.isInTmux && session.tty != nil
+        session.isNativeRuntimeSession || (session.isInTmux && session.tty != nil)
+    }
+
+    private var messagePlaceholder: String {
+        AppLocalization.format("Message %@...", session.providerDisplayName)
     }
 
     private var inputBar: some View {
         HStack(spacing: 10) {
-            TextField("Message Claude...", text: $inputText)
+            TextField(messagePlaceholder, text: $inputText)
                 .textFieldStyle(.plain)
                 .font(.system(size: 13))
                 .foregroundColor(.white)
@@ -739,47 +743,10 @@ struct ChatView: View {
     }
 
     private func sendToSession(_ text: String) async {
-        if session.ingress == .nativeRuntime {
-            sessionMonitor.sendNativeSessionInput(sessionId: session.sessionId, text: text)
-            return
-        }
-
-        guard session.isInTmux else { return }
-        guard let tty = session.tty else { return }
-
-        if let target = await findTmuxTarget(tty: tty) {
-            _ = await ToolApprovalHandler.shared.sendMessage(text, to: target)
-        }
-    }
-
-    private func findTmuxTarget(tty: String) async -> TmuxTarget? {
-        guard let tmuxPath = await TmuxPathFinder.shared.getTmuxPath() else {
-            return nil
-        }
-
-        do {
-            let output = try await ProcessExecutor.shared.run(
-                tmuxPath,
-                arguments: ["list-panes", "-a", "-F", "#{session_name}:#{window_index}.#{pane_index} #{pane_tty}"]
-            )
-
-            let lines = output.components(separatedBy: "\n")
-            for line in lines {
-                let parts = line.components(separatedBy: " ")
-                guard parts.count >= 2 else { continue }
-
-                let target = parts[0]
-                let paneTty = parts[1].replacingOccurrences(of: "/dev/", with: "")
-
-                if paneTty == tty {
-                    return TmuxTarget(from: target)
-                }
-            }
-        } catch {
-            return nil
-        }
-
-        return nil
+        try? await sessionMonitor.sendSessionMessage(
+            sessionId: session.sessionId,
+            text: text
+        )
     }
 }
 

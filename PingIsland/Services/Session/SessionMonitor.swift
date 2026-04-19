@@ -438,6 +438,62 @@ class SessionMonitor: ObservableObject {
         )
     }
 
+    func sendSessionMessage(sessionId: String, text: String, expectedTurnId: String? = nil) async throws {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        guard let session = await SessionStore.shared.session(for: sessionId) else {
+            throw NSError(
+                domain: "PingIsland.SessionMonitor",
+                code: 404,
+                userInfo: [NSLocalizedDescriptionKey: "Session not found."]
+            )
+        }
+
+        if session.provider == .codex,
+           (session.ingress == .codexAppServer || session.ingress == .nativeRuntime) {
+            try await continueCodexThread(
+                sessionId: sessionId,
+                expectedTurnId: expectedTurnId ?? "",
+                text: trimmed
+            )
+            return
+        }
+
+        if session.ingress == .nativeRuntime {
+            try await runtimeCoordinator.sendUserInput(
+                provider: session.provider,
+                sessionID: session.sessionId,
+                text: trimmed
+            )
+            return
+        }
+
+        guard session.isInTmux, let tty = session.tty else {
+            throw NSError(
+                domain: "PingIsland.SessionMonitor",
+                code: 400,
+                userInfo: [NSLocalizedDescriptionKey: "Inline follow-up requires an active tmux-backed terminal session."]
+            )
+        }
+
+        guard let target = await findTmuxTarget(tty: tty) else {
+            throw NSError(
+                domain: "PingIsland.SessionMonitor",
+                code: 404,
+                userInfo: [NSLocalizedDescriptionKey: "Could not find the terminal pane for this session."]
+            )
+        }
+
+        guard await ToolApprovalHandler.shared.sendMessage(trimmed, to: target) else {
+            throw NSError(
+                domain: "PingIsland.SessionMonitor",
+                code: 500,
+                userInfo: [NSLocalizedDescriptionKey: "Failed to send the follow-up message to the terminal session."]
+            )
+        }
+    }
+
     func sendNativeSessionInput(sessionId: String, text: String) {
         Task {
             guard let session = await SessionStore.shared.session(for: sessionId),
@@ -484,6 +540,35 @@ class SessionMonitor: ObservableObject {
                     || candidate.shouldHideAsDuplicateOpenCodeChildSession(comparedTo: other)
             }
         }
+    }
+
+    private func findTmuxTarget(tty: String) async -> TmuxTarget? {
+        guard let tmuxPath = await TmuxPathFinder.shared.getTmuxPath() else {
+            return nil
+        }
+
+        do {
+            let output = try await ProcessExecutor.shared.run(
+                tmuxPath,
+                arguments: ["list-panes", "-a", "-F", "#{session_name}:#{window_index}.#{pane_index} #{pane_tty}"]
+            )
+
+            let lines = output.components(separatedBy: "\n")
+            for line in lines {
+                let parts = line.components(separatedBy: " ")
+                guard parts.count >= 2 else { continue }
+
+                let target = parts[0]
+                let paneTTY = parts[1].replacingOccurrences(of: "/dev/", with: "")
+                if paneTTY == tty {
+                    return TmuxTarget(from: target)
+                }
+            }
+        } catch {
+            return nil
+        }
+
+        return nil
     }
 
     // MARK: - History Loading (for UI)

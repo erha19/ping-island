@@ -8,6 +8,8 @@ final class SessionMonitorNativeRuntimeTests: XCTestCase {
         var approvedSessionIDs: [(String, Bool)] = []
         var deniedSessionIDs: [String] = []
         var answeredSessionIDs: [(String, [String: [String]])] = []
+        var sentInputs: [(SessionProvider, String, String)] = []
+        var continuedSessions: [(SessionProvider, String, String?, String)] = []
 
         func markManaged(_ sessionID: String) {
             managedSessionIDs.insert(sessionID)
@@ -23,6 +25,14 @@ final class SessionMonitorNativeRuntimeTests: XCTestCase {
 
         func answers() -> [(String, [String: [String]])] {
             answeredSessionIDs
+        }
+
+        func userInputs() -> [(SessionProvider, String, String)] {
+            sentInputs
+        }
+
+        func continuations() -> [(SessionProvider, String, String?, String)] {
+            continuedSessions
         }
 
         func start() async {}
@@ -48,7 +58,10 @@ final class SessionMonitorNativeRuntimeTests: XCTestCase {
         }
 
         func terminateSession(provider: SessionProvider, sessionID: String) async throws {}
-        func sendUserInput(provider: SessionProvider, sessionID: String, text: String) async throws {}
+
+        func sendUserInput(provider: SessionProvider, sessionID: String, text: String) async throws {
+            sentInputs.append((provider, sessionID, text))
+        }
 
         func approveSession(provider: SessionProvider, sessionID: String, forSession: Bool) async throws {
             approvedSessionIDs.append((sessionID, forSession))
@@ -61,7 +74,10 @@ final class SessionMonitorNativeRuntimeTests: XCTestCase {
         func answerSession(provider: SessionProvider, sessionID: String, answers: [String : [String]]) async throws {
             answeredSessionIDs.append((sessionID, answers))
         }
-        func continueSession(provider: SessionProvider, sessionID: String, expectedTurnId: String?, text: String) async throws {}
+
+        func continueSession(provider: SessionProvider, sessionID: String, expectedTurnId: String?, text: String) async throws {
+            continuedSessions.append((provider, sessionID, expectedTurnId, text))
+        }
 
         func managesNativeSession(sessionID: String, provider: SessionProvider?) async -> Bool {
             managedSessionIDs.contains(sessionID)
@@ -270,6 +286,69 @@ final class SessionMonitorNativeRuntimeTests: XCTestCase {
         try? await Task.sleep(nanoseconds: 100_000_000)
         let denials = await runtimeCoordinator.denials()
         XCTAssertEqual(denials, [sessionID])
+
+        await SessionStore.shared.process(.sessionArchived(sessionId: sessionID))
+    }
+
+    func testSendSessionMessageUsesNativeRuntimeInputForClaudeSession() async throws {
+        let runtimeCoordinator = StubRuntimeCoordinator()
+        let monitor = SessionMonitor(runtimeCoordinator: runtimeCoordinator)
+        let sessionID = "native-send-claude-\(UUID().uuidString)"
+
+        await SessionStore.shared.process(.runtimeSessionStarted(
+            SessionRuntimeHandle(
+                sessionID: sessionID,
+                provider: .claude,
+                cwd: "/tmp/native-send-claude",
+                createdAt: Date(),
+                resumeToken: nil,
+                runtimeIdentifier: "stub",
+                sessionFilePath: nil
+            )
+        ))
+        await runtimeCoordinator.markManaged(sessionID)
+
+        try await monitor.sendSessionMessage(sessionId: sessionID, text: "追问一下")
+
+        let inputs = await runtimeCoordinator.userInputs()
+        XCTAssertEqual(inputs.count, 1)
+        XCTAssertEqual(inputs.first?.0, .claude)
+        XCTAssertEqual(inputs.first?.1, sessionID)
+        XCTAssertEqual(inputs.first?.2, "追问一下")
+
+        await SessionStore.shared.process(.sessionArchived(sessionId: sessionID))
+    }
+
+    func testSendSessionMessageUsesContinuationForNativeCodexSession() async throws {
+        let runtimeCoordinator = StubRuntimeCoordinator()
+        let monitor = SessionMonitor(runtimeCoordinator: runtimeCoordinator)
+        let sessionID = "native-send-codex-\(UUID().uuidString)"
+
+        await SessionStore.shared.process(.runtimeSessionStarted(
+            SessionRuntimeHandle(
+                sessionID: sessionID,
+                provider: .codex,
+                cwd: "/tmp/native-send-codex",
+                createdAt: Date(),
+                resumeToken: nil,
+                runtimeIdentifier: "stub",
+                sessionFilePath: nil
+            )
+        ))
+        await runtimeCoordinator.markManaged(sessionID)
+
+        try await monitor.sendSessionMessage(
+            sessionId: sessionID,
+            text: "继续这个思路",
+            expectedTurnId: "turn-123"
+        )
+
+        let continuations = await runtimeCoordinator.continuations()
+        XCTAssertEqual(continuations.count, 1)
+        XCTAssertEqual(continuations.first?.0, .codex)
+        XCTAssertEqual(continuations.first?.1, sessionID)
+        XCTAssertEqual(continuations.first?.2, "turn-123")
+        XCTAssertEqual(continuations.first?.3, "继续这个思路")
 
         await SessionStore.shared.process(.sessionArchived(sessionId: sessionID))
     }
