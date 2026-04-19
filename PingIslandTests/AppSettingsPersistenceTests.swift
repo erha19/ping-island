@@ -63,8 +63,9 @@ final class AppSettingsPersistenceTests: XCTestCase {
         )
 
         store.setShortcut(shortcut, for: .openSessionList)
+        let reloadedStore = AppSettingsStore(defaults: defaults)
 
-        XCTAssertEqual(AppSettingsStore(defaults: defaults).shortcut(for: .openSessionList), shortcut)
+        XCTAssertEqual(reloadedStore.shortcut(for: .openSessionList), shortcut)
         XCTAssertNotNil(defaults.data(forKey: key))
         XCTAssertNil(defaults.dictionary(forKey: key))
     }
@@ -76,8 +77,9 @@ final class AppSettingsPersistenceTests: XCTestCase {
         XCTAssertEqual(store.subagentVisibilityMode, .visible)
 
         store.subagentVisibilityMode = .visible
+        let reloadedStore = AppSettingsStore(defaults: defaults)
 
-        XCTAssertEqual(AppSettingsStore(defaults: defaults).subagentVisibilityMode, .visible)
+        XCTAssertEqual(reloadedStore.subagentVisibilityMode, .visible)
         XCTAssertEqual(defaults.string(forKey: "subagentVisibilityMode"), SubagentVisibilityMode.visible.rawValue)
         XCTAssertEqual(defaults.string(forKey: "codexSubagentVisibilityMode"), SubagentVisibilityMode.visible.rawValue)
     }
@@ -108,8 +110,9 @@ final class AppSettingsPersistenceTests: XCTestCase {
         XCTAssertTrue(store.autoOpenCompactedNotificationPanel)
 
         store.autoOpenCompactedNotificationPanel = false
+        let reloadedStore = AppSettingsStore(defaults: defaults)
 
-        XCTAssertFalse(AppSettingsStore(defaults: defaults).autoOpenCompactedNotificationPanel)
+        XCTAssertFalse(reloadedStore.autoOpenCompactedNotificationPanel)
         XCTAssertEqual(defaults.object(forKey: "autoOpenCompactedNotificationPanel") as? Bool, false)
     }
 }
