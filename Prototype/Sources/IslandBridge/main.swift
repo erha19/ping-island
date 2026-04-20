@@ -2,6 +2,8 @@ import Foundation
 import IslandShared
 #if canImport(Darwin)
 import Darwin
+#elseif canImport(Musl)
+import Musl
 #elseif canImport(Glibc)
 import Glibc
 #endif
@@ -9,6 +11,9 @@ import Glibc
 #if canImport(Darwin)
 private let islandStreamSocketType: Int32 = SOCK_STREAM
 private let islandShutdownWrite: Int32 = SHUT_WR
+#elseif canImport(Musl)
+private let islandStreamSocketType: Int32 = Int32(SOCK_STREAM)
+private let islandShutdownWrite: Int32 = Int32(SHUT_WR)
 #elseif canImport(Glibc)
 private let islandStreamSocketType: Int32 = Int32(SOCK_STREAM.rawValue)
 private let islandShutdownWrite: Int32 = Int32(SHUT_WR)
