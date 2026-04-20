@@ -1055,6 +1055,7 @@ private struct SettingsPanelContentView: View {
             .padding(.bottom, 24)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .id(currentCategory)
         .accessibilityIdentifier("settings.detail.\(currentCategory.rawValue)")
         .background(
             UnevenRoundedRectangle(
