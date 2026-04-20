@@ -1155,6 +1155,13 @@ private struct SettingsPanelContentView: View {
                 SettingsLineDivider()
 
                 SettingsToggleLine(
+                    title: "无活跃会话时自动隐藏",
+                    subtitle: "当前没有正在运行或需要处理的会话时，自动隐藏 Island",
+                    isOn: $settings.autoHideWhenIdle
+                )
+                SettingsLineDivider()
+
+                SettingsToggleLine(
                     title: "智能抑制",
                     subtitle: "当前正在看终端时，不自动弹出通知面板",
                     isOn: $settings.smartSuppression
