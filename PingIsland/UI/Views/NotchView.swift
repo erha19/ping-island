@@ -99,6 +99,15 @@ struct NotchView: View {
         countedClosedSessions.count
     }
 
+    private var shouldHideForIdleState: Bool {
+        settings.autoHideWhenIdle
+            && activeSessions.isEmpty
+            && !hasPendingPermission
+            && !hasHumanIntervention
+            && !hasCompletedReadyState
+            && activeCompletionNotification == nil
+    }
+
     /// Most recently active live session that has a hook message we can surface in the compact notch.
     private var latestHookMessageSession: SessionState? {
         latestHookMessageSession(from: sessionMonitor.instances)
@@ -295,7 +304,8 @@ struct NotchView: View {
         presentedBody
             .onAppear {
                 sessionMonitor.startMonitoring()
-                isVisible = !viewModel.shouldHideClosedPresentation
+                viewModel.updateIdleAutoHiddenState(hasVisibleSessionActivity: !shouldHideForIdleState)
+                isVisible = !viewModel.shouldHideWindowPresentation
                 viewModel.setManualAttentionActive(hasManualAttentionIndicator)
                 refreshLastVisibleMascotClient(from: sessionMonitor.instances)
                 handleProcessingChange()
@@ -336,6 +346,9 @@ struct NotchView: View {
                     viewModel.exitChat()
                 }
             }
+            .onChange(of: settings.autoHideWhenIdle) { _, _ in
+                handleProcessingChange()
+            }
     }
 
     private var instrumentedBody: some View {
@@ -360,6 +373,20 @@ struct NotchView: View {
             }
             .onChange(of: viewModel.isFullscreenEdgeRevealActive) { _, isActive in
                 if isActive && viewModel.status != .opened {
+                    isVisible = false
+                } else {
+                    handleProcessingChange()
+                }
+            }
+            .onChange(of: viewModel.isFullscreenBrowserHiddenActive) { _, isActive in
+                if isActive {
+                    isVisible = false
+                } else {
+                    handleProcessingChange()
+                }
+            }
+            .onChange(of: viewModel.isIdleAutoHiddenActive) { _, isHidden in
+                if isHidden && viewModel.status != .opened {
                     isVisible = false
                 } else {
                     handleProcessingChange()
@@ -673,8 +700,10 @@ struct NotchView: View {
     // MARK: - Event Handlers
 
     private func handleProcessingChange() {
-        if viewModel.shouldHideClosedPresentation {
-            isVisible = viewModel.status == .opened
+        viewModel.updateIdleAutoHiddenState(hasVisibleSessionActivity: !shouldHideForIdleState)
+
+        if viewModel.shouldHideWindowPresentation {
+            isVisible = false
             return
         }
 
@@ -703,7 +732,7 @@ struct NotchView: View {
                 clearCompletionNotifications(keepPanelOpen: true)
             }
         case .closed:
-            isVisible = !viewModel.shouldHideClosedPresentation
+            isVisible = !viewModel.shouldHideWindowPresentation
             maybePresentNextCompletionNotification()
         }
     }

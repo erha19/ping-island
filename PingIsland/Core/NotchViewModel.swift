@@ -46,6 +46,8 @@ class NotchViewModel: ObservableObject {
     @Published private(set) var openedMeasuredHeight: CGFloat?
     @Published private(set) var isFullscreenEdgeRevealActive = false
     @Published private(set) var isFullscreenPhysicalNotchCompactActive = false
+    @Published private(set) var isFullscreenBrowserHiddenActive = false
+    @Published private(set) var isIdleAutoHiddenActive = false
     @Published private(set) var isSettingsPopoverPresented = false
 
     // MARK: - Geometry
@@ -157,7 +159,9 @@ class NotchViewModel: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     private let events: EventMonitors?
     private let fullscreenActivityProvider: @MainActor (CGRect) -> Bool
+    private let fullscreenBrowserHiddenProvider: @MainActor (CGRect) -> Bool
     private let hideInFullscreenProvider: @MainActor () -> Bool
+    private let autoHideWhenIdleProvider: @MainActor () -> Bool
     private var hoverTimer: DispatchWorkItem?
     // Keep hover previews feeling responsive without making incidental cursor
     // passes over the notch expand it too aggressively.
@@ -179,6 +183,8 @@ class NotchViewModel: ObservableObject {
         observeSystemEnvironment: Bool = true,
         fullscreenActivityProvider: @escaping @MainActor (CGRect) -> Bool = FullscreenAppDetector.isFullscreenAppActive,
         hideInFullscreenProvider: @escaping @MainActor () -> Bool = { AppSettings.hideInFullscreen },
+        fullscreenBrowserHiddenProvider: @escaping @MainActor (CGRect) -> Bool = FullscreenAppDetector.isFullscreenBrowserActive,
+        autoHideWhenIdleProvider: @escaping @MainActor () -> Bool = { AppSettings.autoHideWhenIdle },
         fullscreenStateSettleDelay: TimeInterval = 0.18
     ) {
         self.geometry = NotchGeometry(
@@ -193,7 +199,9 @@ class NotchViewModel: ObservableObject {
         )
         self.events = enableEventMonitoring ? EventMonitors.shared : nil
         self.fullscreenActivityProvider = fullscreenActivityProvider
+        self.fullscreenBrowserHiddenProvider = fullscreenBrowserHiddenProvider
         self.hideInFullscreenProvider = hideInFullscreenProvider
+        self.autoHideWhenIdleProvider = autoHideWhenIdleProvider
         self.fullscreenStateSettleDelay = fullscreenStateSettleDelay
         if enableEventMonitoring {
             setupEventHandlers()
@@ -225,6 +233,12 @@ class NotchViewModel: ObservableObject {
             }
             .store(in: &cancellables)
 
+        AppSettings.shared.$autoHideWhenIdle
+            .sink { [weak self] _ in
+                self?.objectWillChange.send()
+            }
+            .store(in: &cancellables)
+
         AppSettings.shared.$maxPanelHeight
             .sink { [weak self] _ in
                 self?.objectWillChange.send()
@@ -234,8 +248,13 @@ class NotchViewModel: ObservableObject {
 
     private func refreshFullscreenPresentationState() {
         let isFullscreenActive = fullscreenActivityProvider(screenRect)
+        let shouldHideForFullscreenBrowser = fullscreenBrowserHiddenProvider(screenRect)
         let shouldUseEdgeReveal = shouldUseFullscreenEdgeReveal(isFullscreenActive: isFullscreenActive)
         let shouldUsePhysicalNotchCompact = shouldUsePhysicalNotchCompact(isFullscreenActive: isFullscreenActive)
+
+        if shouldHideForFullscreenBrowser != isFullscreenBrowserHiddenActive {
+            isFullscreenBrowserHiddenActive = shouldHideForFullscreenBrowser
+        }
 
         applyPhysicalNotchFullscreenState(shouldUsePhysicalNotchCompact)
 
@@ -243,6 +262,15 @@ class NotchViewModel: ObservableObject {
         isFullscreenEdgeRevealActive = shouldUseEdgeReveal
 
         if shouldUseEdgeReveal {
+            hoverTimer?.cancel()
+            hoverTimer = nil
+            isHovering = false
+            if status == .opened {
+                notchClose()
+            }
+        }
+
+        if shouldHideForFullscreenBrowser {
             hoverTimer?.cancel()
             hoverTimer = nil
             isHovering = false
@@ -288,7 +316,10 @@ class NotchViewModel: ObservableObject {
     }
 
     private func shouldUsePhysicalNotchCompact(isFullscreenActive: Bool) -> Bool {
-        hideInFullscreenProvider() && hasPhysicalNotch && isFullscreenActive
+        hideInFullscreenProvider()
+            && hasPhysicalNotch
+            && isFullscreenActive
+            && !isFullscreenBrowserHiddenActive
     }
 
     // MARK: - Event Handling
@@ -386,16 +417,29 @@ class NotchViewModel: ObservableObject {
         isFullscreenEdgeRevealActive ? fullscreenHoverActivationDelay : defaultHoverActivationDelay
     }
 
+    var shouldHideWindowPresentation: Bool {
+        if isFullscreenBrowserHiddenActive {
+            return true
+        }
+        if isFullscreenEdgeRevealActive && status != .opened {
+            return true
+        }
+        if isIdleAutoHiddenActive && status != .opened {
+            return true
+        }
+        return false
+    }
+
     var shouldHideClosedPresentation: Bool {
-        isFullscreenEdgeRevealActive && status != .opened
+        shouldHideWindowPresentation
     }
 
     var shouldSuppressAutomaticPresentation: Bool {
-        isFullscreenEdgeRevealActive && status != .opened
+        isFullscreenBrowserHiddenActive || (isFullscreenEdgeRevealActive && status != .opened)
     }
 
     var closedPresentationOffsetY: CGFloat {
-        shouldHideClosedPresentation ? -(closedHeight + 12) : 0
+        shouldHideWindowPresentation ? -(closedHeight + 12) : 0
     }
 
     func isPointInHoverTrigger(_ point: CGPoint) -> Bool {
@@ -407,6 +451,13 @@ class NotchViewModel: ObservableObject {
 
     private func isPointInClosedNotch(_ point: CGPoint) -> Bool {
         closedScreenRect.insetBy(dx: -10, dy: -5).contains(point)
+    }
+
+    func updateIdleAutoHiddenState(hasVisibleSessionActivity: Bool) {
+        let shouldHide = autoHideWhenIdleProvider() && !hasVisibleSessionActivity
+        if shouldHide != isIdleAutoHiddenActive {
+            isIdleAutoHiddenActive = shouldHide
+        }
     }
 
     private var fullscreenRevealTriggerRect: CGRect {

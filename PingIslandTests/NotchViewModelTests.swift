@@ -210,6 +210,51 @@ final class NotchViewModelTests: XCTestCase {
         }
     }
 
+    func testFullscreenBrowserHidesWindowPresentationEvenOnPhysicalNotch() async {
+        let viewModel = await MainActor.run {
+            NotchViewModel(
+                deviceNotchRect: CGRect(x: 0, y: 0, width: 220, height: 38),
+                screenRect: CGRect(x: 0, y: 0, width: 1512, height: 982),
+                windowHeight: 320,
+                hasPhysicalNotch: true,
+                enableEventMonitoring: false,
+                observeSystemEnvironment: false,
+                fullscreenActivityProvider: { _ in true },
+                fullscreenBrowserHiddenProvider: { _ in true }
+            )
+        }
+
+        await MainActor.run {
+            XCTAssertTrue(viewModel.isFullscreenBrowserHiddenActive)
+            XCTAssertTrue(viewModel.shouldHideWindowPresentation)
+            XCTAssertTrue(viewModel.shouldSuppressAutomaticPresentation)
+        }
+    }
+
+    func testIdleAutoHideTracksVisibleSessionActivity() async {
+        let viewModel = await MainActor.run {
+            NotchViewModel(
+                deviceNotchRect: .zero,
+                screenRect: CGRect(x: 0, y: 0, width: 1440, height: 900),
+                windowHeight: 320,
+                hasPhysicalNotch: false,
+                enableEventMonitoring: false,
+                observeSystemEnvironment: false,
+                autoHideWhenIdleProvider: { true }
+            )
+        }
+
+        await MainActor.run {
+            viewModel.updateIdleAutoHiddenState(hasVisibleSessionActivity: false)
+            XCTAssertTrue(viewModel.isIdleAutoHiddenActive)
+            XCTAssertTrue(viewModel.shouldHideWindowPresentation)
+
+            viewModel.updateIdleAutoHiddenState(hasVisibleSessionActivity: true)
+            XCTAssertFalse(viewModel.isIdleAutoHiddenActive)
+            XCTAssertFalse(viewModel.shouldHideWindowPresentation)
+        }
+    }
+
     func testToggleChatClosesWhenSameSessionIsAlreadyVisible() async {
         await MainActor.run {
             let viewModel = makeViewModel()

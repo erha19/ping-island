@@ -1055,6 +1055,7 @@ private struct SettingsPanelContentView: View {
             .padding(.bottom, 24)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .id(currentCategory)
         .accessibilityIdentifier("settings.detail.\(currentCategory.rawValue)")
         .background(
             UnevenRoundedRectangle(
@@ -1151,6 +1152,13 @@ private struct SettingsPanelContentView: View {
                     title: "全屏时隐藏",
                     subtitle: "无刘海屏会在全屏时收起到顶部中央触发区；刘海屏会收缩为空白系统刘海，hover 后再展示 Island 内容",
                     isOn: $settings.hideInFullscreen
+                )
+                SettingsLineDivider()
+
+                SettingsToggleLine(
+                    title: "无活跃会话时自动隐藏",
+                    subtitle: "当前没有正在运行或需要处理的会话时，自动隐藏 Island",
+                    isOn: $settings.autoHideWhenIdle
                 )
                 SettingsLineDivider()
 

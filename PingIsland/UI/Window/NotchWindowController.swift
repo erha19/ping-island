@@ -90,6 +90,22 @@ class NotchWindowController: NSWindowController {
             }
             .store(in: &cancellables)
 
+        viewModel.$isFullscreenBrowserHiddenActive
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self, weak notchWindow, weak viewModel] _ in
+                guard let self, let notchWindow, let viewModel else { return }
+                self.updateWindowPresentation(window: notchWindow, viewModel: viewModel)
+            }
+            .store(in: &cancellables)
+
+        viewModel.$isIdleAutoHiddenActive
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self, weak notchWindow, weak viewModel] _ in
+                guard let self, let notchWindow, let viewModel else { return }
+                self.updateWindowPresentation(window: notchWindow, viewModel: viewModel)
+            }
+            .store(in: &cancellables)
+
         // Start with ignoring mouse events (closed state)
         notchWindow.ignoresMouseEvents = true
         updateWindowPresentation(window: notchWindow, viewModel: viewModel)
@@ -105,7 +121,7 @@ class NotchWindowController: NSWindowController {
     }
 
     private func updateWindowPresentation(window: NotchPanel, viewModel: NotchViewModel) {
-        let shouldHideWindow = viewModel.shouldHideClosedPresentation
+        let shouldHideWindow = viewModel.shouldHideWindowPresentation
 
         if shouldHideWindow {
             window.ignoresMouseEvents = true

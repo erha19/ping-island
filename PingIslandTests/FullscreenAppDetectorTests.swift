@@ -25,4 +25,11 @@ final class FullscreenAppDetectorTests: XCTestCase {
             )
         )
     }
+
+    func testRecognizesBrowserBundleIdentifiers() {
+        XCTAssertTrue(FullscreenAppDetector.isBrowserBundleIdentifier("com.google.Chrome"))
+        XCTAssertTrue(FullscreenAppDetector.isBrowserBundleIdentifier("com.apple.Safari"))
+        XCTAssertTrue(FullscreenAppDetector.isBrowserBundleIdentifier("com.microsoft.edgemac"))
+        XCTAssertFalse(FullscreenAppDetector.isBrowserBundleIdentifier("com.openai.codex"))
+    }
 }
