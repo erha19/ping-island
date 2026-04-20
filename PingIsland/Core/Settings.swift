@@ -453,12 +453,23 @@ final class AppSettingsStore: ObservableObject {
     var subagentVisibilityMode: SubagentVisibilityMode {
         get { subagentVisibilityModeStorage }
         set {
-            guard subagentVisibilityModeStorage != newValue else { return }
-            objectWillChange.send()
-            subagentVisibilityModeStorage = newValue
+            let shouldUpdatePublishedState = subagentVisibilityModeStorage != newValue
+            if shouldUpdatePublishedState {
+                objectWillChange.send()
+                subagentVisibilityModeStorage = newValue
+            }
+
             guard !isBootstrapping else { return }
-            defaults.set(newValue.rawValue, forKey: Keys.subagentVisibilityMode)
-            defaults.set(newValue.rawValue, forKey: Keys.legacyCodexSubagentVisibilityMode)
+
+            let persistedValue = newValue.rawValue
+            let primaryStoredValue = defaults.string(forKey: Keys.subagentVisibilityMode)
+            let legacyStoredValue = defaults.string(forKey: Keys.legacyCodexSubagentVisibilityMode)
+            guard shouldUpdatePublishedState
+                    || primaryStoredValue != persistedValue
+                    || legacyStoredValue != persistedValue else { return }
+
+            defaults.set(persistedValue, forKey: Keys.subagentVisibilityMode)
+            defaults.set(persistedValue, forKey: Keys.legacyCodexSubagentVisibilityMode)
         }
     }
 
