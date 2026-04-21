@@ -135,11 +135,20 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
     }
 
     nonisolated func resolvedProfile(for provider: SessionProvider) -> SessionClientProfile? {
-        ClientProfileRegistry.runtimeProfile(id: profileID)
+        if let inferredProfileID {
+            return ClientProfileRegistry.runtimeProfile(id: inferredProfileID)
+        }
+
+        return ClientProfileRegistry.runtimeProfile(id: profileID)
             ?? ClientProfileRegistry.defaultRuntimeProfile(for: provider, kind: kind)
     }
 
     nonisolated var brand: SessionClientBrand {
+        if let inferredProfileID,
+           let profile = ClientProfileRegistry.runtimeProfile(id: inferredProfileID) {
+            return profile.brand
+        }
+
         if let profile = ClientProfileRegistry.runtimeProfile(id: profileID) {
             return profile.brand
         }
@@ -157,10 +166,7 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
     }
 
     nonisolated var isOpenClawGatewayClient: Bool {
-        profileID == "openclaw"
-            || threadSource?.lowercased() == "openclaw-hooks"
-            || name?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "openclaw"
-            || originator?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "openclaw"
+        inferredProfileID == "openclaw"
     }
 
     nonisolated var isQwenCodeClient: Bool {
@@ -191,6 +197,10 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
 
     nonisolated func badgeLabel(for provider: SessionProvider) -> String {
         let profile = resolvedProfile(for: provider)
+        if let inferredProfileID,
+           let inferredProfile = ClientProfileRegistry.runtimeProfile(id: inferredProfileID) {
+            return inferredProfile.displayName
+        }
         if provider == .codex,
            kind == .codexCLI,
            let terminalSourceDisplayName {
@@ -206,6 +216,11 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
     }
 
     nonisolated func subagentClientTypeLabel(for provider: SessionProvider) -> String {
+        if let inferredProfileID,
+           let inferredProfile = ClientProfileRegistry.runtimeProfile(id: inferredProfileID) {
+            return inferredProfile.displayName
+        }
+
         if provider == .codex {
             return provider.displayName
         }
@@ -311,6 +326,10 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
     }
 
     nonisolated var ideHostProfile: ManagedIDEExtensionProfile? {
+        if inferredProfileID == "openclaw" {
+            return nil
+        }
+
         let detectedBundleIdentifier = terminalBundleIdentifier ?? bundleIdentifier
         let appName: String?
         if let detectedBundleIdentifier,
@@ -431,6 +450,30 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
         }
 
         return normalized
+    }
+
+    private nonisolated var inferredProfileID: String? {
+        let normalizedThreadSource = threadSource?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        let normalizedName = name?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        let normalizedOriginator = originator?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        let normalizedSessionFilePath = sessionFilePath?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+
+        if normalizedThreadSource == "openclaw-hooks"
+            || normalizedName == "openclaw"
+            || normalizedOriginator == "openclaw"
+            || normalizedSessionFilePath?.contains("/.openclaw/") == true {
+            return "openclaw"
+        }
+
+        return nil
     }
 
     nonisolated func normalizedForClaudeRouting() -> SessionClientInfo {

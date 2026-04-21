@@ -115,6 +115,31 @@ final class OpenCodeIntegrationTests: XCTestCase {
         XCTAssertEqual(session.lastMessage, "second hi")
     }
 
+    func testOpenClawSessionFilePathWinsOverCursorHostForClientIdentity() {
+        let clientInfo = SessionClientInfo(
+            kind: .custom,
+            profileID: "cursor",
+            name: "Cursor",
+            bundleIdentifier: "com.todesktop.230313mzl4w4u92",
+            originator: "Cursor",
+            sessionFilePath: NSHomeDirectory() + "/.openclaw/agents/main/sessions/openclaw-session.jsonl",
+            terminalBundleIdentifier: "com.todesktop.230313mzl4w4u92"
+        )
+        let session = SessionState(
+            sessionId: "openclaw-via-cursor",
+            cwd: "/Users/ping-island/Island",
+            projectName: "Island",
+            provider: .claude,
+            clientInfo: clientInfo
+        )
+
+        XCTAssertTrue(clientInfo.isOpenClawGatewayClient)
+        XCTAssertEqual(clientInfo.resolvedProfile(for: SessionProvider.claude)?.id, "openclaw")
+        XCTAssertEqual(clientInfo.badgeLabel(for: SessionProvider.claude), "OpenClaw")
+        XCTAssertEqual(MascotClient(clientInfo: clientInfo, provider: SessionProvider.claude), .openclaw)
+        XCTAssertTrue(session.shouldHideProjectContextInUI)
+    }
+
     func testOpenClawConversationParserReadsMultiTurnSessionFile() async throws {
         let root = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
