@@ -888,14 +888,11 @@ final class RemoteConnectorManager: ObservableObject {
         logger.notice(
             "Remote agent ensure/start endpoint=\(endpoint.id.uuidString, privacy: .public) target=\(endpoint.sshTarget, privacy: .public) controlSocket=\(endpoint.remoteControlSocketPath, privacy: .public)"
         )
-        let command = """
-        mkdir -p \(quoted(endpoint.remoteInstallRoot))/run \(quoted(endpoint.remoteInstallRoot))/logs
-        if [ -S \(quoted(endpoint.remoteControlSocketPath)) ]; then
-          exit 0
-        fi
-        nohup \(quoted(endpoint.remoteInstallRoot))/bin/ping-island-bridge --mode remote-agent-service --hook-socket \(quoted(endpoint.remoteHookSocketPath)) --control-socket \(quoted(endpoint.remoteControlSocketPath)) > \(quoted(endpoint.remoteInstallRoot))/logs/remote-agent.log 2>&1 &
-        sleep 1
-        """
+        let command = Self.remoteEnsureAgentRunningCommand(
+            installRoot: endpoint.remoteInstallRoot,
+            controlSocketPath: endpoint.remoteControlSocketPath,
+            hookSocketPath: endpoint.remoteHookSocketPath
+        )
         _ = try await RemoteSSHCommandRunner.runSSH(
             target: endpoint.sshTarget,
             port: endpoint.sshPort,
@@ -1243,6 +1240,24 @@ final class RemoteConnectorManager: ObservableObject {
         pkill -f \(shellQuote(agentPattern)) >/dev/null 2>&1 || true
         sleep 1
         rm -f \(shellQuote(controlSocketPath)) \(shellQuote(hookSocketPath)) \(shellQuote("\(installRoot)/bin/PingIslandBridge.tmp"))
+        """
+    }
+
+    nonisolated static func remoteEnsureAgentRunningCommand(
+        installRoot: String,
+        controlSocketPath: String,
+        hookSocketPath: String
+    ) -> String {
+        let servicePattern = "\(installRoot)/bin/[P]ingIslandBridge --mode remote-agent-service"
+        return """
+        mkdir -p \(shellQuote("\(installRoot)/run")) \(shellQuote("\(installRoot)/logs"))
+        if [ -S \(shellQuote(controlSocketPath)) ] && pgrep -f \(shellQuote(servicePattern)) >/dev/null 2>&1; then
+          exit 0
+        fi
+        pkill -f \(shellQuote(servicePattern)) >/dev/null 2>&1 || true
+        rm -f \(shellQuote(controlSocketPath)) \(shellQuote(hookSocketPath))
+        nohup \(shellQuote("\(installRoot)/bin/ping-island-bridge")) --mode remote-agent-service --hook-socket \(shellQuote(hookSocketPath)) --control-socket \(shellQuote(controlSocketPath)) > \(shellQuote("\(installRoot)/logs/remote-agent.log")) 2>&1 &
+        sleep 1
         """
     }
 

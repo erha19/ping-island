@@ -27,6 +27,20 @@ final class RemoteHookConfigurationTests: XCTestCase {
         XCTAssertTrue(command.contains("chmod 755 '/root/.ping-island/bin/PingIslandBridge' '/root/.ping-island/bin/ping-island-bridge'"))
     }
 
+    func testRemoteEnsureAgentRunningCommandReplacesStaleSocketStateBeforeRestart() {
+        let command = RemoteConnectorManager.remoteEnsureAgentRunningCommand(
+            installRoot: "/root/.ping-island",
+            controlSocketPath: "/root/.ping-island/run/agent-control.sock",
+            hookSocketPath: "/root/.ping-island/run/agent-hook.sock"
+        )
+
+        XCTAssertTrue(command.contains("mkdir -p '/root/.ping-island/run' '/root/.ping-island/logs'"))
+        XCTAssertTrue(command.contains("if [ -S '/root/.ping-island/run/agent-control.sock' ] && pgrep -f '/root/.ping-island/bin/[P]ingIslandBridge --mode remote-agent-service' >/dev/null 2>&1; then"))
+        XCTAssertTrue(command.contains("pkill -f '/root/.ping-island/bin/[P]ingIslandBridge --mode remote-agent-service' >/dev/null 2>&1 || true"))
+        XCTAssertTrue(command.contains("rm -f '/root/.ping-island/run/agent-control.sock' '/root/.ping-island/run/agent-hook.sock'"))
+        XCTAssertTrue(command.contains("nohup '/root/.ping-island/bin/ping-island-bridge' --mode remote-agent-service --hook-socket '/root/.ping-island/run/agent-hook.sock' --control-socket '/root/.ping-island/run/agent-control.sock' > '/root/.ping-island/logs/remote-agent.log' 2>&1 &"))
+    }
+
     func testRemoteBootstrapUninstallCommandStopsBridgeAndRemovesInstallRoot() {
         let command = RemoteConnectorManager.remoteBootstrapUninstallCommand(
             installRoot: "/root/.ping-island",
