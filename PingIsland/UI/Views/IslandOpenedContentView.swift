@@ -39,6 +39,7 @@ struct IslandOpenedContentView: View {
             case .completionNotification(let notification):
                 SessionCompletionNotificationView(
                     notification: liveNotification(notification),
+                    presentationStyle: style == .detached ? .bubble : .panel,
                     onHoverChanged: onCompletionNotificationHoverChanged,
                     onDismiss: onDismissCompletionNotification
                 )

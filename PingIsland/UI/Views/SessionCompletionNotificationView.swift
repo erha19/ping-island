@@ -145,11 +145,24 @@ struct SessionCompletionNotificationView: View {
     static let maximumAssistantContentHeight: CGFloat = 300
 
     let notification: SessionCompletionNotification
+    let presentationStyle: SessionCompletionNotificationPresentationStyle
     let onHoverChanged: (Bool) -> Void
     let onDismiss: () -> Void
 
     @ObservedObject private var settings = AppSettings.shared
     @State private var measuredAssistantContentHeight: CGFloat = 0
+
+    init(
+        notification: SessionCompletionNotification,
+        presentationStyle: SessionCompletionNotificationPresentationStyle = .panel,
+        onHoverChanged: @escaping (Bool) -> Void,
+        onDismiss: @escaping () -> Void
+    ) {
+        self.notification = notification
+        self.presentationStyle = presentationStyle
+        self.onHoverChanged = onHoverChanged
+        self.onDismiss = onDismiss
+    }
 
     private var session: SessionState { notification.session }
 
@@ -240,49 +253,93 @@ struct SessionCompletionNotificationView: View {
         .padding(.vertical, 14)
     }
 
+    private var containerCornerRadius: CGFloat { 16 }
+
+    @ViewBuilder
+    private var contentCard: some View {
+        let content = VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Text(appLocalized: "你：")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.48))
+
+                Text(userText ?? session.titleOnlySubagentDisplayTitle)
+                    .font(.system(size: bodyFontSize, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.88))
+                    .lineLimit(2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                Text(AppLocalization.string(notification.kind.statusLabelKey))
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundColor(.white.opacity(0.5))
+                    .fixedSize()
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
+
+            Rectangle()
+                .fill(Color.white.opacity(0.05))
+                .frame(height: 1)
+
+            assistantSection
+        }
+
+        switch presentationStyle {
+        case .panel:
+            content
+                .background(
+                    RoundedRectangle(cornerRadius: containerCornerRadius, style: .continuous)
+                        .fill(Color.white.opacity(0.055))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: containerCornerRadius, style: .continuous)
+                                .strokeBorder(Color.white.opacity(0.06), lineWidth: 1)
+                        )
+                )
+        case .bubble:
+            content
+        }
+    }
+
+    private var outerHorizontalPadding: CGFloat {
+        switch presentationStyle {
+        case .panel:
+            return 14
+        case .bubble:
+            return 0
+        }
+    }
+
+    private var outerTopPadding: CGFloat {
+        switch presentationStyle {
+        case .panel:
+            return 8
+        case .bubble:
+            return 0
+        }
+    }
+
+    private var outerBottomPadding: CGFloat {
+        switch presentationStyle {
+        case .panel:
+            return 12
+        case .bubble:
+            return 0
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            VStack(alignment: .leading, spacing: 0) {
-                HStack(alignment: .firstTextBaseline, spacing: 10) {
-                    Text(appLocalized: "你：")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(.white.opacity(0.48))
-
-                    Text(userText ?? session.titleOnlySubagentDisplayTitle)
-                        .font(.system(size: bodyFontSize, weight: .semibold))
-                        .foregroundColor(.white.opacity(0.88))
-                        .lineLimit(2)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-
-                    Text(AppLocalization.string(notification.kind.statusLabelKey))
-                        .font(.system(size: 13, weight: .bold))
-                        .foregroundColor(.white.opacity(0.5))
-                        .fixedSize()
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 14)
-
-                Rectangle()
-                    .fill(Color.white.opacity(0.05))
-                    .frame(height: 1)
-
-                assistantSection
-            }
-            .background(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(Color.white.opacity(0.055))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .strokeBorder(Color.white.opacity(0.06), lineWidth: 1)
-                    )
-            )
-
+            contentCard
         }
-        .padding(.horizontal, 14)
-        .padding(.top, 8)
-        .padding(.bottom, 12)
+        .padding(.horizontal, outerHorizontalPadding)
+        .padding(.top, outerTopPadding)
+        .padding(.bottom, outerBottomPadding)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .contentShape(
+            presentationStyle == .bubble
+                ? AnyShape(Rectangle())
+                : AnyShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        )
         .onPreferenceChange(SessionCompletionContentHeightPreferenceKey.self) { height in
             guard height > 0 else { return }
             measuredAssistantContentHeight = height
@@ -297,4 +354,9 @@ struct SessionCompletionNotificationView: View {
             onDismiss()
         }
     }
+}
+
+enum SessionCompletionNotificationPresentationStyle: Equatable {
+    case panel
+    case bubble
 }
