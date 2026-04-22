@@ -348,13 +348,16 @@ final class NotchViewModelTests: XCTestCase {
             let initialWidth = viewModel.closedWidth
 
             XCTAssertFalse(viewModel.isDetachmentNarrowingClosedNotch)
+            XCTAssertFalse(viewModel.isDetachmentGestureActive)
             viewModel.beginDockedDetachmentTrackingForTesting()
 
             XCTAssertTrue(viewModel.isDetachmentNarrowingClosedNotch)
+            XCTAssertTrue(viewModel.isDetachmentGestureActive)
             XCTAssertLessThan(viewModel.closedWidth, initialWidth)
 
             viewModel.cancelDockedDetachmentTrackingForTesting()
             XCTAssertFalse(viewModel.isDetachmentNarrowingClosedNotch)
+            XCTAssertFalse(viewModel.isDetachmentGestureActive)
             XCTAssertEqual(viewModel.closedWidth, initialWidth)
         }
     }

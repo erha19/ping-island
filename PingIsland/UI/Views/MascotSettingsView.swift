@@ -264,6 +264,8 @@ private struct StatusRow: View {
             return .green
         case .warning:
             return .orange
+        case .dragging:
+            return .purple
         }
     }
 }

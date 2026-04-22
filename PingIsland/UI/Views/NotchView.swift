@@ -191,7 +191,10 @@ struct NotchView: View {
     }
 
     private var closedMascotStatus: MascotStatus {
-        MascotStatus.closedNotchStatus(
+        if viewModel.isDetachmentGestureActive {
+            return .dragging
+        }
+        return MascotStatus.closedNotchStatus(
             representativePhase: representativeClosedSession?.phase,
             hasPendingPermission: hasPendingPermission,
             hasHumanIntervention: hasHumanIntervention

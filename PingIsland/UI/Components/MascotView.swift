@@ -369,6 +369,8 @@ struct MascotView: View {
                 workingScene(time: animationTime)
             case .warning:
                 warningScene(time: animationTime)
+            case .dragging:
+                draggingScene(time: animationTime)
             }
         }
         .frame(width: size, height: size)
@@ -394,6 +396,10 @@ struct MascotView: View {
         }
     }
 
+    private func draggingScene(time: TimeInterval?) -> some View {
+        canvasScene(interval: 0.03, mode: .dragging, time: time)
+    }
+
     @ViewBuilder
     private func canvasScene(interval: TimeInterval, mode: MascotRenderMode, time: TimeInterval?) -> some View {
         if let time {
@@ -410,7 +416,13 @@ struct MascotView: View {
     }
 
     private func canvasFrame(time: TimeInterval, mode: MascotRenderMode) -> some View {
-        Canvas { graphicsContext, canvasSize in
+        let dragHover = CGFloat(sin(time * 6.4) * 2.8)
+        let dragTilt = Angle(degrees: Double(sin(time * 4.8) * 7.5))
+        let dragScaleX: CGFloat = mode == .dragging ? 1.06 : 1
+        let dragScaleY: CGFloat = mode == .dragging ? 0.94 : 1
+        let dragOffsetY: CGFloat = mode == .dragging ? (-size * 0.10 + dragHover) : 0
+
+        return Canvas { graphicsContext, canvasSize in
             drawMascot(
                 in: graphicsContext,
                 canvasSize: canvasSize,
@@ -419,6 +431,18 @@ struct MascotView: View {
             )
         }
         .frame(width: size, height: size)
+        .scaleEffect(x: dragScaleX, y: dragScaleY, anchor: .center)
+        .rotationEffect(mode == .dragging ? dragTilt : .zero)
+        .offset(y: dragOffsetY)
+        .overlay(alignment: .top) {
+            if mode == .dragging {
+                Capsule(style: .continuous)
+                    .fill(Color.white.opacity(0.30))
+                    .frame(width: size * 0.34, height: max(3, size * 0.06))
+                    .blur(radius: 1.2)
+                    .offset(y: size * 0.04)
+            }
+        }
     }
 
     private func drawMascot(
@@ -1177,6 +1201,10 @@ struct MascotView: View {
             wingLift = -0.25
             tailWag = 0.12
             headBob = -0.12
+        case .dragging:
+            wingLift = -0.35 + CGFloat(sin(time * 7.0) * 0.10)
+            tailWag = CGFloat(sin(time * 5.8) * 0.22)
+            headBob = CGFloat(cos(time * 5.4) * 0.08)
         }
 
         drawShadow(in: context, space: space, centerX: 9.0, y: 16.7, width: 8.7 - abs(motion.bounce) * 0.18, opacity: 0.2)
@@ -1582,7 +1610,17 @@ struct MascotView: View {
         context.fill(Path(space.rect(5.4 + motion.shake, 7.9 + motion.vertical, 1.9, 1.4)), with: .color(face))
         context.fill(Path(space.rect(8.8 + motion.shake, 7.9 + motion.vertical, 1.9, 1.4)), with: .color(face))
 
-        let eyeHeight: CGFloat = mode == .idle ? 0.4 : (mode == .warning ? 1.0 : blinkHeight(time: time, closedHeight: 0.2, openHeight: 1.0))
+        let eyeHeight: CGFloat
+        switch mode {
+        case .idle:
+            eyeHeight = 0.4
+        case .warning:
+            eyeHeight = 1.0
+        case .working:
+            eyeHeight = blinkHeight(time: time, closedHeight: 0.2, openHeight: 1.0)
+        case .dragging:
+            eyeHeight = 0.75
+        }
         context.fill(Path(space.rect(6.0 + motion.shake, 8.2 + motion.vertical, 0.75, eyeHeight)), with: .color(eye))
         context.fill(Path(space.rect(9.4 + motion.shake, 8.2 + motion.vertical, 0.75, eyeHeight)), with: .color(eye))
 
@@ -1632,6 +1670,15 @@ struct MascotView: View {
                 shake: shake,
                 squashX: squashX,
                 squashY: squashY
+            )
+        case .dragging:
+            let swing = CGFloat(sin(time * 4.6) * 0.35)
+            return MascotMotion(
+                vertical: -1.4 + CGFloat(sin(time * 6.4) * 0.18),
+                bounce: -1.1,
+                shake: swing,
+                squashX: 1.03,
+                squashY: 0.97
             )
         }
     }
@@ -1714,6 +1761,7 @@ private enum MascotRenderMode {
     case idle
     case working
     case warning
+    case dragging
 }
 
 private struct MascotMotion {

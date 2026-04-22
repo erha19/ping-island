@@ -242,6 +242,10 @@ class NotchViewModel: ObservableObject {
         presentationMode == .docked && detachmentTracking != nil && status != .opened
     }
 
+    var isDetachmentGestureActive: Bool {
+        presentationMode == .docked && detachmentTracking != nil
+    }
+
     // MARK: - Private
 
     private var cancellables = Set<AnyCancellable>()

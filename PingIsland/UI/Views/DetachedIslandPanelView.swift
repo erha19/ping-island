@@ -490,6 +490,7 @@ struct DetachedIslandPanelView: View {
     @ObservedObject var interactionModel: DetachedIslandInteractionModel
     @ObservedObject var bubbleViewState: DetachedIslandBubbleViewState
     @ObservedObject private var settings = AppSettings.shared
+    @State private var isPetDragging = false
 
     let onClose: () -> Void
     let onPetTap: () -> Void
@@ -538,7 +539,10 @@ struct DetachedIslandPanelView: View {
     }
 
     private var compactMascotStatus: MascotStatus {
-        MascotStatus.closedNotchStatus(
+        if isPetDragging {
+            return .dragging
+        }
+        return MascotStatus.closedNotchStatus(
             representativePhase: representativeSession?.phase,
             hasPendingPermission: sortedSessions.contains { $0.needsApprovalResponse },
             hasHumanIntervention: sortedSessions.contains { $0.intervention != nil }
@@ -604,9 +608,15 @@ struct DetachedIslandPanelView: View {
             mascotKind: compactMascotKind,
             mascotStatus: compactMascotStatus,
             onTap: onPetTap,
-            onDragStarted: onPetDragStarted,
+            onDragStarted: {
+                isPetDragging = true
+                onPetDragStarted()
+            },
             onDragChanged: onPetDragChanged,
-            onDragEnded: onPetDragEnded
+            onDragEnded: {
+                isPetDragging = false
+                onPetDragEnded()
+            }
         )
     }
 
