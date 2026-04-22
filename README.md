@@ -38,6 +38,18 @@
   <sub>Official website: <a href="https://erha19.github.io/ping-island/">erha19.github.io/ping-island</a></sub>
 </p>
 
+## New in 0.4.0: Pet Undocking
+
+<p align="center">
+  <img src="docs/images/ping-island-undocked-pet-feature.png" width="960" alt="Ping Island pet undocking feature demo">
+</p>
+
+Ping Island 0.4.0 introduced the pet-undocking feature: drag the mascot out of the notch and turn it into a floating desktop companion.
+
+- The floating pet stays near your active window instead of taking over the notch.
+- Hover or click it to open anchored bubbles for approvals, follow-ups, and session status.
+- Ping Island remembers the pet position and lets you right-click the mascot to reopen Settings.
+
 <p align="center">
   <img src="docs/images/mascots/claude.gif" width="36" alt="Claude mascot" title="Claude Code">&nbsp;
   <img src="docs/images/mascots/codex.gif" width="36" alt="Codex mascot" title="Codex">&nbsp;
@@ -67,6 +79,7 @@ Ping Island focuses on the moments that actually interrupt coding flow, then kee
 
 - **Attention-first UI** - Stay compact until a session needs approval, input, review, or intervention.
 - **Act from the notch** - Approve tools, deny requests, and answer follow-up prompts without hunting through tabs.
+- **Pet undocking** - Drag the mascot out of the notch into a floating desktop companion, then use anchored bubbles to stay on top of active sessions.
 - **Claude Code auto-approve** - Turn on per-session auto-approval when you want Claude Code to stop pausing on every permission request.
 - **One-click return** - Jump back to the right iTerm2, Ghostty, Terminal.app, tmux pane, or IDE window.
 - **SSH terminal support** - Bootstrap a remote PingIslandBridge over SSH, rewrite the remote Claude-compatible hooks to point back at your Mac, and keep remote terminal activity visible in the same local Island UI.
@@ -97,6 +110,7 @@ SSH support is a core workflow, not a sidecar script. Ping Island can bootstrap 
 
 The mascot GIFs used throughout this README are generated from the live `MascotView` implementation via `./scripts/render-mascots.sh`.
 The OpenClaw feature poster in `docs/images/ping-island-openclaw-poster.png` is generated via `./scripts/render-openclaw-poster.sh`.
+The pet-undocking demo image in `docs/images/ping-island-undocked-pet-feature.png` is generated via `./scripts/render-detached-pet-poster.sh`.
 
 <a id="installation"></a>
 ## Installation
