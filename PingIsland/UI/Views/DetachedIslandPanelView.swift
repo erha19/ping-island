@@ -420,6 +420,7 @@ enum DetachedIslandContentModel {
 final class DetachedIslandInteractionModel: ObservableObject {
     @Published private(set) var bubbleState: DetachedIslandBubbleState = .hidden
     @Published private(set) var bubblePlacement: DetachedIslandBubblePlacement = .topLeft
+    @Published private(set) var isPetDragging = false
 
     var bubbleContentMode: DetachedIslandBubbleContentMode? {
         DetachedIslandBubbleContentMode(bubbleState: bubbleState)
@@ -472,6 +473,11 @@ final class DetachedIslandInteractionModel: ObservableObject {
 
     func resetForDragSuppression() {
         hidePinnedBubble()
+    }
+
+    func setPetDragging(_ isDragging: Bool) {
+        guard isPetDragging != isDragging else { return }
+        isPetDragging = isDragging
     }
 }
 
@@ -636,6 +642,7 @@ struct DetachedIslandPanelView: View {
             activeCount: activeCount,
             mascotKind: compactMascotKind,
             mascotStatus: compactMascotStatus,
+            isDragging: interactionModel.isPetDragging,
             onTap: onPetTap,
             onDragStarted: {
                 isPetDragging = true
@@ -680,6 +687,7 @@ private struct DetachedFloatingPetInteractionView: View {
     let activeCount: Int
     let mascotKind: MascotKind
     let mascotStatus: MascotStatus
+    let isDragging: Bool
     let onTap: () -> Void
     let onDragStarted: () -> Void
     let onDragChanged: (CGSize) -> Void
@@ -689,7 +697,8 @@ private struct DetachedFloatingPetInteractionView: View {
         ZStack(alignment: .bottomTrailing) {
             DetachedFloatingMascotView(
                 kind: mascotKind,
-                status: mascotStatus
+                status: mascotStatus,
+                isDragging: isDragging
             )
             .frame(
                 width: DetachedIslandPanelMetrics.petVisualFrame,
@@ -708,6 +717,9 @@ private struct DetachedFloatingPetInteractionView: View {
             width: DetachedIslandPanelMetrics.petHitFrame,
             height: DetachedIslandPanelMetrics.petHitFrame
         )
+        .rotationEffect(.degrees(isDragging ? -7 : 0))
+        .scaleEffect(isDragging ? 1.08 : 1)
+        .animation(.spring(response: 0.22, dampingFraction: 0.68), value: isDragging)
         .overlay {
             DetachedPetInteractionBridge(
                 size: CGSize(
@@ -834,6 +846,7 @@ private final class DetachedPetInteractionView: NSView {
 private struct DetachedFloatingMascotView: View {
     let kind: MascotKind
     let status: MascotStatus
+    let isDragging: Bool
 
     private var renderSize: CGFloat {
         DetachedIslandPanelMetrics.mascotDisplaySize * DetachedIslandPanelMetrics.mascotRenderScale
@@ -847,7 +860,8 @@ private struct DetachedFloatingMascotView: View {
         MascotView(
             kind: kind,
             status: status,
-            size: renderSize
+            size: renderSize,
+            isDragging: isDragging
         )
         .frame(width: renderSize, height: renderSize)
         .scaleEffect(displayScale)

@@ -396,6 +396,7 @@ final class DetachedIslandWindowController: NSWindowController, NSWindowDelegate
         guard floatingDragStartOrigin == nil else { return }
         cancelInteractionActivation()
         interactionModel.resetForDragSuppression()
+        interactionModel.setPetDragging(true)
         hideBubbleRenderingImmediately()
         floatingDragStartOrigin = window?.frame.origin
     }
@@ -418,6 +419,7 @@ final class DetachedIslandWindowController: NSWindowController, NSWindowDelegate
 
     func endFloatingDrag() {
         floatingDragStartOrigin = nil
+        interactionModel.setPetDragging(false)
         if let currentPetAnchor {
             onPetAnchorChanged(currentPetAnchor)
         }
@@ -470,6 +472,10 @@ final class DetachedIslandWindowController: NSWindowController, NSWindowDelegate
         bubbleViewState.isBubbleVisible
     }
 
+    var isPetDraggingForTesting: Bool {
+        interactionModel.isPetDragging
+    }
+
     func applySessionSnapshotForTesting(_ sessions: [SessionState]) {
         sessionMonitor.instances = sessions
         handleManualAttentionChange()
@@ -492,6 +498,7 @@ final class DetachedIslandWindowController: NSWindowController, NSWindowDelegate
         outsideClickMonitor?.stop()
         outsideClickMonitor = nil
         floatingDragStartOrigin = nil
+        interactionModel.setPetDragging(false)
         window?.orderOut(nil)
     }
 

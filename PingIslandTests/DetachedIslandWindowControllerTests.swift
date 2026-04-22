@@ -188,6 +188,27 @@ final class DetachedIslandWindowControllerTests: XCTestCase {
         XCTAssertFalse(window.ignoresMouseEvents)
     }
 
+    func testFloatingDragUpdatesPetDraggingState() {
+        let viewModel = makeViewModel()
+        let sessionMonitor = SessionMonitor()
+        sessionMonitor.instances = []
+
+        let controller = DetachedIslandWindowController(
+            viewModel: viewModel,
+            sessionMonitor: sessionMonitor,
+            onClose: {}
+        )
+        defer { controller.dismiss() }
+
+        XCTAssertFalse(controller.isPetDraggingForTesting)
+
+        controller.beginFloatingDrag()
+        XCTAssertTrue(controller.isPetDraggingForTesting)
+
+        controller.endFloatingDrag()
+        XCTAssertFalse(controller.isPetDraggingForTesting)
+    }
+
     func testBeginFloatingDragPreservesPetAnchorWhenHoverBubbleIsVisible() throws {
         let viewModel = makeViewModel()
         let sessionMonitor = SessionMonitor()

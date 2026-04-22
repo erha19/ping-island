@@ -348,29 +348,53 @@ struct MascotView: View {
     let status: MascotStatus
     var size: CGFloat = 40
     var animationTime: TimeInterval?
+    var isDragging: Bool = false
 
-    init(kind: MascotKind, status: MascotStatus, size: CGFloat = 40, animationTime: TimeInterval? = nil) {
+    init(
+        kind: MascotKind,
+        status: MascotStatus,
+        size: CGFloat = 40,
+        animationTime: TimeInterval? = nil,
+        isDragging: Bool = false
+    ) {
         self.kind = kind
         self.status = status
         self.size = size
         self.animationTime = animationTime
+        self.isDragging = isDragging
     }
 
-    init(provider: SessionProvider, status: MascotStatus, size: CGFloat = 40, animationTime: TimeInterval? = nil) {
-        self.init(kind: MascotKind(provider: provider), status: status, size: size, animationTime: animationTime)
+    init(
+        provider: SessionProvider,
+        status: MascotStatus,
+        size: CGFloat = 40,
+        animationTime: TimeInterval? = nil,
+        isDragging: Bool = false
+    ) {
+        self.init(
+            kind: MascotKind(provider: provider),
+            status: status,
+            size: size,
+            animationTime: animationTime,
+            isDragging: isDragging
+        )
     }
 
     var body: some View {
         ZStack {
-            switch status {
-            case .idle:
-                idleScene(time: animationTime)
-            case .working:
-                workingScene(time: animationTime)
-            case .warning:
-                warningScene(time: animationTime)
-            case .dragging:
+            if isDragging || status == .dragging {
                 draggingScene(time: animationTime)
+            } else {
+                switch status {
+                case .idle:
+                    idleScene(time: animationTime)
+                case .working:
+                    workingScene(time: animationTime)
+                case .warning:
+                    warningScene(time: animationTime)
+                case .dragging:
+                    draggingScene(time: animationTime)
+                }
             }
         }
         .frame(width: size, height: size)
@@ -397,7 +421,10 @@ struct MascotView: View {
     }
 
     private func draggingScene(time: TimeInterval?) -> some View {
-        canvasScene(interval: 0.03, mode: .dragging, time: time)
+        ZStack {
+            DragMotionOverlay(size: size, time: time)
+            canvasScene(interval: 0.025, mode: .dragging, time: time)
+        }
     }
 
     @ViewBuilder
@@ -1202,9 +1229,9 @@ struct MascotView: View {
             tailWag = 0.12
             headBob = -0.12
         case .dragging:
-            wingLift = -0.35 + CGFloat(sin(time * 7.0) * 0.10)
-            tailWag = CGFloat(sin(time * 5.8) * 0.22)
-            headBob = CGFloat(cos(time * 5.4) * 0.08)
+            wingLift = -0.4 + flapPhase * 0.82
+            tailWag = CGFloat(sin(time * 11.0) * 0.28)
+            headBob = CGFloat(sin(time * 8.0) * 0.1)
         }
 
         drawShadow(in: context, space: space, centerX: 9.0, y: 16.7, width: 8.7 - abs(motion.bounce) * 0.18, opacity: 0.2)
@@ -1672,13 +1699,20 @@ struct MascotView: View {
                 squashY: squashY
             )
         case .dragging:
-            let swing = CGFloat(sin(time * 4.6) * 0.35)
+            let cycle = time.truncatingRemainder(dividingBy: 0.72)
+            let pct = CGFloat(cycle / 0.72)
+            let lift = lerp(
+                [(0, 0), (0.18, -1.4), (0.34, -3.1), (0.56, -2.0), (0.78, -3.4), (1, 0)],
+                at: pct
+            )
+            let shake = CGFloat(sin(time * 14.5) * 0.38)
+            let stretch = CGFloat(sin(time * 9.5) * 0.03)
             return MascotMotion(
-                vertical: -1.4 + CGFloat(sin(time * 6.4) * 0.18),
-                bounce: -1.1,
-                shake: swing,
-                squashX: 1.03,
-                squashY: 0.97
+                vertical: lift,
+                bounce: lift,
+                shake: shake,
+                squashX: 1.03 + stretch,
+                squashY: 0.97 - (stretch * 0.8)
             )
         }
     }
@@ -1900,6 +1934,80 @@ private struct AlertHalo: View {
             .frame(width: size * (0.78 + pulse * 0.10))
             .blur(radius: size * 0.07)
     }
+}
+
+private struct DragMotionOverlay: View {
+    let size: CGFloat
+    var time: TimeInterval?
+
+    var body: some View {
+        if let time {
+            overlayBody(time: time)
+        } else {
+            TimelineView(.periodic(from: .now, by: 0.04)) { context in
+                overlayBody(time: context.date.timeIntervalSinceReferenceDate)
+            }
+        }
+    }
+
+    private func overlayBody(time: TimeInterval) -> some View {
+        let cycle = 0.9
+        let baseProgress = wrappedProgress((time / cycle).truncatingRemainder(dividingBy: 1))
+
+        return ZStack(alignment: .topLeading) {
+            ForEach(dragTrailConfigs.indices, id: \.self) { index in
+                let config = dragTrailConfigs[index]
+                let progress = wrappedProgress(baseProgress + config.phaseOffset)
+                let opacity = trailOpacity(progress: progress) * config.maxOpacity
+
+                if opacity > 0.01 {
+                    Capsule(style: .continuous)
+                        .fill(Color.white.opacity(opacity))
+                        .frame(
+                            width: size * CGFloat(config.widthScale - progress * 0.02),
+                            height: max(2, size * CGFloat(config.heightScale))
+                        )
+                        .rotationEffect(.degrees(config.rotation))
+                        .offset(
+                            x: size * CGFloat(config.startX - progress * config.travelX),
+                            y: size * CGFloat(config.startY + progress * config.travelY)
+                        )
+                }
+            }
+        }
+        .frame(width: size, height: size, alignment: .topLeading)
+    }
+
+    private func wrappedProgress(_ progress: Double) -> Double {
+        let wrapped = progress.truncatingRemainder(dividingBy: 1)
+        return wrapped >= 0 ? wrapped : wrapped + 1
+    }
+
+    private func trailOpacity(progress: Double) -> Double {
+        let fadeIn = min(max(progress / 0.12, 0), 1)
+        let fadeOut = min(max((1 - progress) / 0.48, 0), 1)
+        return fadeIn * fadeOut
+    }
+
+    private var dragTrailConfigs: [DragTrailConfig] {
+        [
+            DragTrailConfig(phaseOffset: 0.00, startX: 0.14, startY: 0.26, travelX: 0.12, travelY: 0.03, widthScale: 0.20, heightScale: 0.05, rotation: -22, maxOpacity: 0.42),
+            DragTrailConfig(phaseOffset: 0.24, startX: 0.08, startY: 0.42, travelX: 0.10, travelY: -0.01, widthScale: 0.24, heightScale: 0.055, rotation: -14, maxOpacity: 0.34),
+            DragTrailConfig(phaseOffset: 0.48, startX: 0.18, startY: 0.58, travelX: 0.14, travelY: -0.04, widthScale: 0.18, heightScale: 0.05, rotation: -28, maxOpacity: 0.28)
+        ]
+    }
+}
+
+private struct DragTrailConfig {
+    let phaseOffset: Double
+    let startX: Double
+    let startY: Double
+    let travelX: Double
+    let travelY: Double
+    let widthScale: Double
+    let heightScale: Double
+    let rotation: Double
+    let maxOpacity: Double
 }
 
 #Preview("Mascot Grid") {
