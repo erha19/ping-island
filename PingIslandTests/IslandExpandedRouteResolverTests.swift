@@ -83,6 +83,21 @@ final class IslandExpandedRouteResolverTests: XCTestCase {
         XCTAssertEqual(route, .attentionNotification(attention))
     }
 
+    func testFloatingNotificationWithCompletionResolvesToCompletionNotification() {
+        let completed = makeSession(id: "completed", phase: .waitingForInput)
+        let notification = SessionCompletionNotification(session: completed, kind: .completed)
+
+        let route = IslandExpandedRouteResolver.resolve(
+            surface: .floating,
+            trigger: .notification,
+            contentType: .instances,
+            sessions: [completed],
+            activeCompletionNotification: notification
+        )
+
+        XCTAssertEqual(route, .completionNotification(notification))
+    }
+
     private func makeSession(
         id: String,
         phase: SessionPhase,

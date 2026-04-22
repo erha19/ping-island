@@ -42,7 +42,7 @@ struct SessionManualAttentionTracker {
         return attentionCandidates.sorted(by: attentionSort).first
     }
 
-    private func attentionSort(_ lhs: SessionState, _ rhs: SessionState) -> Bool {
+    nonisolated private func attentionSort(_ lhs: SessionState, _ rhs: SessionState) -> Bool {
         let lhsDate = lhs.attentionRequestedAt ?? lhs.lastUserMessageDate ?? lhs.lastActivity
         let rhsDate = rhs.attentionRequestedAt ?? rhs.lastUserMessageDate ?? rhs.lastActivity
         return lhsDate > rhsDate

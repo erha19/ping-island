@@ -588,6 +588,76 @@ final class DetachedIslandWindowControllerTests: XCTestCase {
         wait(for: [bubblePresented], timeout: 1.0)
     }
 
+    func testCompletedSessionAutoOpensCompletionBubbleInFloatingMode() {
+        let viewModel = makeViewModel()
+        let sessionMonitor = SessionMonitor()
+        sessionMonitor.instances = [makeSession(id: "active", phase: .processing)]
+
+        let controller = DetachedIslandWindowController(
+            viewModel: viewModel,
+            sessionMonitor: sessionMonitor,
+            onClose: {}
+        )
+        defer { controller.dismiss() }
+
+        controller.present(atPetAnchor: CGPoint(x: 1200, y: 220))
+
+        let completed = makeCompletedSession(id: "completed")
+        controller.applySessionSnapshotForTesting([completed])
+
+        let bubblePresented = expectation(description: "completion bubble auto-opens")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            XCTAssertEqual(controller.renderedBubbleStateForTesting, .hoverPreview)
+            XCTAssertTrue(controller.isBubbleVisibleForTesting)
+
+            guard let notification = controller.currentActiveCompletionNotificationForTesting else {
+                XCTFail("Expected active completion notification")
+                bubblePresented.fulfill()
+                return
+            }
+
+            XCTAssertEqual(notification.session.stableId, completed.stableId)
+            XCTAssertEqual(notification.kind, .completed)
+            XCTAssertEqual(
+                controller.currentExpandedRoute,
+                .completionNotification(notification)
+            )
+            bubblePresented.fulfill()
+        }
+
+        wait(for: [bubblePresented], timeout: 1.0)
+    }
+
+    func testDisablingCompletionNotificationsPreventsFloatingCompletionBubble() {
+        let originalAutoOpenCompletionPanel = AppSettings.autoOpenCompletionPanel
+        AppSettings.autoOpenCompletionPanel = false
+        defer { AppSettings.autoOpenCompletionPanel = originalAutoOpenCompletionPanel }
+
+        let viewModel = makeViewModel()
+        let sessionMonitor = SessionMonitor()
+        sessionMonitor.instances = [makeSession(id: "active", phase: .processing)]
+
+        let controller = DetachedIslandWindowController(
+            viewModel: viewModel,
+            sessionMonitor: sessionMonitor,
+            onClose: {}
+        )
+        defer { controller.dismiss() }
+
+        controller.present(atPetAnchor: CGPoint(x: 1200, y: 220))
+        controller.applySessionSnapshotForTesting([makeCompletedSession(id: "completed")])
+
+        let noBubble = expectation(description: "completion bubble stays hidden")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            XCTAssertNil(controller.currentActiveCompletionNotificationForTesting)
+            XCTAssertEqual(controller.renderedBubbleStateForTesting, .hidden)
+            XCTAssertFalse(controller.isBubbleVisibleForTesting)
+            noBubble.fulfill()
+        }
+
+        wait(for: [noBubble], timeout: 1.0)
+    }
+
     func testDismissAttentionBubbleHidesHoverPreview() {
         let viewModel = makeViewModel()
         let sessionMonitor = SessionMonitor()
@@ -846,6 +916,25 @@ final class DetachedIslandWindowControllerTests: XCTestCase {
             phase: phase,
             chatItems: chatItems,
             conversationInfo: conversationInfo
+        )
+    }
+
+    private func makeCompletedSession(id: String) -> SessionState {
+        makeSession(
+            id: id,
+            phase: .waitingForInput,
+            chatItems: [
+                ChatHistoryItem(id: "\(id)-user", type: .user("Do it"), timestamp: Date()),
+                ChatHistoryItem(id: "\(id)-assistant", type: .assistant("All done"), timestamp: Date())
+            ],
+            conversationInfo: ConversationInfo(
+                summary: nil,
+                lastMessage: "All done",
+                lastMessageRole: "assistant",
+                lastToolName: nil,
+                firstUserMessage: "Do it",
+                lastUserMessageDate: Date()
+            )
         )
     }
 

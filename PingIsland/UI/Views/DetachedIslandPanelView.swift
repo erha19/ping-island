@@ -148,10 +148,14 @@ enum DetachedIslandContentModel {
 
     static func canPresentBubble(
         from sessions: [SessionState],
-        mode: DetachedIslandBubbleContentMode
+        mode: DetachedIslandBubbleContentMode,
+        activeCompletionNotification: SessionCompletionNotification? = nil
     ) -> Bool {
         switch mode {
         case .hoverPreview:
+            if activeCompletionNotification != nil {
+                return true
+            }
             return IslandExpandedRouteResolver.highestPriorityAttentionSession(from: sessions) != nil
                 || !IslandExpandedRouteResolver.activePreviewSessions(from: sessions).isEmpty
         case .pinnedList:
@@ -163,10 +167,12 @@ enum DetachedIslandContentModel {
     static func route(
         for sessions: [SessionState],
         viewModel: NotchViewModel,
-        mode: DetachedIslandBubbleContentMode
+        mode: DetachedIslandBubbleContentMode,
+        activeCompletionNotification: SessionCompletionNotification? = nil
     ) -> IslandExpandedRoute {
         let trigger: IslandExpandedTrigger = switch mode {
-        case .hoverPreview: .hover
+        case .hoverPreview:
+            activeCompletionNotification == nil ? .hover : .notification
         case .pinnedList: .pinnedList
         }
 
@@ -174,7 +180,8 @@ enum DetachedIslandContentModel {
             surface: .floating,
             trigger: trigger,
             contentType: viewModel.contentType,
-            sessions: sessions
+            sessions: sessions,
+            activeCompletionNotification: activeCompletionNotification
         )
     }
 
@@ -263,6 +270,7 @@ enum DetachedIslandContentModel {
         bubbleState: DetachedIslandBubbleState,
         bubblePlacement: DetachedIslandBubblePlacement,
         measuredAttentionBubbleHeight: CGFloat? = nil,
+        activeCompletionNotification: SessionCompletionNotification? = nil,
         petScreenAnchor: CGPoint? = nil,
         availableFrame: CGRect? = nil
     ) -> DetachedIslandWindowLayout {
@@ -273,7 +281,11 @@ enum DetachedIslandContentModel {
         let hiddenAnchor = CGPoint(x: petSize.width / 2, y: petSize.height / 2)
 
         guard let mode = DetachedIslandBubbleContentMode(bubbleState: bubbleState),
-              canPresentBubble(from: sessions, mode: mode) else {
+              canPresentBubble(
+                from: sessions,
+                mode: mode,
+                activeCompletionNotification: activeCompletionNotification
+              ) else {
             return DetachedIslandWindowLayout(
                 containerSize: petSize,
                 petFrame: CGRect(origin: .zero, size: petSize),
@@ -284,7 +296,12 @@ enum DetachedIslandContentModel {
             )
         }
 
-        let route = route(for: sessions, viewModel: viewModel, mode: mode)
+        let route = route(
+            for: sessions,
+            viewModel: viewModel,
+            mode: mode,
+            activeCompletionNotification: activeCompletionNotification
+        )
         let bubbleSize = bubbleContentSize(
             for: route,
             sessions: sessions,
@@ -461,6 +478,7 @@ final class DetachedIslandInteractionModel: ObservableObject {
 @MainActor
 final class DetachedIslandBubbleViewState: ObservableObject {
     @Published var highlightedSessionStableID: String?
+    @Published private(set) var activeCompletionNotification: SessionCompletionNotification?
     @Published private(set) var renderedBubbleState: DetachedIslandBubbleState = .hidden
     @Published private(set) var isBubbleVisible = false
     @Published private(set) var measuredAttentionBubbleHeight: CGFloat?
@@ -482,6 +500,11 @@ final class DetachedIslandBubbleViewState: ObservableObject {
         guard measuredAttentionBubbleHeight != sanitized else { return }
         measuredAttentionBubbleHeight = sanitized
     }
+
+    func setActiveCompletionNotification(_ notification: SessionCompletionNotification?) {
+        guard activeCompletionNotification != notification else { return }
+        activeCompletionNotification = notification
+    }
 }
 
 struct DetachedIslandPanelView: View {
@@ -497,6 +520,8 @@ struct DetachedIslandPanelView: View {
     let onPetDragChanged: (CGSize) -> Void
     let onPetDragEnded: () -> Void
     let onAttentionActionCompleted: () -> Void
+    let onCompletionNotificationHoverChanged: (Bool) -> Void
+    let onDismissCompletionNotification: () -> Void
 
     private var sortedSessions: [SessionState] {
         DetachedIslandContentModel.sortedSessions(from: sessionMonitor.instances)
@@ -519,7 +544,8 @@ struct DetachedIslandPanelView: View {
         return DetachedIslandContentModel.route(
             for: sortedSessions,
             viewModel: viewModel,
-            mode: bubbleContentMode
+            mode: bubbleContentMode,
+            activeCompletionNotification: bubbleViewState.activeCompletionNotification
         )
     }
 
@@ -529,7 +555,8 @@ struct DetachedIslandPanelView: View {
             viewModel: viewModel,
             bubbleState: bubbleViewState.renderedBubbleState,
             bubblePlacement: interactionModel.bubblePlacement,
-            measuredAttentionBubbleHeight: bubbleViewState.measuredAttentionBubbleHeight
+            measuredAttentionBubbleHeight: bubbleViewState.measuredAttentionBubbleHeight,
+            activeCompletionNotification: bubbleViewState.activeCompletionNotification
         )
     }
 
@@ -572,7 +599,9 @@ struct DetachedIslandPanelView: View {
         )
         .preferredColorScheme(.dark)
         .onAppear {
-            sessionMonitor.startMonitoring()
+            if !SessionMonitor.isRunningUnderXCTest {
+                sessionMonitor.startMonitoring()
+            }
         }
         .onChange(of: bubbleRoute) { _, route in
             guard case .attentionNotification = route else {
@@ -620,16 +649,18 @@ struct DetachedIslandPanelView: View {
                 sessionMonitor: sessionMonitor,
                 viewModel: viewModel,
                 surface: .floating,
-                trigger: mode == .pinnedList ? .pinnedList : .hover,
+                trigger: mode == .pinnedList
+                    ? .pinnedList
+                    : (bubbleViewState.activeCompletionNotification == nil ? .hover : .notification),
                 style: .detached,
-                activeCompletionNotification: nil,
+                activeCompletionNotification: bubbleViewState.activeCompletionNotification,
                 highlightedSessionStableID: route == .sessionList
                     ? bubbleViewState.highlightedSessionStableID
                     : nil,
                 contentWidthOverride: contentWidth,
                 onAttentionActionCompleted: onAttentionActionCompleted,
-                onCompletionNotificationHoverChanged: { _ in },
-                onDismissCompletionNotification: {}
+                onCompletionNotificationHoverChanged: onCompletionNotificationHoverChanged,
+                onDismissCompletionNotification: onDismissCompletionNotification
             )
         }
     }

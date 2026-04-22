@@ -283,7 +283,9 @@ struct NotchView: View {
     private var lifecycleBody: some View {
         presentedBody
             .onAppear {
-                sessionMonitor.startMonitoring()
+                if !SessionMonitor.isRunningUnderXCTest {
+                    sessionMonitor.startMonitoring()
+                }
                 viewModel.updateIdleAutoHiddenState(hasVisibleSessionActivity: !shouldHideForIdleState)
                 isVisible = !viewModel.shouldHideWindowPresentation
                 viewModel.setManualAttentionActive(hasManualAttentionIndicator)

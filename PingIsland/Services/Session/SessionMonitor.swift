@@ -15,6 +15,10 @@ class SessionMonitor: ObservableObject {
     @Published var instances: [SessionState] = []
     @Published var pendingInstances: [SessionState] = []
 
+    nonisolated static var isRunningUnderXCTest: Bool {
+        Foundation.ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+    }
+
     private let runtimeCoordinator: any RuntimeCoordinating
     private var cancellables = Set<AnyCancellable>()
     private var hasStarted = false
