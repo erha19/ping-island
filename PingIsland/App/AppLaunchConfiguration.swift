@@ -72,7 +72,8 @@ struct NotchDetachmentHintExperience {
     static func prepareForLaunch(
         defaults: UserDefaults = .standard,
         previousVersion: String?,
-        currentVersion: String = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? ""
+        currentVersion: String = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "",
+        markHintsPending: (() -> Void)? = nil
     ) {
         let normalizedCurrentVersion = currentVersion.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalizedCurrentVersion.isEmpty else {
@@ -96,7 +97,11 @@ struct NotchDetachmentHintExperience {
             return
         }
 
-        defaults.set(true, forKey: AppSettingsDefaultKeys.notchDetachmentHintPending)
-        defaults.set(true, forKey: AppSettingsDefaultKeys.floatingPetSettingsHintPending)
+        if let markHintsPending {
+            markHintsPending()
+        } else {
+            defaults.set(true, forKey: AppSettingsDefaultKeys.notchDetachmentHintPending)
+            defaults.set(true, forKey: AppSettingsDefaultKeys.floatingPetSettingsHintPending)
+        }
     }
 }

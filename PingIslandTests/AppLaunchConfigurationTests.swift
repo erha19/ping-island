@@ -194,6 +194,22 @@ final class AppLaunchConfigurationTests: XCTestCase {
         XCTAssertFalse(defaults.bool(forKey: AppSettingsDefaultKeys.notchDetachmentHintPending))
     }
 
+    func testNotchDetachmentHintExperienceUsesInjectedPendingMarkerForUpgrades() {
+        let defaults = makeDefaults()
+        var injectedMarkerInvocationCount = 0
+
+        NotchDetachmentHintExperience.prepareForLaunch(
+            defaults: defaults,
+            previousVersion: "0.5.0",
+            currentVersion: "0.5.1",
+            markHintsPending: {
+                injectedMarkerInvocationCount += 1
+            }
+        )
+
+        XCTAssertEqual(injectedMarkerInvocationCount, 1)
+    }
+
     func testMouseEventReplayMarkerDistinguishesSyntheticEvents() {
         let location = CGPoint(x: 120, y: 48)
         let originalEvent = CGEvent(

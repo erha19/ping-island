@@ -24,7 +24,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             HookInstaller.installIfNeeded()
             IDEExtensionInstaller.cleanupLegacyTraeExtension()
             NotchDetachmentHintExperience.prepareForLaunch(
-                previousVersion: HookInstaller.getVersionMetadata()?["previousVersion"] as? String
+                previousVersion: HookInstaller.getVersionMetadata()?["previousVersion"] as? String,
+                markHintsPending: {
+                    AppSettings.notchDetachmentHintPending = true
+                    AppSettings.floatingPetSettingsHintPending = true
+                }
             )
         }
 
