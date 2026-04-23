@@ -207,9 +207,11 @@ struct HookInstaller {
     }
 
     /// Install managed hooks for preferred clients on app launch.
-    static func installIfNeeded() {
+    static func installIfNeeded(markPresentationOnboardingPending: (() -> Void)? = nil) {
         // Check if this is first launch and perform auto-integration
-        let isFirstLaunch = checkAndMarkFirstLaunch()
+        let isFirstLaunch = checkAndMarkFirstLaunch(
+            markPresentationOnboardingPending: markPresentationOnboardingPending
+        )
 
         let preferredTargets = preferredTargets()
         installBridgeLauncherIfNeeded()
@@ -231,8 +233,10 @@ struct HookInstaller {
     }
 
     /// Check if this is the first launch and mark as installed
-    private static func checkAndMarkFirstLaunch() -> Bool {
-        let defaults = UserDefaults.standard
+    static func checkAndMarkFirstLaunch(
+        defaults: UserDefaults = .standard,
+        markPresentationOnboardingPending: (() -> Void)? = nil
+    ) -> Bool {
 
         // Check if we've already recorded a version
         if defaults.string(forKey: installedVersionDefaultsKey) != nil {
@@ -241,7 +245,11 @@ struct HookInstaller {
 
         // First launch - mark it
         defaults.set(true, forKey: firstLaunchDefaultsKey)
-        defaults.set(true, forKey: AppSettingsDefaultKeys.presentationModeOnboardingPending)
+        if let markPresentationOnboardingPending {
+            markPresentationOnboardingPending()
+        } else {
+            defaults.set(true, forKey: AppSettingsDefaultKeys.presentationModeOnboardingPending)
+        }
         return true
     }
 

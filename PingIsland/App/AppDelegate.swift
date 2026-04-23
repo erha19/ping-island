@@ -21,7 +21,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         if launchConfiguration.shouldInstallIntegrations {
-            HookInstaller.installIfNeeded()
+            HookInstaller.installIfNeeded(
+                markPresentationOnboardingPending: {
+                    AppSettings.presentationModeOnboardingPending = true
+                }
+            )
             IDEExtensionInstaller.cleanupLegacyTraeExtension()
             NotchDetachmentHintExperience.prepareForLaunch(
                 previousVersion: HookInstaller.getVersionMetadata()?["previousVersion"] as? String,
