@@ -1,3 +1,5 @@
+import AppKit
+import Combine
 import CoreGraphics
 import XCTest
 @testable import Ping_Island
@@ -566,6 +568,57 @@ final class NotchViewModelTests: XCTestCase {
         }
     }
 
+    func testEventMonitorsRebuildAllMonitorsOnWakeNotification() async {
+        await MainActor.run {
+            let notificationCenter = NotificationCenter()
+            let workspaceNotificationCenter = NotificationCenter()
+            let recorder = MonitorRecorder()
+
+            let monitors = EventMonitors(
+                notificationCenter: notificationCenter,
+                workspaceNotificationCenter: workspaceNotificationCenter,
+                currentMouseLocation: { CGPoint(x: 40, y: 24) },
+                monitorFactory: recorder.makeMonitor(mask:handler:)
+            )
+
+            XCTAssertEqual(recorder.createdMasks, [.mouseMoved, .leftMouseDown, .leftMouseDragged, .leftMouseUp])
+            XCTAssertEqual(recorder.startedMasks, [.mouseMoved, .leftMouseDown, .leftMouseDragged, .leftMouseUp])
+
+            workspaceNotificationCenter.post(name: NSWorkspace.didWakeNotification, object: nil)
+
+            XCTAssertEqual(
+                recorder.createdMasks,
+                [.mouseMoved, .leftMouseDown, .leftMouseDragged, .leftMouseUp, .mouseMoved, .leftMouseDown, .leftMouseDragged, .leftMouseUp]
+            )
+            XCTAssertEqual(recorder.stopCallCount, 4)
+            XCTAssertEqual(monitors.mouseLocation.value, CGPoint(x: 40, y: 24))
+        }
+    }
+
+    func testEventMonitorsRebuildAllMonitorsOnAppActivation() async {
+        await MainActor.run {
+            let notificationCenter = NotificationCenter()
+            let workspaceNotificationCenter = NotificationCenter()
+            let recorder = MonitorRecorder()
+
+            let monitors = EventMonitors(
+                notificationCenter: notificationCenter,
+                workspaceNotificationCenter: workspaceNotificationCenter,
+                currentMouseLocation: { .zero },
+                monitorFactory: recorder.makeMonitor(mask:handler:)
+            )
+
+            notificationCenter.post(name: NSApplication.didBecomeActiveNotification, object: nil)
+
+            XCTAssertEqual(recorder.stopCallCount, 4)
+            XCTAssertEqual(
+                recorder.startedMasks,
+                [.mouseMoved, .leftMouseDown, .leftMouseDragged, .leftMouseUp, .mouseMoved, .leftMouseDown, .leftMouseDragged, .leftMouseUp]
+            )
+            XCTAssertEqual(monitors.mouseLocation.value, .zero)
+        }
+    }
+
     @MainActor
     private func makeViewModel() -> NotchViewModel {
         NotchViewModel(
@@ -584,5 +637,55 @@ final class NotchViewModelTests: XCTestCase {
             sessionId: id,
             cwd: "/tmp/\(id)"
         )
+    }
+}
+
+private final class MonitorRecorder {
+    private(set) var createdMasks: [NSEvent.EventTypeMask] = []
+    private(set) var startedMasks: [NSEvent.EventTypeMask] = []
+    private(set) var stopCallCount = 0
+
+    func makeMonitor(
+        mask: NSEvent.EventTypeMask,
+        handler: @escaping (NSEvent) -> Void
+    ) -> EventMonitoring {
+        createdMasks.append(mask)
+        return FakeEventMonitor(
+            mask: mask,
+            startHook: { [weak self] mask in
+                self?.startedMasks.append(mask)
+            },
+            stopHook: { [weak self] in
+                self?.stopCallCount += 1
+            },
+            handler: handler
+        )
+    }
+}
+
+private final class FakeEventMonitor: EventMonitoring {
+    private let mask: NSEvent.EventTypeMask
+    private let startHook: (NSEvent.EventTypeMask) -> Void
+    private let stopHook: () -> Void
+    let handler: (NSEvent) -> Void
+
+    init(
+        mask: NSEvent.EventTypeMask,
+        startHook: @escaping (NSEvent.EventTypeMask) -> Void,
+        stopHook: @escaping () -> Void,
+        handler: @escaping (NSEvent) -> Void
+    ) {
+        self.mask = mask
+        self.startHook = startHook
+        self.stopHook = stopHook
+        self.handler = handler
+    }
+
+    func start() {
+        startHook(mask)
+    }
+
+    func stop() {
+        stopHook()
     }
 }

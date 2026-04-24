@@ -7,6 +7,11 @@
 
 import AppKit
 
+protocol EventMonitoring: AnyObject {
+    func start()
+    func stop()
+}
+
 enum MouseEventReplay {
     private static let marker: Int64 = 0x50494E47
 
@@ -81,7 +86,7 @@ enum MouseEventReplay {
     }
 }
 
-class EventMonitor {
+final class EventMonitor: EventMonitoring {
     private var globalMonitor: Any?
     private var localMonitor: Any?
     private let mask: NSEvent.EventTypeMask
