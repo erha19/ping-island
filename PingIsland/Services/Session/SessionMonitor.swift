@@ -19,6 +19,7 @@ class SessionMonitor: ObservableObject {
 
     nonisolated static var isRunningUnderXCTest: Bool {
         Foundation.ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+            || NSClassFromString("XCTestCase") != nil
     }
 
     private let runtimeCoordinator: any RuntimeCoordinating
@@ -33,8 +34,11 @@ class SessionMonitor: ObservableObject {
     ) {
         self.runtimeCoordinator = runtimeCoordinator
         guard observeSharedState else { return }
-        claudeUsageSnapshot = UsageSnapshotCacheStore.loadClaude()
-        codexUsageSnapshot = UsageSnapshotCacheStore.loadCodex()
+        let shouldRefreshUsage = !Self.isRunningUnderXCTest
+        if shouldRefreshUsage {
+            claudeUsageSnapshot = UsageSnapshotCacheStore.loadClaude()
+            codexUsageSnapshot = UsageSnapshotCacheStore.loadCodex()
+        }
 
         SessionStore.shared.sessionsPublisher
             .receive(on: DispatchQueue.main)
@@ -47,7 +51,9 @@ class SessionMonitor: ObservableObject {
             .autoconnect()
             .sink { [weak self] _ in
                 self?.refreshVisibleSessions()
-                self?.refreshUsageState()
+                if shouldRefreshUsage {
+                    self?.refreshUsageState()
+                }
                 Task {
                     await SessionStore.shared.process(
                         .pruneTimedOutExternalContinuations(now: Date())
@@ -65,7 +71,9 @@ class SessionMonitor: ObservableObject {
             }
             .store(in: &cancellables)
 
-        refreshUsageState()
+        if shouldRefreshUsage {
+            refreshUsageState()
+        }
     }
 
     // MARK: - Monitoring Lifecycle

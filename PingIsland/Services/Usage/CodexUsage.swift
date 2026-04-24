@@ -175,8 +175,12 @@ enum CodexUsageLoader {
     }
 
     private nonisolated static func jsonObject(for line: String) -> [String: Any]? {
-        guard let data = line.data(using: .utf8),
-              let object = try? JSONSerialization.jsonObject(with: data),
+        guard !line.isEmpty else {
+            return nil
+        }
+
+        let data = Data(line.utf8)
+        guard let object = try? JSONSerialization.jsonObject(with: data),
               let dictionary = object as? [String: Any] else {
             return nil
         }
