@@ -28,6 +28,32 @@ func mapsApprovalEventFromClaudePayload() throws {
 }
 
 @Test
+func codexPermissionRequestKeepsApprovalStatusWhenPayloadStatusIsPending() throws {
+    let payload = """
+    {
+      "hook_event_name": "PermissionRequest",
+      "tool_name": "Bash",
+      "status": "pending",
+      "reason": "Needs approval to continue",
+      "session_id": "codex-permission-1"
+    }
+    """.data(using: .utf8)!
+
+    let envelope = HookPayloadMapper.makeEnvelope(
+        source: .codex,
+        arguments: ["island-bridge", "--source", "codex"],
+        environment: ["TERM_PROGRAM": "codex", "PWD": "/tmp/demo"],
+        stdinData: payload
+    )
+
+    #expect(envelope.provider == .codex)
+    #expect(envelope.eventType == "PermissionRequest")
+    #expect(envelope.intervention?.kind == .approval)
+    #expect(envelope.status?.kind == .waitingForApproval)
+    #expect(envelope.expectsResponse)
+}
+
+@Test
 func mapsGhosttyTerminalContextFromEnvironment() throws {
     let payload = """
     {

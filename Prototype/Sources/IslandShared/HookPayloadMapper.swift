@@ -258,7 +258,11 @@ public enum HookPayloadMapper {
             if hasAnsweredQuestionPayload(payload) {
                 return answeredQuestionStatus(eventType: eventType)
             }
-            return mapStatusString(text)
+            return normalizedInteractiveStatus(
+                mapStatusString(text),
+                eventType: eventType,
+                intervention: intervention
+            )
         }
         if isGeminiHookClient(clientKind) {
             return geminiStatus(eventType: eventType, payload: payload)
@@ -306,6 +310,57 @@ public enum HookPayloadMapper {
             return SessionStatus(kind: .thinking)
         }
         return SessionStatus(kind: .active)
+    }
+
+    private static func normalizedInteractiveStatus(
+        _ explicitStatus: SessionStatus,
+        eventType: String,
+        intervention: InterventionRequest?
+    ) -> SessionStatus {
+        let loweredEvent = eventType.lowercased()
+
+        if let intervention {
+            switch intervention.kind {
+            case .approval:
+                if shouldPreferApprovalStatus(for: explicitStatus.kind) {
+                    return SessionStatus(kind: .waitingForApproval, detail: explicitStatus.detail)
+                }
+            case .question:
+                if shouldPreferQuestionStatus(for: explicitStatus.kind) {
+                    return SessionStatus(kind: .waitingForInput, detail: explicitStatus.detail)
+                }
+            }
+        }
+
+        if (loweredEvent.contains("permission") || loweredEvent.contains("approval")),
+           shouldPreferApprovalStatus(for: explicitStatus.kind) {
+            return SessionStatus(kind: .waitingForApproval, detail: explicitStatus.detail)
+        }
+
+        if (loweredEvent.contains("question") || loweredEvent.contains("userinput")),
+           shouldPreferQuestionStatus(for: explicitStatus.kind) {
+            return SessionStatus(kind: .waitingForInput, detail: explicitStatus.detail)
+        }
+
+        return explicitStatus
+    }
+
+    private static func shouldPreferApprovalStatus(for kind: SessionStatusKind) -> Bool {
+        switch kind {
+        case .idle, .active, .thinking, .runningTool:
+            return true
+        default:
+            return false
+        }
+    }
+
+    private static func shouldPreferQuestionStatus(for kind: SessionStatusKind) -> Bool {
+        switch kind {
+        case .idle, .active, .thinking, .runningTool:
+            return true
+        default:
+            return false
+        }
     }
 
     private static func detectExpectsResponse(
