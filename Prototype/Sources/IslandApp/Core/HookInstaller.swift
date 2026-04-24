@@ -184,10 +184,12 @@ struct HookInstaller {
 
         updated["hooks"] = hooks
         updated["env"] = mergedEnvironment(from: current["env"] as? [String: Any] ?? [:])
-        updated["statusLine"] = [
-            "type": "command",
-            "command": statusLineCommand()
-        ]
+        if shouldInstallManagedStatusLine(current["statusLine"] as? [String: Any]) {
+            updated["statusLine"] = [
+                "type": "command",
+                "command": statusLineCommand()
+            ]
+        }
 
         try writeJSON(updated, to: fileURL)
     }
@@ -489,6 +491,15 @@ struct HookInstaller {
 
     private func statusLineCommand() -> String {
         appSupportDirectory.appending(path: "bin/island-statusline").path()
+    }
+
+    private func shouldInstallManagedStatusLine(_ existingStatusLine: [String: Any]?) -> Bool {
+        guard let command = existingStatusLine?["command"] as? String else {
+            return true
+        }
+
+        return command == statusLineCommand()
+            || command.contains("/.ping-island/bin/island-statusline")
     }
 
     private func mergedEnvironment(from existing: [String: Any]) -> [String: Any] {

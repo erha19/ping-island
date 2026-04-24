@@ -865,9 +865,21 @@ struct HookInstaller {
 
         json["hooks"] = hooks
         if profile.id == "claude-hooks" {
-            json["statusLine"] = managedStatusLineConfiguration()
+            json["statusLine"] = installedClaudeStatusLineConfiguration(
+                preserving: json["statusLine"] as? [String: Any]
+            )
         }
         writeJSONObject(json, to: url)
+    }
+
+    nonisolated static func installedClaudeStatusLineConfiguration(
+        preserving existingStatusLine: [String: Any]?
+    ) -> [String: Any] {
+        if let existingStatusLine, !isManagedStatusLine(existingStatusLine) {
+            return existingStatusLine
+        }
+
+        return managedStatusLineConfiguration()
     }
 
     private static func managedStatusLineConfiguration() -> [String: Any] {
