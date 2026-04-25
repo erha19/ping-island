@@ -1,4 +1,5 @@
 import SwiftUI
+import Foundation
 
 enum MascotClient: String, CaseIterable, Identifiable, Sendable {
     case claude
@@ -404,26 +405,26 @@ struct MascotView: View {
 
     private func idleScene(time: TimeInterval?) -> some View {
         ZStack(alignment: .topTrailing) {
-            canvasScene(interval: 0.06, mode: .idle, time: time)
+            canvasScene(interval: adaptiveInterval(for: .idle), mode: .idle, time: time)
             FloatingZOverlay(size: size, time: time)
         }
     }
 
     private func workingScene(time: TimeInterval?) -> some View {
-        canvasScene(interval: 0.03, mode: .working, time: time)
+        canvasScene(interval: adaptiveInterval(for: .working), mode: .working, time: time)
     }
 
     private func warningScene(time: TimeInterval?) -> some View {
         ZStack {
             AlertHalo(tint: kind.alertColor, size: size, time: time)
-            canvasScene(interval: 0.03, mode: .warning, time: time)
+            canvasScene(interval: adaptiveInterval(for: .warning), mode: .warning, time: time)
         }
     }
 
     private func draggingScene(time: TimeInterval?) -> some View {
         ZStack {
             DragMotionOverlay(size: size, time: time)
-            canvasScene(interval: 0.025, mode: .dragging, time: time)
+            canvasScene(interval: adaptiveInterval(for: .dragging), mode: .dragging, time: time)
         }
     }
 
@@ -431,13 +432,31 @@ struct MascotView: View {
     private func canvasScene(interval: TimeInterval, mode: MascotRenderMode, time: TimeInterval?) -> some View {
         if let time {
             canvasFrame(time: time, mode: mode)
+                .drawingGroup(opaque: false)  // Enable GPU caching for complex pixel art
         } else {
             animatedCanvas(interval: interval, mode: mode)
         }
     }
 
+    /// Adaptive refresh rate based on animation complexity
+    /// Optimized for battery life while maintaining smooth visual feedback
+    private func adaptiveInterval(for mode: MascotRenderMode) -> TimeInterval {
+        // Higher interval = lower FPS for better battery/thermal performance
+        switch mode {
+        case .idle:
+            return 0.10  // 10 FPS for idle (slow animation, maximum battery savings)
+        case .working:
+            return 0.033  // ~30 FPS for working state (smooth but efficient)
+        case .warning:
+            return 0.04   // 25 FPS for warning (noticeable but not excessive)
+        case .dragging:
+            return 0.025  // 40 FPS for dragging (needs responsiveness)
+        }
+    }
+
     private func animatedCanvas(interval: TimeInterval, mode: MascotRenderMode) -> some View {
-        TimelineView(.periodic(from: .now, by: interval)) { context in
+        let effectiveInterval = adaptiveInterval(for: mode)
+        return TimelineView(.periodic(from: .now, by: effectiveInterval)) { context in
             canvasFrame(time: context.date.timeIntervalSinceReferenceDate, mode: mode)
         }
     }
@@ -1843,11 +1862,14 @@ private struct FloatingZOverlay: View {
     let size: CGFloat
     var time: TimeInterval?
 
+    // Higher interval = lower CPU usage for particle effect
+    private static let updateInterval: TimeInterval = 0.08  // 12.5 FPS is sufficient for Z particles
+
     var body: some View {
         if let time {
             overlayBody(time: time)
         } else {
-            TimelineView(.periodic(from: .now, by: 0.05)) { context in
+            TimelineView(.periodic(from: .now, by: Self.updateInterval)) { context in
                 overlayBody(time: context.date.timeIntervalSinceReferenceDate)
             }
         }
@@ -1916,11 +1938,14 @@ private struct AlertHalo: View {
     let size: CGFloat
     var time: TimeInterval?
 
+    // Halo is a subtle glow effect - lower refresh rate is sufficient
+    private static let updateInterval: TimeInterval = 0.10  // 10 FPS
+
     var body: some View {
         if let time {
             haloBody(time: time)
         } else {
-            TimelineView(.periodic(from: .now, by: 0.08)) { context in
+            TimelineView(.periodic(from: .now, by: Self.updateInterval)) { context in
                 haloBody(time: context.date.timeIntervalSinceReferenceDate)
             }
         }
@@ -1940,11 +1965,14 @@ private struct DragMotionOverlay: View {
     let size: CGFloat
     var time: TimeInterval?
 
+    // Trail effect needs moderate refresh rate but can be optimized
+    private static let updateInterval: TimeInterval = 0.05  // 20 FPS for smooth trail
+
     var body: some View {
         if let time {
             overlayBody(time: time)
         } else {
-            TimelineView(.periodic(from: .now, by: 0.04)) { context in
+            TimelineView(.periodic(from: .now, by: Self.updateInterval)) { context in
                 overlayBody(time: context.date.timeIntervalSinceReferenceDate)
             }
         }

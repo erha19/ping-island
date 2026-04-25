@@ -152,7 +152,8 @@ struct NotchPetIcon: View {
 
     @State private var phase: Int = 0
 
-    private let animationTimer = Timer.publish(every: 0.18, on: .main, in: .common).autoconnect()
+    // Use TimelineView for synchronized, efficient updates
+    private static let frameInterval: TimeInterval = 0.18  // ~5.5 FPS for pixel art animation
 
     init(
         style: NotchPetStyle,
@@ -201,6 +202,7 @@ struct NotchPetIcon: View {
                     }
                 }
             }
+            .drawingGroup(opaque: false)  // GPU caching for pixel art
             .offset(y: sleepOffsetY)
             .scaleEffect(x: 1, y: sleepScaleY, anchor: .bottom)
 
@@ -210,8 +212,8 @@ struct NotchPetIcon: View {
         }
         .frame(width: size * style.aspectRatio, height: size)
         .shadow(color: palette.outerGlow.opacity(0.72), radius: 6, y: 0)
-        .onReceive(animationTimer) { _ in
-            phase = (phase + 1) % max(1, frames.count)
+        .onAppear {
+            phase = 0
         }
         .onChange(of: activity) { _, _ in
             phase = 0
@@ -219,6 +221,15 @@ struct NotchPetIcon: View {
         .onChange(of: tone) { _, _ in
             phase = 0
         }
+        // Use TimelineView for synchronized, battery-efficient animation
+        .background(
+            TimelineView(.periodic(from: .now, by: Self.frameInterval)) { _ in
+                Color.clear
+                    .onAppear { phase = (phase + 1) % max(1, frames.count) }
+            }
+            .opacity(0)
+            .frame(width: 0, height: 0)
+        )
     }
 
     private var sleepOffsetY: CGFloat {
