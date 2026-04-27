@@ -180,6 +180,16 @@ actor TerminalSessionFocuser {
                 titleHint: remoteHostHint
             )
         default:
+            if await TerminalPrecisionJumpService.shared.focus(
+                bundleIdentifier: bundleIdentifier,
+                workspacePath: workspacePath,
+                clientInfo: clientInfo ?? SessionClientInfo(kind: .unknown)
+            ) {
+                await FocusDiagnosticsStore.shared.record(
+                    "TerminalFocus precision-jump success bundle=\(bundleIdentifier) terminalPid=\(terminalPid)"
+                )
+                return true
+            }
             logger.debug("No scripted focuser for bundle \(bundleIdentifier, privacy: .public)")
             await FocusDiagnosticsStore.shared.record(
                 "TerminalFocus unsupported bundle=\(bundleIdentifier) terminalPid=\(terminalPid)"

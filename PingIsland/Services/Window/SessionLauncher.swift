@@ -77,6 +77,15 @@ actor SessionLauncher {
             return true
         }
 
+        if await TerminalPrecisionJumpService.shared.focus(
+            bundleIdentifier: session.clientInfo.terminalBundleIdentifier ?? session.clientInfo.bundleIdentifier,
+            workspacePath: session.cwd,
+            clientInfo: session.clientInfo
+        ) {
+            Self.logger.debug("Activated session \(session.sessionId, privacy: .public) via precision jump service")
+            return true
+        }
+
         if session.tty == nil,
            session.pid == nil,
            await activateIDEChatSession(session) {

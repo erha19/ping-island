@@ -19,7 +19,14 @@ struct TerminalAppRegistry: Sendable {
         "net.kovidgoyal.kitty": "kitty",
         "co.zeit.hyper": "Hyper",
         "dev.warp.warp-stable": "Warp",
-        "com.github.wez.wezterm": "WezTerm"
+        "com.github.wez.wezterm": "WezTerm",
+        "com.jetbrains.intellij": "IntelliJ IDEA",
+        "com.jetbrains.WebStorm": "WebStorm",
+        "com.jetbrains.PyCharm": "PyCharm",
+        "com.jetbrains.goland": "GoLand",
+        "com.jetbrains.CLion": "CLion",
+        "com.jetbrains.rider": "Rider",
+        "com.jetbrains.rustrover": "RustRover"
     ]
 
     private nonisolated static let terminalBundleIdentifiersByProgram: [String: String] = [
@@ -36,7 +43,9 @@ struct TerminalAppRegistry: Sendable {
         "warp": "dev.warp.Warp-Stable",
         "warpterminal": "dev.warp.Warp-Stable",
         "wezterm": "com.github.wez.wezterm",
-        "wezterm-gui": "com.github.wez.wezterm"
+        "wezterm-gui": "com.github.wez.wezterm",
+        "kaku": "com.github.wez.wezterm",
+        "zellij": "com.github.wez.wezterm"
     ]
 
     nonisolated static let ideBundleIdentifiers: Set<String> = [
@@ -45,6 +54,13 @@ struct TerminalAppRegistry: Sendable {
         "com.todesktop.230313mzl4w4u92",
         "com.exafunction.windsurf",
         "dev.zed.Zed",
+        "com.jetbrains.intellij",
+        "com.jetbrains.WebStorm",
+        "com.jetbrains.PyCharm",
+        "com.jetbrains.goland",
+        "com.jetbrains.CLion",
+        "com.jetbrains.rider",
+        "com.jetbrains.rustrover",
         "com.trae.app",
         "com.codebuddy.app",
         "com.tencent.codebuddy",
@@ -59,6 +75,13 @@ struct TerminalAppRegistry: Sendable {
         "com.todesktop.230313mzl4w4u92.helper": "com.todesktop.230313mzl4w4u92",
         "com.exafunction.windsurf.helper": "com.exafunction.windsurf",
         "dev.zed.Zed.helper": "dev.zed.Zed",
+        "com.jetbrains.intellij.helper": "com.jetbrains.intellij",
+        "com.jetbrains.WebStorm.helper": "com.jetbrains.WebStorm",
+        "com.jetbrains.PyCharm.helper": "com.jetbrains.PyCharm",
+        "com.jetbrains.goland.helper": "com.jetbrains.goland",
+        "com.jetbrains.CLion.helper": "com.jetbrains.CLion",
+        "com.jetbrains.rider.helper": "com.jetbrains.rider",
+        "com.jetbrains.rustrover.helper": "com.jetbrains.rustrover",
         "com.trae.app.helper": "com.trae.app",
         "com.codebuddy.app.helper": "com.codebuddy.app",
         "com.tencent.codebuddy.helper": "com.tencent.codebuddy",
@@ -96,7 +119,14 @@ struct TerminalAppRegistry: Sendable {
         "WorkBuddy",
         "Qoder",
         "QoderWork",
-        "zed"
+        "zed",
+        "IntelliJ IDEA",
+        "WebStorm",
+        "PyCharm",
+        "GoLand",
+        "CLion",
+        "Rider",
+        "RustRover"
     ]
 
     /// Bundle identifiers for terminal apps (for window enumeration)
@@ -121,7 +151,14 @@ struct TerminalAppRegistry: Sendable {
         "com.workbuddy.workbuddy",
         "com.qoder.ide",
         "com.qoder.work",
-        "dev.zed.Zed"
+        "dev.zed.Zed",
+        "com.jetbrains.intellij",
+        "com.jetbrains.WebStorm",
+        "com.jetbrains.PyCharm",
+        "com.jetbrains.goland",
+        "com.jetbrains.CLion",
+        "com.jetbrains.rider",
+        "com.jetbrains.rustrover"
     ]
 
     /// Check if an app name or command path is a known terminal

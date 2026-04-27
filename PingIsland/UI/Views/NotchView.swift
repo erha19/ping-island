@@ -8,6 +8,7 @@
 import AppKit
 import CoreGraphics
 import SwiftUI
+import UniformTypeIdentifiers
 
 // Corner radius constants
 private let cornerRadiusInsets = (
@@ -59,6 +60,10 @@ struct NotchView: View {
     @State private var isShowingDetachmentHint: Bool = false
     @State private var detachmentHintDismissWorkItem: DispatchWorkItem?
     @State private var detachmentHintPresentationWorkItem: DispatchWorkItem?
+    @State private var isFileDropTargeted: Bool = false
+    @State private var pendingDroppedFiles: [URL] = []
+    @State private var fileDropStatusMessage: String?
+    @State private var fileDropInFlightSessionID: String?
 
     @Namespace private var activityNamespace
 
@@ -219,6 +224,26 @@ struct NotchView: View {
 
     private var areReminderNotificationsSuppressed: Bool {
         settings.areNotificationsMutedTemporarily
+    }
+
+    private var attentionPolicySnapshot: AttentionPolicySnapshot {
+        AttentionPolicySnapshot(
+            smartSuppressionEnabled: settings.smartSuppression,
+            quietHours: settings.quietHoursWindow,
+            followFocusEnabled: settings.followFocusEnabled,
+            temporaryMuteUntil: settings.temporarilyMuteNotificationsUntil
+        )
+    }
+
+    private var fileDropCandidateSessions: [SessionState] {
+        sessionMonitor.instances
+            .filter { $0.phase != .ended && !$0.clientInfo.suppressesActivationNavigation }
+            .sorted { lhs, rhs in
+                if lhs.needsManualAttention != rhs.needsManualAttention {
+                    return lhs.needsManualAttention
+                }
+                return lhs.lastActivity > rhs.lastActivity
+            }
     }
 
     private var temporaryMuteButtonHelpText: String {
@@ -501,6 +526,25 @@ struct NotchView: View {
                     )
                     .allowsHitTesting(false)
             }
+
+            if isFileDropTargeted || !pendingDroppedFiles.isEmpty || fileDropStatusMessage != nil {
+                FileDropSessionPicker(
+                    files: pendingDroppedFiles,
+                    sessions: fileDropCandidateSessions,
+                    statusMessage: fileDropStatusMessage,
+                    inFlightSessionID: fileDropInFlightSessionID,
+                    onSelect: sendDroppedFiles,
+                    onDismiss: clearFileDropState
+                )
+                .offset(y: max(28, closedNotchSize.height + 10))
+                .transition(
+                    .asymmetric(
+                        insertion: .opacity.combined(with: .scale(scale: 0.94, anchor: .top)),
+                        removal: .opacity.animation(.easeOut(duration: 0.16))
+                    )
+                )
+                .zIndex(40)
+            }
         }
     }
 
@@ -546,6 +590,10 @@ struct NotchView: View {
                 if !isOpened {
                     viewModel.notchOpen(reason: .click)
                 }
+            }
+            .onDrop(of: [UTType.fileURL.identifier], isTargeted: $isFileDropTargeted) { providers in
+                handleFileDrop(providers)
+                return true
             }
     }
 
@@ -833,13 +881,22 @@ struct NotchView: View {
         let currentIds = Set(sessions.map { $0.stableId })
         let newPendingIds = currentIds.subtracting(previousPendingIds)
 
+        if AppSettings.relayEnabled {
+            sessions
+                .filter { newPendingIds.contains($0.stableId) }
+                .forEach { IslandRelayClient.shared.enqueueAttention(for: $0) }
+        }
+
         if areReminderNotificationsSuppressed {
             previousPendingIds = currentIds
             return
         }
 
-        let shouldSuppressAutoOpen = settings.smartSuppression &&
-            TerminalVisibilityDetector.isTerminalVisibleOnCurrentSpace()
+        let shouldSuppressAutoOpen = AttentionPolicy.suppressesAutomaticPresentation(
+            settings: attentionPolicySnapshot,
+            terminalVisibleOnCurrentSpace: TerminalVisibilityDetector.isTerminalVisibleOnCurrentSpace(),
+            sessionFocused: false
+        )
 
         if viewModel.shouldSuppressAutomaticPresentation {
             previousPendingIds = currentIds
@@ -901,7 +958,12 @@ struct NotchView: View {
 
         clearCompletionNotifications(keepPanelOpen: true)
 
-        if viewModel.shouldSuppressAutomaticPresentation {
+        if viewModel.shouldSuppressAutomaticPresentation ||
+            AttentionPolicy.suppressesAutomaticPresentation(
+                settings: attentionPolicySnapshot,
+                terminalVisibleOnCurrentSpace: TerminalVisibilityDetector.isTerminalVisibleOnCurrentSpace(),
+                sessionFocused: false
+            ) {
             return
         }
 
@@ -1079,6 +1141,10 @@ struct NotchView: View {
     }
 
     private func enqueueCompletionNotification(_ notification: SessionCompletionNotification) {
+        if AppSettings.relayEnabled {
+            IslandRelayClient.shared.enqueueAttention(for: notification.session)
+        }
+
         if let active = activeCompletionNotification,
            active.session.stableId == notification.session.stableId {
             activeCompletionNotification?.session = notification.session
@@ -1102,6 +1168,11 @@ struct NotchView: View {
         guard activeCompletionNotification == nil else { return }
         guard !completionNotificationQueue.isEmpty else { return }
         guard !viewModel.shouldSuppressAutomaticPresentation else { return }
+        guard !AttentionPolicy.suppressesAutomaticPresentation(
+            settings: attentionPolicySnapshot,
+            terminalVisibleOnCurrentSpace: TerminalVisibilityDetector.isTerminalVisibleOnCurrentSpace(),
+            sessionFocused: false
+        ) else { return }
         guard !hasPendingPermission && !hasHumanIntervention else { return }
         guard case .instances = viewModel.contentType else { return }
 
@@ -1301,6 +1372,113 @@ struct NotchView: View {
         SettingsWindowController.shared.present()
     }
 
+    private func handleFileDrop(_ providers: [NSItemProvider]) {
+        guard !providers.isEmpty else { return }
+
+        fileDropStatusMessage = "正在读取拖入文件..."
+        loadDroppedFileURLs(from: providers) { urls in
+            let uniqueURLs = Array(Set(urls))
+            withAnimation(.spring(response: 0.28, dampingFraction: 0.9)) {
+                pendingDroppedFiles = uniqueURLs.sorted { $0.path < $1.path }
+                fileDropStatusMessage = uniqueURLs.isEmpty ? "没有读取到可用文件路径" : nil
+            }
+
+            if uniqueURLs.isEmpty {
+                scheduleFileDropStatusDismissal()
+            } else if viewModel.status == .closed {
+                viewModel.notchOpen(reason: .click)
+            }
+        }
+    }
+
+    private func loadDroppedFileURLs(
+        from providers: [NSItemProvider],
+        completion: @escaping ([URL]) -> Void
+    ) {
+        let group = DispatchGroup()
+        let lock = NSLock()
+        var urls: [URL] = []
+
+        for provider in providers where provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
+            group.enter()
+            provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in
+                defer { group.leave() }
+                guard let url = Self.fileURL(from: item) else { return }
+                lock.lock()
+                urls.append(url)
+                lock.unlock()
+            }
+        }
+
+        group.notify(queue: .main) {
+            completion(urls)
+        }
+    }
+
+    private static func fileURL(from item: NSSecureCoding?) -> URL? {
+        if let url = item as? URL {
+            return url
+        }
+
+        if let data = item as? Data,
+           let url = URL(dataRepresentation: data, relativeTo: nil) {
+            return url
+        }
+
+        if let string = item as? String {
+            return URL(string: string) ?? URL(fileURLWithPath: string)
+        }
+
+        return nil
+    }
+
+    private func sendDroppedFiles(to session: SessionState) {
+        let prompt = SessionFileDropRouter.prompt(for: pendingDroppedFiles)
+        guard !prompt.isEmpty else {
+            fileDropStatusMessage = "没有可发送的文件路径"
+            scheduleFileDropStatusDismissal()
+            return
+        }
+
+        fileDropInFlightSessionID = session.stableId
+        fileDropStatusMessage = nil
+
+        Task {
+            do {
+                try await sessionMonitor.sendSessionMessage(sessionId: session.sessionId, text: prompt)
+                await MainActor.run {
+                    fileDropInFlightSessionID = nil
+                    pendingDroppedFiles = []
+                    fileDropStatusMessage = "已发送给 \(session.displayTitle)"
+                    scheduleFileDropStatusDismissal()
+                }
+            } catch {
+                await MainActor.run {
+                    fileDropInFlightSessionID = nil
+                    fileDropStatusMessage = SessionFileDropRouter.failureMessage(for: error)
+                }
+            }
+        }
+    }
+
+    private func clearFileDropState() {
+        withAnimation(.easeOut(duration: 0.16)) {
+            pendingDroppedFiles = []
+            fileDropStatusMessage = nil
+            fileDropInFlightSessionID = nil
+            isFileDropTargeted = false
+        }
+    }
+
+    private func scheduleFileDropStatusDismissal() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.8) {
+            guard pendingDroppedFiles.isEmpty else { return }
+            withAnimation(.easeOut(duration: 0.16)) {
+                fileDropStatusMessage = nil
+            }
+        }
+    }
+
     private func handleOpenActiveSessionShortcut() {
         guard let session = preferredShortcutSession else { return }
         NSApp.activate(ignoringOtherApps: true)
@@ -1328,19 +1506,24 @@ struct NotchView: View {
     /// Determine if notification sound should play for the given sessions
     /// Returns true if ANY session is not actively focused
     private func shouldPlayNotificationSound(for sessions: [SessionState]) async -> Bool {
+        var allFocused = !sessions.isEmpty
+
         for session in sessions {
             guard let pid = session.pid else {
-                // No PID means we can't check focus, assume not focused
-                return true
+                allFocused = false
+                continue
             }
 
             let isFocused = await TerminalVisibilityDetector.isSessionFocused(sessionPid: pid)
             if !isFocused {
-                return true
+                allFocused = false
             }
         }
 
-        return false
+        return AttentionPolicy.allowsNotificationSound(
+            settings: attentionPolicySnapshot,
+            allTargetSessionsFocused: allFocused
+        )
     }
 }
 
@@ -1388,6 +1571,135 @@ private struct NotchDetachmentHintView: View {
         .shadow(color: Color.black.opacity(0.22), radius: 14, y: 8)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(Text(AppLocalization.string("拖动宠物，让宠物离岛工作")))
+    }
+}
+
+private struct FileDropSessionPicker: View {
+    let files: [URL]
+    let sessions: [SessionState]
+    let statusMessage: String?
+    let inFlightSessionID: String?
+    let onSelect: (SessionState) -> Void
+    let onDismiss: () -> Void
+
+    private var title: String {
+        files.isEmpty ? "拖入文件" : "发送 \(files.count) 个文件路径"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                Image(systemName: "paperclip.circle.fill")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(Color(red: 0.36, green: 0.78, blue: 1.0))
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                        .foregroundColor(.white)
+
+                    if let first = files.first {
+                        Text(first.lastPathComponent)
+                            .font(.system(size: 10.5, weight: .medium, design: .rounded))
+                            .foregroundColor(.white.opacity(0.58))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    } else {
+                        Text(statusMessage ?? "拖到 Island 后选择目标会话")
+                            .font(.system(size: 10.5, weight: .medium, design: .rounded))
+                            .foregroundColor(.white.opacity(0.58))
+                            .lineLimit(1)
+                    }
+                }
+
+                Spacer(minLength: 8)
+
+                Button(action: onDismiss) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(Color.white.opacity(0.68))
+                        .frame(width: 22, height: 22)
+                }
+                .buttonStyle(.plain)
+                .help("关闭")
+            }
+
+            if let statusMessage {
+                Text(statusMessage)
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.72))
+                    .lineLimit(2)
+            }
+
+            if !files.isEmpty {
+                VStack(spacing: 6) {
+                    ForEach(sessions.prefix(5), id: \.stableId) { session in
+                        Button {
+                            onSelect(session)
+                        } label: {
+                            HStack(spacing: 8) {
+                                MascotView(
+                                    kind: AppSettings.shared.mascotKind(for: session.mascotClient),
+                                    status: session.phase == .processing ? .working : .idle,
+                                    size: 16
+                                )
+
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(session.displayTitle)
+                                        .font(.system(size: 11.5, weight: .semibold, design: .rounded))
+                                        .foregroundColor(.white.opacity(0.94))
+                                        .lineLimit(1)
+
+                                    Text(session.clientDisplayName)
+                                        .font(.system(size: 9.5, weight: .medium, design: .rounded))
+                                        .foregroundColor(.white.opacity(0.48))
+                                        .lineLimit(1)
+                                }
+
+                                Spacer(minLength: 6)
+
+                                if inFlightSessionID == session.stableId {
+                                    ProgressView()
+                                        .scaleEffect(0.52)
+                                        .frame(width: 18, height: 18)
+                                } else {
+                                    Image(systemName: "arrow.turn.down.left")
+                                        .font(.system(size: 10, weight: .bold))
+                                        .foregroundColor(.white.opacity(0.46))
+                                }
+                            }
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 7)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .fill(Color.white.opacity(0.07))
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(inFlightSessionID != nil)
+                    }
+
+                    if sessions.isEmpty {
+                        Text("没有可接收文件路径的活跃会话")
+                            .font(.system(size: 11, weight: .semibold, design: .rounded))
+                            .foregroundColor(.white.opacity(0.58))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.vertical, 6)
+                    }
+                }
+            }
+        }
+        .padding(12)
+        .frame(width: 286, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.black.opacity(0.92))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
+                )
+        )
+        .shadow(color: Color.black.opacity(0.32), radius: 18, y: 10)
     }
 }
 
