@@ -284,6 +284,12 @@ final class AppSettingsStore: ObservableObject {
         static let autoHideWhenIdle = "autoHideWhenIdle"
         static let autoCollapseOnLeave = "autoCollapseOnLeave"
         static let smartSuppression = "smartSuppression"
+        static let quietHoursEnabled = "quietHoursEnabled"
+        static let quietHoursStartMinutes = "quietHoursStartMinutes"
+        static let quietHoursEndMinutes = "quietHoursEndMinutes"
+        static let followFocusEnabled = "followFocusEnabled"
+        static let relayEnabled = "relayEnabled"
+        static let relayServerURLString = "relayServerURLString"
         static let autoOpenCompletionPanel = "autoOpenCompletionPanel"
         static let autoOpenCompactedNotificationPanel = "autoOpenCompactedNotificationPanel"
         static let showAgentDetail = "showAgentDetail"
@@ -471,6 +477,58 @@ final class AppSettingsStore: ObservableObject {
         didSet {
             guard !isBootstrapping else { return }
             defaults.set(smartSuppression, forKey: Keys.smartSuppression)
+        }
+    }
+
+    @Published var quietHoursEnabled: Bool {
+        didSet {
+            guard !isBootstrapping else { return }
+            defaults.set(quietHoursEnabled, forKey: Keys.quietHoursEnabled)
+        }
+    }
+
+    @Published var quietHoursStartMinutes: Int {
+        didSet {
+            let clamped = Self.clampedMinuteOfDay(quietHoursStartMinutes)
+            if quietHoursStartMinutes != clamped {
+                quietHoursStartMinutes = clamped
+                return
+            }
+            guard !isBootstrapping else { return }
+            defaults.set(quietHoursStartMinutes, forKey: Keys.quietHoursStartMinutes)
+        }
+    }
+
+    @Published var quietHoursEndMinutes: Int {
+        didSet {
+            let clamped = Self.clampedMinuteOfDay(quietHoursEndMinutes)
+            if quietHoursEndMinutes != clamped {
+                quietHoursEndMinutes = clamped
+                return
+            }
+            guard !isBootstrapping else { return }
+            defaults.set(quietHoursEndMinutes, forKey: Keys.quietHoursEndMinutes)
+        }
+    }
+
+    @Published var followFocusEnabled: Bool {
+        didSet {
+            guard !isBootstrapping else { return }
+            defaults.set(followFocusEnabled, forKey: Keys.followFocusEnabled)
+        }
+    }
+
+    @Published var relayEnabled: Bool {
+        didSet {
+            guard !isBootstrapping else { return }
+            defaults.set(relayEnabled, forKey: Keys.relayEnabled)
+        }
+    }
+
+    @Published var relayServerURLString: String {
+        didSet {
+            guard !isBootstrapping else { return }
+            defaults.set(relayServerURLString, forKey: Keys.relayServerURLString)
         }
     }
 
@@ -727,6 +785,14 @@ final class AppSettingsStore: ObservableObject {
         temporarilyMuteNotificationsUntil = now.addingTimeInterval(duration)
     }
 
+    var quietHoursWindow: AttentionQuietHoursWindow {
+        AttentionQuietHoursWindow(
+            enabled: quietHoursEnabled,
+            startMinutes: quietHoursStartMinutes,
+            endMinutes: quietHoursEndMinutes
+        )
+    }
+
     nonisolated static func isNotificationMuteActive(until date: Date?, now: Date = Date()) -> Bool {
         guard let date else { return false }
         return date > now
@@ -777,6 +843,19 @@ final class AppSettingsStore: ObservableObject {
         default defaultValue: Double
     ) -> Double {
         exists ? defaults.double(forKey: key) : defaultValue
+    }
+
+    private static func intValue(
+        from defaults: UserDefaults,
+        key: String,
+        exists: Bool,
+        default defaultValue: Int
+    ) -> Int {
+        exists ? defaults.integer(forKey: key) : defaultValue
+    }
+
+    nonisolated static func clampedMinuteOfDay(_ value: Int) -> Int {
+        min(max(value, 0), 23 * 60 + 59)
     }
 
     private func containsPersistedValue(forKey key: String) -> Bool {
@@ -994,6 +1073,37 @@ final class AppSettingsStore: ObservableObject {
             exists: persistedKeys.contains(Keys.smartSuppression),
             default: true
         ))
+        _quietHoursEnabled = Published(initialValue: Self.boolValue(
+            from: defaults,
+            key: Keys.quietHoursEnabled,
+            exists: persistedKeys.contains(Keys.quietHoursEnabled),
+            default: false
+        ))
+        _quietHoursStartMinutes = Published(initialValue: Self.clampedMinuteOfDay(Self.intValue(
+            from: defaults,
+            key: Keys.quietHoursStartMinutes,
+            exists: persistedKeys.contains(Keys.quietHoursStartMinutes),
+            default: 22 * 60
+        )))
+        _quietHoursEndMinutes = Published(initialValue: Self.clampedMinuteOfDay(Self.intValue(
+            from: defaults,
+            key: Keys.quietHoursEndMinutes,
+            exists: persistedKeys.contains(Keys.quietHoursEndMinutes),
+            default: 8 * 60
+        )))
+        _followFocusEnabled = Published(initialValue: Self.boolValue(
+            from: defaults,
+            key: Keys.followFocusEnabled,
+            exists: persistedKeys.contains(Keys.followFocusEnabled),
+            default: true
+        ))
+        _relayEnabled = Published(initialValue: Self.boolValue(
+            from: defaults,
+            key: Keys.relayEnabled,
+            exists: persistedKeys.contains(Keys.relayEnabled),
+            default: false
+        ))
+        _relayServerURLString = Published(initialValue: defaults.string(forKey: Keys.relayServerURLString) ?? "http://127.0.0.1:8787")
         _autoOpenCompletionPanel = Published(initialValue: Self.boolValue(
             from: defaults,
             key: Keys.autoOpenCompletionPanel,
@@ -1145,6 +1255,40 @@ enum AppSettings {
     static var smartSuppression: Bool {
         get { shared.smartSuppression }
         set { shared.smartSuppression = newValue }
+    }
+
+    static var quietHoursEnabled: Bool {
+        get { shared.quietHoursEnabled }
+        set { shared.quietHoursEnabled = newValue }
+    }
+
+    static var quietHoursStartMinutes: Int {
+        get { shared.quietHoursStartMinutes }
+        set { shared.quietHoursStartMinutes = newValue }
+    }
+
+    static var quietHoursEndMinutes: Int {
+        get { shared.quietHoursEndMinutes }
+        set { shared.quietHoursEndMinutes = newValue }
+    }
+
+    static var followFocusEnabled: Bool {
+        get { shared.followFocusEnabled }
+        set { shared.followFocusEnabled = newValue }
+    }
+
+    static var relayEnabled: Bool {
+        get { shared.relayEnabled }
+        set { shared.relayEnabled = newValue }
+    }
+
+    static var relayServerURLString: String {
+        get { shared.relayServerURLString }
+        set { shared.relayServerURLString = newValue }
+    }
+
+    static var quietHoursWindow: AttentionQuietHoursWindow {
+        shared.quietHoursWindow
     }
 
     static var autoOpenCompletionPanel: Bool {
