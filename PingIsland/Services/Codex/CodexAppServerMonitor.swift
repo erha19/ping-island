@@ -41,6 +41,7 @@ actor CodexAppServerMonitor {
     private let logger = Logger(subsystem: "com.wudanwu.pingisland", category: "Codex")
     private let port = 41241
     private let threadListRefreshInterval: Duration = .seconds(15)
+    private let webSocketMaximumMessageSize = 16 * 1024 * 1024
 
     private var process: Process?
     private var websocket: URLSessionWebSocketTask?
@@ -337,6 +338,7 @@ actor CodexAppServerMonitor {
         guard let url = URL(string: "ws://127.0.0.1:\(port)") else { return false }
 
         let websocket = URLSession.shared.webSocketTask(with: url)
+        websocket.maximumMessageSize = webSocketMaximumMessageSize
         websocket.resume()
         self.websocket = websocket
 
@@ -373,6 +375,7 @@ actor CodexAppServerMonitor {
     }
 
     private func receiveLoop() async {
+        var closeError: Error?
         while !Task.isCancelled {
             guard let websocket else { return }
 
@@ -381,14 +384,12 @@ actor CodexAppServerMonitor {
                 await handle(message)
             } catch {
                 logger.debug("Codex websocket closed: \(error.localizedDescription, privacy: .public)")
+                closeError = error
                 break
             }
         }
 
-        websocket?.cancel(with: .goingAway, reason: nil)
-        websocket = nil
-        threadListRefreshTask?.cancel()
-        threadListRefreshTask = nil
+        closeWebSocket(error: closeError)
     }
 
     private func ensureThreadListRefreshLoop() {
@@ -409,6 +410,20 @@ actor CodexAppServerMonitor {
             guard !Task.isCancelled else { break }
             guard websocket != nil else { break }
             await refreshThreadList(reason: "poll")
+        }
+    }
+
+    private func closeWebSocket(error: Error?) {
+        websocket?.cancel(with: .goingAway, reason: nil)
+        websocket = nil
+        threadListRefreshTask?.cancel()
+        threadListRefreshTask = nil
+
+        if let error {
+            for (_, continuation) in pendingResponses {
+                continuation.resume(throwing: error)
+            }
+            pendingResponses.removeAll()
         }
     }
 

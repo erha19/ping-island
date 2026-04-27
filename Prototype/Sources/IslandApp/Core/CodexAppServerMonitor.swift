@@ -7,6 +7,7 @@ actor CodexAppServerMonitor {
     private var process: Process?
     private var websocket: URLSessionWebSocketTask?
     private let port = 41241
+    private let webSocketMaximumMessageSize = 16 * 1024 * 1024
 
     init(
         sessionStore: SessionStore,
@@ -65,6 +66,7 @@ actor CodexAppServerMonitor {
     private func connectWebSocket() async throws {
         let url = URL(string: "ws://127.0.0.1:\(port)")!
         let task = URLSession.shared.webSocketTask(with: url)
+        task.maximumMessageSize = webSocketMaximumMessageSize
         task.resume()
         websocket = task
         await noteDidChange("Codex app-server connected")
