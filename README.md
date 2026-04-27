@@ -84,7 +84,13 @@ Ping Island focuses on the moments that actually interrupt coding flow, then kee
 - **Act from the notch** - Approve tools, deny requests, and answer follow-up prompts without hunting through tabs.
 - **Claude Code auto-approve** - Turn on per-session auto-approval when you want Claude Code to stop pausing on every permission request.
 - **One-click return** - Jump back to the right iTerm2, Ghostty, Terminal.app, tmux pane, or IDE window.
+- **Notch file drop** - Drop files or images onto the Island and route their local paths into an active Claude, Codex, OpenCode, Qwen, or Qoder-compatible session.
+- **Quiet attention policy** - Smart Suppress, Quiet Hours, and Follow Focus share one policy for auto-open, notifications, and sounds.
+- **Precision jump pack** - Adds Warp tab lookup plus WezTerm/Kaku/Zellij pane activation and JetBrains workspace routing on top of Terminal, iTerm2, Ghostty, and tmux.
+- **Hook Health Center** - See installed, missing, stale, and conflicting hook profiles in Settings, then reinstall, uninstall, or export diagnostics.
 - **SSH terminal support** - Bootstrap a remote PingIslandBridge over SSH, rewrite the remote Claude-compatible hooks to point back at your Mac, and keep remote terminal activity visible in the same local Island UI.
+- **Self-host relay preview** - Pair a local iOS/watch companion skeleton through a small self-host relay for session, permission, and question notifications.
+- **Hardware simulator** - Preview the future BLE hardware frame protocol from a macOS simulator window.
 - **Multi-agent coverage** - Track Claude Code, Codex, Gemini CLI, Hermes Agent, Qwen Code, OpenClaw, OpenCode, Cursor, Qoder, CodeBuddy, WorkBuddy, GitHub Copilot, and other compatible sessions in one place.
 - **OpenClaw gateway support** - Follow OpenClaw sessions from managed internal hooks, then refill the conversation from OpenClaw's local session transcripts so the Island UI can show the actual back-and-forth instead of a single inbound message.
 - **Codex hook + app-server sync** - Support Codex CLI hooks, live app-server threads, and rollout parsing fallback when needed.
