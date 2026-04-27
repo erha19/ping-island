@@ -14,7 +14,7 @@ struct TerminalAppRegistry: Sendable {
         "com.googlecode.iterm2": "iTerm2",
         "com.openai.codex": "Codex",
         "com.mitchellh.ghostty": "Ghostty",
-        "cmux": "cmux",
+        "com.cmuxterm.app": "cmux",
         "io.alacritty": "Alacritty",
         "org.alacritty": "Alacritty",
         "net.kovidgoyal.kitty": "kitty",
@@ -31,7 +31,7 @@ struct TerminalAppRegistry: Sendable {
         "terminal": "com.apple.Terminal",
         "terminal.app": "com.apple.Terminal",
         "ghostty": "com.mitchellh.ghostty",
-        "cmux": "cmux",
+        "cmux": "com.cmuxterm.app",
         "alacritty": "io.alacritty",
         "kitty": "net.kovidgoyal.kitty",
         "hyper": "co.zeit.hyper",
@@ -108,8 +108,7 @@ struct TerminalAppRegistry: Sendable {
         "com.googlecode.iterm2",
         "com.openai.codex",
         "com.mitchellh.ghostty",
-        "cmux",
-        "io.alacritty",
+        "com.cmuxterm.app",
         "org.alacritty",
         "net.kovidgoyal.kitty",
         "co.zeit.hyper",
@@ -178,7 +177,7 @@ struct TerminalAppRegistry: Sendable {
             return "com.mitchellh.ghostty"
         }
         if normalizedCommand.contains("cmux") {
-            return "cmux"
+            return "com.cmuxterm.app"
         }
         if normalizedCommand.contains("wezterm") {
             return "com.github.wez.wezterm"

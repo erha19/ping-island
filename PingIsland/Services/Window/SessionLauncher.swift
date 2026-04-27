@@ -165,7 +165,7 @@ actor SessionLauncher {
         let trackedTerminalBundleIdentifier = clientInfo.terminalBundleIdentifier
             .map(TerminalAppRegistry.normalizedHostBundleIdentifier(for:))
         let terminalSessionIdentifier: String?
-        if trackedTerminalBundleIdentifier == "com.mitchellh.ghostty" || trackedTerminalBundleIdentifier == "cmux" {
+        if trackedTerminalBundleIdentifier == "com.mitchellh.ghostty" || trackedTerminalBundleIdentifier == "com.cmuxterm.app" {
             terminalSessionIdentifier = TerminalSessionFocuser.normalizedGhosttyTerminalIdentifier(
                 clientInfo.terminalSessionIdentifier
             )
