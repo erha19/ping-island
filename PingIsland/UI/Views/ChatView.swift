@@ -490,6 +490,8 @@ struct ChatView: View {
         ChatApprovalBar(
             tool: tool,
             toolInput: session.pendingToolInput,
+            permission: session.activePermission,
+            intervention: session.intervention,
             sessionAction: session.scopedApprovalAction,
             onApprove: { approvePermission() },
             onApproveForSession: { approvePermissionForSession() },
@@ -1306,6 +1308,8 @@ struct ChatInteractivePromptBar: View {
 struct ChatApprovalBar: View {
     let tool: String
     let toolInput: String?
+    let permission: PermissionContext?
+    let intervention: SessionIntervention?
     let sessionAction: SessionScopedApprovalAction?
     let onApprove: () -> Void
     let onApproveForSession: () -> Void
@@ -1316,73 +1320,90 @@ struct ChatApprovalBar: View {
     @State private var showDenyButton = false
     @State private var showSessionButton = false
 
+    private var reviewDigest: ApprovalReviewDigest {
+        ApprovalReviewDigest(
+            toolName: tool,
+            formattedInput: toolInput,
+            permission: permission,
+            intervention: intervention
+        )
+    }
+
     var body: some View {
-        HStack(spacing: 12) {
-            // Tool info
-            VStack(alignment: .leading, spacing: 2) {
-                Text(MCPToolFormatter.formatToolName(tool))
-                    .font(.system(size: 12, weight: .medium, design: .monospaced))
-                    .foregroundColor(TerminalColors.amber)
-                if let input = toolInput {
-                    Text(input)
-                        .font(.system(size: 11))
-                        .foregroundColor(.white.opacity(0.5))
-                        .lineLimit(1)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 12) {
+                // Tool info
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(MCPToolFormatter.formatToolName(tool))
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .foregroundColor(TerminalColors.amber)
+                    if let input = toolInput {
+                        Text(input)
+                            .font(.system(size: 11))
+                            .foregroundColor(.white.opacity(0.5))
+                            .lineLimit(1)
+                    }
                 }
-            }
-            .opacity(showContent ? 1 : 0)
-            .offset(x: showContent ? 0 : -10)
+                .opacity(showContent ? 1 : 0)
+                .offset(x: showContent ? 0 : -10)
 
-            Spacer()
+                Spacer()
 
-            // Deny button
-            Button {
-                onDeny()
-            } label: {
-                Text("Deny")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundColor(.white.opacity(0.7))
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
-                    .background(Color.white.opacity(0.1))
-                    .clipShape(Capsule())
-            }
-            .buttonStyle(.plain)
-            .opacity(showDenyButton ? 1 : 0)
-            .scaleEffect(showDenyButton ? 1 : 0.8)
-
-            if let sessionAction {
+                // Deny button
                 Button {
-                    onApproveForSession()
+                    onDeny()
                 } label: {
-                    Text(AppLocalization.string(sessionAction.buttonTitleKey))
+                    Text("Deny")
                         .font(.system(size: 13, weight: .medium))
-                        .foregroundColor(.white.opacity(0.92))
+                        .foregroundColor(.white.opacity(0.7))
                         .padding(.horizontal, 16)
                         .padding(.vertical, 8)
-                        .background(TerminalColors.blue.opacity(0.26))
+                        .background(Color.white.opacity(0.1))
                         .clipShape(Capsule())
                 }
                 .buttonStyle(.plain)
-                .opacity(showSessionButton ? 1 : 0)
-                .scaleEffect(showSessionButton ? 1 : 0.8)
+                .keyboardShortcut(.escape, modifiers: [])
+                .opacity(showDenyButton ? 1 : 0)
+                .scaleEffect(showDenyButton ? 1 : 0.8)
+
+                if let sessionAction {
+                    Button {
+                        onApproveForSession()
+                    } label: {
+                        Text(AppLocalization.string(sessionAction.buttonTitleKey))
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundColor(.white.opacity(0.92))
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 8)
+                            .background(TerminalColors.blue.opacity(0.26))
+                            .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .keyboardShortcut("s", modifiers: [.command])
+                    .opacity(showSessionButton ? 1 : 0)
+                    .scaleEffect(showSessionButton ? 1 : 0.8)
+                }
+
+                // Allow button
+                Button {
+                    onApprove()
+                } label: {
+                    Text("Allow")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(.black)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .background(Color.white.opacity(0.95))
+                        .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .keyboardShortcut(.return, modifiers: [.command])
+                .opacity(showAllowButton ? 1 : 0)
+                .scaleEffect(showAllowButton ? 1 : 0.8)
             }
 
-            // Allow button
-            Button {
-                onApprove()
-            } label: {
-                Text("Allow")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundColor(.black)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
-                    .background(Color.white.opacity(0.95))
-                    .clipShape(Capsule())
-            }
-            .buttonStyle(.plain)
-            .opacity(showAllowButton ? 1 : 0)
-            .scaleEffect(showAllowButton ? 1 : 0.8)
+            ApprovalReviewPanel(digest: reviewDigest)
+                .opacity(showContent ? 1 : 0)
         }
         .frame(minHeight: 44)  // Consistent height with other bars
         .padding(.horizontal, 16)
@@ -1401,6 +1422,106 @@ struct ChatApprovalBar: View {
             withAnimation(.spring(response: 0.35, dampingFraction: 0.7).delay(0.2)) {
                 showAllowButton = true
             }
+        }
+    }
+}
+
+private struct ApprovalReviewPanel: View {
+    let digest: ApprovalReviewDigest
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Label("Risk \(digest.risk.title)", systemImage: riskIcon)
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundColor(riskTint)
+
+                Text(digest.riskReason)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundColor(.white.opacity(0.58))
+                    .lineLimit(1)
+
+                Spacer(minLength: 8)
+
+                Text("⌘↩ allow  Esc deny")
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .foregroundColor(.white.opacity(0.38))
+            }
+
+            if !digest.files.isEmpty {
+                reviewLine(
+                    icon: "doc.text.magnifyingglass",
+                    title: "Files",
+                    value: digest.files.prefix(3).joined(separator: "  ")
+                )
+            }
+
+            if let command = digest.command {
+                reviewLine(
+                    icon: "terminal",
+                    title: "Command",
+                    value: command
+                )
+            }
+
+            if let patchSummary = digest.patchSummary {
+                reviewLine(
+                    icon: "plus.forwardslash.minus",
+                    title: "Patch",
+                    value: patchSummary
+                )
+            }
+
+            if let planSummary = digest.planSummary {
+                MarkdownText(planSummary, color: .white.opacity(0.64), fontSize: 11)
+                    .lineLimit(6)
+                    .padding(.top, 2)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .fill(Color.white.opacity(0.055))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .strokeBorder(riskTint.opacity(digest.risk == .low ? 0.12 : 0.28), lineWidth: 1)
+        )
+    }
+
+    private func reviewLine(icon: String, title: String, value: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Image(systemName: icon)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundColor(.white.opacity(0.42))
+                .frame(width: 13)
+
+            Text(title)
+                .font(.system(size: 10, weight: .bold))
+                .foregroundColor(.white.opacity(0.46))
+
+            Text(value)
+                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .foregroundColor(.white.opacity(0.68))
+                .lineLimit(1)
+                .truncationMode(.middle)
+        }
+    }
+
+    private var riskIcon: String {
+        switch digest.risk {
+        case .low: return "checkmark.shield"
+        case .medium: return "exclamationmark.shield"
+        case .high: return "xmark.shield"
+        }
+    }
+
+    private var riskTint: Color {
+        switch digest.risk {
+        case .low: return TerminalColors.green
+        case .medium: return TerminalColors.amber
+        case .high: return Color.red.opacity(0.88)
         }
     }
 }

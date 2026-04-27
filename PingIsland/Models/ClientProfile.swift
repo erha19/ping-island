@@ -543,6 +543,58 @@ enum ClientProfileRegistry {
             ]
         ),
         ManagedHookClientProfile(
+            id: "kimi-hooks",
+            title: "Kimi",
+            subtitle: "管理 ~/.kimi/settings.json，按 Claude Hooks 兼容协议接入 Island",
+            alwaysVisibleInSettings: true,
+            iconSymbolName: "moonphase.waxing.crescent",
+            configurationRelativePath: ".kimi/settings.json",
+            bridgeSource: "claude",
+            bridgeExtraArguments: [
+                "--client-kind", "kimi",
+                "--client-name", "Kimi",
+                "--client-origin", "cli",
+                "--client-originator", "Kimi",
+                "--thread-source", "kimi-hooks"
+            ],
+            defaultEnabled: false,
+            brand: .neutral,
+            events: [
+                HookInstallEventDescriptor(name: "UserPromptSubmit", templates: [.plain]),
+                HookInstallEventDescriptor(name: "PreToolUse", templates: [.matcher("*")], timeout: 86_400),
+                HookInstallEventDescriptor(name: "PostToolUse", templates: [.matcher("*")]),
+                HookInstallEventDescriptor(name: "PermissionRequest", templates: [.matcher("*")], timeout: 86_400),
+                HookInstallEventDescriptor(name: "Notification", templates: [.matcher("*")]),
+                HookInstallEventDescriptor(name: "Stop", templates: [.plain]),
+            ]
+        ),
+        ManagedHookClientProfile(
+            id: "factory-hooks",
+            title: "Factory",
+            subtitle: "管理 ~/.factory/settings.json，按 agent hooks 兼容协议接入 Island",
+            alwaysVisibleInSettings: true,
+            iconSymbolName: "shippingbox.circle.fill",
+            configurationRelativePath: ".factory/settings.json",
+            bridgeSource: "claude",
+            bridgeExtraArguments: [
+                "--client-kind", "factory",
+                "--client-name", "Factory",
+                "--client-origin", "cli",
+                "--client-originator", "Factory",
+                "--thread-source", "factory-hooks"
+            ],
+            defaultEnabled: false,
+            brand: .neutral,
+            events: [
+                HookInstallEventDescriptor(name: "UserPromptSubmit", templates: [.plain]),
+                HookInstallEventDescriptor(name: "PreToolUse", templates: [.matcher("*")], timeout: 86_400),
+                HookInstallEventDescriptor(name: "PostToolUse", templates: [.matcher("*")]),
+                HookInstallEventDescriptor(name: "PermissionRequest", templates: [.matcher("*")], timeout: 86_400),
+                HookInstallEventDescriptor(name: "Notification", templates: [.matcher("*")]),
+                HookInstallEventDescriptor(name: "Stop", templates: [.plain]),
+            ]
+        ),
+        ManagedHookClientProfile(
             id: "openclaw-hooks",
             title: "OpenClaw",
             subtitle: "管理 ~/.openclaw/hooks/ping-island-openclaw，并自动启用内部 hook",
@@ -661,6 +713,90 @@ enum ClientProfileRegistry {
                 HookInstallEventDescriptor(name: "SessionStart", templates: [.plain]),
                 HookInstallEventDescriptor(name: "SessionEnd", templates: [.plain]),
                 HookInstallEventDescriptor(name: "PreCompact", templates: [.matcher("auto"), .matcher("manual")]),
+            ]
+        ),
+        ManagedHookClientProfile(
+            id: "trae-hooks",
+            title: "Trae",
+            subtitle: "管理 Trae/User/settings.json 或 ~/.trae/settings.json，按 Claude Hooks 兼容协议接入 Island",
+            alwaysVisibleInSettings: true,
+            localAppBundleIdentifiers: ["com.trae.app", "com.trae.cn"],
+            iconSymbolName: "bolt.badge.clock.fill",
+            configurationRelativePaths: [
+                "Library/Application Support/Trae/User/settings.json",
+                ".trae/settings.json"
+            ],
+            bridgeSource: "claude",
+            bridgeExtraArguments: [
+                "--client-kind", "trae",
+                "--client-name", "Trae",
+                "--client-originator", "Trae",
+                "--thread-source", "trae-hooks"
+            ],
+            defaultEnabled: false,
+            brand: .neutral,
+            events: [
+                HookInstallEventDescriptor(name: "UserPromptSubmit", templates: [.plain]),
+                HookInstallEventDescriptor(name: "PreToolUse", templates: [.matcher("*")], timeout: 86_400),
+                HookInstallEventDescriptor(name: "PostToolUse", templates: [.matcher("*")]),
+                HookInstallEventDescriptor(name: "PermissionRequest", templates: [.matcher("*")], timeout: 86_400),
+                HookInstallEventDescriptor(name: "Notification", templates: [.matcher("*")]),
+                HookInstallEventDescriptor(name: "Stop", templates: [.plain]),
+            ]
+        ),
+        ManagedHookClientProfile(
+            id: "stepfun-hooks",
+            title: "StepFun",
+            subtitle: "管理 ~/.stepfun/settings.json，按 Claude Hooks 兼容协议接入 Island",
+            alwaysVisibleInSettings: true,
+            iconSymbolName: "figure.stairs",
+            configurationRelativePath: ".stepfun/settings.json",
+            bridgeSource: "claude",
+            bridgeExtraArguments: [
+                "--client-kind", "stepfun",
+                "--client-name", "StepFun",
+                "--client-origin", "cli",
+                "--client-originator", "StepFun",
+                "--thread-source", "stepfun-hooks"
+            ],
+            defaultEnabled: false,
+            brand: .neutral,
+            events: [
+                HookInstallEventDescriptor(name: "UserPromptSubmit", templates: [.plain]),
+                HookInstallEventDescriptor(name: "PreToolUse", templates: [.matcher("*")], timeout: 86_400),
+                HookInstallEventDescriptor(name: "PostToolUse", templates: [.matcher("*")]),
+                HookInstallEventDescriptor(name: "PermissionRequest", templates: [.matcher("*")], timeout: 86_400),
+                HookInstallEventDescriptor(name: "Notification", templates: [.matcher("*")]),
+                HookInstallEventDescriptor(name: "Stop", templates: [.plain]),
+            ]
+        ),
+        ManagedHookClientProfile(
+            id: "antigravity-hooks",
+            title: "AntiGravity",
+            subtitle: "管理 Antigravity/User/settings.json 或 ~/.antigravity/settings.json，按 Claude Hooks 兼容协议接入 Island",
+            alwaysVisibleInSettings: true,
+            localAppBundleIdentifiers: ["com.google.antigravity"],
+            iconSymbolName: "arrow.up.and.down.circle.fill",
+            configurationRelativePaths: [
+                "Library/Application Support/Google/Antigravity/User/settings.json",
+                ".antigravity/settings.json"
+            ],
+            bridgeSource: "claude",
+            bridgeExtraArguments: [
+                "--client-kind", "antigravity",
+                "--client-name", "AntiGravity",
+                "--client-originator", "AntiGravity",
+                "--thread-source", "antigravity-hooks"
+            ],
+            defaultEnabled: false,
+            brand: .neutral,
+            events: [
+                HookInstallEventDescriptor(name: "UserPromptSubmit", templates: [.plain]),
+                HookInstallEventDescriptor(name: "PreToolUse", templates: [.matcher("*")], timeout: 86_400),
+                HookInstallEventDescriptor(name: "PostToolUse", templates: [.matcher("*")]),
+                HookInstallEventDescriptor(name: "PermissionRequest", templates: [.matcher("*")], timeout: 86_400),
+                HookInstallEventDescriptor(name: "Notification", templates: [.matcher("*")]),
+                HookInstallEventDescriptor(name: "Stop", templates: [.plain]),
             ]
         ),
         ManagedHookClientProfile(
@@ -868,6 +1004,66 @@ enum ClientProfileRegistry {
             exactAliases: ["trae", "trae-ide", "trae ide", "trae-ai", "trae ai"],
             keywordAliases: ["trae"],
             bundleIdentifiers: []
+        ),
+        SessionClientProfile(
+            id: "kimi",
+            provider: .claude,
+            family: .claudeHooks,
+            kind: .custom,
+            displayName: "Kimi",
+            assistantLabelMode: .badgeLabel,
+            brand: .neutral,
+            defaultBundleIdentifier: nil,
+            defaultOrigin: "cli",
+            recognizedKinds: ["kimi", "kimi-cli", "kimi cli"],
+            exactAliases: ["kimi", "kimi-cli", "kimi cli"],
+            keywordAliases: ["kimi"],
+            bundleIdentifiers: []
+        ),
+        SessionClientProfile(
+            id: "factory",
+            provider: .claude,
+            family: .claudeHooks,
+            kind: .custom,
+            displayName: "Factory",
+            assistantLabelMode: .badgeLabel,
+            brand: .neutral,
+            defaultBundleIdentifier: nil,
+            defaultOrigin: "cli",
+            recognizedKinds: ["factory", "factory-cli", "factory cli"],
+            exactAliases: ["factory", "factory-cli", "factory cli"],
+            keywordAliases: ["factory"],
+            bundleIdentifiers: []
+        ),
+        SessionClientProfile(
+            id: "stepfun",
+            provider: .claude,
+            family: .claudeHooks,
+            kind: .custom,
+            displayName: "StepFun",
+            assistantLabelMode: .badgeLabel,
+            brand: .neutral,
+            defaultBundleIdentifier: nil,
+            defaultOrigin: "cli",
+            recognizedKinds: ["stepfun", "step-fun", "step_fun", "step fun"],
+            exactAliases: ["stepfun", "step-fun", "step fun"],
+            keywordAliases: ["stepfun", "step fun"],
+            bundleIdentifiers: []
+        ),
+        SessionClientProfile(
+            id: "antigravity",
+            provider: .claude,
+            family: .claudeHooks,
+            kind: .custom,
+            displayName: "AntiGravity",
+            assistantLabelMode: .badgeLabel,
+            brand: .neutral,
+            defaultBundleIdentifier: "com.google.antigravity",
+            defaultOrigin: "desktop",
+            recognizedKinds: ["antigravity", "anti-gravity", "anti_gravity", "anti gravity"],
+            exactAliases: ["antigravity", "anti-gravity", "anti gravity"],
+            keywordAliases: ["antigravity", "anti gravity"],
+            bundleIdentifiers: ["com.google.antigravity"]
         ),
         SessionClientProfile(
             id: "cursor",

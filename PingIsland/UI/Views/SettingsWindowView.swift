@@ -282,6 +282,8 @@ final class SettingsPanelViewModel: ObservableObject {
     @Published private(set) var reinstallingHookProfileID: String?
     @Published private(set) var hookReinstallFeedbacks: [String: HookReinstallFeedback] = [:]
     @Published private(set) var customHookInstallations: [HookInstaller.CustomHookInstallation] = []
+    @Published private(set) var hookHealthSnapshots: [HookHealthSnapshot] = []
+    @Published var hookHealthExportStatus = AppLocalization.string("导出 Hook 健康诊断 JSON")
     @Published var nativeClaudeRuntimeEnabled = FeatureFlags.nativeClaudeRuntime
     @Published var nativeCodexRuntimeEnabled = FeatureFlags.nativeCodexRuntime
     @Published var nativeRuntimeWorkingDirectory = FileManager.default.homeDirectoryForCurrentUser.path
@@ -337,6 +339,7 @@ final class SettingsPanelViewModel: ObservableObject {
     func refresh() {
         launchAtLogin = SMAppService.mainApp.status == .enabled
         refreshHookInstallationStates()
+        refreshHookHealthSnapshots()
         refreshIDEExtensionInstallationStates()
         refreshCustomHookInstallations()
         accessibilityEnabled = AXIsProcessTrusted()
@@ -376,6 +379,7 @@ final class SettingsPanelViewModel: ObservableObject {
     func installHooks(for profile: ManagedHookClientProfile) {
         HookInstaller.install(profile)
         refreshHookInstallationStates()
+        refreshHookHealthSnapshots()
     }
 
     func reinstallHooks(for profile: ManagedHookClientProfile) {
@@ -395,6 +399,7 @@ final class SettingsPanelViewModel: ObservableObject {
             try? await Task.sleep(nanoseconds: 450_000_000)
 
             refreshHookInstallationStates()
+            refreshHookHealthSnapshots()
             reinstallingHookProfileID = nil
             hookReinstallFeedbacks[profile.id] = HookReinstallFeedback(
                 message: didInstall
@@ -415,6 +420,29 @@ final class SettingsPanelViewModel: ObservableObject {
     func uninstallHooks(for profile: ManagedHookClientProfile) {
         HookInstaller.uninstall(profile)
         refreshHookInstallationStates()
+        refreshHookHealthSnapshots()
+    }
+
+    func hookHealthSnapshot(for profile: ManagedHookClientProfile) -> HookHealthSnapshot? {
+        hookHealthSnapshots.first { $0.profileID == profile.id }
+    }
+
+    func exportHookHealthDiagnostics() {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.json]
+        panel.canCreateDirectories = true
+        panel.isExtensionHidden = false
+        panel.nameFieldStringValue = "PingIsland-HookHealth-\(Self.archiveTimestamp()).json"
+
+        guard panel.runModal() == .OK, let destinationURL = panel.url else { return }
+
+        let report = HookHealthCenter.diagnosticsReport(for: hookHealthSnapshots)
+        do {
+            try Data(report.utf8).write(to: destinationURL, options: .atomic)
+            hookHealthExportStatus = AppLocalization.format("已导出到 %@", destinationURL.lastPathComponent)
+        } catch {
+            hookHealthExportStatus = AppLocalization.format("导出失败：%@", error.localizedDescription)
+        }
     }
 
     func installCustomHook(profileID: String, directoryPath: String) {
@@ -636,6 +664,10 @@ final class SettingsPanelViewModel: ObservableObject {
         }
     }
 
+    private func refreshHookHealthSnapshots() {
+        hookHealthSnapshots = HookHealthCenter.snapshots(profiles: visibleHookProfiles)
+    }
+
     private func refreshIDEExtensionInstallationStates() {
         ideExtensionInstallationStates = ClientProfileRegistry.ideExtensionProfiles.reduce(into: [:]) { result, profile in
             result[profile.id] = IDEExtensionInstaller.isInstalled(profile)
@@ -715,6 +747,7 @@ private struct SettingsPanelContentView: View {
     @ObservedObject private var soundPacks = SoundPackCatalog.shared
     @ObservedObject private var updateManager = UpdateManager.shared
     @ObservedObject private var remoteManager = RemoteConnectorManager.shared
+    @ObservedObject private var relayClient = IslandRelayClient.shared
     @State private var selectedCategory: SettingsCategory? = .general
     @State private var nativeRuntimePreviewUnlockState = NativeRuntimePreviewUnlockState()
     @State private var pendingHookReinstallProfile: ManagedHookClientProfile?
@@ -1170,6 +1203,33 @@ private struct SettingsPanelContentView: View {
                 SettingsLineDivider()
 
                 SettingsToggleLine(
+                    title: "跟随焦点",
+                    subtitle: "当目标会话已经在前台时，不播放提示音，也不强行弹出 Island",
+                    isOn: $settings.followFocusEnabled
+                )
+                SettingsLineDivider()
+
+                SettingsToggleLine(
+                    title: "安静时段",
+                    subtitle: "在指定时间段只保留状态变化，不自动弹出或播放声音",
+                    isOn: $settings.quietHoursEnabled
+                )
+                SettingsLineDivider()
+
+                SettingsInfoLine(
+                    title: "安静时段范围",
+                    subtitle: "支持跨午夜，例如 22:00 到 08:00"
+                ) {
+                    QuietHoursRangeEditor(
+                        startMinutes: $settings.quietHoursStartMinutes,
+                        endMinutes: $settings.quietHoursEndMinutes
+                    )
+                    .disabled(!settings.quietHoursEnabled)
+                    .opacity(settings.quietHoursEnabled ? 1 : 0.48)
+                }
+                SettingsLineDivider()
+
+                SettingsToggleLine(
                     title: "完成时自动展开会话",
                     subtitle: "消息完成后自动弹出结果面板；关闭后只保留刘海状态提示和提示音",
                     isOn: $settings.autoOpenCompletionPanel
@@ -1485,6 +1545,45 @@ private struct SettingsPanelContentView: View {
         VStack(alignment: .leading, spacing: 18) {
             let hookProfiles = viewModel.visibleHookProfiles
             if !hookProfiles.isEmpty {
+                SettingsSectionCard(title: "Hook Health Center") {
+                    let profiles = hookProfiles
+                    ForEach(Array(profiles.enumerated()), id: \.element.id) { index, profile in
+                        HookHealthLine(
+                            profile: profile,
+                            snapshot: viewModel.hookHealthSnapshot(for: profile),
+                            reinstallAction: { pendingHookReinstallProfile = profile },
+                            uninstallAction: { viewModel.uninstallHooks(for: profile) },
+                            openConfigurationDirectoryAction: {
+                                viewModel.openHookConfigurationDirectory(for: profile)
+                            }
+                        )
+
+                        if index < profiles.count - 1 {
+                            SettingsLineDivider()
+                        }
+                    }
+
+                    SettingsLineDivider()
+
+                    HStack(spacing: 10) {
+                        Text(appLocalized: viewModel.hookHealthExportStatus)
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(.white.opacity(0.58))
+                            .lineLimit(1)
+
+                        Spacer()
+
+                        HookManagementButton(
+                            title: "导出诊断",
+                            tint: TerminalColors.blue
+                        ) {
+                            viewModel.exportHookHealthDiagnostics()
+                        }
+                    }
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 12)
+                }
+
                 SettingsSectionCard(title: "Hooks 管理") {
                     let profiles = hookProfiles
                     ForEach(Array(profiles.enumerated()), id: \.element.id) { index, profile in
@@ -1572,6 +1671,19 @@ private struct SettingsPanelContentView: View {
                     if !viewModel.accessibilityEnabled {
                         viewModel.openAccessibilitySettings()
                     }
+                }
+            }
+
+            SettingsSectionCard(title: "硬件模拟器") {
+                SettingsActionLine(
+                    title: "打开 BLE 状态模拟器",
+                    subtitle: "预览 mascot、status、tool、brightness、orientation 协议帧"
+                ) {
+                    HardwareSimulatorWindowController.shared.show()
+                } accessory: {
+                    Image(systemName: "cpu")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.5))
                 }
             }
 
@@ -1663,6 +1775,13 @@ private struct SettingsPanelContentView: View {
 
     private var remoteContent: some View {
         VStack(alignment: .leading, spacing: 18) {
+            SettingsSectionCard(title: "移动端自托管中继") {
+                RelayCompanionSection(
+                    settings: settings,
+                    relayClient: relayClient
+                )
+            }
+
             SettingsSectionCard(title: "远程主机") {
                 if remoteManager.endpoints.isEmpty {
                     VStack(alignment: .leading, spacing: 10) {
@@ -2140,6 +2259,101 @@ private struct SettingsLineDivider: View {
     }
 }
 
+private struct HookHealthLine: View {
+    let profile: ManagedHookClientProfile
+    let snapshot: HookHealthSnapshot?
+    let reinstallAction: () -> Void
+    let uninstallAction: () -> Void
+    let openConfigurationDirectoryAction: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .center, spacing: 14) {
+                HookManagementIcon(profile: profile)
+
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(spacing: 8) {
+                        Text(appLocalized: profile.title)
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(.white)
+
+                        Text(appLocalized: statusTitle)
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundColor(statusTint)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 3)
+                            .background(Capsule(style: .continuous).fill(statusTint.opacity(0.18)))
+                    }
+
+                    Text(appLocalized: statusDetail)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(.white.opacity(0.58))
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    if let firstPath = snapshot?.configurationPaths.first {
+                        Text(firstPath)
+                            .font(.system(size: 10, weight: .medium, design: .monospaced))
+                            .foregroundColor(.white.opacity(0.42))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                }
+
+                Spacer(minLength: 12)
+            }
+
+            HStack(spacing: 10) {
+                HookManagementButton(
+                    title: "打开配置目录",
+                    tint: TerminalColors.blue,
+                    action: openConfigurationDirectoryAction
+                )
+
+                HookManagementButton(
+                    title: "重装",
+                    tint: statusTint,
+                    action: reinstallAction
+                )
+
+                if snapshot?.installed == true {
+                    HookManagementButton(
+                        title: "卸载",
+                        tint: TerminalColors.amber,
+                        action: uninstallAction
+                    )
+                }
+            }
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var statusTitle: String {
+        switch snapshot?.status {
+        case .installed: return "installed"
+        case .missing: return "missing"
+        case .stale: return "stale"
+        case .conflict: return "conflict"
+        case nil: return "checking"
+        }
+    }
+
+    private var statusDetail: String {
+        snapshot?.detail ?? "Health snapshot will refresh when this panel opens."
+    }
+
+    private var statusTint: Color {
+        switch snapshot?.status {
+        case .installed: return TerminalColors.green
+        case .missing: return .white.opacity(0.58)
+        case .stale: return TerminalColors.amber
+        case .conflict: return Color.red.opacity(0.86)
+        case nil: return TerminalColors.blue
+        }
+    }
+}
+
 private struct HookManagementLine: View {
     let profile: ManagedHookClientProfile
     let isInstalled: Bool
@@ -2562,6 +2776,135 @@ private struct HookManagementIcon: View {
             localAppBundleIdentifiers: profile.localAppBundleIdentifiers,
             iconSymbolName: profile.iconSymbolName
         )
+    }
+}
+
+private struct RelayCompanionSection: View {
+    @ObservedObject var settings: AppSettingsStore
+    @ObservedObject var relayClient: IslandRelayClient
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            SettingsToggleLine(
+                title: "启用中继推送",
+                subtitle: "将 session、permission、question 事件推送到自托管 relay 服务",
+                isOn: $settings.relayEnabled
+            )
+
+            SettingsLineDivider()
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text(appLocalized: "Relay URL")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.7))
+
+                TextField("", text: $settings.relayServerURLString)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(.white.opacity(0.06))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .strokeBorder(.white.opacity(0.1), lineWidth: 1)
+                    )
+            }
+            .padding(.horizontal, 18)
+
+            SettingsLineDivider()
+
+            HStack(spacing: 14) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(appLocalized: "配对码")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.55))
+                    Text(relayClient.pairingCode.code)
+                        .font(.system(size: 28, weight: .bold, design: .monospaced))
+                        .foregroundColor(.white)
+                    Text(pairingExpiryText)
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundColor(.white.opacity(0.42))
+                }
+
+                Spacer()
+
+                HookManagementButton(
+                    title: "刷新配对码",
+                    tint: TerminalColors.blue
+                ) {
+                    relayClient.rotatePairingCode()
+                }
+            }
+            .padding(.horizontal, 18)
+
+            if !relayClient.devices.isEmpty {
+                SettingsLineDivider()
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(relayClient.devices) { device in
+                        HStack(spacing: 10) {
+                            Image(systemName: device.platform.localizedCaseInsensitiveContains("watch") ? "applewatch" : "iphone")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(TerminalColors.blue)
+                                .frame(width: 20)
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(device.name)
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundColor(.white.opacity(0.86))
+                                Text(device.platform)
+                                    .font(.system(size: 10, weight: .medium))
+                                    .foregroundColor(.white.opacity(0.42))
+                            }
+
+                            Spacer()
+
+                            Button {
+                                relayClient.removeDevice(id: device.id)
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundColor(.white.opacity(0.36))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+                .padding(.horizontal, 18)
+            }
+
+            SettingsLineDivider()
+
+            HStack(spacing: 10) {
+                Text(relayClient.lastDeliveryStatus ?? "Outbox \(relayClient.outbox.count) messages")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.white.opacity(0.56))
+                    .lineLimit(1)
+
+                Spacer()
+
+                HookManagementButton(
+                    title: "清空队列",
+                    tint: TerminalColors.amber,
+                    isDisabled: relayClient.outbox.isEmpty
+                ) {
+                    relayClient.clearOutbox()
+                }
+            }
+            .padding(.horizontal, 18)
+            .padding(.bottom, 12)
+        }
+        .padding(.top, 14)
+    }
+
+    private var pairingExpiryText: String {
+        let remaining = max(0, Int(relayClient.pairingCode.expiresAt.timeIntervalSinceNow.rounded()))
+        let minutes = max(0, remaining / 60)
+        let seconds = max(0, remaining % 60)
+        return AppLocalization.format("%lld:%02lld 后过期", minutes, seconds)
     }
 }
 
@@ -3977,6 +4320,50 @@ private struct UsageValueModePicker: View {
         .labelsHidden()
         .accessibilityLabel(Text(appLocalized: "用量显示方式"))
         .settingsMenuPicker(width: 168)
+    }
+}
+
+private struct QuietHoursRangeEditor: View {
+    @Binding var startMinutes: Int
+    @Binding var endMinutes: Int
+
+    var body: some View {
+        HStack(spacing: 8) {
+            minuteStepper(title: "开始", value: $startMinutes)
+
+            Text("→")
+                .font(.system(size: 11, weight: .bold))
+                .foregroundColor(.white.opacity(0.44))
+
+            minuteStepper(title: "结束", value: $endMinutes)
+        }
+    }
+
+    private func minuteStepper(title: String, value: Binding<Int>) -> some View {
+        Stepper(
+            value: Binding(
+                get: { value.wrappedValue },
+                set: { value.wrappedValue = AppSettingsStore.clampedMinuteOfDay($0) }
+            ),
+            in: 0...(23 * 60 + 59),
+            step: 15
+        ) {
+            VStack(alignment: .trailing, spacing: 1) {
+                Text(title)
+                    .font(.system(size: 9, weight: .semibold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.42))
+                Text(Self.formatted(value.wrappedValue))
+                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.88))
+                    .monospacedDigit()
+            }
+        }
+        .frame(width: 92)
+    }
+
+    private static func formatted(_ minutes: Int) -> String {
+        let clamped = AppSettingsStore.clampedMinuteOfDay(minutes)
+        return String(format: "%02d:%02d", clamped / 60, clamped % 60)
     }
 }
 
