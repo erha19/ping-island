@@ -3245,7 +3245,8 @@ actor SessionStore {
         event: HookEvent,
         workspacePath: String
     ) async -> SessionClientInfo? {
-        guard current.terminalBundleIdentifier == "com.mitchellh.ghostty",
+        // cmux is based on Ghostty, so we reuse the Ghostty enrichment logic
+        guard current.terminalBundleIdentifier == "com.mitchellh.ghostty" || current.terminalBundleIdentifier == "cmux",
               TerminalSessionFocuser.normalizedGhosttyTerminalIdentifier(current.terminalSessionIdentifier) == nil,
               shouldCaptureFrontmostGhosttyTerminalIdentifier(for: event) else {
             return nil

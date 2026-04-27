@@ -179,6 +179,29 @@ actor TerminalSessionFocuser {
                 workspacePath: workspacePath,
                 titleHint: remoteHostHint
             )
+        case "cmux":
+            // cmux is based on Ghostty, reuse Ghostty focus logic
+            let cmuxTerminalIdentifier = clientInfo?.terminalSessionIdentifier
+            await FocusDiagnosticsStore.shared.record(
+                "TerminalFocus cmux applescript terminalPid=\(terminalPid) terminalIdentifier=\(cmuxTerminalIdentifier ?? "nil") workspacePath=\(workspacePath ?? "nil")"
+            )
+            guard await TerminalAutomationPermissionCoordinator.shared.ensurePermissionIfNeeded(
+                terminalPid: terminalPid,
+                bundleIdentifier: bundleIdentifier,
+                sessionId: sessionId
+            ) else {
+                logger.debug("Automation permission unavailable for cmux bundle \(bundleIdentifier, privacy: .public)")
+                await FocusDiagnosticsStore.shared.record(
+                    "TerminalFocus cmux skip-no-automation-permission terminalPid=\(terminalPid) sessionId=\(sessionId ?? "nil")"
+                )
+                return false
+            }
+            return await focusGhosttyTerminal(
+                terminalPid: terminalPid,
+                terminalSessionIdentifier: cmuxTerminalIdentifier,
+                workspacePath: workspacePath,
+                titleHint: remoteHostHint
+            )
         default:
             logger.debug("No scripted focuser for bundle \(bundleIdentifier, privacy: .public)")
             await FocusDiagnosticsStore.shared.record(
@@ -314,9 +337,11 @@ actor TerminalSessionFocuser {
     }
 
     func frontmostGhosttyTerminalSnapshot() async -> GhosttyTerminalSnapshot? {
-        let isGhosttyFrontmost = await MainActor.run {
-            NSWorkspace.shared.frontmostApplication?.bundleIdentifier == "com.mitchellh.ghostty"
+        let frontmostBundleId = await MainActor.run {
+            NSWorkspace.shared.frontmostApplication?.bundleIdentifier
         }
+        // cmux is based on Ghostty and uses the same AppleScript interface
+        let isGhosttyFrontmost = frontmostBundleId == "com.mitchellh.ghostty" || frontmostBundleId == "cmux"
         guard isGhosttyFrontmost else {
             return nil
         }
