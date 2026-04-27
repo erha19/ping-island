@@ -87,11 +87,11 @@ final class PingIslandUpgradeTests: XCTestCase {
 
     func testSupplementalHookClientsResolveToMascotClients() {
         let expected: [(String, MascotClient, MascotKind)] = [
-            ("kimi", .kimi, .gemini),
-            ("factory", .factory, .opencode),
-            ("trae", .trae, .cursor),
-            ("stepfun", .stepfun, .qwen),
-            ("antigravity", .antigravity, .cursor),
+            ("kimi", .kimi, .kimi),
+            ("factory", .factory, .factory),
+            ("trae", .trae, .trae),
+            ("stepfun", .stepfun, .stepfun),
+            ("antigravity", .antigravity, .antigravity),
         ]
 
         for (profileID, client, mascot) in expected {

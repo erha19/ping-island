@@ -137,15 +137,15 @@ enum MascotClient: String, CaseIterable, Identifiable, Sendable {
         case .codebuddy:
             return .codebuddy
         case .trae:
-            return .cursor
+            return .trae
         case .kimi:
-            return .gemini
+            return .kimi
         case .factory:
-            return .opencode
+            return .factory
         case .stepfun:
-            return .qwen
+            return .stepfun
         case .antigravity:
-            return .cursor
+            return .antigravity
         case .copilot:
             return .copilot
         }
@@ -265,6 +265,11 @@ enum MascotKind: String, CaseIterable, Identifiable, Sendable {
     case cursor
     case qoder
     case codebuddy
+    case trae
+    case kimi
+    case factory
+    case stepfun
+    case antigravity
     case copilot
 
     var id: String { rawValue }
@@ -291,6 +296,16 @@ enum MascotKind: String, CaseIterable, Identifiable, Sendable {
             return "Qoder"
         case .codebuddy:
             return "CodeBuddy"
+        case .trae:
+            return "Trae"
+        case .kimi:
+            return "Kimi"
+        case .factory:
+            return "Factory"
+        case .stepfun:
+            return "StepFun"
+        case .antigravity:
+            return "AntiGravity"
         case .copilot:
             return "Copilot"
         }
@@ -318,6 +333,16 @@ enum MascotKind: String, CaseIterable, Identifiable, Sendable {
             return "Q 仔"
         case .codebuddy:
             return "宇航员猫"
+        case .trae:
+            return "轨迹星狐"
+        case .kimi:
+            return "月牙助手"
+        case .factory:
+            return "齿轮工坊机器人"
+        case .stepfun:
+            return "阶跃弹簧精灵"
+        case .antigravity:
+            return "反重力棱镜"
         case .copilot:
             return "黑框眼镜机器人"
         }
@@ -345,6 +370,16 @@ enum MascotKind: String, CaseIterable, Identifiable, Sendable {
             return Color(red: 0.98, green: 0.53, blue: 0.18)
         case .codebuddy:
             return Color(red: 1.0, green: 0.45, blue: 0.34)
+        case .trae:
+            return Color(red: 1.0, green: 0.38, blue: 0.30)
+        case .kimi:
+            return Color(red: 0.62, green: 0.52, blue: 1.0)
+        case .factory:
+            return Color(red: 1.0, green: 0.68, blue: 0.20)
+        case .stepfun:
+            return Color(red: 0.16, green: 0.92, blue: 0.72)
+        case .antigravity:
+            return Color(red: 0.78, green: 0.48, blue: 1.0)
         case .copilot:
             return Color(red: 1.0, green: 0.56, blue: 0.28)
         }
@@ -559,6 +594,16 @@ struct MascotView: View {
             drawQoder(in: context, canvasSize: canvasSize, time: time, mode: mode)
         case .codebuddy:
             drawCodeBuddy(in: context, canvasSize: canvasSize, time: time, mode: mode)
+        case .trae:
+            drawTrae(in: context, canvasSize: canvasSize, time: time, mode: mode)
+        case .kimi:
+            drawKimi(in: context, canvasSize: canvasSize, time: time, mode: mode)
+        case .factory:
+            drawFactory(in: context, canvasSize: canvasSize, time: time, mode: mode)
+        case .stepfun:
+            drawStepFun(in: context, canvasSize: canvasSize, time: time, mode: mode)
+        case .antigravity:
+            drawAntiGravity(in: context, canvasSize: canvasSize, time: time, mode: mode)
         case .copilot:
             drawCopilot(in: context, canvasSize: canvasSize, time: time, mode: mode)
         }
@@ -1650,6 +1695,327 @@ struct MascotView: View {
 
         if mode == .warning {
             drawAlertGlyph(in: context, space: space, x: 12.0 + motion.shake, y: 2.1, color: kind.alertColor)
+        }
+    }
+
+    private func drawTrae(
+        in context: GraphicsContext,
+        canvasSize: CGSize,
+        time: TimeInterval,
+        mode: MascotRenderMode
+    ) {
+        let space = PixelSpace(canvasSize, logicalWidth: 17, logicalHeight: 14, yOffset: 2)
+        let motion = motionValues(for: mode, time: time)
+        let fur = Color(red: 0.94, green: 0.36, blue: 0.24)
+        let dark = Color(red: 0.42, green: 0.13, blue: 0.10)
+        let cream = Color(red: 1.0, green: 0.82, blue: 0.62)
+        let trail = Color(red: 0.27, green: 0.78, blue: 1.0)
+        let spark = Color(red: 1.0, green: 0.86, blue: 0.36)
+
+        drawShadow(in: context, space: space, centerX: 8.5, y: 15.6, width: 7.8 - abs(motion.bounce) * 0.25, opacity: 0.22)
+
+        if mode == .working {
+            drawKeyboard(
+                in: context,
+                space: space,
+                y: 13.0,
+                base: Color(red: 0.24, green: 0.13, blue: 0.12),
+                key: Color(red: 0.48, green: 0.24, blue: 0.20),
+                highlight: trail,
+                flashIndex: keyboardFlashIndex(time: time)
+            )
+        }
+
+        let tailLift: CGFloat = mode == .working ? CGFloat(sin(time * 8) * 0.35) : CGFloat(sin(time * 1.6) * 0.18)
+        context.fill(Path(space.rect(2.0 + motion.shake, 9.2 + motion.vertical + tailLift, 2.0, 1.0)), with: .color(fur))
+        context.fill(Path(space.rect(1.2 + motion.shake, 8.5 + motion.vertical + tailLift, 1.5, 0.8)), with: .color(fur))
+        context.fill(Path(space.rect(0.7 + motion.shake, 7.9 + motion.vertical + tailLift, 1.0, 0.7)), with: .color(cream))
+        context.fill(Path(space.rect(3.1 + motion.shake, 10.0 + motion.vertical + tailLift, 1.2, 0.6)), with: .color(dark.opacity(0.75)))
+
+        let rows: [(CGFloat, CGFloat, CGFloat)] = [
+            (13.0, 4.6, 8.4), (12.0, 3.8, 9.6), (11.0, 3.2, 10.4),
+            (10.0, 3.4, 10.0), (9.0, 4.0, 9.0), (8.0, 4.8, 7.4),
+            (7.0, 5.7, 5.6), (6.0, 6.3, 4.4)
+        ]
+        for row in rows {
+            context.fill(Path(space.rect(row.1 + motion.shake, row.0 + motion.vertical, row.2 * motion.squashX, 1 * motion.squashY)), with: .color(fur))
+        }
+
+        context.fill(Path(space.rect(5.2 + motion.shake, 5.0 + motion.vertical, 1.3, 2.0)), with: .color(fur))
+        context.fill(Path(space.rect(10.5 + motion.shake, 5.0 + motion.vertical, 1.3, 2.0)), with: .color(fur))
+        context.fill(Path(space.rect(5.6 + motion.shake, 5.6 + motion.vertical, 0.6, 0.9)), with: .color(cream.opacity(0.85)))
+        context.fill(Path(space.rect(10.9 + motion.shake, 5.6 + motion.vertical, 0.6, 0.9)), with: .color(cream.opacity(0.85)))
+        context.fill(Path(space.rect(5.8 + motion.shake, 10.2 + motion.vertical, 4.8, 1.7)), with: .color(cream))
+        context.fill(Path(space.rect(7.7 + motion.shake, 10.0 + motion.vertical, 0.9, 0.7)), with: .color(dark))
+
+        let eyeHeight: CGFloat = mode == .idle ? 0.45 : (mode == .warning ? 1.2 : blinkHeight(time: time, closedHeight: 0.2, openHeight: 1.2))
+        context.fill(Path(space.rect(6.0 + motion.shake, 8.2 + motion.vertical, 1.0, eyeHeight)), with: .color(dark))
+        context.fill(Path(space.rect(10.0 + motion.shake, 8.2 + motion.vertical, 1.0, eyeHeight)), with: .color(dark))
+
+        let pathPulse = mode == .working ? CGFloat((sin(time * 7) + 1) * 0.5) : 0.35
+        context.fill(Path(space.rect(12.1 + motion.shake, 7.4 + motion.vertical, 1.2, 0.5)), with: .color(trail.opacity(0.55 + pathPulse * 0.35)))
+        context.fill(Path(space.rect(13.2 + motion.shake, 6.7 + motion.vertical, 0.9, 0.5)), with: .color(trail.opacity(0.45)))
+        context.fill(Path(space.rect(14.0 + motion.shake, 5.8 + motion.vertical, 0.6, 0.6)), with: .color(spark.opacity(0.55 + pathPulse * 0.35)))
+
+        if mode == .warning {
+            drawAlertGlyph(in: context, space: space, x: 12.1 + motion.shake, y: 2.1, color: kind.alertColor)
+        }
+    }
+
+    private func drawKimi(
+        in context: GraphicsContext,
+        canvasSize: CGSize,
+        time: TimeInterval,
+        mode: MascotRenderMode
+    ) {
+        let space = PixelSpace(canvasSize, logicalWidth: 16, logicalHeight: 14, yOffset: 2)
+        let motion = motionValues(for: mode, time: time)
+        let moon = Color(red: 0.86, green: 0.88, blue: 1.0)
+        let shadow = Color(red: 0.44, green: 0.38, blue: 0.80)
+        let deep = Color(red: 0.18, green: 0.16, blue: 0.36)
+        let glow = Color(red: 0.70, green: 0.60, blue: 1.0)
+        let star = Color(red: 1.0, green: 0.90, blue: 0.52)
+
+        drawShadow(in: context, space: space, centerX: 8, y: 15.5, width: 7.5 - abs(motion.bounce) * 0.24, opacity: 0.20)
+
+        if mode == .working {
+            drawKeyboard(
+                in: context,
+                space: space,
+                y: 13.0,
+                base: Color(red: 0.18, green: 0.16, blue: 0.30),
+                key: Color(red: 0.34, green: 0.30, blue: 0.52),
+                highlight: star,
+                flashIndex: keyboardFlashIndex(time: time)
+            )
+        }
+
+        let rows: [(CGFloat, CGFloat, CGFloat)] = [
+            (13.0, 4.0, 8.0), (12.0, 3.0, 10.0), (11.0, 2.4, 11.2),
+            (10.0, 2.2, 11.6), (9.0, 2.6, 10.8), (8.0, 3.4, 9.2),
+            (7.0, 4.6, 6.8), (6.0, 5.8, 4.6)
+        ]
+        for row in rows {
+            context.fill(Path(space.rect(row.1 + motion.shake, row.0 + motion.vertical, row.2 * motion.squashX, 1 * motion.squashY)), with: .color(moon))
+        }
+
+        let crescentRows: [(CGFloat, CGFloat, CGFloat)] = [
+            (7.0, 9.4, 2.3), (8.0, 8.8, 3.1), (9.0, 8.4, 3.5),
+            (10.0, 8.4, 3.5), (11.0, 8.8, 3.0), (12.0, 9.5, 2.1)
+        ]
+        for row in crescentRows {
+            context.fill(Path(space.rect(row.1 + motion.shake, row.0 + motion.vertical, row.2, 1)), with: .color(shadow.opacity(0.72)))
+        }
+
+        context.fill(Path(space.rect(5.0 + motion.shake, 4.8 + motion.vertical, 1.1, 1.6)), with: .color(glow.opacity(0.82)))
+        context.fill(Path(space.rect(10.1 + motion.shake, 4.8 + motion.vertical, 1.1, 1.6)), with: .color(glow.opacity(0.82)))
+        context.fill(Path(space.rect(4.7 + motion.shake, 5.6 + motion.vertical, 1.7, 0.7)), with: .color(moon))
+        context.fill(Path(space.rect(9.8 + motion.shake, 5.6 + motion.vertical, 1.7, 0.7)), with: .color(moon))
+
+        let eyeHeight: CGFloat = mode == .idle ? 0.35 : (mode == .warning ? 1.15 : blinkHeight(time: time, closedHeight: 0.2, openHeight: 1.15))
+        context.fill(Path(space.rect(5.5 + motion.shake, 8.7 + motion.vertical, 0.9, eyeHeight)), with: .color(deep))
+        context.fill(Path(space.rect(8.4 + motion.shake, 8.7 + motion.vertical, 0.9, eyeHeight)), with: .color(deep))
+        context.fill(Path(space.rect(6.4 + motion.shake, 10.9 + motion.vertical, 2.2, 0.4)), with: .color(deep.opacity(mode == .idle ? 0.28 : 0.55)))
+
+        let sparkle = mode == .working ? CGFloat((sin(time * 8) + 1) * 0.5) : 0.35
+        context.fill(Path(space.rect(12.3 + motion.shake, 4.3 + motion.vertical, 0.7, 0.7)), with: .color(star.opacity(0.55 + sparkle * 0.4)))
+        context.fill(Path(space.rect(13.1 + motion.shake, 5.0 + motion.vertical, 0.4, 0.4)), with: .color(star.opacity(0.42)))
+        context.fill(Path(space.rect(3.1 + motion.shake, 7.0 + motion.vertical, 0.5, 0.5)), with: .color(glow.opacity(0.45)))
+
+        if mode == .warning {
+            drawAlertGlyph(in: context, space: space, x: 11.9 + motion.shake, y: 2.2, color: kind.alertColor)
+        }
+    }
+
+    private func drawFactory(
+        in context: GraphicsContext,
+        canvasSize: CGSize,
+        time: TimeInterval,
+        mode: MascotRenderMode
+    ) {
+        let space = PixelSpace(canvasSize, logicalWidth: 16, logicalHeight: 14, yOffset: 2)
+        let motion = motionValues(for: mode, time: time)
+        let steel = Color(red: 0.62, green: 0.66, blue: 0.72)
+        let dark = Color(red: 0.25, green: 0.28, blue: 0.34)
+        let panel = Color(red: 0.82, green: 0.86, blue: 0.90)
+        let amber = Color(red: 1.0, green: 0.66, blue: 0.18)
+        let teal = Color(red: 0.20, green: 0.88, blue: 0.76)
+
+        drawShadow(in: context, space: space, centerX: 8, y: 15.5, width: 8.0 - abs(motion.bounce) * 0.24, opacity: 0.22)
+
+        if mode == .working {
+            drawKeyboard(
+                in: context,
+                space: space,
+                y: 13.0,
+                base: Color(red: 0.18, green: 0.19, blue: 0.22),
+                key: Color(red: 0.38, green: 0.40, blue: 0.45),
+                highlight: amber,
+                flashIndex: keyboardFlashIndex(time: time)
+            )
+        }
+
+        context.fill(Path(space.rect(4.0 + motion.shake, 6.0 + motion.vertical, 8.0 * motion.squashX, 6.8 * motion.squashY)), with: .color(steel))
+        context.fill(Path(space.rect(4.8 + motion.shake, 6.8 + motion.vertical, 6.4, 4.6)), with: .color(panel))
+        context.fill(Path(space.rect(5.2 + motion.shake, 13.0 + motion.vertical, 1.1, 1.3)), with: .color(dark))
+        context.fill(Path(space.rect(9.8 + motion.shake, 13.0 + motion.vertical, 1.1, 1.3)), with: .color(dark))
+        context.fill(Path(space.rect(3.1 + motion.shake, 8.0 + motion.vertical, 0.9, 2.4)), with: .color(dark))
+        context.fill(Path(space.rect(12.0 + motion.shake, 8.0 + motion.vertical, 0.9, 2.4)), with: .color(dark))
+
+        let blink = mode == .idle ? 0.4 : (mode == .warning ? 1.1 : blinkHeight(time: time, closedHeight: 0.2, openHeight: 1.1))
+        context.fill(Path(space.rect(5.8 + motion.shake, 8.1 + motion.vertical, 1.2, blink)), with: .color(teal))
+        context.fill(Path(space.rect(9.0 + motion.shake, 8.1 + motion.vertical, 1.2, blink)), with: .color(teal))
+        context.fill(Path(space.rect(6.6 + motion.shake, 10.2 + motion.vertical, 2.7, 0.5)), with: .color(dark.opacity(0.72)))
+
+        let gearPhase = Int(time * 8) % 4
+        let gearColor = mode == .working ? amber : amber.opacity(0.75)
+        context.fill(Path(space.rect(7.2 + motion.shake, 3.7 + motion.vertical, 1.6, 1.6)), with: .color(gearColor))
+        context.fill(Path(space.rect(7.6 + motion.shake, 3.2 + motion.vertical, 0.8, 0.5)), with: .color(gearPhase == 0 ? teal : gearColor))
+        context.fill(Path(space.rect(7.6 + motion.shake, 5.3 + motion.vertical, 0.8, 0.5)), with: .color(gearPhase == 2 ? teal : gearColor))
+        context.fill(Path(space.rect(6.7 + motion.shake, 4.1 + motion.vertical, 0.5, 0.8)), with: .color(gearPhase == 3 ? teal : gearColor))
+        context.fill(Path(space.rect(8.8 + motion.shake, 4.1 + motion.vertical, 0.5, 0.8)), with: .color(gearPhase == 1 ? teal : gearColor))
+        context.fill(Path(space.rect(7.75 + motion.shake, 4.25 + motion.vertical, 0.5, 0.5)), with: .color(dark))
+
+        context.fill(Path(space.rect(10.8 + motion.shake, 5.2 + motion.vertical, 1.8, 0.5)), with: .color(amber.opacity(0.8)))
+        context.fill(Path(space.rect(12.1 + motion.shake, 4.6 + motion.vertical, 0.5, 1.6)), with: .color(amber.opacity(0.8)))
+
+        if mode == .warning {
+            drawAlertGlyph(in: context, space: space, x: 12.0 + motion.shake, y: 2.1, color: kind.alertColor)
+        }
+    }
+
+    private func drawStepFun(
+        in context: GraphicsContext,
+        canvasSize: CGSize,
+        time: TimeInterval,
+        mode: MascotRenderMode
+    ) {
+        let space = PixelSpace(canvasSize, logicalWidth: 16, logicalHeight: 14, yOffset: 2)
+        let motion = motionValues(for: mode, time: time)
+        let body = Color(red: 0.14, green: 0.78, blue: 0.68)
+        let light = Color(red: 0.66, green: 1.0, blue: 0.86)
+        let deep = Color(red: 0.06, green: 0.31, blue: 0.30)
+        let step = Color(red: 0.24, green: 0.92, blue: 0.84)
+        let gold = Color(red: 1.0, green: 0.80, blue: 0.30)
+
+        drawShadow(in: context, space: space, centerX: 8, y: 15.6, width: 7.7 - abs(motion.bounce) * 0.35, opacity: 0.22)
+
+        if mode == .working {
+            drawKeyboard(
+                in: context,
+                space: space,
+                y: 13.0,
+                base: Color(red: 0.08, green: 0.19, blue: 0.19),
+                key: Color(red: 0.18, green: 0.42, blue: 0.40),
+                highlight: light,
+                flashIndex: keyboardFlashIndex(time: time)
+            )
+        }
+
+        let rows: [(CGFloat, CGFloat, CGFloat)] = [
+            (13.0, 4.0, 8.2), (12.0, 3.4, 9.4), (11.0, 3.1, 10.0),
+            (10.0, 3.5, 9.2), (9.0, 4.2, 7.8), (8.0, 5.0, 6.2),
+            (7.0, 5.8, 4.6), (6.0, 6.6, 3.0)
+        ]
+        for row in rows {
+            context.fill(Path(space.rect(row.1 + motion.shake, row.0 + motion.vertical, row.2 * motion.squashX, 1 * motion.squashY)), with: .color(body))
+        }
+
+        context.fill(Path(space.rect(5.0 + motion.shake, 10.2 + motion.vertical, 5.8, 1.3)), with: .color(light.opacity(0.78)))
+        context.fill(Path(space.rect(5.1 + motion.shake, 13.8 + motion.vertical, 1.0, 1.0)), with: .color(deep))
+        context.fill(Path(space.rect(9.8 + motion.shake, 13.8 + motion.vertical, 1.0, 1.0)), with: .color(deep))
+
+        let eyeHeight: CGFloat = mode == .idle ? 0.4 : (mode == .warning ? 1.15 : blinkHeight(time: time, closedHeight: 0.2, openHeight: 1.15))
+        context.fill(Path(space.rect(5.7 + motion.shake, 8.6 + motion.vertical, 1.0, eyeHeight)), with: .color(deep))
+        context.fill(Path(space.rect(9.1 + motion.shake, 8.6 + motion.vertical, 1.0, eyeHeight)), with: .color(deep))
+
+        let rise = mode == .working ? CGFloat((sin(time * 7.5) + 1) * 0.35) : 0
+        context.fill(Path(space.rect(11.0 + motion.shake, 9.9 + motion.vertical - rise, 1.2, 0.8)), with: .color(step))
+        context.fill(Path(space.rect(12.0 + motion.shake, 8.8 + motion.vertical - rise, 1.2, 0.8)), with: .color(step.opacity(0.86)))
+        context.fill(Path(space.rect(13.0 + motion.shake, 7.7 + motion.vertical - rise, 1.2, 0.8)), with: .color(step.opacity(0.72)))
+        context.fill(Path(space.rect(6.8 + motion.shake, 4.4 + motion.vertical, 2.4, 0.7)), with: .color(gold.opacity(mode == .working ? 0.95 : 0.70)))
+        context.fill(Path(space.rect(7.6 + motion.shake, 3.7 + motion.vertical, 0.8, 0.8)), with: .color(gold.opacity(0.78)))
+
+        if mode == .warning {
+            drawAlertGlyph(in: context, space: space, x: 11.8 + motion.shake, y: 2.1, color: kind.alertColor)
+        }
+    }
+
+    private func drawAntiGravity(
+        in context: GraphicsContext,
+        canvasSize: CGSize,
+        time: TimeInterval,
+        mode: MascotRenderMode
+    ) {
+        let space = PixelSpace(canvasSize, logicalWidth: 16, logicalHeight: 14, yOffset: 2)
+        let motion = motionValues(for: mode, time: time)
+        let core = Color(red: 0.58, green: 0.38, blue: 1.0)
+        let dark = Color(red: 0.20, green: 0.14, blue: 0.42)
+        let edge = Color(red: 0.90, green: 0.72, blue: 1.0)
+        let cyan = Color(red: 0.30, green: 0.92, blue: 1.0)
+        let glow = Color(red: 0.78, green: 0.48, blue: 1.0)
+
+        drawShadow(in: context, space: space, centerX: 8, y: 15.7, width: 7.0 - abs(motion.bounce) * 0.42, opacity: 0.18)
+
+        if mode == .working {
+            drawKeyboard(
+                in: context,
+                space: space,
+                y: 13.1,
+                base: Color(red: 0.14, green: 0.12, blue: 0.24),
+                key: Color(red: 0.28, green: 0.24, blue: 0.45),
+                highlight: cyan,
+                flashIndex: keyboardFlashIndex(time: time)
+            )
+        }
+
+        let hover = mode == .idle ? CGFloat(sin(time * 1.7) * 0.3) : CGFloat(sin(time * 5.5) * 0.45)
+        let top = space.point(8 + motion.shake, 4.7 + motion.vertical + hover)
+        let right = space.point(12.2 + motion.shake, 8.4 + motion.vertical + hover)
+        let bottom = space.point(8 + motion.shake, 12.8 + motion.vertical + hover)
+        let left = space.point(3.8 + motion.shake, 8.4 + motion.vertical + hover)
+        let center = space.point(8 + motion.shake, 8.6 + motion.vertical + hover)
+
+        var leftFacet = Path()
+        leftFacet.move(to: top)
+        leftFacet.addLine(to: center)
+        leftFacet.addLine(to: bottom)
+        leftFacet.addLine(to: left)
+        leftFacet.closeSubpath()
+        context.fill(leftFacet, with: .color(core))
+
+        var rightFacet = Path()
+        rightFacet.move(to: top)
+        rightFacet.addLine(to: right)
+        rightFacet.addLine(to: bottom)
+        rightFacet.addLine(to: center)
+        rightFacet.closeSubpath()
+        context.fill(rightFacet, with: .color(dark.opacity(0.92)))
+
+        var rim = Path()
+        rim.move(to: top)
+        rim.addLine(to: right)
+        rim.addLine(to: bottom)
+        rim.addLine(to: left)
+        rim.closeSubpath()
+        context.stroke(rim, with: .color(edge.opacity(0.72)), lineWidth: max(1, space.pixel * 0.45))
+
+        let orbitOpacity = mode == .working ? 0.72 : 0.42
+        context.stroke(Path(ellipseIn: space.rect(3.0 + motion.shake, 7.2 + motion.vertical + hover, 10.0, 2.4)), with: .color(cyan.opacity(orbitOpacity)), lineWidth: max(1, space.pixel * 0.35))
+        context.fill(Path(space.rect(11.8 + motion.shake, 7.9 + motion.vertical + hover, 0.8, 0.8)), with: .color(cyan))
+
+        let eyeHeight: CGFloat = mode == .idle ? 0.35 : (mode == .warning ? 1.0 : blinkHeight(time: time, closedHeight: 0.2, openHeight: 1.0))
+        context.fill(Path(space.rect(6.0 + motion.shake, 8.5 + motion.vertical + hover, 0.8, eyeHeight)), with: .color(edge))
+        context.fill(Path(space.rect(9.2 + motion.shake, 8.5 + motion.vertical + hover, 0.8, eyeHeight)), with: .color(edge))
+        context.fill(Path(space.rect(7.1 + motion.shake, 10.4 + motion.vertical + hover, 1.8, 0.4)), with: .color(edge.opacity(0.48)))
+
+        if mode == .working || mode == .dragging {
+            context.fill(Path(space.rect(5.0 + motion.shake, 13.2 + motion.vertical, 0.7, 0.7)), with: .color(glow.opacity(0.55)))
+            context.fill(Path(space.rect(10.4 + motion.shake, 13.0 + motion.vertical, 0.7, 0.7)), with: .color(cyan.opacity(0.48)))
+        }
+
+        if mode == .warning {
+            drawAlertGlyph(in: context, space: space, x: 11.8 + motion.shake, y: 2.1, color: kind.alertColor)
         }
     }
 
