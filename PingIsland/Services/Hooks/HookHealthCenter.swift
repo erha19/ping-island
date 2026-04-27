@@ -47,15 +47,9 @@ enum HookHealthCenter {
         let paths = profile.configurationURLs.map(\.path)
         let existingURLs = profile.configurationURLs.filter { fileManager.fileExists(atPath: $0.path) }
         let contents = existingURLs.compactMap { try? String(contentsOf: $0, encoding: .utf8) }
-        let hasIslandSignature = contents.contains { content in
-            content.localizedCaseInsensitiveContains("ping-island-bridge")
-                || content.localizedCaseInsensitiveContains("island-bridge")
-                || content.localizedCaseInsensitiveContains("Ping Island managed integration")
-        }
-        let hasLegacySignature = contents.contains { content in
-            content.localizedCaseInsensitiveContains("island-bridge")
-                || content.localizedCaseInsensitiveContains("IslandBridge")
-        }
+        let hasCurrentSignature = contents.contains(where: containsCurrentIslandSignature)
+        let hasLegacySignature = contents.contains(where: containsLegacyIslandBridgeSignature)
+        let hasIslandSignature = hasCurrentSignature || hasLegacySignature
 
         let status: HookHealthStatus
         let detail: String
@@ -97,5 +91,19 @@ enum HookHealthCenter {
             return "[]"
         }
         return text
+    }
+
+    nonisolated static func containsCurrentIslandSignature(_ content: String) -> Bool {
+        let lowercased = content.lowercased()
+        return lowercased.contains("ping-island-bridge")
+            || lowercased.contains("ping island managed integration")
+    }
+
+    nonisolated static func containsLegacyIslandBridgeSignature(_ content: String) -> Bool {
+        content.components(separatedBy: .newlines).contains { line in
+            let lowercased = line.lowercased()
+            return lowercased.contains("islandbridge")
+                || (lowercased.contains("island-bridge") && !lowercased.contains("ping-island-bridge"))
+        }
     }
 }

@@ -74,6 +74,34 @@ final class PingIslandUpgradeTests: XCTestCase {
         XCTAssertFalse(snapshot.installed)
     }
 
+    func testHookHealthDoesNotTreatCurrentBridgeSignatureAsStale() {
+        let currentHook = "/usr/local/bin/ping-island-bridge --source claude"
+        let legacyHook = "/usr/local/bin/island-bridge --source claude"
+        let legacyTypeName = "IslandBridge.install()"
+
+        XCTAssertTrue(HookHealthCenter.containsCurrentIslandSignature(currentHook))
+        XCTAssertFalse(HookHealthCenter.containsLegacyIslandBridgeSignature(currentHook))
+        XCTAssertTrue(HookHealthCenter.containsLegacyIslandBridgeSignature(legacyHook))
+        XCTAssertTrue(HookHealthCenter.containsLegacyIslandBridgeSignature(legacyTypeName))
+    }
+
+    func testSupplementalHookClientsResolveToMascotClients() {
+        let expected: [(String, MascotClient, MascotKind)] = [
+            ("kimi", .kimi, .gemini),
+            ("factory", .factory, .opencode),
+            ("trae", .trae, .cursor),
+            ("stepfun", .stepfun, .qwen),
+            ("antigravity", .antigravity, .cursor),
+        ]
+
+        for (profileID, client, mascot) in expected {
+            let clientInfo = SessionClientInfo(kind: .custom, profileID: profileID)
+            XCTAssertEqual(MascotClient(clientInfo: clientInfo, provider: .claude), client)
+            XCTAssertEqual(MascotKind(clientInfo: clientInfo, provider: .claude), mascot)
+            XCTAssertTrue(MascotClient.allCases.contains(client))
+        }
+    }
+
     func testApprovalDigestFlagsDestructiveCommands() {
         let permission = PermissionContext(
             toolUseId: "tool-1",

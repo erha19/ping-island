@@ -13,6 +13,10 @@ enum MascotClient: String, CaseIterable, Identifiable, Sendable {
     case qoder
     case codebuddy
     case trae
+    case kimi
+    case factory
+    case stepfun
+    case antigravity
     case copilot
 
     static let allCases: [MascotClient] = [
@@ -26,6 +30,11 @@ enum MascotClient: String, CaseIterable, Identifiable, Sendable {
         .cursor,
         .qoder,
         .codebuddy,
+        .trae,
+        .kimi,
+        .factory,
+        .stepfun,
+        .antigravity,
         .copilot,
     ]
 
@@ -55,6 +64,14 @@ enum MascotClient: String, CaseIterable, Identifiable, Sendable {
             return "CodeBuddy"
         case .trae:
             return "Trae"
+        case .kimi:
+            return "Kimi"
+        case .factory:
+            return "Factory"
+        case .stepfun:
+            return "StepFun"
+        case .antigravity:
+            return "AntiGravity"
         case .copilot:
             return "Copilot"
         }
@@ -84,6 +101,14 @@ enum MascotClient: String, CaseIterable, Identifiable, Sendable {
             return "CodeBuddy、WorkBuddy 客户端"
         case .trae:
             return "Trae IDE 中的 Claude 会话"
+        case .kimi:
+            return "Kimi hooks 与 Moonshot 客户端"
+        case .factory:
+            return "Factory agent hooks 与自动化会话"
+        case .stepfun:
+            return "StepFun hooks 与阶跃客户端"
+        case .antigravity:
+            return "AntiGravity IDE 与本地 agent 会话"
         case .copilot:
             return "GitHub Copilot Hooks 客户端"
         }
@@ -112,7 +137,15 @@ enum MascotClient: String, CaseIterable, Identifiable, Sendable {
         case .codebuddy:
             return .codebuddy
         case .trae:
-            return .claude
+            return .cursor
+        case .kimi:
+            return .gemini
+        case .factory:
+            return .opencode
+        case .stepfun:
+            return .qwen
+        case .antigravity:
+            return .cursor
         case .copilot:
             return .copilot
         }
@@ -150,6 +183,14 @@ enum MascotClient: String, CaseIterable, Identifiable, Sendable {
                 .gemini
             case "trae":
                 .trae
+            case "kimi":
+                .kimi
+            case "factory":
+                .factory
+            case "stepfun":
+                .stepfun
+            case "antigravity":
+                .antigravity
             case "codex-app", "codex-cli":
                 .codex
             default:
