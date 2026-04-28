@@ -152,6 +152,7 @@ struct HookInstaller {
     private static let preferredTargetsDefaultsKey = "HookInstaller.preferredTargets.v1"
     private static let qoderMigrationDefaultsKey = "HookInstaller.preferredTargets.qoder-default.v1"
     private static let qoderWorkMigrationDefaultsKey = "HookInstaller.preferredTargets.qoderwork-default.v1"
+    private static let optionalConfiguredProfilesMigrationDefaultsKey = "HookInstaller.preferredTargets.optional-configured-profiles.v2"
     private static let installedVersionDefaultsKey = "HookInstaller.installedVersion.v1"
     private static let firstLaunchDefaultsKey = "HookInstaller.isFirstLaunch.v1"
     private static let versionMetadataDefaultsKey = "HookInstaller.versionMetadata.v1"
@@ -476,7 +477,48 @@ struct HookInstaller {
             UserDefaults.standard.set(true, forKey: qoderWorkMigrationDefaultsKey)
         }
 
+        if !UserDefaults.standard.bool(forKey: optionalConfiguredProfilesMigrationDefaultsKey) {
+            let optionalInstalledTargets = ClientProfileRegistry.managedHookProfiles
+                .filter { !$0.defaultEnabled && shouldAutoEnableOptionalIntegration($0) }
+                .map(\.id)
+            if !optionalInstalledTargets.isEmpty {
+                targets.formUnion(optionalInstalledTargets)
+                persistPreferredTargets(targets)
+            }
+            UserDefaults.standard.set(true, forKey: optionalConfiguredProfilesMigrationDefaultsKey)
+        }
+
         return targets.isEmpty ? [] : targets
+    }
+
+    private static func shouldAutoEnableOptionalIntegration(_ profile: ManagedHookClientProfile) -> Bool {
+        let explicitlyManagedOptionalProfiles: Set<String> = [
+            "opencode-hooks",
+            "kimi-hooks",
+            "factory-hooks",
+            "trae-hooks",
+            "stepfun-hooks",
+            "antigravity-hooks"
+        ]
+        if explicitlyManagedOptionalProfiles.contains(profile.id) {
+            return true
+        }
+
+        guard profile.alwaysVisibleInSettings || canManage(profile) else { return false }
+
+        let fileManager = FileManager.default
+        let hasKnownConfiguration = profile.configurationURLs.contains { url in
+            fileManager.fileExists(atPath: url.path)
+                || fileManager.fileExists(atPath: url.deletingLastPathComponent().path)
+        }
+        if hasKnownConfiguration { return true }
+
+        if let activationURL = profile.activationConfigurationURL {
+            return fileManager.fileExists(atPath: activationURL.path)
+                || fileManager.fileExists(atPath: activationURL.deletingLastPathComponent().path)
+        }
+
+        return false
     }
 
     private static func persistPreferredTargets(_ targets: Set<String>) {
@@ -1279,6 +1321,15 @@ struct HookInstaller {
           };
         }
 
+        function appendAssistantDelta(session, partID, delta) {
+          const key = stableString(partID) ?? "default";
+          const previous = session.assistantDeltas.get(key) ?? "";
+          const next = `${previous}${delta}`;
+          session.assistantDeltas.set(key, next);
+          session.lastAssistantText = next;
+          return next;
+        }
+
         function normalizeQuestions(questions) {
           if (!Array.isArray(questions)) return [];
           return questions.map((question) => ({
@@ -1436,6 +1487,19 @@ struct HookInstaller {
             return undefined;
           }
 
+          if (type === "session.idle" && stableString(properties.sessionID)) {
+            const rawSessionID = stableString(properties.sessionID);
+            const session = getSession(rawSessionID);
+            const payload = makeBasePayload(`opencode-${rawSessionID}`, {
+              hook_event_name: "Stop",
+              cwd: session.cwd,
+              last_assistant_message: session.lastAssistantText || undefined,
+              session_title: session.pendingTitle || undefined
+            });
+            session.pendingTitle = undefined;
+            return payload;
+          }
+
           if (type === "message.updated" && isObject(properties.info) && stableString(properties.info.id) && stableString(properties.info.sessionID)) {
             messageRoles.set(stableString(properties.info.id), {
               role: stableString(properties.info.role),
@@ -1445,6 +1509,26 @@ struct HookInstaller {
               messageRoles.delete(messageRoles.keys().next().value);
             }
             return undefined;
+          }
+
+          if (type === "message.part.delta" && stableString(properties.sessionID)) {
+            const rawSessionID = stableString(properties.sessionID);
+            const session = getSession(rawSessionID);
+            const delta = stableString(properties.delta);
+            if (!delta || properties.field !== "text") return undefined;
+
+            const messageID = stableString(properties.messageID);
+            const meta = messageID ? messageRoles.get(messageID) : undefined;
+            if (meta?.role && meta.role !== "assistant") return undefined;
+
+            const text = appendAssistantDelta(session, properties.partID, delta);
+            return makeBasePayload(`opencode-${rawSessionID}`, {
+              hook_event_name: "Notification",
+              status: "processing",
+              notification_type: "assistant_message",
+              cwd: session.cwd,
+              message: text
+            });
           }
 
           if (type === "message.part.updated" && isObject(properties.part) && stableString(properties.part.sessionID)) {
@@ -1470,6 +1554,9 @@ struct HookInstaller {
 
               if (meta.role === "assistant") {
                 session.lastAssistantText = text;
+                if (stableString(properties.part.id)) {
+                  session.assistantDeltas.set(stableString(properties.part.id), text);
+                }
               }
               return undefined;
             }
@@ -1589,7 +1676,8 @@ struct HookInstaller {
               cwd: undefined,
               lastUserText: "",
               lastAssistantText: "",
-              pendingTitle: undefined
+              pendingTitle: undefined,
+              assistantDeltas: new Map()
             });
           }
           return sessions.get(sessionID);
