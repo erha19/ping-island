@@ -1942,6 +1942,7 @@ struct HookInstaller {
                     session_id,
                     hook_event_name="SessionStart",
                     platform=_stable_text(platform),
+                    connection_transport=_stable_text(platform),
                     model=_stable_text(model),
                     message=_stable_text(message),
                     cwd=cwd,
@@ -1993,6 +1994,9 @@ struct HookInstaller {
                         resolved_id,
                         hook_event_name="UserPromptSubmit",
                         prompt=prompt or _state_for(resolved_id).get("last_user"),
+                        platform=_stable_text(kwargs.get("platform")),
+                        connection_transport=_stable_text(kwargs.get("platform")),
+                        model=_stable_text(kwargs.get("model")),
                         cwd=cwd,
                     )
                 )
@@ -2047,6 +2051,7 @@ struct HookInstaller {
                         notification_type="assistant_message",
                         message=reply,
                         platform=_stable_text(kwargs.get("platform")),
+                        connection_transport=_stable_text(kwargs.get("platform")),
                         model=_stable_text(kwargs.get("model")),
                         cwd=_resolve_cwd(kwargs),
                     )
@@ -2065,6 +2070,7 @@ struct HookInstaller {
                 hook_event_name="Stop",
                 last_assistant_message=assistant,
                 platform=_stable_text(platform),
+                connection_transport=_stable_text(platform),
                 model=_stable_text(model),
                 completed=bool(completed),
                 interrupted=bool(interrupted),
@@ -2084,6 +2090,7 @@ struct HookInstaller {
                 hook_event_name="SessionEnd",
                 last_assistant_message=assistant,
                 platform=_stable_text(platform),
+                connection_transport=_stable_text(platform),
                 model=_stable_text(model),
                 completed=True,
                 interrupted=False,

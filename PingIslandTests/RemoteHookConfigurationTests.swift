@@ -2,8 +2,11 @@ import XCTest
 @testable import Ping_Island
 
 final class RemoteHookConfigurationTests: XCTestCase {
+    private let genericEndpoint = RemoteEndpoint(displayName: "Remote", sshTarget: "remote")
+
     func testRemoteBootstrapPrepareCommandStopsRunningAgentBeforeReplacingBridge() {
         let command = RemoteConnectorManager.remoteBootstrapPrepareCommand(
+            endpoint: genericEndpoint,
             installRoot: "/root/.ping-island",
             controlSocketPath: "/root/.ping-island/run/agent-control.sock",
             hookSocketPath: "/root/.ping-island/run/agent-hook.sock",
@@ -19,6 +22,7 @@ final class RemoteHookConfigurationTests: XCTestCase {
 
     func testRemoteBootstrapInstallCommandPromotesStagedBridgeAtomically() {
         let command = RemoteConnectorManager.remoteBootstrapInstallCommand(
+            endpoint: genericEndpoint,
             installRoot: "/root/.ping-island",
             stagedBridgePath: "/root/.ping-island/bin/PingIslandBridge.tmp"
         )
@@ -29,6 +33,7 @@ final class RemoteHookConfigurationTests: XCTestCase {
 
     func testRemoteEnsureAgentRunningCommandReplacesStaleSocketStateBeforeRestart() {
         let command = RemoteConnectorManager.remoteEnsureAgentRunningCommand(
+            endpoint: genericEndpoint,
             installRoot: "/root/.ping-island",
             controlSocketPath: "/root/.ping-island/run/agent-control.sock",
             hookSocketPath: "/root/.ping-island/run/agent-hook.sock"
@@ -127,6 +132,7 @@ final class RemoteHookConfigurationTests: XCTestCase {
 
     func testRemoteManagedHookConfigDirectoryPathsResolveUnderRemoteHome() {
         let directories = RemoteConnectorManager.remoteManagedHookConfigDirectoryPaths(
+            endpoint: genericEndpoint,
             homeDirectory: "/root",
             profiles: RemoteConnectorManager.remoteManagedHookProfiles()
         )
@@ -147,10 +153,44 @@ final class RemoteHookConfigurationTests: XCTestCase {
         let profile = try XCTUnwrap(ClientProfileRegistry.managedHookProfile(id: "hermes-hooks"))
         let directories = RemoteConnectorManager.remoteManagedHookDirectoryPaths(
             for: profile,
+            endpoint: genericEndpoint,
             homeDirectory: "/root"
         )
 
         XCTAssertEqual(directories, ["/root/.hermes/plugins", "/root/.hermes/plugins/ping_island"])
+    }
+
+    func testPraduckHermesContainerUsesSharedRuntimeAndContainerHookPaths() throws {
+        let endpoint = RemoteEndpoint(
+            displayName: "Praduck",
+            sshTarget: "praduck-ping-island",
+            detectedHostname: "praduck",
+            remoteInstallRoot: "/srv/hermes/data/ping-island",
+            remoteHookSocketPath: "/srv/hermes/data/ping-island/run/agent-hook.sock",
+            remoteControlSocketPath: "/srv/hermes/data/ping-island/run/agent-control.sock"
+        )
+        let profile = try XCTUnwrap(ClientProfileRegistry.managedHookProfile(id: "hermes-hooks"))
+
+        XCTAssertTrue(RemoteConnectorManager.usesPraduckHermesContainer(endpoint))
+        XCTAssertEqual(RemoteConnectorManager.remoteHookRuntimeInstallRoot(for: endpoint), "/opt/data/ping-island")
+        XCTAssertEqual(RemoteConnectorManager.remoteHookRuntimeSocketPath(for: endpoint), "/opt/data/ping-island/run/agent-hook.sock")
+        XCTAssertEqual(
+            RemoteConnectorManager.remoteManagedHookDirectoryPaths(for: profile, endpoint: endpoint, homeDirectory: "/home/joseph"),
+            ["/srv/hermes/data/plugins", "/srv/hermes/data/plugins/ping_island"]
+        )
+
+        let command = RemoteConnectorManager.remoteEnsureAgentRunningCommand(
+            endpoint: endpoint,
+            installRoot: endpoint.remoteInstallRoot,
+            controlSocketPath: endpoint.remoteControlSocketPath,
+            hookSocketPath: endpoint.remoteHookSocketPath
+        )
+        XCTAssertTrue(command.contains("sudo rm -f '/srv/hermes/data/ping-island/run/agent-control.sock' '/srv/hermes/data/ping-island/run/agent-hook.sock'"))
+        XCTAssertTrue(command.contains("sudo chown -R 10000:10000 '/srv/hermes/data/ping-island'"))
+        XCTAssertTrue(command.contains("sudo setpriv --reuid=10000 --regid=10000 --clear-groups sh -c "))
+        XCTAssertTrue(command.contains("/srv/hermes/data/ping-island/bin/ping-island-bridge"))
+        XCTAssertTrue(command.contains("/srv/hermes/data/ping-island/logs/remote-agent.log"))
+        XCTAssertTrue(command.contains("2>&1 &"))
     }
 
     func testHermesManagedPluginDirectoryFilesContainPluginManifestAndModule() throws {

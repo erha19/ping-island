@@ -764,6 +764,9 @@ public enum HookPayloadMapper {
         if let transport = nonEmpty(terminalContext.transport), metadata["connection_transport"] == nil {
             metadata["connection_transport"] = transport
         }
+        if let platform = nonEmpty(payload["platform"] as? String), metadata["connection_transport"] == nil {
+            metadata["connection_transport"] = platform
+        }
         if let remoteHost = nonEmpty(terminalContext.remoteHost), metadata["remote_host"] == nil {
             metadata["remote_host"] = remoteHost
         }

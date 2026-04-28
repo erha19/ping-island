@@ -576,9 +576,15 @@ final class RemoteConnectorManager: ObservableObject {
         endpoint.detectedHomeDirectory = probe.homeDirectory
         endpoint.hostFingerprint = probe.fingerprint
         endpoint.authMode = passwordWasUsed ? .passwordSession : .publicKey
-        endpoint.remoteInstallRoot = resolvedRemotePath(endpoint.remoteInstallRoot, homeDirectory: probe.homeDirectory)
-        endpoint.remoteHookSocketPath = resolvedRemotePath(endpoint.remoteHookSocketPath, homeDirectory: probe.homeDirectory)
-        endpoint.remoteControlSocketPath = resolvedRemotePath(endpoint.remoteControlSocketPath, homeDirectory: probe.homeDirectory)
+        if Self.usesPraduckHermesContainer(endpoint) {
+            endpoint.remoteInstallRoot = Self.praduckHermesHostInstallRoot
+            endpoint.remoteHookSocketPath = "\(Self.praduckHermesHostInstallRoot)/run/agent-hook.sock"
+            endpoint.remoteControlSocketPath = "\(Self.praduckHermesHostInstallRoot)/run/agent-control.sock"
+        } else {
+            endpoint.remoteInstallRoot = resolvedRemotePath(endpoint.remoteInstallRoot, homeDirectory: probe.homeDirectory)
+            endpoint.remoteHookSocketPath = resolvedRemotePath(endpoint.remoteHookSocketPath, homeDirectory: probe.homeDirectory)
+            endpoint.remoteControlSocketPath = resolvedRemotePath(endpoint.remoteControlSocketPath, homeDirectory: probe.homeDirectory)
+        }
         updateEndpoint(endpoint)
         logger.debug(
             "Remote probe applied endpoint=\(endpoint.id.uuidString, privacy: .public) installRoot=\(endpoint.remoteInstallRoot, privacy: .public) hookSocket=\(endpoint.remoteHookSocketPath, privacy: .public) controlSocket=\(endpoint.remoteControlSocketPath, privacy: .public)"
@@ -588,7 +594,7 @@ final class RemoteConnectorManager: ObservableObject {
     private func bootstrapRemoteAgent(endpointID: UUID, password: String?, probe: RemoteHostProbe) async throws {
         guard let endpoint = endpoint(for: endpointID) else { return }
         let bridgeBinaryURL = try await assetResolver.resolveBinaryURL(for: probe)
-        let stagedBridgePath = "\(endpoint.remoteInstallRoot)/bin/PingIslandBridge.tmp"
+        let stagedBridgePath = Self.remoteStagedBridgePath(for: endpoint)
         let remoteHookProfiles = Self.remoteManagedHookProfiles(for: endpoint)
         logger.notice(
             "Remote bootstrap starting endpoint=\(endpoint.id.uuidString, privacy: .public) target=\(endpoint.sshTarget, privacy: .public) binary=\(bridgeBinaryURL.path, privacy: .public) installRoot=\(endpoint.remoteInstallRoot, privacy: .public)"
@@ -602,10 +608,12 @@ final class RemoteConnectorManager: ObservableObject {
             port: endpoint.sshPort,
             password: password,
             remoteCommand: Self.remoteBootstrapPrepareCommand(
+                endpoint: endpoint,
                 installRoot: endpoint.remoteInstallRoot,
                 controlSocketPath: endpoint.remoteControlSocketPath,
                 hookSocketPath: endpoint.remoteHookSocketPath,
                 configDirectoryPaths: Self.remoteManagedHookConfigDirectoryPaths(
+                    endpoint: endpoint,
                     homeDirectory: probe.homeDirectory,
                     profiles: remoteHookProfiles
                 )
@@ -636,7 +644,8 @@ final class RemoteConnectorManager: ObservableObject {
         fi
         exec "$SCRIPT_DIR/PingIslandBridge" "$@"
         """
-        try await RemoteSSHCommandRunner.writeRemoteFile(
+        try await writeManagedRemoteFile(
+            endpoint: endpoint,
             target: endpoint.sshTarget,
             port: endpoint.sshPort,
             remotePath: "\(endpoint.remoteInstallRoot)/bin/ping-island-bridge",
@@ -648,6 +657,7 @@ final class RemoteConnectorManager: ObservableObject {
             port: endpoint.sshPort,
             password: password,
             remoteCommand: Self.remoteBootstrapInstallCommand(
+                endpoint: endpoint,
                 installRoot: endpoint.remoteInstallRoot,
                 stagedBridgePath: stagedBridgePath
             ),
@@ -700,20 +710,21 @@ final class RemoteConnectorManager: ObservableObject {
                 )
                 let remoteBridgeArguments = Self.remoteManagedBridgeArguments(
                     for: profile,
-                    installRoot: endpoint.remoteInstallRoot
+                    installRoot: Self.remoteHookRuntimeInstallRoot(for: endpoint)
                 )
                 let remoteFiles = HookInstaller.managedHookDirectoryFiles(
                     for: profile,
                     bridgeArguments: remoteBridgeArguments,
                     bridgeEnvironment: Self.remoteManagedBridgeEnvironment(
-                        hookSocketPath: endpoint.remoteHookSocketPath
+                        hookSocketPath: Self.remoteHookRuntimeSocketPath(for: endpoint)
                     )
                 )
                 logger.debug(
                     "Remote bootstrap preparing hook directory endpoint=\(endpoint.id.uuidString, privacy: .public) profile=\(profile.id, privacy: .public) remotePath=\(remoteDirectoryPath, privacy: .public) fileCount=\(remoteFiles.count, privacy: .public)"
                 )
                 for (name, content) in remoteFiles {
-                    try await RemoteSSHCommandRunner.writeRemoteFile(
+                    try await writeManagedRemoteFile(
+                        endpoint: endpoint,
                         target: endpoint.sshTarget,
                         port: endpoint.sshPort,
                         remotePath: "\(remoteDirectoryPath)/\(name)",
@@ -748,25 +759,27 @@ final class RemoteConnectorManager: ObservableObject {
                     )
                 }
             case .pluginDirectory:
-                let remoteDirectoryPath = Self.remoteConfigurationPath(
-                    relativePath: profile.configurationRelativePaths[0],
+                let remoteDirectoryPath = Self.remoteManagedPluginDirectoryPath(
+                    for: profile,
+                    endpoint: endpoint,
                     homeDirectory: probe.homeDirectory
                 )
                 let remoteFiles = HookInstaller.managedPluginDirectoryFiles(
                     for: profile,
                     bridgeArguments: Self.remoteManagedBridgeArguments(
                         for: profile,
-                        installRoot: endpoint.remoteInstallRoot
+                        installRoot: Self.remoteHookRuntimeInstallRoot(for: endpoint)
                     ),
                     bridgeEnvironment: Self.remoteManagedBridgeEnvironment(
-                        hookSocketPath: endpoint.remoteHookSocketPath
+                        hookSocketPath: Self.remoteHookRuntimeSocketPath(for: endpoint)
                     )
                 )
                 logger.debug(
                     "Remote bootstrap preparing plugin directory endpoint=\(endpoint.id.uuidString, privacy: .public) profile=\(profile.id, privacy: .public) remotePath=\(remoteDirectoryPath, privacy: .public) fileCount=\(remoteFiles.count, privacy: .public)"
                 )
                 for (name, content) in remoteFiles {
-                    try await RemoteSSHCommandRunner.writeRemoteFile(
+                    try await writeManagedRemoteFile(
+                        endpoint: endpoint,
                         target: endpoint.sshTarget,
                         port: endpoint.sshPort,
                         remotePath: "\(remoteDirectoryPath)/\(name)",
@@ -805,7 +818,11 @@ final class RemoteConnectorManager: ObservableObject {
             target: endpoint.sshTarget,
             port: endpoint.sshPort,
             password: password,
-            remoteCommand: "mkdir -p \(Self.remoteManagedHookConfigDirectoryPaths(homeDirectory: probe.homeDirectory, profiles: remoteHookProfiles).map(Self.shellQuote).joined(separator: " "))",
+            remoteCommand: Self.remoteManagedHookConfigPrepareCommand(
+                endpoint: endpoint,
+                homeDirectory: probe.homeDirectory,
+                profiles: remoteHookProfiles
+            ),
             acceptNewHostKey: true
         )
 
@@ -850,17 +867,18 @@ final class RemoteConnectorManager: ObservableObject {
                 )
                 let remoteBridgeArguments = Self.remoteManagedBridgeArguments(
                     for: profile,
-                    installRoot: endpoint.remoteInstallRoot
+                    installRoot: Self.remoteHookRuntimeInstallRoot(for: endpoint)
                 )
                 let remoteFiles = HookInstaller.managedHookDirectoryFiles(
                     for: profile,
                     bridgeArguments: remoteBridgeArguments,
                     bridgeEnvironment: Self.remoteManagedBridgeEnvironment(
-                        hookSocketPath: endpoint.remoteHookSocketPath
+                        hookSocketPath: Self.remoteHookRuntimeSocketPath(for: endpoint)
                     )
                 )
                 for (name, content) in remoteFiles {
-                    try await RemoteSSHCommandRunner.writeRemoteFile(
+                    try await writeManagedRemoteFile(
+                        endpoint: endpoint,
                         target: endpoint.sshTarget,
                         port: endpoint.sshPort,
                         remotePath: "\(remoteDirectoryPath)/\(name)",
@@ -896,22 +914,24 @@ final class RemoteConnectorManager: ObservableObject {
                 }
 
             case .pluginDirectory:
-                let remoteDirectoryPath = Self.remoteConfigurationPath(
-                    relativePath: profile.configurationRelativePaths[0],
+                let remoteDirectoryPath = Self.remoteManagedPluginDirectoryPath(
+                    for: profile,
+                    endpoint: endpoint,
                     homeDirectory: probe.homeDirectory
                 )
                 let remoteFiles = HookInstaller.managedPluginDirectoryFiles(
                     for: profile,
                     bridgeArguments: Self.remoteManagedBridgeArguments(
                         for: profile,
-                        installRoot: endpoint.remoteInstallRoot
+                        installRoot: Self.remoteHookRuntimeInstallRoot(for: endpoint)
                     ),
                     bridgeEnvironment: Self.remoteManagedBridgeEnvironment(
-                        hookSocketPath: endpoint.remoteHookSocketPath
+                        hookSocketPath: Self.remoteHookRuntimeSocketPath(for: endpoint)
                     )
                 )
                 for (name, content) in remoteFiles {
-                    try await RemoteSSHCommandRunner.writeRemoteFile(
+                    try await writeManagedRemoteFile(
+                        endpoint: endpoint,
                         target: endpoint.sshTarget,
                         port: endpoint.sshPort,
                         remotePath: "\(remoteDirectoryPath)/\(name)",
@@ -948,7 +968,51 @@ final class RemoteConnectorManager: ObservableObject {
             target: endpoint.sshTarget,
             port: endpoint.sshPort,
             password: password,
-            remoteCommand: "python3 -m py_compile \(quoted("\(remoteDirectoryPath)/__init__.py"))",
+            remoteCommand: Self.remoteHermesPluginValidationCommand(
+                endpoint: endpoint,
+                pluginDirectoryPath: remoteDirectoryPath
+            ),
+            acceptNewHostKey: true
+        )
+    }
+
+    private func writeManagedRemoteFile(
+        endpoint: RemoteEndpoint,
+        target: String,
+        port: Int,
+        remotePath: String,
+        contents: Data,
+        password: String?
+    ) async throws {
+        guard Self.usesPraduckHermesContainer(endpoint),
+              remotePath.hasPrefix(Self.praduckHermesDataRoot + "/")
+        else {
+            try await RemoteSSHCommandRunner.writeRemoteFile(
+                target: target,
+                port: port,
+                remotePath: remotePath,
+                contents: contents,
+                password: password
+            )
+            return
+        }
+
+        let stagedPath = "/tmp/ping-island-managed-\(UUID().uuidString)"
+        try await RemoteSSHCommandRunner.writeRemoteFile(
+            target: target,
+            port: port,
+            remotePath: stagedPath,
+            contents: contents,
+            password: password
+        )
+        _ = try await RemoteSSHCommandRunner.runSSH(
+            target: target,
+            port: port,
+            password: password,
+            remoteCommand: """
+            sudo install -D -m 644 -o \(Self.praduckHermesHostUID) -g \(Self.praduckHermesHostGID) \(quoted(stagedPath)) \(quoted(remotePath))
+            sudo rm -f \(quoted(stagedPath))
+            """,
             acceptNewHostKey: true
         )
     }
@@ -1070,6 +1134,7 @@ final class RemoteConnectorManager: ObservableObject {
             "Remote agent ensure/start endpoint=\(endpoint.id.uuidString, privacy: .public) target=\(endpoint.sshTarget, privacy: .public) controlSocket=\(endpoint.remoteControlSocketPath, privacy: .public)"
         )
         let command = Self.remoteEnsureAgentRunningCommand(
+            endpoint: endpoint,
             installRoot: endpoint.remoteInstallRoot,
             controlSocketPath: endpoint.remoteControlSocketPath,
             hookSocketPath: endpoint.remoteHookSocketPath
@@ -1461,16 +1526,31 @@ final class RemoteConnectorManager: ObservableObject {
     }
 
     nonisolated static func remoteBootstrapPrepareCommand(
+        endpoint: RemoteEndpoint,
         installRoot: String,
         controlSocketPath: String,
         hookSocketPath: String,
         configDirectoryPaths: [String]
     ) -> String {
         let agentPattern = "\(installRoot)/bin/[P]ingIslandBridge --mode remote-agent-service"
-        let directoryList = ([ "\(installRoot)/bin", "\(installRoot)/run", "\(installRoot)/logs", "$HOME/.claude" ] + configDirectoryPaths)
+        let baseDirectories = usesPraduckHermesContainer(endpoint)
+            ? [ "\(installRoot)/bin", "\(installRoot)/run", "\(installRoot)/logs" ]
+            : [ "\(installRoot)/bin", "\(installRoot)/run", "\(installRoot)/logs", "$HOME/.claude" ]
+        let directoryList = (baseDirectories + configDirectoryPaths)
             .uniquedPreservingOrder()
             .map(shellQuote)
             .joined(separator: " ")
+        if usesPraduckHermesContainer(endpoint) {
+            return """
+            sudo chmod o+x \(shellQuote(praduckHermesHostRoot)) >/dev/null 2>&1 || true
+            sudo install -d -m 755 -o \(praduckHermesHostUID) -g \(praduckHermesHostGID) \(directoryList)
+            sudo chown -R \(praduckHermesHostUID):\(praduckHermesHostGID) \(shellQuote(installRoot))
+            sudo pkill -u \(praduckHermesHostUID) -f \(shellQuote(agentPattern)) >/dev/null 2>&1 || true
+            sleep 1
+            sudo rm -f \(shellQuote(controlSocketPath)) \(shellQuote(hookSocketPath))
+            sudo rm -f \(shellQuote("\(installRoot)/bin/PingIslandBridge.tmp"))
+            """
+        }
         return """
         mkdir -p \(directoryList)
         pkill -f \(shellQuote(agentPattern)) >/dev/null 2>&1 || true
@@ -1480,11 +1560,29 @@ final class RemoteConnectorManager: ObservableObject {
     }
 
     nonisolated static func remoteEnsureAgentRunningCommand(
+        endpoint: RemoteEndpoint,
         installRoot: String,
         controlSocketPath: String,
         hookSocketPath: String
     ) -> String {
         let servicePattern = "\(installRoot)/bin/[P]ingIslandBridge --mode remote-agent-service"
+        if usesPraduckHermesContainer(endpoint) {
+            let serviceCommand = """
+            nohup \(shellQuote("\(installRoot)/bin/ping-island-bridge")) --mode remote-agent-service --hook-socket \(shellQuote(hookSocketPath)) --control-socket \(shellQuote(controlSocketPath)) > \(shellQuote("\(installRoot)/logs/remote-agent.log")) 2>&1 &
+            """
+            return """
+            sudo chmod o+x \(shellQuote(praduckHermesHostRoot)) >/dev/null 2>&1 || true
+            sudo install -d -m 755 -o \(praduckHermesHostUID) -g \(praduckHermesHostGID) \(shellQuote("\(installRoot)/run")) \(shellQuote("\(installRoot)/logs"))
+            sudo chown -R \(praduckHermesHostUID):\(praduckHermesHostGID) \(shellQuote(installRoot))
+            if \(praduckHermesHostRunPrefix) test -S \(shellQuote(controlSocketPath)) && pgrep -u \(praduckHermesHostUID) -f \(shellQuote(servicePattern)) >/dev/null 2>&1; then
+              exit 0
+            fi
+            sudo pkill -u \(praduckHermesHostUID) -f \(shellQuote(servicePattern)) >/dev/null 2>&1 || true
+            sudo rm -f \(shellQuote(controlSocketPath)) \(shellQuote(hookSocketPath))
+            \(praduckHermesHostRunPrefix) sh -c \(shellQuote(serviceCommand))
+            sleep 1
+            """
+        }
         return """
         mkdir -p \(shellQuote("\(installRoot)/run")) \(shellQuote("\(installRoot)/logs"))
         if [ -S \(shellQuote(controlSocketPath)) ] && pgrep -f \(shellQuote(servicePattern)) >/dev/null 2>&1; then
@@ -1498,10 +1596,18 @@ final class RemoteConnectorManager: ObservableObject {
     }
 
     nonisolated static func remoteBootstrapInstallCommand(
+        endpoint: RemoteEndpoint,
         installRoot: String,
         stagedBridgePath: String
     ) -> String {
-        """
+        if usesPraduckHermesContainer(endpoint) {
+            return """
+            sudo install -D -m 755 -o \(praduckHermesHostUID) -g \(praduckHermesHostGID) \(shellQuote(stagedBridgePath)) \(shellQuote("\(installRoot)/bin/PingIslandBridge"))
+            sudo chmod 755 \(shellQuote("\(installRoot)/bin/PingIslandBridge")) \(shellQuote("\(installRoot)/bin/ping-island-bridge"))
+            sudo rm -f \(shellQuote(stagedBridgePath))
+            """
+        }
+        return """
         mv -f \(shellQuote(stagedBridgePath)) \(shellQuote("\(installRoot)/bin/PingIslandBridge"))
         chmod 755 \(shellQuote("\(installRoot)/bin/PingIslandBridge")) \(shellQuote("\(installRoot)/bin/ping-island-bridge"))
         """
@@ -1583,24 +1689,79 @@ final class RemoteConnectorManager: ObservableObject {
         ["ISLAND_SOCKET_PATH": hookSocketPath]
     }
 
+    nonisolated static let praduckHermesHostRoot = "/srv/hermes"
+    nonisolated static let praduckHermesDataRoot = "/srv/hermes/data"
+    nonisolated static let praduckHermesHostInstallRoot = "/srv/hermes/data/ping-island"
+    nonisolated static let praduckHermesContainerInstallRoot = "/opt/data/ping-island"
+    nonisolated static let praduckHermesHostUID = "10000"
+    nonisolated static let praduckHermesHostGID = "10000"
+    nonisolated static let praduckHermesHostRunPrefix = "sudo setpriv --reuid=10000 --regid=10000 --clear-groups"
+
+    nonisolated static func usesPraduckHermesContainer(_ endpoint: RemoteEndpoint) -> Bool {
+        let descriptor = [
+            endpoint.displayName,
+            endpoint.sshTarget,
+            endpoint.detectedHostname ?? "",
+            endpoint.detectedHomeDirectory ?? ""
+        ].joined(separator: " ").lowercased()
+        return descriptor.contains("praduck")
+    }
+
+    nonisolated static func remoteHookRuntimeInstallRoot(for endpoint: RemoteEndpoint) -> String {
+        usesPraduckHermesContainer(endpoint) ? praduckHermesContainerInstallRoot : endpoint.remoteInstallRoot
+    }
+
+    nonisolated static func remoteHookRuntimeSocketPath(for endpoint: RemoteEndpoint) -> String {
+        usesPraduckHermesContainer(endpoint)
+            ? "\(praduckHermesContainerInstallRoot)/run/agent-hook.sock"
+            : endpoint.remoteHookSocketPath
+    }
+
+    nonisolated static func remoteStagedBridgePath(for endpoint: RemoteEndpoint) -> String {
+        usesPraduckHermesContainer(endpoint)
+            ? "/tmp/PingIslandBridge.\(UUID().uuidString).tmp"
+            : "\(endpoint.remoteInstallRoot)/bin/PingIslandBridge.tmp"
+    }
+
     nonisolated static func remoteManagedHookConfigDirectoryPaths(
+        endpoint: RemoteEndpoint,
         homeDirectory: String,
         profiles: [ManagedHookClientProfile]
     ) -> [String] {
         profiles
             .flatMap { profile in
-                remoteManagedHookDirectoryPaths(for: profile, homeDirectory: homeDirectory)
+                remoteManagedHookDirectoryPaths(for: profile, endpoint: endpoint, homeDirectory: homeDirectory)
             }
             .filter { !$0.isEmpty }
             .uniquedPreservingOrder()
     }
 
+    nonisolated static func remoteManagedHookConfigPrepareCommand(
+        endpoint: RemoteEndpoint,
+        homeDirectory: String,
+        profiles: [ManagedHookClientProfile]
+    ) -> String {
+        let directories = remoteManagedHookConfigDirectoryPaths(
+            endpoint: endpoint,
+            homeDirectory: homeDirectory,
+            profiles: profiles
+        )
+        guard usesPraduckHermesContainer(endpoint) else {
+            return "mkdir -p \(directories.map(shellQuote).joined(separator: " "))"
+        }
+        return """
+        sudo install -d -m 755 -o \(praduckHermesHostUID) -g \(praduckHermesHostGID) \(directories.map(shellQuote).joined(separator: " "))
+        """
+    }
+
     nonisolated static func remoteManagedHookDirectoryPaths(
         for profile: ManagedHookClientProfile,
+        endpoint: RemoteEndpoint,
         homeDirectory: String
     ) -> [String] {
-        let configurationPath = remoteConfigurationPath(
-            relativePath: profile.configurationRelativePaths[0],
+        let configurationPath = remoteManagedPluginDirectoryPath(
+            for: profile,
+            endpoint: endpoint,
             homeDirectory: homeDirectory
         )
 
@@ -1626,6 +1787,38 @@ final class RemoteConnectorManager: ObservableObject {
         }
 
         return paths.uniquedPreservingOrder()
+    }
+
+    nonisolated static func remoteManagedPluginDirectoryPath(
+        for profile: ManagedHookClientProfile,
+        endpoint: RemoteEndpoint,
+        homeDirectory: String
+    ) -> String {
+        guard profile.id == "hermes-hooks", usesPraduckHermesContainer(endpoint) else {
+            return remoteConfigurationPath(
+                relativePath: profile.configurationRelativePaths[0],
+                homeDirectory: homeDirectory
+            )
+        }
+        return "\(praduckHermesDataRoot)/plugins/ping_island"
+    }
+
+    nonisolated static func remoteHermesPluginValidationCommand(
+        endpoint: RemoteEndpoint,
+        pluginDirectoryPath: String
+    ) -> String {
+        if usesPraduckHermesContainer(endpoint) {
+            return """
+            sudo docker exec -u hermes hermes bash -lc 'python -m py_compile /opt/data/plugins/ping_island/__init__.py'
+            sudo docker exec -u hermes hermes bash -lc 'source /opt/hermes/.venv/bin/activate; cd /opt/hermes; python /opt/hermes/hermes plugins enable ping-island'
+            """
+        }
+        return """
+        python3 -m py_compile \(shellQuote("\(pluginDirectoryPath)/__init__.py"))
+        if command -v hermes >/dev/null 2>&1; then
+          hermes plugins enable ping-island >/dev/null 2>&1 || true
+        fi
+        """
     }
 
     nonisolated static func remoteConfigurationPath(relativePath: String, homeDirectory: String) -> String {
@@ -1816,11 +2009,15 @@ private final class RemoteAttachConnector {
         let stdoutPipe = Pipe()
         let stdinPipe = Pipe()
         let stderrPipe = Pipe()
+        let bridgeCommand = "\(shellQuote("\(endpoint.remoteInstallRoot)/bin/ping-island-bridge")) --mode remote-agent-attach --control-socket \(shellQuote(endpoint.remoteControlSocketPath))"
+        let remoteCommand = RemoteConnectorManager.usesPraduckHermesContainer(endpoint)
+            ? "\(RemoteConnectorManager.praduckHermesHostRunPrefix) \(bridgeCommand)"
+            : bridgeCommand
         let process = try RemoteSSHCommandRunner.makeSSHProcess(
             target: endpoint.sshTarget,
             port: endpoint.sshPort,
             password: password,
-            remoteCommand: "\(shellQuote("\(endpoint.remoteInstallRoot)/bin/ping-island-bridge")) --mode remote-agent-attach --control-socket \(shellQuote(endpoint.remoteControlSocketPath))",
+            remoteCommand: remoteCommand,
             acceptNewHostKey: true
         )
         process.standardOutput = stdoutPipe

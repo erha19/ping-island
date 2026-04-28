@@ -1181,7 +1181,8 @@ func hermesUserPromptSubmitMapsFromPluginHookPayload() throws {
     {
       "hook_event_name": "UserPromptSubmit",
       "session_id": "hermes-1",
-      "prompt": "Summarize the failing tests and next fix."
+      "prompt": "Summarize the failing tests and next fix.",
+      "platform": "discord"
     }
     """.data(using: .utf8)!
 
@@ -1202,6 +1203,7 @@ func hermesUserPromptSubmitMapsFromPluginHookPayload() throws {
     #expect(envelope.status?.kind == .thinking)
     #expect(envelope.preview == "Summarize the failing tests and next fix.")
     #expect(envelope.metadata["client_kind"] == "hermes")
+    #expect(envelope.metadata["connection_transport"] == "discord")
 }
 
 @Test
