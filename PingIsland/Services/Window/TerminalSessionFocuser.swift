@@ -180,6 +180,7 @@ actor TerminalSessionFocuser {
                 titleHint: remoteHostHint
             )
         case "com.cmuxterm.app":
+            // cmux is based on Ghostty, reuse Ghostty focus logic
             let cmuxTerminalIdentifier = clientInfo?.terminalSessionIdentifier
             await FocusDiagnosticsStore.shared.record(
                 "TerminalFocus cmux applescript terminalPid=\(terminalPid) terminalIdentifier=\(cmuxTerminalIdentifier ?? "nil") workspacePath=\(workspacePath ?? "nil")"
@@ -349,6 +350,7 @@ actor TerminalSessionFocuser {
         let frontmostBundleIdentifier = await MainActor.run {
             NSWorkspace.shared.frontmostApplication?.bundleIdentifier
         }
+        // cmux is based on Ghostty and uses the same AppleScript interface.
         let isGhosttyFrontmost = frontmostBundleIdentifier == "com.mitchellh.ghostty"
             || frontmostBundleIdentifier == "com.cmuxterm.app"
         guard isGhosttyFrontmost else {

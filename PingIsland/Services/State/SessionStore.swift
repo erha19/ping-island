@@ -3400,7 +3400,7 @@ actor SessionStore {
         event: HookEvent,
         workspacePath: String
     ) async -> SessionClientInfo? {
-        // cmux is Ghostty-based, so keep the upstream Ghostty enrichment path.
+        // cmux is based on Ghostty, so we reuse the Ghostty enrichment logic.
         guard current.terminalBundleIdentifier == "com.mitchellh.ghostty"
                 || current.terminalBundleIdentifier == "com.cmuxterm.app",
               TerminalSessionFocuser.normalizedGhosttyTerminalIdentifier(current.terminalSessionIdentifier) == nil,
