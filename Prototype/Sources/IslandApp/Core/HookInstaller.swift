@@ -283,7 +283,7 @@ struct HookInstaller {
             relativePath: ".qoderwork/settings.json",
             clientKind: "qoderwork",
             clientName: "QoderWork",
-            preToolUseTimeout: 86_400
+            preToolUseTimeout: nil
         )
     }
 

@@ -240,7 +240,7 @@ func installerDeduplicatesManagedHooksButKeepsUnrelatedHooks() throws {
         }
     )
     let qoderWorkManagedPreToolUseHook = try #require((qoderWorkManagedPreToolUse["hooks"] as? [[String: Any]])?.first)
-    #expect(qoderWorkManagedPreToolUseHook["timeout"] as? Int == 86_400)
+    #expect(qoderWorkManagedPreToolUseHook.keys.contains("timeout") == false)
 
     let workBuddyData = try Data(contentsOf: workBuddySettingsURL)
     let workBuddyJSON = try #require(JSONSerialization.jsonObject(with: workBuddyData) as? [String: Any])

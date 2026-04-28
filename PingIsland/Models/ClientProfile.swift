@@ -561,7 +561,7 @@ enum ClientProfileRegistry {
             brand: .neutral,
             events: [
                 HookInstallEventDescriptor(name: "UserPromptSubmit", templates: [.plain]),
-                HookInstallEventDescriptor(name: "PreToolUse", templates: [.matcher("*")], timeout: 86_400),
+                HookInstallEventDescriptor(name: "PreToolUse", templates: [.matcher("*")]),
                 HookInstallEventDescriptor(name: "PostToolUse", templates: [.matcher("*")]),
                 HookInstallEventDescriptor(name: "PermissionRequest", templates: [.matcher("*")], timeout: 86_400),
                 HookInstallEventDescriptor(name: "Notification", templates: [.matcher("*")]),
@@ -587,7 +587,7 @@ enum ClientProfileRegistry {
             brand: .neutral,
             events: [
                 HookInstallEventDescriptor(name: "UserPromptSubmit", templates: [.plain]),
-                HookInstallEventDescriptor(name: "PreToolUse", templates: [.matcher("*")], timeout: 86_400),
+                HookInstallEventDescriptor(name: "PreToolUse", templates: [.matcher("*")]),
                 HookInstallEventDescriptor(name: "PostToolUse", templates: [.matcher("*")]),
                 HookInstallEventDescriptor(name: "PermissionRequest", templates: [.matcher("*")], timeout: 86_400),
                 HookInstallEventDescriptor(name: "Notification", templates: [.matcher("*")]),
@@ -737,7 +737,7 @@ enum ClientProfileRegistry {
             brand: .neutral,
             events: [
                 HookInstallEventDescriptor(name: "UserPromptSubmit", templates: [.plain]),
-                HookInstallEventDescriptor(name: "PreToolUse", templates: [.matcher("*")], timeout: 86_400),
+                HookInstallEventDescriptor(name: "PreToolUse", templates: [.matcher("*")]),
                 HookInstallEventDescriptor(name: "PostToolUse", templates: [.matcher("*")]),
                 HookInstallEventDescriptor(name: "PermissionRequest", templates: [.matcher("*")], timeout: 86_400),
                 HookInstallEventDescriptor(name: "Notification", templates: [.matcher("*")]),
@@ -763,7 +763,7 @@ enum ClientProfileRegistry {
             brand: .neutral,
             events: [
                 HookInstallEventDescriptor(name: "UserPromptSubmit", templates: [.plain]),
-                HookInstallEventDescriptor(name: "PreToolUse", templates: [.matcher("*")], timeout: 86_400),
+                HookInstallEventDescriptor(name: "PreToolUse", templates: [.matcher("*")]),
                 HookInstallEventDescriptor(name: "PostToolUse", templates: [.matcher("*")]),
                 HookInstallEventDescriptor(name: "PermissionRequest", templates: [.matcher("*")], timeout: 86_400),
                 HookInstallEventDescriptor(name: "Notification", templates: [.matcher("*")]),
@@ -792,7 +792,7 @@ enum ClientProfileRegistry {
             brand: .neutral,
             events: [
                 HookInstallEventDescriptor(name: "UserPromptSubmit", templates: [.plain]),
-                HookInstallEventDescriptor(name: "PreToolUse", templates: [.matcher("*")], timeout: 86_400),
+                HookInstallEventDescriptor(name: "PreToolUse", templates: [.matcher("*")]),
                 HookInstallEventDescriptor(name: "PostToolUse", templates: [.matcher("*")]),
                 HookInstallEventDescriptor(name: "PermissionRequest", templates: [.matcher("*")], timeout: 86_400),
                 HookInstallEventDescriptor(name: "Notification", templates: [.matcher("*")]),
@@ -840,7 +840,7 @@ enum ClientProfileRegistry {
             brand: .qoder,
             events: [
                 HookInstallEventDescriptor(name: "UserPromptSubmit", templates: [.plain]),
-                HookInstallEventDescriptor(name: "PreToolUse", templates: [.matcher("*")], timeout: 86_400),
+                HookInstallEventDescriptor(name: "PreToolUse", templates: [.matcher("*")]),
                 HookInstallEventDescriptor(name: "PostToolUse", templates: [.matcher("*")]),
                 HookInstallEventDescriptor(name: "PostToolUseFailure", templates: [.matcher("*")]),
                 HookInstallEventDescriptor(name: "PermissionRequest", templates: [.matcher("*")], timeout: 86_400),
