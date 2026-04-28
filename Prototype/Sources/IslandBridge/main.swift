@@ -1083,7 +1083,15 @@ private enum RemoteBridgeMessageBuilder {
             return "waiting_for_input"
         case .idle:
             return "idle"
-        case .thinking, .active, .error, .none:
+        case .thinking:
+            return "processing"
+        case .active:
+            if eventType.contains(":") {
+                return "idle"
+            }
+        case .error:
+            return "idle"
+        case .none:
             break
         }
 

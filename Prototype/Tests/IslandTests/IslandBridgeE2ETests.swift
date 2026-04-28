@@ -220,3 +220,78 @@ func remoteAgentFailsOpenWhenNoControlClientIsAttached() async throws {
     #expect(response.updatedInput == nil)
     #expect(response.reason == nil)
 }
+
+@Test
+func remoteAgentMapsOpenClawPatchActivityToIdle() async throws {
+    let executable = try TestRuntime.executableURL(named: "PingIslandBridge")
+    let socketID = UUID().uuidString.prefix(8)
+    let hookSocketPath = "/tmp/pi-\(socketID)-h.sock"
+    let controlSocketPath = "/tmp/pi-\(socketID)-c.sock"
+
+    let service = try RunningProcess(
+        executableURL: executable,
+        arguments: [
+            "--mode", "remote-agent-service",
+            "--hook-socket", hookSocketPath,
+            "--control-socket", controlSocketPath
+        ]
+    )
+    defer {
+        service.terminate()
+        _ = service.waitForExit()
+        try? FileManager.default.removeItem(atPath: hookSocketPath)
+        try? FileManager.default.removeItem(atPath: controlSocketPath)
+    }
+
+    try await waitUntil(description: "remote agent service should create sockets") {
+        FileManager.default.fileExists(atPath: hookSocketPath)
+            && FileManager.default.fileExists(atPath: controlSocketPath)
+    }
+
+    let attach = try RunningProcess(
+        executableURL: executable,
+        arguments: [
+            "--mode", "remote-agent-attach",
+            "--control-socket", controlSocketPath
+        ],
+        closeStdinOnLaunch: false
+    )
+    defer {
+        attach.closeStdin()
+        attach.terminate()
+        _ = attach.waitForExit()
+    }
+
+    try await Task.sleep(for: .milliseconds(300))
+
+    _ = try TestSocketClient.send(
+        envelope: BridgeEnvelope(
+            provider: .claude,
+            eventType: "session:patch",
+            sessionKey: "claude:openclaw-patch",
+            title: "OpenClaw",
+            preview: "OpenClaw session patch",
+            cwd: "/home/openclaw",
+            status: SessionStatus(kind: .active),
+            expectsResponse: false,
+            metadata: [
+                "session_id": "openclaw-patch",
+                "client_kind": "openclaw",
+                "client_name": "OpenClaw",
+                "client_originator": "OpenClaw",
+                "thread_source": "openclaw-hooks"
+            ]
+        ),
+        socketPath: hookSocketPath
+    )
+
+    try await Task.sleep(for: .milliseconds(300))
+    service.terminate()
+    _ = service.waitForExit()
+    attach.closeStdin()
+    let result = attach.waitForExit()
+
+    #expect(result.stdout.contains("\"type\":\"hook_event\""))
+    #expect(result.stdout.contains("\"event\":\"session:patch\""))
+    #expect(result.stdout.contains("\"status\":\"idle\""))
+}

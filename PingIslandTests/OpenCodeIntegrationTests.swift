@@ -91,6 +91,142 @@ final class OpenCodeIntegrationTests: XCTestCase {
         XCTAssertFalse(SessionMonitor.shouldWatchTranscript(for: event, phase: .processing))
     }
 
+    func testOpenClawBridgePatchDoesNotCreateActiveGhostSession() {
+        XCTAssertEqual(
+            HookSocketServer.normalizedBridgeStatus(
+                eventType: "session:patch",
+                status: "active",
+                notificationType: nil
+            ),
+            "idle"
+        )
+        XCTAssertEqual(
+            HookSocketServer.normalizedBridgeStatus(
+                eventType: "message:received",
+                status: "thinking",
+                notificationType: nil
+            ),
+            "processing"
+        )
+        XCTAssertEqual(
+            HookSocketServer.normalizedBridgeStatus(
+                eventType: "PostToolUse",
+                status: "active",
+                notificationType: nil
+            ),
+            "processing"
+        )
+    }
+
+    func testRemoteOpenClawPatchPayloadSettlesToIdleForOldBridge() {
+        let clientInfoPayload = RemoteHookClientInfoPayload(
+            kind: "custom",
+            profileID: "openclaw",
+            name: "OpenClaw",
+            bundleIdentifier: nil,
+            launchURL: nil,
+            origin: "gateway",
+            originator: "OpenClaw",
+            threadSource: "openclaw-hooks",
+            transport: "ssh",
+            remoteHost: "openclaw",
+            sessionFilePath: "/home/openclaw/.openclaw/agents/main/sessions/session.jsonl",
+            terminalBundleIdentifier: nil,
+            terminalProgram: nil,
+            terminalSessionIdentifier: nil,
+            iTermSessionIdentifier: nil,
+            tmuxSessionIdentifier: nil,
+            tmuxPaneIdentifier: nil,
+            processName: "openclaw-gateway"
+        )
+        let clientInfo = SessionClientInfo(
+            kind: .custom,
+            profileID: "openclaw",
+            name: "OpenClaw",
+            origin: "gateway",
+            originator: "OpenClaw",
+            threadSource: "openclaw-hooks",
+            transport: "ssh",
+            remoteHost: "openclaw",
+            sessionFilePath: "/home/openclaw/.openclaw/agents/main/sessions/session.jsonl",
+            processName: "openclaw-gateway"
+        )
+        let patchPayload = RemoteHookEventPayload(
+            requestID: UUID(),
+            sessionID: "openclaw-patch",
+            cwd: "/home/openclaw",
+            event: "session:patch",
+            status: "processing",
+            provider: "claude",
+            pid: nil,
+            tty: nil,
+            tool: nil,
+            toolInput: nil,
+            toolUseID: nil,
+            notificationType: nil,
+            message: nil,
+            expectsResponse: false,
+            clientInfo: clientInfoPayload
+        )
+        let messagePayload = RemoteHookEventPayload(
+            requestID: UUID(),
+            sessionID: "openclaw-message",
+            cwd: "/home/openclaw",
+            event: "message:received",
+            status: "processing",
+            provider: "claude",
+            pid: nil,
+            tty: nil,
+            tool: nil,
+            toolInput: nil,
+            toolUseID: nil,
+            notificationType: nil,
+            message: nil,
+            expectsResponse: false,
+            clientInfo: clientInfoPayload
+        )
+
+        XCTAssertEqual(
+            RemoteConnectorManager.normalizedRemoteHookStatus(payload: patchPayload, clientInfo: clientInfo),
+            "idle"
+        )
+        XCTAssertEqual(
+            RemoteConnectorManager.normalizedRemoteHookStatus(payload: messagePayload, clientInfo: clientInfo),
+            "processing"
+        )
+    }
+
+    func testStaleOpenClawActivitySettlesToIdle() {
+        let lastActivity = Date(timeIntervalSince1970: 100)
+        let clientInfo = SessionClientInfo(
+            kind: .custom,
+            profileID: "openclaw",
+            name: "OpenClaw",
+            origin: "gateway",
+            originator: "OpenClaw",
+            threadSource: "openclaw-hooks"
+        )
+        let session = SessionState(
+            sessionId: "openclaw-stale",
+            cwd: "/Users/ping-island/Island",
+            provider: .claude,
+            clientInfo: clientInfo,
+            phase: .processing,
+            lastActivity: lastActivity
+        )
+
+        XCTAssertTrue(SessionStore.shouldSettleStaleOpenClawActivity(
+            session: session,
+            now: lastActivity.addingTimeInterval(91),
+            timeout: 90
+        ))
+        XCTAssertFalse(SessionStore.shouldSettleStaleOpenClawActivity(
+            session: session,
+            now: lastActivity.addingTimeInterval(30),
+            timeout: 90
+        ))
+    }
+
     func testOpenClawClientSuppressesActivationAndProjectContext() {
         let clientInfo = SessionClientInfo(
             kind: .custom,

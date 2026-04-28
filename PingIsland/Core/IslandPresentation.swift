@@ -111,12 +111,37 @@ struct IslandDetachedContentResolver {
 }
 
 enum IslandMascotResolver {
-    static func sourceSession(from sessions: [SessionState]) -> SessionState? {
-        sessions
-            .filter { $0.phase.isActive || $0.needsManualAttention }
-            .sorted(by: {
-                ($0.attentionRequestedAt ?? $0.lastActivity) > ($1.attentionRequestedAt ?? $1.lastActivity)
-            })
+    nonisolated static func sourceSession(from sessions: [SessionState]) -> SessionState? {
+        ClosedNotchActivityResolver.representativeSession(from: sessions)
+    }
+}
+
+enum ClosedNotchActivityResolver {
+    nonisolated static func hasActionableAttention(_ session: SessionState) -> Bool {
+        session.needsApprovalResponse || session.intervention != nil
+    }
+
+    nonisolated static func activeCount(from sessions: [SessionState]) -> Int {
+        sessions.filter { $0.phase.isActive }.count
+    }
+
+    nonisolated static func representativeSession(from sessions: [SessionState]) -> SessionState? {
+        if let attention = sessions
+            .filter(hasActionableAttention)
+            .sorted(by: activitySort)
+            .first {
+            return attention
+        }
+
+        return sessions
+            .filter { $0.phase.isActive }
+            .sorted(by: activitySort)
             .first
+    }
+
+    nonisolated private static func activitySort(_ lhs: SessionState, _ rhs: SessionState) -> Bool {
+        let lhsDate = lhs.attentionRequestedAt ?? lhs.lastActivity
+        let rhsDate = rhs.attentionRequestedAt ?? rhs.lastActivity
+        return lhsDate > rhsDate
     }
 }

@@ -97,14 +97,8 @@ struct NotchView: View {
         sessionMonitor.instances.filter(\.phase.isActive)
     }
 
-    private var countedClosedSessions: [SessionState] {
-        sessionMonitor.instances.filter { session in
-            session.phase.isActive || session.phase.needsAttention
-        }
-    }
-
     private var activeSessionCount: Int {
-        countedClosedSessions.count
+        ClosedNotchActivityResolver.activeCount(from: sessionMonitor.instances)
     }
 
     private var usageSummaryProviders: [UsageSummaryProvider] {
@@ -189,23 +183,7 @@ struct NotchView: View {
     }
 
     private var representativeClosedSession: SessionState? {
-        if let attention = sessionMonitor.instances
-            .filter({ $0.needsManualAttention })
-            .sorted(by: { ($0.attentionRequestedAt ?? $0.lastActivity) > ($1.attentionRequestedAt ?? $1.lastActivity) })
-            .first {
-            return attention
-        }
-
-        if let active = sessionMonitor.instances
-            .filter({ $0.phase.isActive })
-            .sorted(by: { $0.lastActivity > $1.lastActivity })
-            .first {
-            return active
-        }
-
-        return sessionMonitor.instances
-            .sorted(by: { $0.lastActivity > $1.lastActivity })
-            .first
+        ClosedNotchActivityResolver.representativeSession(from: sessionMonitor.instances)
     }
 
     private var preferredShortcutSession: SessionState? {

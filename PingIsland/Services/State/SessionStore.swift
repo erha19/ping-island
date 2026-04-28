@@ -70,6 +70,7 @@ actor SessionStore {
     private let qoderSubagentAssociationWindow: TimeInterval = 2 * 60
     private let openClawConversationPollIntervalNs: UInt64 = 1_000_000_000
     private let openClawConversationPollTimeoutNs: UInt64 = 30_000_000_000
+    private let openClawActiveSessionStaleTimeout: TimeInterval = 90
 
     /// Persisted session associations used to restore client routing across relaunches.
     private var persistedAssociations: [String: PersistedSessionAssociation] = [:]
@@ -89,6 +90,20 @@ actor SessionStore {
     // MARK: - Initialization
 
     private init() {}
+
+    nonisolated static func shouldSettleStaleOpenClawActivity(
+        session: SessionState,
+        now: Date,
+        timeout: TimeInterval
+    ) -> Bool {
+        guard case nil = session.intervention else {
+            return false
+        }
+
+        return session.clientInfo.isOpenClawGatewayClient
+            && session.phase.isActive
+            && now.timeIntervalSince(session.lastActivity) >= timeout
+    }
 
     // MARK: - Event Processing
 
@@ -1462,6 +1477,25 @@ actor SessionStore {
             session.lastActivity = now
             sessions[sessionId] = session
             didChange = true
+        }
+
+        for sessionId in sessions.keys {
+            guard var session = sessions[sessionId],
+                  Self.shouldSettleStaleOpenClawActivity(
+                    session: session,
+                    now: now,
+                    timeout: openClawActiveSessionStaleTimeout
+                  ) else {
+                continue
+            }
+
+            session.phase = .idle
+            sessions[sessionId] = session
+            cancelPendingOpenClawConversationPoll(sessionId: sessionId)
+            didChange = true
+            Self.logger.info(
+                "Settled stale OpenClaw activity session=\(sessionId, privacy: .public) age=\(now.timeIntervalSince(session.lastActivity), privacy: .public)"
+            )
         }
 
         if didChange {

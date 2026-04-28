@@ -566,6 +566,7 @@ final class NotchViewModelTests: XCTestCase {
         let attention = SessionState(
             sessionId: "attention",
             cwd: "/tmp/attention",
+            intervention: makeQuestionIntervention(id: "question-1"),
             phase: .waitingForInput,
             lastActivity: now.addingTimeInterval(-5)
         )
@@ -573,6 +574,31 @@ final class NotchViewModelTests: XCTestCase {
         XCTAssertEqual(
             IslandMascotResolver.sourceSession(from: [idle, active, attention])?.sessionId,
             "attention"
+        )
+    }
+
+    func testIslandMascotResolverIgnoresPassiveWaitingHistory() {
+        let now = Date()
+        let active = SessionState(
+            sessionId: "active",
+            cwd: "/tmp/active",
+            phase: .processing,
+            lastActivity: now.addingTimeInterval(-20)
+        )
+        let passiveWaiting = SessionState(
+            sessionId: "passive-waiting",
+            cwd: "/tmp/passive-waiting",
+            phase: .waitingForInput,
+            lastActivity: now
+        )
+
+        XCTAssertEqual(
+            IslandMascotResolver.sourceSession(from: [active, passiveWaiting])?.sessionId,
+            "active"
+        )
+        XCTAssertEqual(
+            ClosedNotchActivityResolver.activeCount(from: [active, passiveWaiting]),
+            1
         )
     }
 
@@ -661,6 +687,19 @@ final class NotchViewModelTests: XCTestCase {
         SessionState(
             sessionId: id,
             cwd: "/tmp/\(id)"
+        )
+    }
+
+    private func makeQuestionIntervention(id: String) -> SessionIntervention {
+        SessionIntervention(
+            id: id,
+            kind: .question,
+            title: "Needs input",
+            message: "Needs input",
+            options: [],
+            questions: [],
+            supportsSessionScope: false,
+            metadata: [:]
         )
     }
 }

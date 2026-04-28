@@ -522,12 +522,13 @@ final class RemoteConnectorManager: ObservableObject {
                 tmuxPaneIdentifier: payload.clientInfo.tmuxPaneIdentifier,
                 processName: payload.clientInfo.processName
             )
+            let resolvedStatus = Self.normalizedRemoteHookStatus(payload: payload, clientInfo: clientInfo)
 
             let event = HookEvent(
                 sessionId: payload.sessionID,
                 cwd: payload.cwd,
                 event: payload.event,
-                status: payload.status,
+                status: resolvedStatus,
                 provider: provider,
                 clientInfo: clientInfo,
                 pid: payload.pid,
@@ -1010,6 +1011,26 @@ final class RemoteConnectorManager: ObservableObject {
         case .unknown, .publicKey:
             return true
         }
+    }
+
+    nonisolated static func normalizedRemoteHookStatus(
+        payload: RemoteHookEventPayload,
+        clientInfo: SessionClientInfo
+    ) -> String {
+        guard clientInfo.isOpenClawGatewayClient else {
+            return payload.status
+        }
+
+        switch payload.event {
+        case "session:patch", "session:compact:after":
+            if payload.status == "active" || payload.status == "processing" {
+                return "idle"
+            }
+        default:
+            break
+        }
+
+        return payload.status
     }
 
     nonisolated static func normalizedLinuxBridgeArchitecture(_ architecture: String) -> String? {

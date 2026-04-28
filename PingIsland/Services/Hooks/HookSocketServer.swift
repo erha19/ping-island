@@ -455,47 +455,11 @@ private extension BridgeEnvelope {
         status: BridgeStatusKind?,
         notificationType: String?
     ) -> String {
-        if eventType == "Notification", notificationType == "idle_prompt" {
-            return "waiting_for_input"
-        }
-
-        switch status {
-        case .waitingForApproval:
-            return "waiting_for_approval"
-        case .waitingForInput:
-            return "waiting_for_input"
-        case .runningTool:
-            return "running_tool"
-        case .compacting:
-            return "compacting"
-        case .completed:
-            return "ended"
-        case .notification:
-            return "notification"
-        case .interrupted:
-            return "waiting_for_input"
-        case .idle:
-            return "idle"
-        case .thinking, .active, .error, .none:
-            break
-        }
-
-        switch eventType {
-        case "SessionEnd":
-            return "ended"
-        case "SessionStart", "Stop", "SubagentStop":
-            return "waiting_for_input"
-        case "UserPromptSubmit", "PostToolUse":
-            return "processing"
-        case "PreToolUse":
-            return "running_tool"
-        case "PreCompact":
-            return "compacting"
-        case "Notification":
-            return "notification"
-        default:
-            return "processing"
-        }
+        HookSocketServer.normalizedBridgeStatus(
+            eventType: eventType,
+            status: status?.rawValue,
+            notificationType: notificationType
+        )
     }
 
     private static func decodeToolInput(from json: String?) -> [String: AnyCodable]? {
@@ -822,6 +786,62 @@ class HookSocketServer {
         "justification",
         "reason"
     ]
+
+    static func normalizedBridgeStatus(
+        eventType: String,
+        status: String?,
+        notificationType: String?
+    ) -> String {
+        if eventType == "Notification", notificationType == "idle_prompt" {
+            return "waiting_for_input"
+        }
+
+        switch status {
+        case "waitingForApproval":
+            return "waiting_for_approval"
+        case "waitingForInput":
+            return "waiting_for_input"
+        case "runningTool":
+            return "running_tool"
+        case "compacting":
+            return "compacting"
+        case "completed":
+            return "ended"
+        case "notification":
+            return "notification"
+        case "interrupted":
+            return "waiting_for_input"
+        case "idle":
+            return "idle"
+        case "thinking":
+            return "processing"
+        case "active":
+            if eventType.contains(":") {
+                return "idle"
+            }
+        case "error":
+            return "idle"
+        default:
+            break
+        }
+
+        switch eventType {
+        case "SessionEnd":
+            return "ended"
+        case "SessionStart", "Stop", "SubagentStop":
+            return "waiting_for_input"
+        case "UserPromptSubmit", "PostToolUse":
+            return "processing"
+        case "PreToolUse":
+            return "running_tool"
+        case "PreCompact":
+            return "compacting"
+        case "Notification":
+            return "notification"
+        default:
+            return "processing"
+        }
+    }
 
     static func inferredCodexClientKind(
         explicitKind: String?,
