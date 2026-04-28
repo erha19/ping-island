@@ -71,6 +71,117 @@ final class HermesIntegrationTests: XCTestCase {
         XCTAssertEqual(MascotKind(clientInfo: clientInfo, provider: .claude), .hermes)
     }
 
+    func testLegacyHermesClaudeKindNormalizesToHermesProfile() {
+        let normalized = SessionClientInfo(
+            kind: .claudeCode,
+            profileID: "hermes",
+            name: "Hermes",
+            origin: "discord",
+            originator: "Discord",
+            threadSource: "hermes-plugin",
+            transport: "discord",
+            remoteHost: "praduck",
+            processName: "hermes"
+        )
+        .normalizedForClaudeRouting()
+
+        XCTAssertEqual(normalized.kind, .custom)
+        XCTAssertEqual(normalized.profileID, "hermes")
+        XCTAssertEqual(normalized.badgeLabel(for: .claude), "Hermes")
+        XCTAssertEqual(MascotClient(clientInfo: normalized, provider: .claude), .hermes)
+    }
+
+    func testLegacyPraduckRemoteHostNormalizesToHermesProfile() {
+        let normalized = SessionClientInfo(
+            kind: .claudeCode,
+            profileID: "claude-code",
+            name: "Claude Code",
+            transport: "ssh",
+            remoteHost: "praduck",
+            processName: "sh"
+        )
+        .normalizedForClaudeRouting()
+
+        XCTAssertEqual(normalized.kind, .custom)
+        XCTAssertEqual(normalized.profileID, "hermes")
+        XCTAssertEqual(normalized.badgeLabel(for: .claude), "Hermes")
+        XCTAssertEqual(MascotClient(clientInfo: normalized, provider: .claude), .hermes)
+    }
+
+    func testStopBridgeStatusMapsToIdleInsteadOfAttentionState() {
+        XCTAssertEqual(
+            HookSocketServer.normalizedBridgeStatus(
+                eventType: "Stop",
+                status: nil,
+                notificationType: nil
+            ),
+            "idle"
+        )
+        XCTAssertEqual(
+            HookSocketServer.normalizedBridgeStatus(
+                eventType: "Stop",
+                status: "completed",
+                notificationType: nil
+            ),
+            "idle"
+        )
+    }
+
+    func testHermesStopIdleSignalClearsProcessingPhase() async {
+        let sessionId = "hermes-stop-idle-\(UUID().uuidString)"
+        let store = SessionStore.shared
+        let clientInfo = SessionClientInfo(
+            kind: .claudeCode,
+            profileID: "hermes",
+            name: "Hermes",
+            origin: "cli",
+            originator: "Hermes",
+            threadSource: "hermes-plugin",
+            transport: "ssh",
+            remoteHost: "praduck",
+            processName: "hermes"
+        )
+
+        await store.process(.hookReceived(HookEvent(
+            sessionId: sessionId,
+            cwd: "/tmp/hermes-project",
+            event: "UserPromptSubmit",
+            status: "processing",
+            provider: .claude,
+            clientInfo: clientInfo,
+            pid: nil,
+            tty: nil,
+            tool: nil,
+            toolInput: nil,
+            toolUseId: nil,
+            notificationType: nil,
+            message: "Run a Hermes task"
+        )))
+        await store.process(.hookReceived(HookEvent(
+            sessionId: sessionId,
+            cwd: "/tmp/hermes-project",
+            event: "Stop",
+            status: "idle",
+            provider: .claude,
+            clientInfo: clientInfo,
+            pid: nil,
+            tty: nil,
+            tool: nil,
+            toolInput: nil,
+            toolUseId: nil,
+            notificationType: nil,
+            message: "Hermes task finished"
+        )))
+
+        let session = await store.session(for: sessionId)
+        XCTAssertEqual(session?.phase, .idle)
+        XCTAssertEqual(session?.clientInfo.kind, .custom)
+        XCTAssertEqual(session?.clientInfo.profileID, "hermes")
+        XCTAssertEqual(session?.clientInfo.badgeLabel(for: .claude), "Hermes")
+
+        await store.process(.sessionArchived(sessionId: sessionId))
+    }
+
     func testHermesLastMessageFallsBackToHookMessageForPopupPreview() {
         let clientInfo = SessionClientInfo(
             kind: .custom,

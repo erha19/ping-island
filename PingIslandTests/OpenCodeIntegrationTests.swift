@@ -50,6 +50,23 @@ final class OpenCodeIntegrationTests: XCTestCase {
         XCTAssertEqual(clientInfo.badgeLabel(for: .claude), "OpenClaw")
     }
 
+    func testLegacyOpenClawRemoteHostNormalizesToOpenClawProfile() {
+        let normalized = SessionClientInfo(
+            kind: .claudeCode,
+            profileID: "claude-code",
+            name: "Claude Code",
+            transport: "ssh",
+            remoteHost: "openclaw",
+            processName: "sh"
+        )
+        .normalizedForClaudeRouting()
+
+        XCTAssertEqual(normalized.kind, .custom)
+        XCTAssertEqual(normalized.profileID, "openclaw")
+        XCTAssertEqual(normalized.badgeLabel(for: .claude), "OpenClaw")
+        XCTAssertTrue(normalized.isOpenClawGatewayClient)
+    }
+
     func testOpenClawManagedHookDirectoryIncludesSessionFallbacks() throws {
         let profile = try XCTUnwrap(ClientProfileRegistry.managedHookProfile(id: "openclaw-hooks"))
         let files = HookInstaller.managedHookDirectoryFiles(for: profile)
@@ -107,6 +124,22 @@ final class OpenCodeIntegrationTests: XCTestCase {
                 notificationType: nil
             ),
             "processing"
+        )
+        XCTAssertEqual(
+            HookSocketServer.normalizedBridgeStatus(
+                eventType: "message:sent",
+                status: "waitingForInput",
+                notificationType: nil
+            ),
+            "idle"
+        )
+        XCTAssertEqual(
+            HookSocketServer.normalizedBridgeStatus(
+                eventType: "command:stop",
+                status: "completed",
+                notificationType: nil
+            ),
+            "ended"
         )
         XCTAssertEqual(
             HookSocketServer.normalizedBridgeStatus(
@@ -194,6 +227,106 @@ final class OpenCodeIntegrationTests: XCTestCase {
             RemoteConnectorManager.normalizedRemoteHookStatus(payload: messagePayload, clientInfo: clientInfo),
             "processing"
         )
+
+        let messageSentPayload = RemoteHookEventPayload(
+            requestID: UUID(),
+            sessionID: "openclaw-message",
+            cwd: "/home/openclaw",
+            event: "message:sent",
+            status: "waiting_for_input",
+            provider: "claude",
+            pid: nil,
+            tty: nil,
+            tool: nil,
+            toolInput: nil,
+            toolUseID: nil,
+            notificationType: nil,
+            message: nil,
+            expectsResponse: false,
+            clientInfo: clientInfoPayload
+        )
+        let commandStopPayload = RemoteHookEventPayload(
+            requestID: UUID(),
+            sessionID: "openclaw-message",
+            cwd: "/home/openclaw",
+            event: "command:stop",
+            status: "processing",
+            provider: "claude",
+            pid: nil,
+            tty: nil,
+            tool: nil,
+            toolInput: nil,
+            toolUseID: nil,
+            notificationType: nil,
+            message: nil,
+            expectsResponse: false,
+            clientInfo: clientInfoPayload
+        )
+        XCTAssertEqual(
+            RemoteConnectorManager.normalizedRemoteHookStatus(payload: messageSentPayload, clientInfo: clientInfo),
+            "idle"
+        )
+        XCTAssertEqual(
+            RemoteConnectorManager.normalizedRemoteHookStatus(payload: commandStopPayload, clientInfo: clientInfo),
+            "ended"
+        )
+    }
+
+    func testOpenClawMessageSentClearsProcessingPhaseImmediately() async {
+        let sessionId = "openclaw-message-stop-\(UUID().uuidString)"
+        let store = SessionStore.shared
+        let clientInfo = SessionClientInfo(
+            kind: .custom,
+            profileID: "openclaw",
+            name: "OpenClaw",
+            origin: "gateway",
+            originator: "OpenClaw",
+            threadSource: "openclaw-hooks",
+            transport: "discord",
+            remoteHost: "openclaw",
+            sessionFilePath: "/home/openclaw/.openclaw/agents/main/sessions/\(sessionId).jsonl",
+            processName: "openclaw-gateway"
+        )
+
+        await store.process(.hookReceived(HookEvent(
+            sessionId: sessionId,
+            cwd: "/home/openclaw/project",
+            event: "message:received",
+            status: "processing",
+            provider: .claude,
+            clientInfo: clientInfo,
+            pid: nil,
+            tty: nil,
+            tool: nil,
+            toolInput: nil,
+            toolUseId: nil,
+            notificationType: nil,
+            message: "Discord command received",
+            ingress: .remoteBridge
+        )))
+        await store.process(.hookReceived(HookEvent(
+            sessionId: sessionId,
+            cwd: "/home/openclaw/project",
+            event: "message:sent",
+            status: "idle",
+            provider: .claude,
+            clientInfo: clientInfo,
+            pid: nil,
+            tty: nil,
+            tool: nil,
+            toolInput: nil,
+            toolUseId: nil,
+            notificationType: nil,
+            message: "OpenClaw reply sent",
+            ingress: .remoteBridge
+        )))
+
+        let session = await store.session(for: sessionId)
+        XCTAssertEqual(session?.phase, .idle)
+        XCTAssertTrue(session?.clientInfo.isOpenClawGatewayClient ?? false)
+        XCTAssertEqual(session?.clientInfo.badgeLabel(for: .claude), "OpenClaw")
+
+        await store.process(.sessionArchived(sessionId: sessionId))
     }
 
     func testStaleOpenClawActivitySettlesToIdle() {

@@ -284,6 +284,26 @@ func remoteAgentMapsOpenClawPatchActivityToIdle() async throws {
         ),
         socketPath: hookSocketPath
     )
+    _ = try TestSocketClient.send(
+        envelope: BridgeEnvelope(
+            provider: .claude,
+            eventType: "message:sent",
+            sessionKey: "claude:openclaw-patch",
+            title: "OpenClaw",
+            preview: "OpenClaw reply sent",
+            cwd: "/home/openclaw",
+            status: SessionStatus(kind: .waitingForInput),
+            expectsResponse: false,
+            metadata: [
+                "session_id": "openclaw-patch",
+                "client_kind": "openclaw",
+                "client_name": "OpenClaw",
+                "client_originator": "OpenClaw",
+                "thread_source": "openclaw-hooks"
+            ]
+        ),
+        socketPath: hookSocketPath
+    )
 
     try await Task.sleep(for: .milliseconds(300))
     service.terminate()
@@ -293,5 +313,6 @@ func remoteAgentMapsOpenClawPatchActivityToIdle() async throws {
 
     #expect(result.stdout.contains("\"type\":\"hook_event\""))
     #expect(result.stdout.contains("\"event\":\"session:patch\""))
+    #expect(result.stdout.contains("\"event\":\"message:sent\""))
     #expect(result.stdout.contains("\"status\":\"idle\""))
 }

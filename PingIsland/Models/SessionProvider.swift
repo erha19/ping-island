@@ -456,6 +456,9 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
     }
 
     private nonisolated var inferredProfileID: String? {
+        let normalizedProfileID = profileID?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
         let normalizedThreadSource = threadSource?
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
@@ -465,15 +468,35 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
         let normalizedOriginator = originator?
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
+        let normalizedProcessName = processName?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        let normalizedRemoteHost = remoteHost?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
         let normalizedSessionFilePath = sessionFilePath?
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
 
-        if normalizedThreadSource == "openclaw-hooks"
+        if normalizedProfileID == "openclaw"
+            || normalizedThreadSource == "openclaw-hooks"
             || normalizedName == "openclaw"
             || normalizedOriginator == "openclaw"
+            || normalizedRemoteHost?.contains("openclaw") == true
             || normalizedSessionFilePath?.contains("/.openclaw/") == true {
             return "openclaw"
+        }
+
+        if normalizedProfileID == "hermes"
+            || normalizedThreadSource == "hermes-plugin"
+            || normalizedName == "hermes"
+            || normalizedName == "hermes agent"
+            || normalizedOriginator == "hermes"
+            || normalizedOriginator == "hermes agent"
+            || normalizedRemoteHost?.contains("praduck") == true
+            || normalizedRemoteHost?.contains("hermes") == true
+            || normalizedProcessName?.contains("hermes") == true {
+            return "hermes"
         }
 
         return nil
@@ -481,6 +504,39 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
 
     nonisolated func normalizedForClaudeRouting() -> SessionClientInfo {
         var normalized = self
+        func apply(_ matchedProfile: SessionClientProfile) {
+            normalized.kind = matchedProfile.kind
+            normalized.profileID = matchedProfile.id
+            if normalized.name == nil
+                || normalized.name?.trimmingCharacters(in: .whitespacesAndNewlines) == "Claude Code" {
+                normalized.name = matchedProfile.displayName
+            }
+            if normalized.bundleIdentifier == nil {
+                normalized.bundleIdentifier = matchedProfile.defaultBundleIdentifier
+            }
+            if normalized.origin == nil {
+                normalized.origin = matchedProfile.defaultOrigin
+            }
+        }
+
+        if let inferredProfileID,
+           let inferredProfile = ClientProfileRegistry.runtimeProfile(id: inferredProfileID),
+           inferredProfile.provider == .claude,
+           inferredProfile.id != "claude-code" {
+            apply(inferredProfile)
+        } else if let matchedProfile = ClientProfileRegistry.matchRuntimeProfile(
+            provider: .claude,
+            explicitKind: normalized.profileID,
+            explicitName: normalized.name,
+            explicitBundleIdentifier: normalized.bundleIdentifier,
+            terminalBundleIdentifier: normalized.terminalBundleIdentifier,
+            origin: normalized.origin,
+            originator: normalized.originator,
+            threadSource: normalized.threadSource,
+            processName: normalized.processName
+        ), matchedProfile.id != "claude-code" {
+            apply(matchedProfile)
+        }
 
         guard normalized.kind == .qoder else {
             return normalized

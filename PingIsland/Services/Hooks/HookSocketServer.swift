@@ -796,6 +796,26 @@ class HookSocketServer {
             return "waiting_for_input"
         }
 
+        switch eventType {
+        case "Stop":
+            return "idle"
+        case "SessionEnd":
+            return "ended"
+        default:
+            break
+        }
+
+        switch eventType {
+        case "command:new", "command:reset", "message:received":
+            return "processing"
+        case "message:sent", "session:patch", "session:compact:after":
+            return "idle"
+        case "command:stop":
+            return "ended"
+        default:
+            break
+        }
+
         switch status {
         case "waitingForApproval":
             return "waiting_for_approval"
@@ -826,9 +846,7 @@ class HookSocketServer {
         }
 
         switch eventType {
-        case "SessionEnd":
-            return "ended"
-        case "SessionStart", "Stop", "SubagentStop":
+        case "SessionStart", "SubagentStop":
             return "waiting_for_input"
         case "UserPromptSubmit", "PostToolUse":
             return "processing"

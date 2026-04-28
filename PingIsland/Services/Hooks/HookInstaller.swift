@@ -1681,14 +1681,21 @@ struct HookInstaller {
         """
     }
 
-    static func managedPluginDirectoryFiles(for profile: ManagedHookClientProfile) -> [String: String] {
+    static func managedPluginDirectoryFiles(
+        for profile: ManagedHookClientProfile,
+        bridgeArguments: [String]? = nil,
+        bridgeEnvironment: [String: String] = [:]
+    ) -> [String: String] {
         guard profile.id == "hermes-hooks" else {
             return [:]
         }
 
-        let argsData = (try? JSONSerialization.data(withJSONObject: bridgeCommandArguments(for: profile), options: []))
+        let argsData = (try? JSONSerialization.data(withJSONObject: bridgeArguments ?? bridgeCommandArguments(for: profile), options: []))
             ?? Data("[]".utf8)
         let argsJSON = String(data: argsData, encoding: .utf8) ?? "[]"
+        let envData = (try? JSONSerialization.data(withJSONObject: bridgeEnvironment, options: []))
+            ?? Data("{}".utf8)
+        let envJSON = String(data: envData, encoding: .utf8) ?? "{}"
         let marker = managedMarker(for: profile)
 
         let pluginYAML = """
@@ -1722,6 +1729,7 @@ struct HookInstaller {
         import threading
 
         BRIDGE_ARGS = json.loads(r'''\(argsJSON)''')
+        BRIDGE_ENV = json.loads(r'''\(envJSON)''')
         ENV_KEYS = [
             "TERM_PROGRAM",
             "ITERM_SESSION_ID",
@@ -1895,6 +1903,7 @@ struct HookInstaller {
 
         def _spawn_bridge(payload):
             env = os.environ.copy()
+            env.update({key: value for key, value in BRIDGE_ENV.items() if isinstance(value, str) and value})
             bridged_env = payload.pop("_env", None)
             tty = payload.pop("_tty", None)
             if isinstance(bridged_env, dict):
@@ -2208,7 +2217,7 @@ struct HookInstaller {
             case "message:received":
               return "thinking";
             case "message:sent":
-              return "waitingForInput";
+              return "idle";
             case "command:stop":
               return "completed";
             case "session:compact:before":

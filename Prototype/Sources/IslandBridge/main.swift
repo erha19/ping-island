@@ -1066,6 +1066,26 @@ private enum RemoteBridgeMessageBuilder {
             return "waiting_for_input"
         }
 
+        switch eventType {
+        case "Stop":
+            return "idle"
+        case "SessionEnd":
+            return "ended"
+        default:
+            break
+        }
+
+        switch eventType {
+        case "command:new", "command:reset", "message:received":
+            return "processing"
+        case "message:sent", "session:patch", "session:compact:after":
+            return "idle"
+        case "command:stop":
+            return "ended"
+        default:
+            break
+        }
+
         switch status {
         case .waitingForApproval:
             return "waiting_for_approval"
@@ -1096,9 +1116,7 @@ private enum RemoteBridgeMessageBuilder {
         }
 
         switch eventType {
-        case "SessionEnd":
-            return "ended"
-        case "SessionStart", "Stop", "SubagentStop":
+        case "SessionStart", "SubagentStop":
             return "waiting_for_input"
         case "UserPromptSubmit", "PostToolUse":
             return "processing"
@@ -1123,6 +1141,12 @@ private enum RemoteBridgeMessageBuilder {
 
         switch envelope.provider {
         case .claude:
+            if let explicitKind, explicitKind != "claude", explicitKind != "claude-code", explicitKind != "claude_code" {
+                if explicitKind == "qoder" || explicitKind == "qoderwork" || explicitKind == "qoder-work" {
+                    return "qoder"
+                }
+                return "custom"
+            }
             return "claudeCode"
         case .codex:
             if explicitKind?.contains("cli") == true

@@ -103,6 +103,28 @@ final class RemoteHookConfigurationTests: XCTestCase {
         ])
     }
 
+    func testRemoteManagedHookProfilesAreEndpointSpecificForManagedAgents() {
+        let praduck = RemoteEndpoint(
+            displayName: "Praduck",
+            sshTarget: "praduck-ping-island",
+            detectedHostname: "praduck"
+        )
+        let hermes = RemoteEndpoint(
+            displayName: "Hermes",
+            sshTarget: "hermes",
+            detectedHostname: "hermes"
+        )
+        let openClaw = RemoteEndpoint(
+            displayName: "OpenClaw",
+            sshTarget: "openclaw",
+            detectedHostname: "openclaw"
+        )
+
+        XCTAssertEqual(RemoteConnectorManager.remoteManagedHookProfiles(for: praduck).map(\.id), ["hermes-hooks"])
+        XCTAssertEqual(RemoteConnectorManager.remoteManagedHookProfiles(for: hermes).map(\.id), ["hermes-hooks"])
+        XCTAssertEqual(RemoteConnectorManager.remoteManagedHookProfiles(for: openClaw).map(\.id), ["openclaw-hooks"])
+    }
+
     func testRemoteManagedHookConfigDirectoryPathsResolveUnderRemoteHome() {
         let directories = RemoteConnectorManager.remoteManagedHookConfigDirectoryPaths(
             homeDirectory: "/root",
@@ -133,11 +155,104 @@ final class RemoteHookConfigurationTests: XCTestCase {
 
     func testHermesManagedPluginDirectoryFilesContainPluginManifestAndModule() throws {
         let profile = try XCTUnwrap(ClientProfileRegistry.managedHookProfile(id: "hermes-hooks"))
-        let files = HookInstaller.managedPluginDirectoryFiles(for: profile)
+        let files = HookInstaller.managedPluginDirectoryFiles(
+            for: profile,
+            bridgeArguments: [
+                "/root/.ping-island/bin/ping-island-bridge",
+                "--source", "claude",
+                "--client-kind", "hermes"
+            ],
+            bridgeEnvironment: ["ISLAND_SOCKET_PATH": "/root/.ping-island/run/agent-hook.sock"]
+        )
 
+        let initPy = try XCTUnwrap(files["__init__.py"])
         XCTAssertEqual(Set(files.keys), ["plugin.yaml", "__init__.py"])
-        XCTAssertTrue(files["plugin.yaml"]?.contains("name: ping-island") == true)
-        XCTAssertTrue(files["__init__.py"]?.contains("ctx.register_hook(\"pre_llm_call\"") == true)
+        XCTAssertTrue(files["plugin.yaml"]?.contains("name: ping-island") == true, "plugin manifest should keep the Ping Island identity")
+        XCTAssertTrue(initPy.contains("BRIDGE_ENV"), "plugin should embed bridge environment overrides")
+        XCTAssertTrue(initPy.contains("ISLAND_SOCKET_PATH"), "plugin should forward the remote hook socket path through the environment")
+        XCTAssertTrue(initPy.contains("agent-hook.sock"), "plugin should target the remote agent hook socket")
+        XCTAssertTrue(initPy.contains("ctx.register_hook(\"pre_llm_call\""), "plugin should register Hermes pre_llm_call hooks")
+    }
+
+    func testRemoteHermesPayloadResolvesToCustomHermesClientKind() {
+        let payload = RemoteHookClientInfoPayload(
+            kind: "claudeCode",
+            profileID: "hermes",
+            name: "Hermes",
+            bundleIdentifier: nil,
+            launchURL: nil,
+            origin: "cli",
+            originator: "Hermes",
+            threadSource: "hermes-plugin",
+            transport: "ssh",
+            remoteHost: "praduck",
+            sessionFilePath: nil,
+            terminalBundleIdentifier: nil,
+            terminalProgram: nil,
+            terminalSessionIdentifier: nil,
+            iTermSessionIdentifier: nil,
+            tmuxSessionIdentifier: nil,
+            tmuxPaneIdentifier: nil,
+            processName: "hermes"
+        )
+
+        XCTAssertEqual(RemoteConnectorManager.resolvedRemoteClientKind(payload), .custom)
+    }
+
+    func testRemoteHermesStopOverridesOldBridgeWaitingStatus() {
+        let clientInfoPayload = RemoteHookClientInfoPayload(
+            kind: "claudeCode",
+            profileID: "hermes",
+            name: "Hermes",
+            bundleIdentifier: nil,
+            launchURL: nil,
+            origin: "cli",
+            originator: "Hermes",
+            threadSource: "hermes-plugin",
+            transport: "ssh",
+            remoteHost: "praduck",
+            sessionFilePath: nil,
+            terminalBundleIdentifier: nil,
+            terminalProgram: nil,
+            terminalSessionIdentifier: nil,
+            iTermSessionIdentifier: nil,
+            tmuxSessionIdentifier: nil,
+            tmuxPaneIdentifier: nil,
+            processName: "hermes"
+        )
+        let clientInfo = SessionClientInfo(
+            kind: .claudeCode,
+            profileID: "hermes",
+            name: "Hermes",
+            origin: "cli",
+            originator: "Hermes",
+            threadSource: "hermes-plugin",
+            transport: "ssh",
+            remoteHost: "praduck",
+            processName: "hermes"
+        )
+        let payload = RemoteHookEventPayload(
+            requestID: UUID(),
+            sessionID: "remote-hermes-stop",
+            cwd: "/home/joseph/project",
+            event: "Stop",
+            status: "waiting_for_input",
+            provider: "claude",
+            pid: nil,
+            tty: nil,
+            tool: nil,
+            toolInput: nil,
+            toolUseID: nil,
+            notificationType: nil,
+            message: "finished",
+            expectsResponse: false,
+            clientInfo: clientInfoPayload
+        )
+
+        XCTAssertEqual(
+            RemoteConnectorManager.normalizedRemoteHookStatus(payload: payload, clientInfo: clientInfo),
+            "idle"
+        )
     }
 
     func testRemoteConfigurationPathResolvesRelativeHomePaths() {

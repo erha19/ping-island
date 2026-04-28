@@ -388,6 +388,7 @@ actor SessionStore {
         let newPhase: SessionPhase = shouldPreserveEndedStopForAnsweredQuestion
             ? .waitingForInput
             : event.determinePhase()
+        let shouldForceInactivePhase = shouldForceInactivePhase(for: event, incomingPhase: newPhase)
         let intervention = event.intervention
         let shouldPreserveQwenQuestionIntervention = shouldPreserveQwenQuestionIntervention(
             for: event,
@@ -409,6 +410,9 @@ actor SessionStore {
                 "Preserving waitingForApproval for \(sessionId.prefix(8), privacy: .public) on \(event.event, privacy: .public)"
             )
             session.phase = .waitingForApproval(preservedPendingApproval)
+        } else if shouldForceInactivePhase {
+            session.phase = newPhase
+            settleRunningArtifactsForInactiveSignal(in: &session)
         } else if shouldPreserveActivePhaseDuringApparentIdle(
             session: session,
             incomingPhase: newPhase,
@@ -1450,6 +1454,47 @@ actor SessionStore {
         }
 
         return false
+    }
+
+    private func shouldForceInactivePhase(for event: HookEvent, incomingPhase: SessionPhase) -> Bool {
+        guard incomingPhase == .idle || incomingPhase == .ended else {
+            return false
+        }
+
+        if event.event == "Stop" || event.event == "SessionEnd" {
+            return true
+        }
+
+        guard event.clientInfo.isOpenClawGatewayClient else {
+            return false
+        }
+
+        switch event.event {
+        case "message:sent", "session:patch", "session:compact:after", "command:stop":
+            return true
+        default:
+            return false
+        }
+    }
+
+    private func settleRunningArtifactsForInactiveSignal(in session: inout SessionState) {
+        for index in session.chatItems.indices {
+            guard case .toolCall(var tool) = session.chatItems[index].type else {
+                continue
+            }
+            guard tool.status == .running || tool.status == .waitingForApproval else {
+                continue
+            }
+
+            tool.status = .interrupted
+            session.chatItems[index] = ChatHistoryItem(
+                id: session.chatItems[index].id,
+                type: .toolCall(tool),
+                timestamp: session.chatItems[index].timestamp
+            )
+        }
+
+        session.subagentState = SubagentState()
     }
 
     private func mergedLastActivity(
