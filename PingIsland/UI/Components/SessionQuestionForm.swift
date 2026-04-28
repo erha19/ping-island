@@ -30,6 +30,25 @@ struct SessionQuestionForm: View {
         }
     }
 
+    nonisolated static func optionColumns(
+        for question: SessionInterventionQuestion
+    ) -> [GridItem] {
+        if shouldUseSingleColumnOptions(for: question) {
+            return [GridItem(.flexible(minimum: 0), spacing: 8)]
+        }
+
+        return [GridItem(.adaptive(minimum: 150), spacing: 8)]
+    }
+
+    nonisolated static func shouldUseSingleColumnOptions(
+        for question: SessionInterventionQuestion
+    ) -> Bool {
+        question.options.contains { option in
+            option.title.count > 24
+                || ((option.detail?.count ?? 0) > 72)
+        }
+    }
+
     private var shouldUseScrollableQuestionList: Bool {
         Self.shouldUseScrollableQuestionList(for: displayQuestions)
     }
@@ -136,7 +155,7 @@ struct SessionQuestionForm: View {
     private func questionInput(_ question: SessionInterventionQuestion) -> some View {
         if !question.options.isEmpty {
             let reservesDetailSpace = question.options.contains { optionDetail(for: $0) != nil }
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 8)], spacing: 8) {
+            LazyVGrid(columns: Self.optionColumns(for: question), spacing: 8) {
                 ForEach(question.options) { option in
                     Button {
                         guard isEditable else { return }
@@ -153,15 +172,15 @@ struct SessionQuestionForm: View {
                                 Text(option.title)
                                     .font(.system(size: 12, weight: .semibold))
                                     .foregroundColor(.white)
+                                    .fixedSize(horizontal: false, vertical: true)
                                 if let detail = optionDetail(for: option) {
                                     Text(detail)
                                         .font(.system(size: 10))
                                         .foregroundColor(.white.opacity(0.55))
-                                        .lineLimit(2)
+                                        .fixedSize(horizontal: false, vertical: true)
                                 } else if reservesDetailSpace {
                                     Text(" ")
                                         .font(.system(size: 10))
-                                        .lineLimit(2)
                                         .hidden()
                                 }
                             }
