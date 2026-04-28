@@ -7,7 +7,7 @@
 
 import Foundation
 
-struct SessionRuntimeLaunchRequest: Sendable {
+nonisolated struct SessionRuntimeLaunchRequest: Sendable {
     let provider: SessionProvider
     let cwd: String
     let resumeSessionID: String?
@@ -29,7 +29,7 @@ struct SessionRuntimeLaunchRequest: Sendable {
     }
 }
 
-struct SessionRuntimeHandle: Codable, Equatable, Sendable {
+nonisolated struct SessionRuntimeHandle: Codable, Equatable, Sendable {
     let sessionID: String
     let provider: SessionProvider
     let cwd: String
@@ -39,20 +39,20 @@ struct SessionRuntimeHandle: Codable, Equatable, Sendable {
     let sessionFilePath: String?
 }
 
-enum SessionRuntimeStopReason: String, Codable, Equatable, Sendable {
+nonisolated enum SessionRuntimeStopReason: String, Codable, Equatable, Sendable {
     case finished
     case cancelled
     case crashed
     case unavailable
 }
 
-enum SessionRuntimeEvent: Sendable {
+nonisolated enum SessionRuntimeEvent: Sendable {
     case started(SessionRuntimeHandle)
     case stopped(sessionID: String, reason: SessionRuntimeStopReason)
     case availabilityChanged(Bool)
 }
 
-enum SessionRuntimeError: LocalizedError, Equatable, Sendable {
+nonisolated enum SessionRuntimeError: LocalizedError, Equatable, Sendable {
     case unsupportedProvider(SessionProvider)
     case runtimeDisabled(SessionProvider)
     case runtimeUnavailable(SessionProvider)
@@ -75,7 +75,7 @@ enum SessionRuntimeError: LocalizedError, Equatable, Sendable {
     }
 }
 
-protocol SessionRuntime: Sendable {
+nonisolated protocol SessionRuntime: Sendable {
     var provider: SessionProvider { get }
     var events: AsyncStream<SessionRuntimeEvent> { get }
 

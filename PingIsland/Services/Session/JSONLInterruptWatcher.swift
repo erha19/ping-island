@@ -10,7 +10,7 @@ import Foundation
 import os.log
 
 /// Logger for interrupt watcher
-private let logger = Logger(subsystem: "com.wudanwu.pingisland", category: "Interrupt")
+private nonisolated let logger = Logger(subsystem: "com.wudanwu.pingisland", category: "Interrupt")
 
 protocol JSONLInterruptWatcherDelegate: AnyObject {
     func didDetectInterrupt(sessionId: String)
@@ -19,7 +19,7 @@ protocol JSONLInterruptWatcherDelegate: AnyObject {
 
 /// Watches a session's JSONL file for interrupt patterns in real-time
 /// Uses DispatchSource for immediate detection when new lines are written
-class JSONLInterruptWatcher {
+nonisolated class JSONLInterruptWatcher: @unchecked Sendable {
     private static let initialRetryDelayMs = 250
     private static let maxRetryDelayMs = 5_000
 

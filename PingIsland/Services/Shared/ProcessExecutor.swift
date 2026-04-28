@@ -10,7 +10,7 @@ import os.log
 import Darwin
 
 /// Errors that can occur during process execution
-enum ProcessExecutorError: Error, LocalizedError {
+nonisolated enum ProcessExecutorError: Error, LocalizedError {
     case executionFailed(command: String, exitCode: Int32, stderr: String?)
     case invalidOutput(command: String)
     case commandNotFound(String)
@@ -35,7 +35,7 @@ enum ProcessExecutorError: Error, LocalizedError {
 }
 
 /// Result type for process execution
-struct ProcessResult: Sendable {
+nonisolated struct ProcessResult: Sendable {
     let output: String
     let exitCode: Int32
     let stderr: String?
@@ -44,7 +44,7 @@ struct ProcessResult: Sendable {
 }
 
 /// Protocol for executing shell commands (enables testing)
-protocol ProcessExecuting: Sendable {
+nonisolated protocol ProcessExecuting: Sendable {
     func run(_ executable: String, arguments: [String]) async throws -> String
     func runWithResult(_ executable: String, arguments: [String]) async -> Result<ProcessResult, ProcessExecutorError>
     func runWithResult(_ executable: String, arguments: [String], timeout: TimeInterval?) async -> Result<ProcessResult, ProcessExecutorError>
@@ -52,10 +52,10 @@ protocol ProcessExecuting: Sendable {
 }
 
 /// Default implementation using Foundation.Process
-struct ProcessExecutor: ProcessExecuting {
+nonisolated struct ProcessExecutor: ProcessExecuting {
     static let shared = ProcessExecutor()
 
-    static let logger = Logger(subsystem: "com.wudanwu.pingisland", category: "ProcessExecutor")
+    nonisolated static let logger = Logger(subsystem: "com.wudanwu.pingisland", category: "ProcessExecutor")
 
     private init() {}
 
@@ -211,7 +211,7 @@ struct ProcessExecutor: ProcessExecuting {
     }
 }
 
-private final class ProcessExecutionState: @unchecked Sendable {
+private nonisolated final class ProcessExecutionState: @unchecked Sendable {
     private let lock = NSLock()
     private var stdout = Data()
     private var stderr = Data()
@@ -260,7 +260,7 @@ private final class ProcessExecutionState: @unchecked Sendable {
     }
 }
 
-private func terminateProcess(_ process: Process) {
+private nonisolated func terminateProcess(_ process: Process) {
     guard process.isRunning else { return }
 
     process.terminate()

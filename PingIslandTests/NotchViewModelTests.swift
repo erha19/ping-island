@@ -217,7 +217,7 @@ final class NotchViewModelTests: XCTestCase {
     }
 
     func testPhysicalNotchFullscreenStateRespectsHideInFullscreenDisabled() async {
-        var isFullscreenActive = true
+        let isFullscreenActive = true
         var hideInFullscreen = false
 
         let viewModel = await MainActor.run {

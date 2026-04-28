@@ -7,7 +7,7 @@
 
 import Foundation
 
-enum SessionTextSanitizer {
+nonisolated enum SessionTextSanitizer {
     static func sanitizedDisplayText(_ text: String?) -> String? {
         guard let text else { return nil }
 

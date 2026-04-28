@@ -340,7 +340,7 @@ struct NotchView: View {
                 viewModel.setManualAttentionActive(hasManualAttentionIndicator)
                 handleProcessingChange()
                 handleManualAttentionChange(sessionMonitor.instances)
-                primeCompletionNotificationTracking(sessionMonitor.instances)
+                primeCompletionNotificationTracking(sessionMonitor.completionInstances)
                 scheduleDetachmentHintPresentationIfNeeded(delay: Self.startupDetachmentHintDelay)
             }
             .onDisappear {
@@ -401,6 +401,8 @@ struct NotchView: View {
                 handleSessionSoundTransitions(instances)
                 handleManualAttentionChange(instances)
                 handleWaitingForInputChange(instances)
+            }
+            .onReceive(sessionMonitor.$completionInstances) { instances in
                 handleCompletionNotificationChange(instances)
             }
     }

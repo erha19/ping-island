@@ -10,7 +10,7 @@ import Foundation
 // MARK: - Tool Result Wrapper
 
 /// Structured tool result data - parsed from JSONL tool_result blocks
-enum ToolResultData: Equatable, Sendable {
+nonisolated enum ToolResultData: Equatable, Sendable {
     case read(ReadResult)
     case edit(EditResult)
     case write(WriteResult)
@@ -31,7 +31,7 @@ enum ToolResultData: Equatable, Sendable {
 
 // MARK: - Read Tool Result
 
-struct ReadResult: Equatable, Sendable {
+nonisolated struct ReadResult: Equatable, Sendable {
     let filePath: String
     let content: String
     let numLines: Int
@@ -45,7 +45,7 @@ struct ReadResult: Equatable, Sendable {
 
 // MARK: - Edit Tool Result
 
-struct EditResult: Equatable, Sendable {
+nonisolated struct EditResult: Equatable, Sendable {
     let filePath: String
     let oldString: String
     let newString: String
@@ -58,7 +58,7 @@ struct EditResult: Equatable, Sendable {
     }
 }
 
-struct PatchHunk: Equatable, Sendable {
+nonisolated struct PatchHunk: Equatable, Sendable {
     let oldStart: Int
     let oldLines: Int
     let newStart: Int
@@ -68,7 +68,7 @@ struct PatchHunk: Equatable, Sendable {
 
 // MARK: - Write Tool Result
 
-struct WriteResult: Equatable, Sendable {
+nonisolated struct WriteResult: Equatable, Sendable {
     enum WriteType: String, Equatable, Sendable {
         case create
         case overwrite
@@ -86,7 +86,7 @@ struct WriteResult: Equatable, Sendable {
 
 // MARK: - Bash Tool Result
 
-struct BashResult: Equatable, Sendable {
+nonisolated struct BashResult: Equatable, Sendable {
     let stdout: String
     let stderr: String
     let interrupted: Bool
@@ -111,7 +111,7 @@ struct BashResult: Equatable, Sendable {
 
 // MARK: - Grep Tool Result
 
-struct GrepResult: Equatable, Sendable {
+nonisolated struct GrepResult: Equatable, Sendable {
     enum Mode: String, Equatable, Sendable {
         case filesWithMatches = "files_with_matches"
         case content
@@ -128,7 +128,7 @@ struct GrepResult: Equatable, Sendable {
 
 // MARK: - Glob Tool Result
 
-struct GlobResult: Equatable, Sendable {
+nonisolated struct GlobResult: Equatable, Sendable {
     let filenames: [String]
     let durationMs: Int
     let numFiles: Int
@@ -137,12 +137,12 @@ struct GlobResult: Equatable, Sendable {
 
 // MARK: - TodoWrite Tool Result
 
-struct TodoWriteResult: Equatable, Sendable {
+nonisolated struct TodoWriteResult: Equatable, Sendable {
     let oldTodos: [TodoItem]
     let newTodos: [TodoItem]
 }
 
-struct TodoItem: Equatable, Sendable {
+nonisolated struct TodoItem: Equatable, Sendable {
     let content: String
     let status: String // "pending", "in_progress", "completed"
     let activeForm: String?
@@ -150,7 +150,7 @@ struct TodoItem: Equatable, Sendable {
 
 // MARK: - Task (Agent) Tool Result
 
-struct TaskResult: Equatable, Sendable {
+nonisolated struct TaskResult: Equatable, Sendable {
     let agentId: String
     let status: String
     let content: String
@@ -162,7 +162,7 @@ struct TaskResult: Equatable, Sendable {
 
 // MARK: - WebFetch Tool Result
 
-struct WebFetchResult: Equatable, Sendable {
+nonisolated struct WebFetchResult: Equatable, Sendable {
     let url: String
     let code: Int
     let codeText: String
@@ -173,13 +173,13 @@ struct WebFetchResult: Equatable, Sendable {
 
 // MARK: - WebSearch Tool Result
 
-struct WebSearchResult: Equatable, Sendable {
+nonisolated struct WebSearchResult: Equatable, Sendable {
     let query: String
     let durationSeconds: Double
     let results: [SearchResultItem]
 }
 
-struct SearchResultItem: Equatable, Sendable {
+nonisolated struct SearchResultItem: Equatable, Sendable {
     let title: String
     let url: String
     let snippet: String
@@ -187,25 +187,25 @@ struct SearchResultItem: Equatable, Sendable {
 
 // MARK: - AskUserQuestion Tool Result
 
-struct AskUserQuestionResult: Equatable, Sendable {
+nonisolated struct AskUserQuestionResult: Equatable, Sendable {
     let questions: [QuestionItem]
     let answers: [String: String]
 }
 
-struct QuestionItem: Equatable, Sendable {
+nonisolated struct QuestionItem: Equatable, Sendable {
     let question: String
     let header: String?
     let options: [QuestionOption]
 }
 
-struct QuestionOption: Equatable, Sendable {
+nonisolated struct QuestionOption: Equatable, Sendable {
     let label: String
     let description: String?
 }
 
 // MARK: - BashOutput Tool Result
 
-struct BashOutputResult: Equatable, Sendable {
+nonisolated struct BashOutputResult: Equatable, Sendable {
     let shellId: String
     let status: String
     let stdout: String
@@ -219,14 +219,14 @@ struct BashOutputResult: Equatable, Sendable {
 
 // MARK: - KillShell Tool Result
 
-struct KillShellResult: Equatable, Sendable {
+nonisolated struct KillShellResult: Equatable, Sendable {
     let shellId: String
     let message: String
 }
 
 // MARK: - ExitPlanMode Tool Result
 
-struct ExitPlanModeResult: Equatable, Sendable {
+nonisolated struct ExitPlanModeResult: Equatable, Sendable {
     let filePath: String?
     let plan: String?
     let isAgent: Bool
@@ -234,7 +234,7 @@ struct ExitPlanModeResult: Equatable, Sendable {
 
 // MARK: - MCP Tool Result (Generic)
 
-struct MCPResult: Equatable, @unchecked Sendable {
+nonisolated struct MCPResult: Equatable, @unchecked Sendable {
     let serverName: String
     let toolName: String
     let rawResult: [String: Any]
@@ -248,7 +248,7 @@ struct MCPResult: Equatable, @unchecked Sendable {
 
 // MARK: - Generic Tool Result (Fallback)
 
-struct GenericResult: Equatable, @unchecked Sendable {
+nonisolated struct GenericResult: Equatable, @unchecked Sendable {
     let rawContent: String?
     let rawData: [String: Any]?
 
@@ -259,7 +259,7 @@ struct GenericResult: Equatable, @unchecked Sendable {
 
 // MARK: - Tool Status Display
 
-struct ToolStatusDisplay {
+nonisolated struct ToolStatusDisplay {
     let text: String
     let isRunning: Bool
 

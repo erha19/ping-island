@@ -292,7 +292,7 @@ final class DetachedIslandWindowController: NSWindowController, NSWindowDelegate
 
         window.delegate = self
         bindWindowSizeUpdates()
-        primeCompletionNotificationTracking(sessionMonitor.instances)
+        primeCompletionNotificationTracking(sessionMonitor.completionInstances)
         primeSoundTransitions(sessionMonitor.instances)
     }
 
@@ -557,11 +557,18 @@ final class DetachedIslandWindowController: NSWindowController, NSWindowDelegate
             .receive(on: DispatchQueue.main)
             .sink { [weak self] instances in
                 self?.handleManualAttentionChange()
-                self?.handleCompletionNotificationChange(instances)
                 self?.handleSessionSoundTransitions(instances)
                 self?.reconcileHighlightedSessionState()
                 self?.reconcileBubbleStateWithAvailableContent()
                 self?.scheduleWindowSizeUpdate()
+            }
+            .store(in: &cancellables)
+
+        sessionMonitor.$completionInstances
+            .dropFirst()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] instances in
+                self?.handleCompletionNotificationChange(instances)
             }
             .store(in: &cancellables)
 

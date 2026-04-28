@@ -66,7 +66,7 @@ private actor HermesHookDebugStore {
 }
 
 /// Event received from hook clients after bridge-envelope mapping.
-struct HookEvent: Sendable {
+nonisolated struct HookEvent: Sendable {
     let sessionId: String
     let cwd: String
     let event: String
@@ -691,7 +691,7 @@ private extension BridgeProvider {
     }
 }
 
-struct CodexAuxiliaryHookFilter {
+nonisolated struct CodexAuxiliaryHookFilter {
     private static let titleGenerationPromptPrefix =
         "You are a helpful assistant. You will be presented with a user prompt"
     private static let titleGenerationPromptMarker =

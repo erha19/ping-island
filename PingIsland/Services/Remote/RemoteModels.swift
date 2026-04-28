@@ -1,6 +1,6 @@
 import Foundation
 
-struct RemoteSSHLink: Equatable, Sendable {
+nonisolated struct RemoteSSHLink: Equatable, Sendable {
     static let defaultPort = 22
 
     let username: String?
@@ -147,7 +147,7 @@ enum RemoteEndpointConnectionPhase: String, Codable, Equatable, Sendable {
     }
 }
 
-struct RemoteEndpoint: Identifiable, Codable, Equatable, Sendable {
+nonisolated struct RemoteEndpoint: Identifiable, Codable, Equatable, Sendable {
     let id: UUID
     var displayName: String
     var sshTarget: String
@@ -306,7 +306,7 @@ struct RemoteEndpoint: Identifiable, Codable, Equatable, Sendable {
     }
 }
 
-struct RemoteEndpointRuntimeState: Codable, Equatable, Sendable {
+nonisolated struct RemoteEndpointRuntimeState: Codable, Equatable, Sendable {
     var phase: RemoteEndpointConnectionPhase
     var detail: String
     var lastError: String?
@@ -328,7 +328,7 @@ struct RemoteEndpointRuntimeState: Codable, Equatable, Sendable {
     }
 }
 
-struct RemoteEndpointDiagnosticsSnapshot: Codable, Sendable {
+nonisolated struct RemoteEndpointDiagnosticsSnapshot: Codable, Sendable {
     let endpoint: RemoteEndpoint
     let runtimeState: RemoteEndpointRuntimeState
 }
@@ -402,7 +402,7 @@ struct RemoteDecisionMessage: Encodable, Sendable {
     let updatedInput: [String: RemoteJSONValue]?
 }
 
-enum RemoteJSONValue: Codable, Equatable, Sendable {
+nonisolated enum RemoteJSONValue: Codable, Equatable, Sendable {
     case null
     case bool(Bool)
     case int(Int)

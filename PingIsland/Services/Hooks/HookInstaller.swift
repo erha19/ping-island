@@ -7,7 +7,7 @@
 
 import Foundation
 
-private enum HookConfigParser {
+private nonisolated enum HookConfigParser {
     static func parseJSONObject(from data: Data) -> [String: Any]? {
         if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
             return json
@@ -155,11 +155,11 @@ struct HookInstaller {
     private static let installedVersionDefaultsKey = "HookInstaller.installedVersion.v1"
     private static let firstLaunchDefaultsKey = "HookInstaller.isFirstLaunch.v1"
     private static let versionMetadataDefaultsKey = "HookInstaller.versionMetadata.v1"
-    private static let supportDirectoryName = ".ping-island"
-    private static let bridgeLauncherName = "ping-island-bridge"
-    private static let bridgeBinaryName = "PingIslandBridge"
-    private static let legacyBridgeBinaryName = "IslandBridge"
-    private static let statusLineScriptName = "island-statusline"
+    private nonisolated static let supportDirectoryName = ".ping-island"
+    private nonisolated static let bridgeLauncherName = "ping-island-bridge"
+    private nonisolated static let bridgeBinaryName = "PingIslandBridge"
+    private nonisolated static let legacyBridgeBinaryName = "IslandBridge"
+    private nonisolated static let statusLineScriptName = "island-statusline"
 
     private struct VersionMetadata: Codable {
         let version: String
@@ -313,7 +313,7 @@ struct HookInstaller {
         install(profile, persistPreference: true)
     }
 
-    static func createTemporarySettingsFile(for profileID: String) -> URL? {
+    nonisolated static func createTemporarySettingsFile(for profileID: String) -> URL? {
         guard let profile = ClientProfileRegistry.managedHookProfile(id: profileID) else {
             return nil
         }
@@ -335,7 +335,7 @@ struct HookInstaller {
         return fileURL
     }
 
-    static func removeTemporarySettingsFile(at url: URL?) {
+    nonisolated static func removeTemporarySettingsFile(at url: URL?) {
         guard let url else { return }
         try? FileManager.default.removeItem(at: url)
     }
@@ -607,7 +607,7 @@ struct HookInstaller {
         writeJSONObject(json, to: url)
     }
 
-    private static func installBridgeLauncherIfNeeded() {
+    private nonisolated static func installBridgeLauncherIfNeeded() {
         let binDirectory = islandSupportDirectory()
             .appendingPathComponent("bin", isDirectory: true)
         let launcherURL = binDirectory.appendingPathComponent(bridgeLauncherName)
@@ -660,7 +660,7 @@ struct HookInstaller {
         )
     }
 
-    private static func installStatusLineScript(in binDirectory: URL) {
+    private nonisolated static func installStatusLineScript(in binDirectory: URL) {
         let scriptURL = binDirectory.appendingPathComponent(statusLineScriptName)
         let script = """
         #!/bin/bash
@@ -677,7 +677,7 @@ struct HookInstaller {
         )
     }
 
-    private static func installBridgeBinaryIfNeeded(in binDirectory: URL) {
+    private nonisolated static func installBridgeBinaryIfNeeded(in binDirectory: URL) {
         guard let bundledBridgeURL = preferredBridgeBinaryURL() else {
             return
         }
@@ -700,7 +700,7 @@ struct HookInstaller {
         )
     }
 
-    private static func preferredBridgeBinaryURL() -> URL? {
+    private nonisolated static func preferredBridgeBinaryURL() -> URL? {
         let candidates = [
             Bundle.main.executableURL?
                 .deletingLastPathComponent()
@@ -799,7 +799,7 @@ struct HookInstaller {
         return didChange ? patched : nil
     }
 
-    private static func normalizedHookEntries(
+    private nonisolated static func normalizedHookEntries(
         _ existingEntries: [[String: Any]]?,
         preferred: [[String: Any]]
     ) -> [[String: Any]] {
@@ -866,21 +866,21 @@ struct HookInstaller {
         return managedStatusLineConfiguration()
     }
 
-    private static func managedStatusLineConfiguration() -> [String: Any] {
+    private nonisolated static func managedStatusLineConfiguration() -> [String: Any] {
         [
             "type": "command",
             "command": statusLineCommand()
         ]
     }
 
-    private static func statusLineCommand() -> String {
+    private nonisolated static func statusLineCommand() -> String {
         islandSupportDirectory()
             .appendingPathComponent("bin", isDirectory: true)
             .appendingPathComponent(statusLineScriptName)
             .path
     }
 
-    private static func isManagedStatusLine(_ statusLine: [String: Any]?) -> Bool {
+    private nonisolated static func isManagedStatusLine(_ statusLine: [String: Any]?) -> Bool {
         guard let command = statusLine?["command"] as? String else {
             return false
         }
@@ -995,7 +995,7 @@ struct HookInstaller {
         }
     }
 
-    private static func makeHookEntries(command: String, event: HookInstallEventDescriptor) -> [[String: Any]] {
+    private nonisolated static func makeHookEntries(command: String, event: HookInstallEventDescriptor) -> [[String: Any]] {
         var hookCommand: [String: Any] = [
             "type": "command",
             "command": command
@@ -1017,7 +1017,7 @@ struct HookInstaller {
         }
     }
 
-    private static func makeCopilotHookEntries(command: String, event: HookInstallEventDescriptor) -> [[String: Any]] {
+    private nonisolated static func makeCopilotHookEntries(command: String, event: HookInstallEventDescriptor) -> [[String: Any]] {
         var entry: [String: Any] = [
             "type": "command",
             "bash": command
@@ -1028,12 +1028,12 @@ struct HookInstaller {
         return [entry]
     }
 
-    private static func islandSupportDirectory() -> URL {
+    private nonisolated static func islandSupportDirectory() -> URL {
         FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(supportDirectoryName, isDirectory: true)
     }
 
-    private static func bridgeCommandArguments(for profile: ManagedHookClientProfile) -> [String] {
+    private nonisolated static func bridgeCommandArguments(for profile: ManagedHookClientProfile) -> [String] {
         [
             islandSupportDirectory()
                 .appendingPathComponent("bin", isDirectory: true)
@@ -1044,7 +1044,7 @@ struct HookInstaller {
         ] + profile.bridgeExtraArguments
     }
 
-    private static func bridgeCommand(source: String, extraArguments: [String] = []) -> String {
+    private nonisolated static func bridgeCommand(source: String, extraArguments: [String] = []) -> String {
         let base = islandSupportDirectory()
             .appendingPathComponent("bin", isDirectory: true)
             .appendingPathComponent(bridgeLauncherName)
@@ -1072,7 +1072,7 @@ struct HookInstaller {
         return false
     }
 
-    private static func isIslandManagedHookEntry(_ entry: [String: Any]) -> Bool {
+    private nonisolated static func isIslandManagedHookEntry(_ entry: [String: Any]) -> Bool {
         if let command = hookCommandString(from: entry) {
             return isIslandManagedHookCommand(command)
         }
@@ -1087,7 +1087,7 @@ struct HookInstaller {
         return false
     }
 
-    private static func hookCommandString(from entry: [String: Any]) -> String? {
+    private nonisolated static func hookCommandString(from entry: [String: Any]) -> String? {
         let candidates = [
             entry["command"] as? String,
             entry["bash"] as? String,
@@ -1099,7 +1099,7 @@ struct HookInstaller {
         }.first
     }
 
-    private static func isIslandManagedHookCommand(_ command: String) -> Bool {
+    private nonisolated static func isIslandManagedHookCommand(_ command: String) -> Bool {
         let normalized = command.lowercased()
         return normalized.contains("/.ping-island/bin/ping-island-bridge")
             || normalized.contains("/.ping-island/bin/island-bridge")
@@ -2625,7 +2625,7 @@ struct HookInstaller {
         return data
     }
 
-    private static func sanitizedHookEntries(
+    private nonisolated static func sanitizedHookEntries(
         _ entries: [[String: Any]]?,
         removingCommandPrefixes: [String]
     ) -> [[String: Any]]? {
@@ -2635,7 +2635,7 @@ struct HookInstaller {
         }
     }
 
-    private static func entryContainsCommand(
+    private nonisolated static func entryContainsCommand(
         _ entry: [String: Any],
         withPrefixes prefixes: [String]
     ) -> Bool {
@@ -2653,7 +2653,7 @@ struct HookInstaller {
         return false
     }
 
-    private static func writeJSONObject(_ json: [String: Any], to url: URL) {
+    private nonisolated static func writeJSONObject(_ json: [String: Any], to url: URL) {
         try? FileManager.default.createDirectory(
             at: url.deletingLastPathComponent(),
             withIntermediateDirectories: true
@@ -2767,7 +2767,7 @@ struct HookInstaller {
         return plugins.contains { pluginEntry($0, matches: pluginSpecifier, pluginPath: pluginPath) }
     }
 
-    private static func pluginEntry(_ entry: Any, matches pluginSpecifier: String, pluginPath: String) -> Bool {
+    private nonisolated static func pluginEntry(_ entry: Any, matches pluginSpecifier: String, pluginPath: String) -> Bool {
         if let string = entry as? String {
             return normalizedPluginLocation(string) == normalizedPluginLocation(pluginSpecifier)
                 || normalizedPluginLocation(string) == normalizedPluginLocation(pluginPath)
@@ -2782,7 +2782,7 @@ struct HookInstaller {
         return false
     }
 
-    private static func normalizedPluginLocation(_ value: String) -> String {
+    private nonisolated static func normalizedPluginLocation(_ value: String) -> String {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         if let url = URL(string: trimmed), url.isFileURL {
             return url.standardizedFileURL.path

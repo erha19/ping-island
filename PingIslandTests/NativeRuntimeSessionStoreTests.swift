@@ -4,7 +4,7 @@ import XCTest
 @MainActor
 final class NativeRuntimeSessionStoreTests: XCTestCase {
     private actor StubRuntime: SessionRuntime {
-        let provider: SessionProvider
+        nonisolated let provider: SessionProvider
         nonisolated let events: AsyncStream<SessionRuntimeEvent>
 
         private var continuation: AsyncStream<SessionRuntimeEvent>.Continuation?

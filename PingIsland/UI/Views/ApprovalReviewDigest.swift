@@ -1,7 +1,7 @@
 import Foundation
 
-struct ApprovalReviewDigest: Equatable, Sendable {
-    enum Risk: String, Equatable, Sendable {
+nonisolated struct ApprovalReviewDigest: Equatable, Sendable {
+    nonisolated enum Risk: String, Equatable, Sendable {
         case low
         case medium
         case high
@@ -170,19 +170,19 @@ struct ApprovalReviewDigest: Equatable, Sendable {
 }
 
 private extension Array where Element == String {
-    func uniquedForReview() -> [String] {
+    nonisolated func uniquedForReview() -> [String] {
         var seen = Set<String>()
         return filter { seen.insert($0).inserted }
     }
 }
 
 private extension String {
-    var nonEmptyForReview: String? {
+    nonisolated var nonEmptyForReview: String? {
         let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
     }
 
-    func reviewTruncated(to length: Int) -> String {
+    nonisolated func reviewTruncated(to length: Int) -> String {
         guard count > length else { return self }
         return String(prefix(length)) + "..."
     }

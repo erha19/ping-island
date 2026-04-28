@@ -9,7 +9,7 @@
 import Foundation
 import os.log
 
-struct ConversationInfo: Equatable, Sendable {
+nonisolated struct ConversationInfo: Equatable, Sendable {
     let summary: String?
     let lastMessage: String?
     let lastMessageRole: String?  // "user", "assistant", or "tool"

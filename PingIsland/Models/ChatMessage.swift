@@ -7,7 +7,7 @@
 
 import Foundation
 
-struct ChatMessage: Identifiable, Equatable {
+nonisolated struct ChatMessage: Identifiable, Equatable, Sendable {
     let id: String
     let role: ChatRole
     let timestamp: Date
@@ -28,13 +28,13 @@ struct ChatMessage: Identifiable, Equatable {
     }
 }
 
-enum ChatRole: String, Equatable {
+nonisolated enum ChatRole: String, Equatable, Sendable {
     case user
     case assistant
     case system
 }
 
-enum MessageBlock: Equatable, Identifiable {
+nonisolated enum MessageBlock: Equatable, Identifiable, Sendable {
     case text(String)
     case toolUse(ToolUseBlock)
     case thinking(String)
@@ -64,7 +64,7 @@ enum MessageBlock: Equatable, Identifiable {
     }
 }
 
-struct ToolUseBlock: Equatable {
+nonisolated struct ToolUseBlock: Equatable, Sendable {
     let id: String
     let name: String
     let input: [String: String]

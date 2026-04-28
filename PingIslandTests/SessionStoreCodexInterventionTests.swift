@@ -236,6 +236,211 @@ final class SessionStoreCodexInterventionTests: XCTestCase {
         await store.process(.sessionArchived(sessionId: sessionId))
     }
 
+    func testCodexStopWithAssistantReplyLeavesPrimaryListAndFeedsCompletionLane() async {
+        let sessionId = "codex-stop-final-\(UUID().uuidString)"
+        let store = SessionStore.shared
+
+        await store.process(.hookReceived(HookEvent(
+            sessionId: sessionId,
+            cwd: "/tmp/project",
+            event: "SessionStart",
+            status: "processing",
+            provider: .codex,
+            clientInfo: SessionClientInfo(kind: .codexCLI, profileID: "codex-cli", name: "Codex CLI"),
+            pid: nil,
+            tty: nil,
+            tool: nil,
+            toolInput: nil,
+            toolUseId: nil,
+            notificationType: nil,
+            message: "work on this",
+            ingress: .hookBridge
+        )))
+
+        await store.process(.hookReceived(HookEvent(
+            sessionId: sessionId,
+            cwd: "/tmp/project",
+            event: "Stop",
+            status: "completed",
+            provider: .codex,
+            clientInfo: SessionClientInfo(kind: .codexCLI, profileID: "codex-cli", name: "Codex CLI"),
+            pid: nil,
+            tty: nil,
+            tool: nil,
+            toolInput: nil,
+            toolUseId: nil,
+            notificationType: nil,
+            message: "Done and ready to review.",
+            ingress: .hookBridge
+        )))
+
+        guard let session = await store.session(for: sessionId) else {
+            XCTFail("Expected Codex session")
+            return
+        }
+        XCTAssertEqual(session.phase, .idle)
+        XCTAssertNotNil(session.lifecycleCompletedAt)
+        XCTAssertEqual(session.conversationInfo.lastMessage, "Done and ready to review.")
+        XCTAssertEqual(session.conversationInfo.lastMessageRole, "assistant")
+        XCTAssertTrue(session.shouldHideFromPrimaryUI)
+        XCTAssertTrue(session.isHiddenCompletionNotificationCandidate)
+        XCTAssertTrue(SessionCompletionStateEvaluator.isCompletedReadySession(session))
+
+        await store.process(.sessionArchived(sessionId: sessionId))
+    }
+
+    func testCodexStopWithoutAssistantReplyExitsWithoutCompletionNotification() async {
+        let sessionId = "codex-stop-no-reply-\(UUID().uuidString)"
+        let store = SessionStore.shared
+
+        await store.process(.hookReceived(HookEvent(
+            sessionId: sessionId,
+            cwd: "/tmp/project",
+            event: "SessionStart",
+            status: "processing",
+            provider: .codex,
+            clientInfo: SessionClientInfo(kind: .codexCLI, profileID: "codex-cli", name: "Codex CLI"),
+            pid: nil,
+            tty: nil,
+            tool: nil,
+            toolInput: nil,
+            toolUseId: nil,
+            notificationType: nil,
+            message: "start",
+            ingress: .hookBridge
+        )))
+
+        await store.process(.hookReceived(HookEvent(
+            sessionId: sessionId,
+            cwd: "/tmp/project",
+            event: "Stop",
+            status: "completed",
+            provider: .codex,
+            clientInfo: SessionClientInfo(kind: .codexCLI, profileID: "codex-cli", name: "Codex CLI"),
+            pid: nil,
+            tty: nil,
+            tool: nil,
+            toolInput: nil,
+            toolUseId: nil,
+            notificationType: nil,
+            message: nil,
+            ingress: .hookBridge
+        )))
+
+        guard let session = await store.session(for: sessionId) else {
+            XCTFail("Expected Codex session")
+            return
+        }
+        XCTAssertEqual(session.phase, .idle)
+        XCTAssertNotNil(session.lifecycleCompletedAt)
+        XCTAssertTrue(session.shouldHideFromPrimaryUI)
+        XCTAssertFalse(session.isHiddenCompletionNotificationCandidate)
+        XCTAssertFalse(SessionCompletionStateEvaluator.isCompletedReadySession(session))
+
+        await store.process(.sessionArchived(sessionId: sessionId))
+    }
+
+    func testWeakCodexRefreshDoesNotReviveCompletedStopUntilFreshInput() async {
+        let sessionId = "codex-stop-weak-refresh-\(UUID().uuidString)"
+        let store = SessionStore.shared
+
+        await store.process(.hookReceived(HookEvent(
+            sessionId: sessionId,
+            cwd: "/tmp/project",
+            event: "SessionStart",
+            status: "processing",
+            provider: .codex,
+            clientInfo: SessionClientInfo(kind: .codexCLI, profileID: "codex-cli", name: "Codex CLI"),
+            pid: nil,
+            tty: nil,
+            tool: nil,
+            toolInput: nil,
+            toolUseId: nil,
+            notificationType: nil,
+            message: "start",
+            ingress: .hookBridge
+        )))
+        await store.process(.hookReceived(HookEvent(
+            sessionId: sessionId,
+            cwd: "/tmp/project",
+            event: "Stop",
+            status: "completed",
+            provider: .codex,
+            clientInfo: SessionClientInfo(kind: .codexCLI, profileID: "codex-cli", name: "Codex CLI"),
+            pid: nil,
+            tty: nil,
+            tool: nil,
+            toolInput: nil,
+            toolUseId: nil,
+            notificationType: nil,
+            message: "All done.",
+            ingress: .hookBridge
+        )))
+
+        await store.process(.hookReceived(HookEvent(
+            sessionId: sessionId,
+            cwd: "/tmp/project",
+            event: "PostToolUse",
+            status: "processing",
+            provider: .codex,
+            clientInfo: SessionClientInfo(kind: .codexCLI, profileID: "codex-cli", name: "Codex CLI"),
+            pid: nil,
+            tty: nil,
+            tool: "Bash",
+            toolInput: nil,
+            toolUseId: "tool-old",
+            notificationType: nil,
+            message: "old tool completed",
+            ingress: .hookBridge
+        )))
+
+        guard var session = await store.session(for: sessionId) else {
+            XCTFail("Expected Codex session")
+            return
+        }
+        XCTAssertEqual(session.phase, .idle)
+        XCTAssertNotNil(session.lifecycleCompletedAt)
+
+        await store.upsertCodexSession(
+            sessionId: sessionId,
+            name: "Codex",
+            preview: nil,
+            cwd: "/tmp/project",
+            phase: .processing,
+            intervention: nil,
+            clientInfo: SessionClientInfo(kind: .codexCLI, profileID: "codex-cli", name: "Codex CLI")
+        )
+
+        guard let weakRefreshSession = await store.session(for: sessionId) else {
+            XCTFail("Expected Codex session after weak app-server refresh")
+            return
+        }
+        session = weakRefreshSession
+        XCTAssertEqual(session.phase, .idle)
+        XCTAssertNotNil(session.lifecycleCompletedAt)
+
+        await store.upsertCodexSession(
+            sessionId: sessionId,
+            name: "Codex",
+            preview: "new prompt",
+            cwd: "/tmp/project",
+            phase: .processing,
+            intervention: nil,
+            clientInfo: SessionClientInfo(kind: .codexCLI, profileID: "codex-cli", name: "Codex CLI"),
+            allowsCompletedSessionResume: true
+        )
+
+        guard let resumedSession = await store.session(for: sessionId) else {
+            XCTFail("Expected Codex session after fresh input")
+            return
+        }
+        session = resumedSession
+        XCTAssertEqual(session.phase, .processing)
+        XCTAssertNil(session.lifecycleCompletedAt)
+
+        await store.process(.sessionArchived(sessionId: sessionId))
+    }
+
     func testCodexHookPermissionRequestSurvivesAppServerRefresh() async {
         let sessionId = "codex-hook-approval-\(UUID().uuidString)"
         let store = SessionStore.shared

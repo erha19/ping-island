@@ -17,7 +17,7 @@ enum SessionProvider: String, Codable, Equatable, Sendable {
     }
 }
 
-enum SessionIngress: String, Equatable, Sendable {
+nonisolated enum SessionIngress: String, Equatable, Sendable {
     case hookBridge
     case remoteBridge
     case codexAppServer
@@ -33,7 +33,7 @@ enum SessionClientKind: String, Codable, Equatable, Sendable {
     case unknown
 }
 
-struct SessionClientInfo: Codable, Equatable, Sendable {
+nonisolated struct SessionClientInfo: Codable, Equatable, Sendable {
     var kind: SessionClientKind
     var profileID: String?
     var name: String?
@@ -789,12 +789,12 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
     }
 }
 
-enum SessionInterventionKind: String, Sendable {
+nonisolated enum SessionInterventionKind: String, Sendable {
     case approval
     case question
 }
 
-struct SessionInterventionOption: Equatable, Identifiable, Sendable {
+nonisolated struct SessionInterventionOption: Equatable, Identifiable, Sendable {
     let id: String
     let title: String
     let detail: String?
@@ -804,7 +804,7 @@ struct SessionInterventionOption: Equatable, Identifiable, Sendable {
     }
 }
 
-struct SessionInterventionQuestion: Equatable, Identifiable, Sendable {
+nonisolated struct SessionInterventionQuestion: Equatable, Identifiable, Sendable {
     let id: String
     let header: String
     let prompt: String
@@ -829,7 +829,7 @@ struct SessionInterventionQuestion: Equatable, Identifiable, Sendable {
     }
 }
 
-struct SessionIntervention: Equatable, Identifiable, Sendable {
+nonisolated struct SessionIntervention: Equatable, Identifiable, Sendable {
     private nonisolated static let externalContinuationTimeout: TimeInterval = 5 * 60
     private nonisolated static let submittedAnswersMetadataKey = "submittedAnswersJSON"
 

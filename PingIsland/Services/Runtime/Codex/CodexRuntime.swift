@@ -8,7 +8,7 @@
 import Foundation
 
 actor CodexRuntime: SessionRuntime {
-    let provider: SessionProvider = .codex
+    nonisolated let provider: SessionProvider = .codex
     nonisolated let events: AsyncStream<SessionRuntimeEvent>
 
     private let featureFlag: RuntimeFeatureFlag = .nativeCodexRuntime

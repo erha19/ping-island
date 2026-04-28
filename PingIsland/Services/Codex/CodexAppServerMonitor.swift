@@ -308,7 +308,8 @@ actor CodexAppServerMonitor {
             preview: trimmed,
             cwd: nil,
             phase: .processing,
-            intervention: nil
+            intervention: nil,
+            allowsCompletedSessionResume: true
         )
     }
 

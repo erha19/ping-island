@@ -30,7 +30,7 @@ enum RuntimeFeatureFlag: String, CaseIterable, Sendable {
     }
 }
 
-enum FeatureFlags {
+nonisolated enum FeatureFlags {
     private static let truthyValues: Set<String> = ["1", "true", "yes", "on", "enabled"]
     private static let falsyValues: Set<String> = ["0", "false", "no", "off", "disabled"]
 

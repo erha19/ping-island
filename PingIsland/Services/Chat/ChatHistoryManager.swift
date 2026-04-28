@@ -104,7 +104,7 @@ class ChatHistoryManager: ObservableObject {
 
 // MARK: - Models
 
-struct ChatHistoryItem: Identifiable, Equatable, Sendable {
+nonisolated struct ChatHistoryItem: Identifiable, Equatable, Sendable {
     let id: String
     let type: ChatHistoryItemType
     let timestamp: Date
@@ -114,7 +114,7 @@ struct ChatHistoryItem: Identifiable, Equatable, Sendable {
     }
 }
 
-enum ChatHistoryItemType: Equatable, Sendable {
+nonisolated enum ChatHistoryItemType: Equatable, Sendable {
     case user(String)
     case assistant(String)
     case toolCall(ToolCallItem)
@@ -122,7 +122,7 @@ enum ChatHistoryItemType: Equatable, Sendable {
     case interrupted
 }
 
-struct ToolCallItem: Equatable, Sendable {
+nonisolated struct ToolCallItem: Equatable, Sendable {
     let name: String
     let input: [String: String]
     var status: ToolStatus
@@ -182,7 +182,7 @@ struct ToolCallItem: Equatable, Sendable {
     }
 }
 
-enum ToolStatus: Sendable, CustomStringConvertible {
+nonisolated enum ToolStatus: Sendable, CustomStringConvertible {
     case running
     case waitingForApproval
     case success
@@ -201,7 +201,7 @@ enum ToolStatus: Sendable, CustomStringConvertible {
 }
 
 // Explicit nonisolated Equatable conformance to avoid actor isolation issues
-extension ToolStatus: Equatable {
+nonisolated extension ToolStatus: Equatable {
     nonisolated static func == (lhs: ToolStatus, rhs: ToolStatus) -> Bool {
         switch (lhs, rhs) {
         case (.running, .running): return true
@@ -217,7 +217,7 @@ extension ToolStatus: Equatable {
 // MARK: - Subagent Tool Call
 
 /// Represents a tool call made by a subagent (Task tool)
-struct SubagentToolCall: Equatable, Identifiable, Sendable {
+nonisolated struct SubagentToolCall: Equatable, Identifiable, Sendable {
     let id: String
     let name: String
     let input: [String: String]

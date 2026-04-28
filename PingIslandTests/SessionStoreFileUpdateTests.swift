@@ -270,7 +270,7 @@ final class SessionStoreFileUpdateTests: XCTestCase {
             )
         ))
 
-        try await waitForSession(in: monitor, sessionId: sessionId) { session in
+        _ = try await waitForSession(in: monitor, sessionId: sessionId) { session in
             session.phase == .processing
         }
 

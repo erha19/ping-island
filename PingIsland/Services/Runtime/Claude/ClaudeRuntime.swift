@@ -8,7 +8,7 @@
 import Foundation
 
 actor ClaudeRuntime: SessionRuntime {
-    let provider: SessionProvider = .claude
+    nonisolated let provider: SessionProvider = .claude
     nonisolated let events: AsyncStream<SessionRuntimeEvent>
 
     private let featureFlag: RuntimeFeatureFlag = .nativeClaudeRuntime

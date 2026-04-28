@@ -8,7 +8,7 @@
 import Foundation
 import os.log
 
-protocol RuntimeCoordinating: Sendable {
+nonisolated protocol RuntimeCoordinating: Sendable {
     func start() async
     func stop() async
     func startSession(

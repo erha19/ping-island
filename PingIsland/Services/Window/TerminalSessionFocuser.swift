@@ -179,6 +179,28 @@ actor TerminalSessionFocuser {
                 workspacePath: workspacePath,
                 titleHint: remoteHostHint
             )
+        case "com.cmuxterm.app":
+            let cmuxTerminalIdentifier = clientInfo?.terminalSessionIdentifier
+            await FocusDiagnosticsStore.shared.record(
+                "TerminalFocus cmux applescript terminalPid=\(terminalPid) terminalIdentifier=\(cmuxTerminalIdentifier ?? "nil") workspacePath=\(workspacePath ?? "nil")"
+            )
+            guard await TerminalAutomationPermissionCoordinator.shared.ensurePermissionIfNeeded(
+                terminalPid: terminalPid,
+                bundleIdentifier: bundleIdentifier,
+                sessionId: sessionId
+            ) else {
+                logger.debug("Automation permission unavailable for cmux bundle \(bundleIdentifier, privacy: .public)")
+                await FocusDiagnosticsStore.shared.record(
+                    "TerminalFocus cmux skip-no-automation-permission terminalPid=\(terminalPid) sessionId=\(sessionId ?? "nil")"
+                )
+                return false
+            }
+            return await focusGhosttyTerminal(
+                terminalPid: terminalPid,
+                terminalSessionIdentifier: cmuxTerminalIdentifier,
+                workspacePath: workspacePath,
+                titleHint: remoteHostHint
+            )
         default:
             if await TerminalPrecisionJumpService.shared.focus(
                 bundleIdentifier: bundleIdentifier,
@@ -324,9 +346,11 @@ actor TerminalSessionFocuser {
     }
 
     func frontmostGhosttyTerminalSnapshot() async -> GhosttyTerminalSnapshot? {
-        let isGhosttyFrontmost = await MainActor.run {
-            NSWorkspace.shared.frontmostApplication?.bundleIdentifier == "com.mitchellh.ghostty"
+        let frontmostBundleIdentifier = await MainActor.run {
+            NSWorkspace.shared.frontmostApplication?.bundleIdentifier
         }
+        let isGhosttyFrontmost = frontmostBundleIdentifier == "com.mitchellh.ghostty"
+            || frontmostBundleIdentifier == "com.cmuxterm.app"
         guard isGhosttyFrontmost else {
             return nil
         }

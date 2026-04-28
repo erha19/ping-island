@@ -53,10 +53,28 @@ final class TerminalAutomationPermissionCoordinatorTests: XCTestCase {
                 bundleIdentifier: "com.mitchellh.ghostty"
             )
         )
+        XCTAssertTrue(
+            TerminalAutomationPermissionCoordinator.isAutomationPermissionRequired(
+                bundleIdentifier: "com.cmuxterm.app"
+            )
+        )
         XCTAssertFalse(
             TerminalAutomationPermissionCoordinator.isAutomationPermissionRequired(
                 bundleIdentifier: "com.todesktop.230313mzl4w4u92"
             )
+        )
+    }
+
+    func testScriptableTerminalBundleIdentifierIncludesCmux() {
+        let clientInfo = SessionClientInfo(
+            kind: .claudeCode,
+            terminalBundleIdentifier: "com.cmuxterm.app",
+            terminalProgram: "cmux"
+        )
+
+        XCTAssertEqual(
+            TerminalAutomationPermissionCoordinator.scriptableTerminalBundleIdentifier(for: clientInfo),
+            "com.cmuxterm.app"
         )
     }
 }

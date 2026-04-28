@@ -113,4 +113,63 @@ final class SessionCompletionStateEvaluatorTests: XCTestCase {
         XCTAssertTrue(SessionCompletionStateEvaluator.hasCompletedAssistantReply(for: session))
         XCTAssertFalse(SessionCompletionStateEvaluator.isCompletedReadySession(session))
     }
+
+    func testRemoteHermesIdleSessionWithAssistantReplyIsCompletionReady() {
+        let session = SessionState(
+            sessionId: "remote-hermes-idle",
+            cwd: "/tmp/project",
+            provider: .claude,
+            clientInfo: SessionClientInfo(
+                kind: .custom,
+                profileID: "hermes",
+                name: "Hermes",
+                threadSource: "hermes-plugin",
+                transport: "ssh",
+                remoteHost: "praduck"
+            ),
+            ingress: .remoteBridge,
+            phase: .idle,
+            chatItems: [
+                ChatHistoryItem(id: "1", type: .user("帮我跑一下任务"), timestamp: Date(timeIntervalSince1970: 1)),
+                ChatHistoryItem(id: "2", type: .assistant("任务处理好了。"), timestamp: Date(timeIntervalSince1970: 2))
+            ],
+            conversationInfo: ConversationInfo(
+                summary: nil,
+                lastMessage: "任务处理好了。",
+                lastMessageRole: "assistant",
+                lastToolName: nil,
+                firstUserMessage: "帮我跑一下任务",
+                lastUserMessageDate: nil
+            )
+        )
+
+        XCTAssertTrue(SessionCompletionStateEvaluator.hasCompletedAssistantReply(for: session))
+        XCTAssertTrue(SessionCompletionStateEvaluator.isCompletedReadySession(session))
+        XCTAssertTrue(session.shouldAutoArchiveInactiveRemoteHookSession)
+        XCTAssertTrue(session.isHiddenRemoteCompletionNotificationCandidate)
+    }
+
+    func testRemoteHermesIdleSessionWithoutAssistantReplyIsNotCompletionReady() {
+        let session = SessionState(
+            sessionId: "remote-hermes-cleanup",
+            cwd: "/tmp/project",
+            provider: .claude,
+            clientInfo: SessionClientInfo(
+                kind: .custom,
+                profileID: "hermes",
+                name: "Hermes",
+                threadSource: "hermes-plugin",
+                transport: "ssh",
+                remoteHost: "hermes"
+            ),
+            ingress: .remoteBridge,
+            latestHookMessage: "Remote session closed after terminal exit",
+            phase: .idle
+        )
+
+        XCTAssertFalse(SessionCompletionStateEvaluator.hasCompletedAssistantReply(for: session))
+        XCTAssertFalse(SessionCompletionStateEvaluator.isCompletedReadySession(session))
+        XCTAssertTrue(session.shouldAutoArchiveInactiveRemoteHookSession)
+        XCTAssertFalse(session.isHiddenRemoteCompletionNotificationCandidate)
+    }
 }

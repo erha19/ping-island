@@ -9,7 +9,7 @@
 import Foundation
 
 /// Permission context for tools waiting for approval
-struct PermissionContext: Sendable {
+nonisolated struct PermissionContext: Sendable {
     let toolUseId: String
     let toolName: String
     let toolInput: [String: AnyCodable]?
@@ -50,7 +50,7 @@ extension PermissionContext: Equatable {
 }
 
 /// Explicit session phases - the state machine
-enum SessionPhase: Sendable {
+nonisolated enum SessionPhase: Sendable {
     /// Session is idle, waiting for user input or new activity
     case idle
 
@@ -178,7 +178,7 @@ enum SessionPhase: Sendable {
 
 // MARK: - Equatable
 
-extension SessionPhase: Equatable {
+nonisolated extension SessionPhase: Equatable {
     nonisolated static func == (lhs: SessionPhase, rhs: SessionPhase) -> Bool {
         switch (lhs, rhs) {
         case (.idle, .idle): return true
@@ -195,7 +195,7 @@ extension SessionPhase: Equatable {
 
 // MARK: - Debug Description
 
-extension SessionPhase: CustomStringConvertible {
+nonisolated extension SessionPhase: CustomStringConvertible {
     nonisolated var description: String {
         switch self {
         case .idle:

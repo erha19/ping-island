@@ -24,7 +24,7 @@ enum DetachedIslandPanelMetrics {
     static let settingsHintBubbleSize = CGSize(width: 248, height: 92)
 }
 
-enum DetachedIslandBubbleCorner: Equatable {
+nonisolated enum DetachedIslandBubbleCorner: Equatable {
     case topLeading
     case topTrailing
     case bottomLeading

@@ -32,4 +32,22 @@ final class TerminalAppRegistryTests: XCTestCase {
             "com.googlecode.iterm2"
         )
     }
+
+    func testCmuxResolvesAsGhosttyBasedTerminal() {
+        XCTAssertEqual(
+            TerminalAppRegistry.inferredBundleIdentifier(forTerminalProgram: "cmux"),
+            "com.cmuxterm.app"
+        )
+        XCTAssertEqual(
+            TerminalAppRegistry.inferredBundleIdentifier(forCommand: "/Applications/cmux.app/Contents/MacOS/cmux"),
+            "com.cmuxterm.app"
+        )
+        XCTAssertEqual(
+            TerminalAppRegistry.canonicalDisplayName(
+                bundleIdentifier: "com.cmuxterm.app",
+                program: nil
+            ),
+            "cmux"
+        )
+    }
 }

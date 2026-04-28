@@ -1,18 +1,18 @@
 import Foundation
 import Darwin
 
-struct DiagnosticsExportResult: Sendable {
+nonisolated struct DiagnosticsExportResult: Sendable {
     let archiveURL: URL
     let warnings: [String]
 }
 
-struct DiagnosticsCommandResult: Sendable {
+nonisolated struct DiagnosticsCommandResult: Sendable {
     let output: String
     let stderr: String?
     let exitCode: Int32
 }
 
-enum DiagnosticsCommandError: Error, LocalizedError {
+nonisolated enum DiagnosticsCommandError: Error, LocalizedError {
     case executionFailed(executable: String, exitCode: Int32, stderr: String?)
     case launchFailed(executable: String, underlying: Error)
     case timedOut(executable: String, timeout: TimeInterval)
@@ -30,7 +30,7 @@ enum DiagnosticsCommandError: Error, LocalizedError {
     }
 }
 
-enum DiagnosticsCommandRunner {
+nonisolated enum DiagnosticsCommandRunner {
     static func run(
         executable: String,
         arguments: [String],
@@ -114,7 +114,7 @@ enum DiagnosticsCommandRunner {
     }
 }
 
-private final class DiagnosticsCommandState: @unchecked Sendable {
+private nonisolated final class DiagnosticsCommandState: @unchecked Sendable {
     private let lock = NSLock()
     private var stdout = Data()
     private var stderr = Data()
@@ -178,7 +178,7 @@ private final class DiagnosticsCommandState: @unchecked Sendable {
     }
 }
 
-private func terminateDiagnosticsProcess(_ process: Process) {
+private nonisolated func terminateDiagnosticsProcess(_ process: Process) {
     guard process.isRunning else { return }
 
     process.terminate()

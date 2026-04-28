@@ -358,6 +358,7 @@ actor SessionStore {
         if session.clientInfo.isHermesClient {
             appendHermesHookChatItem(event: event, session: &session)
         }
+        applyFinalAssistantMessageIfNeeded(event: event, session: &session)
 
         let shouldPreserveEndedStopForAnsweredQuestion =
             event.status == "ended"
@@ -388,7 +389,20 @@ actor SessionStore {
         let newPhase: SessionPhase = shouldPreserveEndedStopForAnsweredQuestion
             ? .waitingForInput
             : event.determinePhase()
+        let isFreshActivitySignal = SessionLifecyclePolicy.isFreshActivitySignal(
+            event: event,
+            incomingPhase: newPhase
+        )
+        if isFreshActivitySignal {
+            session.lifecycleCompletedAt = nil
+        }
         let shouldForceInactivePhase = shouldForceInactivePhase(for: event, incomingPhase: newPhase)
+        let shouldPreserveCompletedSessionAgainstWeakRefresh =
+            SessionLifecyclePolicy.shouldPreserveCompletedSessionAgainstWeakHookRefresh(
+                session: session,
+                event: event,
+                incomingPhase: newPhase
+            )
         let intervention = event.intervention
         let shouldPreserveQwenQuestionIntervention = shouldPreserveQwenQuestionIntervention(
             for: event,
@@ -412,7 +426,10 @@ actor SessionStore {
             session.phase = .waitingForApproval(preservedPendingApproval)
         } else if shouldForceInactivePhase {
             session.phase = newPhase
+            session.lifecycleCompletedAt = Date()
             settleRunningArtifactsForInactiveSignal(in: &session)
+        } else if shouldPreserveCompletedSessionAgainstWeakRefresh {
+            session.lastActivity = previousLastActivity
         } else if shouldPreserveActivePhaseDuringApparentIdle(
             session: session,
             incomingPhase: newPhase,
@@ -467,12 +484,14 @@ actor SessionStore {
             updateToolStatus(in: &session, toolId: toolUseId, status: .waitingForApproval)
         }
 
-        processToolTracking(
-            event: event,
-            session: &session,
-            preservingPendingApproval: shouldSuppressPendingApprovalCompletion
-        )
-        processSubagentTracking(event: event, session: &session)
+        if !shouldPreserveCompletedSessionAgainstWeakRefresh {
+            processToolTracking(
+                event: event,
+                session: &session,
+                preservingPendingApproval: shouldSuppressPendingApprovalCompletion
+            )
+            processSubagentTracking(event: event, session: &session)
+        }
 
         if event.event == "Stop" {
             session.subagentState = SubagentState()
@@ -628,6 +647,36 @@ actor SessionStore {
         default:
             break  // Tool events are handled by processToolTracking.
         }
+    }
+
+    private func applyFinalAssistantMessageIfNeeded(event: HookEvent, session: inout SessionState) {
+        guard event.event == "Stop" || event.event == "SessionEnd" else { return }
+        guard let message = Self.normalizedHookMessage(event.message), !message.isEmpty else { return }
+
+        if !session.clientInfo.isHermesClient {
+            let id = "completion-assistant-\(session.chatItems.count)-\(Int(Date().timeIntervalSince1970 * 1000))"
+            if !session.chatItems.contains(where: { item in
+                if case .assistant(let text) = item.type {
+                    return text == message
+                }
+                return false
+            }) {
+                session.chatItems.append(ChatHistoryItem(
+                    id: id,
+                    type: .assistant(message),
+                    timestamp: Date()
+                ))
+            }
+        }
+
+        session.conversationInfo = ConversationInfo(
+            summary: session.conversationInfo.summary,
+            lastMessage: message,
+            lastMessageRole: "assistant",
+            lastToolName: session.conversationInfo.lastToolName,
+            firstUserMessage: session.conversationInfo.firstUserMessage,
+            lastUserMessageDate: session.conversationInfo.lastUserMessageDate
+        )
     }
 
     private func processToolTracking(
@@ -1457,24 +1506,7 @@ actor SessionStore {
     }
 
     private func shouldForceInactivePhase(for event: HookEvent, incomingPhase: SessionPhase) -> Bool {
-        guard incomingPhase == .idle || incomingPhase == .ended else {
-            return false
-        }
-
-        if event.event == "Stop" || event.event == "SessionEnd" {
-            return true
-        }
-
-        guard event.clientInfo.isOpenClawGatewayClient else {
-            return false
-        }
-
-        switch event.event {
-        case "message:sent", "session:patch", "session:compact:after", "command:stop":
-            return true
-        default:
-            return false
-        }
+        SessionLifecyclePolicy.isStrongInactiveSignal(event: event, incomingPhase: incomingPhase)
     }
 
     private func settleRunningArtifactsForInactiveSignal(in session: inout SessionState) {
@@ -1871,6 +1903,7 @@ actor SessionStore {
         session.phase = .ended
         session.intervention = nil
         session.autoApprovePermissions = false
+        session.lifecycleCompletedAt = Date()
         session.lastActivity = Date()
     }
 
@@ -2326,7 +2359,8 @@ actor SessionStore {
         intervention: SessionIntervention?,
         clientInfo: SessionClientInfo? = nil,
         activityAt: Date? = nil,
-        metadata: [String: String] = [:]
+        metadata: [String: String] = [:],
+        allowsCompletedSessionResume: Bool = false
     ) {
         let resolvedSessionId = resolveOrAdoptCodexSession(
             incomingSessionId: sessionId,
@@ -2395,10 +2429,24 @@ actor SessionStore {
         if !shouldPreserveExternalIntervention {
             session.intervention = intervention
         }
+        let shouldPreserveCompletedSessionAgainstWeakRefresh =
+            SessionLifecyclePolicy.shouldPreserveCompletedCodexSessionAgainstWeakRefresh(
+                session: session,
+                incomingPhase: phase,
+                incomingIntervention: intervention,
+                allowsResume: allowsCompletedSessionResume
+            )
+        if !shouldPreserveCompletedSessionAgainstWeakRefresh,
+           phase.isActive || phase.needsAttention || intervention != nil {
+            session.lifecycleCompletedAt = nil
+        }
         if shouldPreserveExternalIntervention {
             if !session.phase.needsAttention {
                 session.phase = phase
             }
+        } else if shouldPreserveCompletedSessionAgainstWeakRefresh {
+            // A status-only app-server refresh can arrive after the Stop hook.
+            // Keep the completed session idle until a fresh user/tool-start signal.
         } else if shouldPreserveActivePhaseDuringApparentIdle(
             session: session,
             incomingPhase: phase,
@@ -2429,7 +2477,9 @@ actor SessionStore {
         } else if session.ingress != .hookBridge || (!session.phase.needsAttention && !hasIntervention) {
             session.ingress = .codexAppServer
         }
-        if shouldPreserveActivePhaseDuringApparentIdle(
+        if shouldPreserveCompletedSessionAgainstWeakRefresh {
+            session.lastActivity = existingLastActivity ?? session.lastActivity
+        } else if shouldPreserveActivePhaseDuringApparentIdle(
             session: session,
             incomingPhase: phase,
             referenceDate: activityAt ?? Date(),
@@ -2501,7 +2551,8 @@ actor SessionStore {
         let fallbackName = snapshot.name ?? snapshot.preview ?? "Codex"
         let projectName = restoredAssociation?.projectName
             ?? Self.projectName(for: fallbackCwd, fallback: fallbackName)
-        let existingLastActivity = sessions[resolvedSessionId]?.lastActivity
+        let existingSessionBeforeSnapshot = sessions[resolvedSessionId]
+        let existingLastActivity = existingSessionBeforeSnapshot?.lastActivity
         let resolvedClientInfo = normalizedCodexClientInfo(
             restored: restoredAssociation?.clientInfo,
             incoming: snapshot.clientInfo,
@@ -2551,10 +2602,32 @@ actor SessionStore {
         if !shouldPreserveExternalIntervention {
             session.intervention = snapshot.intervention
         }
+        let shouldPreserveCompletedSessionAgainstWeakRefresh =
+            SessionLifecyclePolicy.shouldPreserveCompletedCodexSessionAgainstWeakRefresh(
+                session: session,
+                incomingPhase: snapshot.phase,
+                incomingIntervention: snapshot.intervention,
+                allowsResume: false,
+                incomingLastUserMessageDate: snapshot.conversationInfo.lastUserMessageDate
+            )
+        if !shouldPreserveCompletedSessionAgainstWeakRefresh,
+           snapshot.phase.isActive || snapshot.phase.needsAttention || snapshot.intervention != nil {
+            session.lifecycleCompletedAt = nil
+        }
+        if shouldPreserveCompletedSessionAgainstWeakRefresh,
+           let existingSessionBeforeSnapshot {
+            session.chatItems = existingSessionBeforeSnapshot.chatItems
+            session.conversationInfo = existingSessionBeforeSnapshot.conversationInfo
+            if session.previewText?.isEmpty != false {
+                session.previewText = existingSessionBeforeSnapshot.previewText
+            }
+        }
         if shouldPreserveExternalIntervention {
             if !session.phase.needsAttention {
                 session.phase = snapshot.phase
             }
+        } else if shouldPreserveCompletedSessionAgainstWeakRefresh {
+            // Final Stop is stronger than stale active snapshots from the app server.
         } else if shouldPreserveActivePhaseDuringApparentIdle(
             session: session,
             incomingPhase: snapshot.phase,
@@ -2589,7 +2662,9 @@ actor SessionStore {
         } else if session.ingress != .hookBridge || (!session.phase.needsAttention && !hasIntervention) {
             session.ingress = .codexAppServer
         }
-        if shouldPreserveActivePhaseDuringApparentIdle(
+        if shouldPreserveCompletedSessionAgainstWeakRefresh {
+            session.lastActivity = existingLastActivity ?? session.lastActivity
+        } else if shouldPreserveActivePhaseDuringApparentIdle(
             session: session,
             incomingPhase: snapshot.phase,
             referenceDate: snapshot.updatedAt,
@@ -2678,6 +2753,7 @@ actor SessionStore {
         guard var session = sessions[resolvedSessionId] else { return }
         session.intervention = nil
         session.phase = nextPhase
+        session.lifecycleCompletedAt = nil
         session.lastActivity = Date()
         sessions[resolvedSessionId] = session
         publishState()
@@ -3324,7 +3400,9 @@ actor SessionStore {
         event: HookEvent,
         workspacePath: String
     ) async -> SessionClientInfo? {
-        guard current.terminalBundleIdentifier == "com.mitchellh.ghostty",
+        // cmux is Ghostty-based, so keep the upstream Ghostty enrichment path.
+        guard current.terminalBundleIdentifier == "com.mitchellh.ghostty"
+                || current.terminalBundleIdentifier == "com.cmuxterm.app",
               TerminalSessionFocuser.normalizedGhosttyTerminalIdentifier(current.terminalSessionIdentifier) == nil,
               shouldCaptureFrontmostGhosttyTerminalIdentifier(for: event) else {
             return nil

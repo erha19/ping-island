@@ -118,15 +118,18 @@ enum SessionCompletionPreviewBuilder {
 }
 
 enum SessionCompletionStateEvaluator {
-    static func isCompletedReadySession(_ session: SessionState) -> Bool {
-        guard session.phase == .waitingForInput else { return false }
-        guard session.intervention == nil else { return false }
-        return hasCompletedAssistantReply(for: session)
+    nonisolated static func isCompletedReadySession(_ session: SessionState) -> Bool {
+        guard case .none = session.intervention else { return false }
+        if session.phase == .waitingForInput || session.phase == .idle || session.phase == .ended {
+            return hasCompletedAssistantReply(for: session)
+        }
+
+        return false
     }
 
     /// Treat tool-only or commentary-only updates as in-progress. A completion notification
     /// should only fire once the session has an actual assistant reply ready for the user.
-    static func hasCompletedAssistantReply(for session: SessionState) -> Bool {
+    nonisolated static func hasCompletedAssistantReply(for session: SessionState) -> Bool {
         for item in session.chatItems.reversed() {
             switch item.type {
             case .assistant:

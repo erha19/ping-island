@@ -31,9 +31,122 @@ enum SessionScopedApprovalAction: Equatable, Sendable {
     }
 }
 
+enum SessionLifecyclePolicy {
+    nonisolated static func isStrongInactiveSignal(
+        event: HookEvent,
+        incomingPhase: SessionPhase
+    ) -> Bool {
+        guard incomingPhase == .idle || incomingPhase == .ended else {
+            return false
+        }
+
+        if event.event == "Stop" || event.event == "SessionEnd" || event.status == "ended" {
+            return true
+        }
+
+        guard event.clientInfo.isOpenClawGatewayClient else {
+            return false
+        }
+
+        switch event.event {
+        case "message:sent", "session:patch", "session:compact:after", "command:stop":
+            return true
+        default:
+            return false
+        }
+    }
+
+    nonisolated static func isFreshActivitySignal(
+        event: HookEvent,
+        incomingPhase: SessionPhase
+    ) -> Bool {
+        guard !isStrongInactiveSignal(event: event, incomingPhase: incomingPhase) else {
+            return false
+        }
+
+        if incomingPhase.needsAttention {
+            return true
+        }
+
+        switch event.event {
+        case "SessionStart", "UserPromptSubmit", "PreToolUse", "PermissionRequest", "PreCompact",
+             "message:received", "agent:start", "agent:step":
+            return true
+        default:
+            return false
+        }
+    }
+
+    nonisolated static func shouldPreserveCompletedSessionAgainstWeakHookRefresh(
+        session: SessionState,
+        event: HookEvent,
+        incomingPhase: SessionPhase
+    ) -> Bool {
+        guard session.lifecycleCompletedAt != nil else { return false }
+        guard incomingPhase.isActive else { return false }
+        guard !isFreshActivitySignal(event: event, incomingPhase: incomingPhase) else { return false }
+        return true
+    }
+
+    nonisolated static func shouldPreserveCompletedCodexSessionAgainstWeakRefresh(
+        session: SessionState,
+        incomingPhase: SessionPhase,
+        incomingIntervention: SessionIntervention?,
+        allowsResume: Bool,
+        incomingLastUserMessageDate: Date? = nil
+    ) -> Bool {
+        guard session.provider == .codex else { return false }
+        guard let completedAt = session.lifecycleCompletedAt else { return false }
+        guard incomingPhase.isActive else { return false }
+        guard case .none = incomingIntervention, !incomingPhase.needsAttention else { return false }
+        guard !allowsResume else { return false }
+
+        if let incomingLastUserMessageDate, incomingLastUserMessageDate > completedAt {
+            return false
+        }
+
+        return true
+    }
+
+    nonisolated static func shouldHideInactiveSessionFromPrimaryUI(_ session: SessionState) -> Bool {
+        if shouldHideInactiveRemoteMessageStream(session) {
+            return true
+        }
+
+        return shouldHideCompletedLocalHookSession(session)
+    }
+
+    nonisolated static func shouldHideInactiveRemoteMessageStream(_ session: SessionState) -> Bool {
+        guard session.isRemoteSession else { return false }
+        guard session.clientInfo.prefersHookMessageAsLastMessageFallback else { return false }
+
+        switch session.phase {
+        case .idle, .ended:
+            return true
+        case .processing, .compacting, .waitingForInput, .waitingForApproval:
+            return false
+        }
+    }
+
+    nonisolated static func shouldHideCompletedLocalHookSession(_ session: SessionState) -> Bool {
+        guard session.lifecycleCompletedAt != nil else { return false }
+        guard !session.isRemoteSession else { return false }
+        guard session.ingress == .hookBridge || session.ingress == .codexAppServer else { return false }
+        guard session.provider == .codex || session.provider == .claude else { return false }
+        guard !session.needsManualAttention else { return false }
+
+        switch session.phase {
+        case .idle, .ended, .waitingForInput:
+            return true
+        case .processing, .compacting, .waitingForApproval:
+            return false
+        }
+    }
+}
+
 /// Complete state for a single tracked session
 /// This is the single source of truth - all state reads and writes go through SessionStore
-struct SessionState: Equatable, Identifiable, Sendable {
+nonisolated struct SessionState: Equatable, Identifiable, Sendable {
     private nonisolated static let minimalCompactDelay: TimeInterval = 10 * 60
     private nonisolated static let autoArchiveDelay: TimeInterval = 30 * 60
     private nonisolated static let endedArchiveActionDelay: TimeInterval = 10 * 60
@@ -100,6 +213,7 @@ struct SessionState: Equatable, Identifiable, Sendable {
     /// When true, the next file update should reconcile chatItems with parser state
     /// This removes pre-/clear items that no longer exist in the JSONL
     var needsClearReconciliation: Bool
+    var lifecycleCompletedAt: Date?
 
     // MARK: - Timestamps
 
@@ -144,6 +258,7 @@ struct SessionState: Equatable, Identifiable, Sendable {
             lastToolName: nil, firstUserMessage: nil, lastUserMessageDate: nil
         ),
         needsClearReconciliation: Bool = false,
+        lifecycleCompletedAt: Date? = nil,
         lastActivity: Date = Date(),
         createdAt: Date = Date()
     ) {
@@ -175,6 +290,7 @@ struct SessionState: Equatable, Identifiable, Sendable {
         self.subagentState = subagentState
         self.conversationInfo = conversationInfo
         self.needsClearReconciliation = needsClearReconciliation
+        self.lifecycleCompletedAt = lifecycleCompletedAt
         self.lastActivity = lastActivity
         self.createdAt = createdAt
     }
@@ -916,7 +1032,7 @@ struct SessionState: Equatable, Identifiable, Sendable {
         if needsManualAttention {
             return false
         }
-        if shouldAutoArchiveInactiveRemoteHookSession {
+        if SessionLifecyclePolicy.shouldHideInactiveSessionFromPrimaryUI(self) {
             return true
         }
         return Date().timeIntervalSince(lastActivity) >= Self.autoArchiveDelay
@@ -927,15 +1043,20 @@ struct SessionState: Equatable, Identifiable, Sendable {
     /// outstanding decision, remove them from the primary notch immediately so the
     /// closed island returns to rest when the remote message stops.
     nonisolated var shouldAutoArchiveInactiveRemoteHookSession: Bool {
-        guard isRemoteSession else { return false }
-        guard clientInfo.prefersHookMessageAsLastMessageFallback else { return false }
+        SessionLifecyclePolicy.shouldHideInactiveRemoteMessageStream(self)
+    }
 
-        switch phase {
-        case .idle, .ended:
-            return true
-        case .processing, .compacting, .waitingForInput, .waitingForApproval:
-            return false
-        }
+    /// Hidden completed sessions can still need a one-shot completion popup. Keep
+    /// them out of the primary notch list, but let notification tracking see the
+    /// final assistant reply just like native Claude/Codex.
+    nonisolated var isHiddenCompletionNotificationCandidate: Bool {
+        guard shouldHideFromPrimaryUI else { return false }
+        return SessionCompletionStateEvaluator.isCompletedReadySession(self)
+            || (phase == .ended && SessionCompletionStateEvaluator.hasCompletedAssistantReply(for: self))
+    }
+
+    nonisolated var isHiddenRemoteCompletionNotificationCandidate: Bool {
+        isHiddenCompletionNotificationCandidate
     }
 
     /// Older background sessions collapse to a header-only presentation in compact surfaces.
@@ -1078,7 +1199,7 @@ struct SessionState: Equatable, Identifiable, Sendable {
 // MARK: - Tool Tracker
 
 /// Unified tool tracking - replaces multiple dictionaries in ChatHistoryManager
-struct ToolTracker: Equatable, Sendable {
+nonisolated struct ToolTracker: Equatable, Sendable {
     /// Tools currently in progress, keyed by tool_use_id
     var inProgress: [String: ToolInProgress]
 
@@ -1148,7 +1269,7 @@ enum ToolInProgressPhase: Equatable, Sendable {
 // MARK: - Subagent State
 
 /// State for Task (subagent) tools
-struct SubagentState: Equatable, Sendable {
+nonisolated struct SubagentState: Equatable, Sendable {
     /// Active Task tools, keyed by task tool_use_id
     var activeTasks: [String: TaskContext]
 

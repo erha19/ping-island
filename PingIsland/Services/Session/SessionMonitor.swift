@@ -14,6 +14,7 @@ import Foundation
 class SessionMonitor: ObservableObject {
     @Published var instances: [SessionState] = []
     @Published var pendingInstances: [SessionState] = []
+    @Published var completionInstances: [SessionState] = []
     @Published private(set) var claudeUsageSnapshot: ClaudeUsageSnapshot?
     @Published private(set) var codexUsageSnapshot: CodexUsageSnapshot?
 
@@ -591,6 +592,10 @@ class SessionMonitor: ObservableObject {
         let visibleSessions = filteredVisibleSessions(from: allSessions)
         instances = visibleSessions
         pendingInstances = visibleSessions.filter { $0.needsAttention }
+        completionInstances = completionCandidateSessions(
+            visibleSessions: visibleSessions,
+            allSessions: allSessions
+        )
     }
 
     private func filteredVisibleSessions(from sessions: [SessionState]) -> [SessionState] {
@@ -614,6 +619,26 @@ class SessionMonitor: ObservableObject {
         session.isLikelyEmptyCodexPlaceholderForUI
             || session.isLikelyTransientCodexContinuationPlaceholder
             || session.isLikelyOpenCodeChildSessionPlaceholderForUI
+    }
+
+    private func completionCandidateSessions(
+        visibleSessions: [SessionState],
+        allSessions: [SessionState]
+    ) -> [SessionState] {
+        let visibilityMode = AppSettings.subagentVisibilityMode
+        var seenStableIDs = Set(visibleSessions.map(\.stableId))
+        var candidates = visibleSessions
+
+        for session in allSessions {
+            guard !seenStableIDs.contains(session.stableId) else { continue }
+            guard session.shouldDisplaySubagent(in: visibilityMode) else { continue }
+            guard session.isHiddenCompletionNotificationCandidate else { continue }
+
+            seenStableIDs.insert(session.stableId)
+            candidates.append(session)
+        }
+
+        return candidates
     }
 
     private func findTmuxTarget(tty: String) async -> TmuxTarget? {

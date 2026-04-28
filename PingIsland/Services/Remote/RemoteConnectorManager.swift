@@ -130,12 +130,26 @@ final class RemoteConnectorManager: ObservableObject {
                     }
                     stage = forceBootstrap ? "bootstrap-forced" : "bootstrap-initial"
                     try await bootstrapRemoteAgent(endpointID: endpointID, password: effectivePassword, probe: probe)
+                    stage = "ensure-remote-message-runtime"
+                    try await ensureRemoteMessageRuntime(
+                        endpointID: endpointID,
+                        password: effectivePassword,
+                        probe: probe,
+                        restartGateway: true
+                    )
                 } else {
                     logger.notice(
                         "Remote bootstrap skipped endpoint=\(endpoint.id.uuidString, privacy: .public) target=\(endpoint.sshTarget, privacy: .public) reason=reuse_existing_install"
                     )
                     stage = "ensure-remote-hooks"
                     try await ensureRemoteHookConfigurations(endpointID: endpointID, password: effectivePassword, probe: probe)
+                    stage = "ensure-remote-message-runtime"
+                    try await ensureRemoteMessageRuntime(
+                        endpointID: endpointID,
+                        password: effectivePassword,
+                        probe: probe,
+                        restartGateway: false
+                    )
                 }
 
                 do {
@@ -172,6 +186,14 @@ final class RemoteConnectorManager: ObservableObject {
 
                     stage = "bootstrap-retry"
                     try await bootstrapRemoteAgent(endpointID: endpointID, password: effectivePassword, probe: probe)
+
+                    stage = "ensure-remote-message-runtime"
+                    try await ensureRemoteMessageRuntime(
+                        endpointID: endpointID,
+                        password: effectivePassword,
+                        probe: probe,
+                        restartGateway: true
+                    )
 
                     stage = "ensure-remote-agent"
                     try await ensureRemoteAgentRunning(endpointID: endpointID, password: effectivePassword)
@@ -956,6 +978,80 @@ final class RemoteConnectorManager: ObservableObject {
         )
     }
 
+    private func ensureRemoteMessageRuntime(
+        endpointID: UUID,
+        password: String?,
+        probe: RemoteHostProbe,
+        restartGateway: Bool
+    ) async throws {
+        guard let endpoint = endpoint(for: endpointID) else { return }
+        guard Self.remoteManagedHookProfiles(for: endpoint).contains(where: { $0.id == "hermes-hooks" }) else {
+            return
+        }
+
+        let paths = Self.remoteHermesRuntimeSupportPaths(endpoint: endpoint, homeDirectory: probe.homeDirectory)
+        logger.notice(
+            "Remote Hermes runtime refresh starting endpoint=\(endpoint.id.uuidString, privacy: .public) target=\(endpoint.sshTarget, privacy: .public) runtime=\(paths.runtimeScriptHostPath, privacy: .public) hookDir=\(paths.gatewayHookDirectoryHostPath, privacy: .public)"
+        )
+
+        _ = try await RemoteSSHCommandRunner.runSSH(
+            target: endpoint.sshTarget,
+            port: endpoint.sshPort,
+            password: password,
+            remoteCommand: Self.remoteHermesRuntimePrepareCommand(endpoint: endpoint, paths: paths),
+            acceptNewHostKey: true
+        )
+
+        try await writeManagedRemoteFile(
+            endpoint: endpoint,
+            target: endpoint.sshTarget,
+            port: endpoint.sshPort,
+            remotePath: paths.runtimeScriptHostPath,
+            contents: Data(Self.remoteHermesRuntimeScript.utf8),
+            password: password
+        )
+        try await writeManagedRemoteFile(
+            endpoint: endpoint,
+            target: endpoint.sshTarget,
+            port: endpoint.sshPort,
+            remotePath: "\(paths.gatewayHookDirectoryHostPath)/handler.py",
+            contents: Data(Self.remoteHermesGatewayHandlerScript.utf8),
+            password: password
+        )
+        try await writeManagedRemoteFile(
+            endpoint: endpoint,
+            target: endpoint.sshTarget,
+            port: endpoint.sshPort,
+            remotePath: "\(paths.gatewayHookDirectoryHostPath)/HOOK.yaml",
+            contents: Data(Self.remoteHermesGatewayHookYAML.utf8),
+            password: password
+        )
+
+        _ = try await RemoteSSHCommandRunner.runSSH(
+            target: endpoint.sshTarget,
+            port: endpoint.sshPort,
+            password: password,
+            remoteCommand: Self.remoteHermesRuntimeValidationCommand(
+                endpoint: endpoint,
+                paths: paths,
+                restartGateway: restartGateway
+            ),
+            acceptNewHostKey: true
+        )
+
+        _ = try await RemoteSSHCommandRunner.runSSH(
+            target: endpoint.sshTarget,
+            port: endpoint.sshPort,
+            password: password,
+            remoteCommand: Self.remoteHermesRuntimeWatcherCommand(endpoint: endpoint, paths: paths),
+            acceptNewHostKey: true
+        )
+
+        logger.notice(
+            "Remote Hermes runtime refresh completed endpoint=\(endpoint.id.uuidString, privacy: .public) target=\(endpoint.sshTarget, privacy: .public)"
+        )
+    }
+
     private func validateRemotePluginDirectoryIfNeeded(
         profile: ManagedHookClientProfile,
         remoteDirectoryPath: String,
@@ -1689,6 +1785,18 @@ final class RemoteConnectorManager: ObservableObject {
         ["ISLAND_SOCKET_PATH": hookSocketPath]
     }
 
+    private struct RemoteHermesRuntimeSupportPaths: Sendable {
+        let runtimeScriptHostPath: String
+        let runtimeScriptContainerPath: String
+        let gatewayHookDirectoryHostPath: String
+        let gatewayHookDirectoryContainerPath: String
+        let sessionsDirectoryContainerPath: String
+        let logsDirectoryHostPath: String
+        let logsDirectoryContainerPath: String
+        let role: String
+        let remoteHost: String
+    }
+
     nonisolated static let praduckHermesHostRoot = "/srv/hermes"
     nonisolated static let praduckHermesDataRoot = "/srv/hermes/data"
     nonisolated static let praduckHermesHostInstallRoot = "/srv/hermes/data/ping-island"
@@ -1715,6 +1823,37 @@ final class RemoteConnectorManager: ObservableObject {
         usesPraduckHermesContainer(endpoint)
             ? "\(praduckHermesContainerInstallRoot)/run/agent-hook.sock"
             : endpoint.remoteHookSocketPath
+    }
+
+    nonisolated private static func remoteHermesRuntimeSupportPaths(
+        endpoint: RemoteEndpoint,
+        homeDirectory: String
+    ) -> RemoteHermesRuntimeSupportPaths {
+        if usesPraduckHermesContainer(endpoint) {
+            return RemoteHermesRuntimeSupportPaths(
+                runtimeScriptHostPath: "\(praduckHermesHostInstallRoot)/bin/ping_island_remote_runtime.py",
+                runtimeScriptContainerPath: "\(praduckHermesContainerInstallRoot)/bin/ping_island_remote_runtime.py",
+                gatewayHookDirectoryHostPath: "\(praduckHermesDataRoot)/hooks/ping_island",
+                gatewayHookDirectoryContainerPath: "/opt/data/hooks/ping_island",
+                sessionsDirectoryContainerPath: "/opt/data/sessions",
+                logsDirectoryHostPath: "\(praduckHermesHostInstallRoot)/logs",
+                logsDirectoryContainerPath: "\(praduckHermesContainerInstallRoot)/logs",
+                role: "Praduck",
+                remoteHost: "praduck"
+            )
+        }
+
+        return RemoteHermesRuntimeSupportPaths(
+            runtimeScriptHostPath: "\(endpoint.remoteInstallRoot)/bin/ping_island_remote_runtime.py",
+            runtimeScriptContainerPath: "\(endpoint.remoteInstallRoot)/bin/ping_island_remote_runtime.py",
+            gatewayHookDirectoryHostPath: "\(homeDirectory)/.hermes/hooks/ping_island",
+            gatewayHookDirectoryContainerPath: "\(homeDirectory)/.hermes/hooks/ping_island",
+            sessionsDirectoryContainerPath: "\(homeDirectory)/.hermes/sessions",
+            logsDirectoryHostPath: "\(endpoint.remoteInstallRoot)/logs",
+            logsDirectoryContainerPath: "\(endpoint.remoteInstallRoot)/logs",
+            role: "Hermes",
+            remoteHost: "hermes"
+        )
     }
 
     nonisolated static func remoteStagedBridgePath(for endpoint: RemoteEndpoint) -> String {
@@ -1821,6 +1960,426 @@ final class RemoteConnectorManager: ObservableObject {
         """
     }
 
+    nonisolated private static func remoteHermesRuntimePrepareCommand(
+        endpoint: RemoteEndpoint,
+        paths: RemoteHermesRuntimeSupportPaths
+    ) -> String {
+        if usesPraduckHermesContainer(endpoint) {
+            return """
+            sudo install -d -m 755 -o \(praduckHermesHostUID) -g \(praduckHermesHostGID) \(shellQuote("\(praduckHermesHostInstallRoot)/bin")) \(shellQuote(paths.logsDirectoryHostPath)) \(shellQuote(paths.gatewayHookDirectoryHostPath))
+            sudo chown -R \(praduckHermesHostUID):\(praduckHermesHostGID) \(shellQuote(paths.gatewayHookDirectoryHostPath)) \(shellQuote(paths.logsDirectoryHostPath))
+            """
+        }
+
+        return """
+        mkdir -p \(shellQuote(NSString(string: paths.runtimeScriptHostPath).deletingLastPathComponent)) \(shellQuote(paths.logsDirectoryHostPath)) \(shellQuote(paths.gatewayHookDirectoryHostPath))
+        """
+    }
+
+    nonisolated private static func remoteHermesRuntimeValidationCommand(
+        endpoint: RemoteEndpoint,
+        paths: RemoteHermesRuntimeSupportPaths,
+        restartGateway: Bool
+    ) -> String {
+        if usesPraduckHermesContainer(endpoint) {
+            let validation = [
+                "python3 -m py_compile \(shellQuote(paths.runtimeScriptContainerPath)) \(shellQuote("\(paths.gatewayHookDirectoryContainerPath)/handler.py"))",
+                restartGateway
+                    ? "/opt/hermes/.venv/bin/python /opt/hermes/hermes gateway --accept-hooks restart >/dev/null 2>&1 || true"
+                    : nil
+            ]
+            .compactMap { $0 }
+            .joined(separator: "\n")
+            return """
+            sudo chmod 755 \(shellQuote(paths.runtimeScriptHostPath))
+            sudo docker exec -u hermes hermes sh -lc \(shellQuote(validation))
+            """
+        }
+
+        let restartCommand = restartGateway ? "\nif command -v hermes >/dev/null 2>&1; then hermes gateway --accept-hooks restart >/dev/null 2>&1 || true; fi" : ""
+        return """
+        chmod 755 \(shellQuote(paths.runtimeScriptHostPath))
+        python3 -m py_compile \(shellQuote(paths.runtimeScriptContainerPath)) \(shellQuote("\(paths.gatewayHookDirectoryContainerPath)/handler.py"))\(restartCommand)
+        """
+    }
+
+    nonisolated private static func remoteHermesRuntimeWatcherCommand(
+        endpoint: RemoteEndpoint,
+        paths: RemoteHermesRuntimeSupportPaths
+    ) -> String {
+        let bridgePath = "\(remoteHookRuntimeInstallRoot(for: endpoint))/bin/ping-island-bridge"
+        let socketPath = remoteHookRuntimeSocketPath(for: endpoint)
+        let envPrefix = [
+            "PING_ISLAND_ROLE=\(shellQuote(paths.role))",
+            "PING_ISLAND_REMOTE_HOST=\(shellQuote(paths.remoteHost))",
+            "PING_ISLAND_BRIDGE=\(shellQuote(bridgePath))",
+            "ISLAND_SOCKET_PATH=\(shellQuote(socketPath))",
+            "PING_ISLAND_SESSIONS_DIR=\(shellQuote(paths.sessionsDirectoryContainerPath))",
+            "PING_ISLAND_IDLE_DEBOUNCE=15",
+            "PING_ISLAND_FINAL_DEBOUNCE=3"
+        ].joined(separator: " ")
+        let watchPattern = "\(paths.runtimeScriptContainerPath) watch"
+
+        if usesPraduckHermesContainer(endpoint) {
+            let command = """
+            pkill -f \(shellQuote(watchPattern)) >/dev/null 2>&1 || true
+            nohup env \(envPrefix) python3 \(shellQuote(paths.runtimeScriptContainerPath)) watch > \(shellQuote("\(paths.logsDirectoryContainerPath)/hermes-runtime-watch.log")) 2>&1 < /dev/null &
+            """
+            return """
+            sudo docker exec -u hermes hermes sh -lc \(shellQuote(command))
+            """
+        }
+
+        return """
+        pkill -f \(shellQuote(watchPattern)) >/dev/null 2>&1 || true
+        nohup env \(envPrefix) python3 \(shellQuote(paths.runtimeScriptContainerPath)) watch > \(shellQuote("\(paths.logsDirectoryContainerPath)/hermes-runtime-watch.log")) 2>&1 < /dev/null &
+        """
+    }
+
+    nonisolated private static let remoteHermesRuntimeScript = #"""
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import sys
+import threading
+import time
+from pathlib import Path
+from typing import Any
+
+ROLE = os.environ.get("PING_ISLAND_ROLE", "Hermes")
+REMOTE_HOST = os.environ.get("PING_ISLAND_REMOTE_HOST", "hermes")
+BRIDGE = os.environ.get("PING_ISLAND_BRIDGE", str(Path.home() / ".ping-island/bin/ping-island-bridge"))
+SOCKET = os.environ.get("ISLAND_SOCKET_PATH", str(Path.home() / ".ping-island/run/agent-hook.sock"))
+SESSIONS_DIR = Path(os.environ.get("PING_ISLAND_SESSIONS_DIR", str(Path.home() / ".hermes/sessions")))
+DEBUG_DIR = Path(os.environ.get("PING_ISLAND_DEBUG_DIR", str(Path.home() / ".ping-island/debug")))
+
+COMMON_ARGS = [
+    BRIDGE,
+    "--source", "claude",
+    "--client-kind", "hermes",
+    "--client-name", "Hermes",
+    "--client-origin", "cli",
+    "--client-originator", ROLE,
+    "--thread-source", "hermes-runtime",
+    "--remote-host", REMOTE_HOST,
+]
+
+_stop_timers: dict[str, threading.Timer] = {}
+ACTIVE_IDLE_DEBOUNCE_SECONDS = float(os.environ.get("PING_ISLAND_IDLE_DEBOUNCE", "15"))
+FINAL_IDLE_DEBOUNCE_SECONDS = float(os.environ.get("PING_ISLAND_FINAL_DEBOUNCE", "3"))
+
+
+def stable_text(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        text = value.strip()
+        return text or None
+    try:
+        return json.dumps(value, ensure_ascii=False)
+    except Exception:
+        return str(value)
+
+
+def session_id(value: Any) -> str | None:
+    text = stable_text(value)
+    if not text:
+        return None
+    return text if text.startswith("hermes-") else f"hermes-{text}"
+
+
+def write_debug(payload: dict[str, Any]) -> None:
+    try:
+        DEBUG_DIR.mkdir(parents=True, exist_ok=True)
+        with (DEBUG_DIR / f"{time.strftime('%Y%m%d')}.jsonl").open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(payload, ensure_ascii=False, default=str) + "\n")
+    except Exception:
+        pass
+
+
+def emit(payload: dict[str, Any]) -> None:
+    payload = {key: value for key, value in payload.items() if value is not None}
+    payload.setdefault("platform", payload.get("connection_transport") or "ssh")
+    payload.setdefault("connection_transport", payload.get("platform") or "ssh")
+    payload.setdefault("remote_host", REMOTE_HOST)
+    write_debug(payload)
+    env = os.environ.copy()
+    env["ISLAND_SOCKET_PATH"] = SOCKET
+    try:
+        process = subprocess.Popen(
+            COMMON_ARGS,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            env=env,
+            start_new_session=True,
+        )
+        if process.stdin:
+            process.stdin.write(json.dumps(payload, ensure_ascii=False, default=str))
+            process.stdin.close()
+    except Exception as exc:
+        write_debug({"error": repr(exc), "payload": payload})
+
+
+def schedule_stop(
+    sid: str,
+    delay: float,
+    assistant: str | None = None,
+    platform: str = "ssh",
+) -> None:
+    old_timer = _stop_timers.pop(sid, None)
+    if old_timer:
+        old_timer.cancel()
+
+    def stop() -> None:
+        emit({
+            "hook_event_name": "Stop",
+            "session_id": sid,
+            "last_assistant_message": assistant,
+            "platform": platform,
+            "connection_transport": platform,
+            "completed": True,
+        })
+        _stop_timers.pop(sid, None)
+
+    timer = threading.Timer(delay, stop)
+    _stop_timers[sid] = timer
+    timer.start()
+
+
+def refresh_active(sid: str, platform: str = "ssh", delay: float | None = None) -> None:
+    schedule_stop(sid, delay=delay or ACTIVE_IDLE_DEBOUNCE_SECONDS, platform=platform)
+
+
+def extract_content(obj: dict[str, Any]) -> str | None:
+    content = obj.get("content") or obj.get("message") or obj.get("text")
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, dict):
+                parts.append(stable_text(item.get("text") or item.get("content")) or "")
+            else:
+                parts.append(stable_text(item) or "")
+        return stable_text("\n".join(part for part in parts if part))
+    return stable_text(content)
+
+
+def handle_transcript_line(path: Path, line: str) -> None:
+    try:
+        obj = json.loads(line)
+    except Exception:
+        return
+    if not isinstance(obj, dict):
+        return
+
+    role = stable_text(obj.get("role") or obj.get("type"))
+    if role == "session_meta":
+        return
+
+    sid = session_id(path.stem)
+    if not sid:
+        return
+
+    text = extract_content(obj)
+    if role == "user":
+        emit({
+            "hook_event_name": "UserPromptSubmit",
+            "session_id": sid,
+            "prompt": text,
+            "message": text,
+            "platform": "ssh",
+            "connection_transport": "ssh",
+            "cwd": os.environ.get("PWD") or str(SESSIONS_DIR.parent),
+        })
+        refresh_active(sid, platform="ssh")
+    elif role == "tool":
+        emit({
+            "hook_event_name": "PreToolUse",
+            "session_id": sid,
+            "tool_name": "Tool",
+            "message": text[:500] if text else None,
+            "platform": "ssh",
+            "connection_transport": "ssh",
+        })
+        refresh_active(sid, platform="ssh")
+    elif role == "assistant":
+        if text:
+            emit({
+                "hook_event_name": "Notification",
+                "session_id": sid,
+                "notification_type": "assistant_message",
+                "message": text,
+                "platform": "ssh",
+                "connection_transport": "ssh",
+            })
+        schedule_stop(sid, delay=FINAL_IDLE_DEBOUNCE_SECONDS, assistant=text, platform="ssh")
+
+
+def watch_transcripts() -> None:
+    offsets: dict[Path, int] = {}
+    SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
+    for path in SESSIONS_DIR.glob("*.jsonl"):
+        try:
+            offsets[path] = path.stat().st_size
+        except OSError:
+            pass
+
+    write_debug({"watcher": "started", "sessions_dir": str(SESSIONS_DIR), "remote_host": REMOTE_HOST})
+    while True:
+        try:
+            paths = sorted(SESSIONS_DIR.glob("*.jsonl"), key=lambda item: item.stat().st_mtime)
+            for path in paths:
+                try:
+                    size = path.stat().st_size
+                    position = offsets.get(path, 0)
+                    if size < position:
+                        position = 0
+                    if size == position:
+                        offsets[path] = position
+                        continue
+                    with path.open("r", encoding="utf-8", errors="ignore") as handle:
+                        handle.seek(position)
+                        for line in handle:
+                            handle_transcript_line(path, line)
+                        offsets[path] = handle.tell()
+                except Exception as exc:
+                    write_debug({"watcher_error": repr(exc), "path": str(path)})
+        except Exception as exc:
+            write_debug({"watcher_loop_error": repr(exc)})
+        time.sleep(1.0)
+
+
+def gateway_handle(event_type: str, context: dict[str, Any]) -> None:
+    sid = session_id(
+        context.get("session_id")
+        or context.get("session_key")
+        or context.get("thread_id")
+        or context.get("user_id")
+    )
+    if not sid:
+        return
+
+    platform = stable_text(context.get("platform") or context.get("transport")) or "discord"
+    if event_type == "session:start":
+        emit({
+            "hook_event_name": "SessionStart",
+            "session_id": sid,
+            "platform": platform,
+            "connection_transport": platform,
+        })
+        refresh_active(sid, platform=platform)
+    elif event_type == "agent:start":
+        message = stable_text(context.get("message") or context.get("prompt"))
+        emit({
+            "hook_event_name": "UserPromptSubmit",
+            "session_id": sid,
+            "prompt": message,
+            "message": message,
+            "platform": platform,
+            "connection_transport": platform,
+        })
+        refresh_active(sid, platform=platform)
+    elif event_type == "agent:step":
+        names = context.get("tool_names") or []
+        tool = names[0] if isinstance(names, list) and names else "Tool"
+        emit({
+            "hook_event_name": "PreToolUse",
+            "session_id": sid,
+            "tool_name": stable_text(tool) or "Tool",
+            "platform": platform,
+            "connection_transport": platform,
+        })
+        refresh_active(sid, platform=platform)
+    elif event_type == "agent:end":
+        response = stable_text(context.get("response") or context.get("message"))
+        if response:
+            emit({
+                "hook_event_name": "Notification",
+                "session_id": sid,
+                "notification_type": "assistant_message",
+                "message": response,
+                "platform": platform,
+                "connection_transport": platform,
+            })
+        schedule_stop(sid, delay=FINAL_IDLE_DEBOUNCE_SECONDS, assistant=response, platform=platform)
+    elif event_type in ("session:end", "session:reset"):
+        emit({
+            "hook_event_name": "SessionEnd",
+            "session_id": sid,
+            "platform": platform,
+            "connection_transport": platform,
+        })
+
+
+if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] == "watch":
+        watch_transcripts()
+    else:
+        payload = json.load(sys.stdin) if not sys.stdin.isatty() else {}
+        emit(payload)
+"""#
+
+    nonisolated private static let remoteHermesGatewayHandlerScript = #"""
+from __future__ import annotations
+
+import importlib.util
+import os
+from pathlib import Path
+
+if Path("/opt/data/ping-island/bin/ping_island_remote_runtime.py").exists():
+    os.environ.setdefault("PING_ISLAND_RUNTIME", "/opt/data/ping-island/bin/ping_island_remote_runtime.py")
+    os.environ.setdefault("PING_ISLAND_ROLE", "Praduck")
+    os.environ.setdefault("PING_ISLAND_REMOTE_HOST", "praduck")
+    os.environ.setdefault("PING_ISLAND_BRIDGE", "/opt/data/ping-island/bin/ping-island-bridge")
+    os.environ.setdefault("ISLAND_SOCKET_PATH", "/opt/data/ping-island/run/agent-hook.sock")
+    os.environ.setdefault("PING_ISLAND_SESSIONS_DIR", "/opt/data/sessions")
+elif Path("/home/joseph/.ping-island/bin/ping_island_remote_runtime.py").exists():
+    os.environ.setdefault("PING_ISLAND_RUNTIME", "/home/joseph/.ping-island/bin/ping_island_remote_runtime.py")
+    os.environ.setdefault("PING_ISLAND_ROLE", "Hermes")
+    os.environ.setdefault("PING_ISLAND_REMOTE_HOST", "hermes")
+    os.environ.setdefault("PING_ISLAND_BRIDGE", "/home/joseph/.ping-island/bin/ping-island-bridge")
+    os.environ.setdefault("ISLAND_SOCKET_PATH", "/home/joseph/.ping-island/run/agent-hook.sock")
+    os.environ.setdefault("PING_ISLAND_SESSIONS_DIR", "/home/joseph/.hermes/sessions")
+
+_candidates = []
+_env_path = os.environ.get("PING_ISLAND_RUNTIME")
+if _env_path:
+    _candidates.append(Path(_env_path))
+_candidates.extend([
+    Path.home() / ".ping-island/bin/ping_island_remote_runtime.py",
+    Path("/opt/data/ping-island/bin/ping_island_remote_runtime.py"),
+    Path("/home/joseph/.ping-island/bin/ping_island_remote_runtime.py"),
+])
+_runtime_path = next((path for path in _candidates if path.exists()), _candidates[0])
+_spec = importlib.util.spec_from_file_location("ping_island_remote_runtime", _runtime_path)
+_runtime = importlib.util.module_from_spec(_spec)
+assert _spec and _spec.loader
+_spec.loader.exec_module(_runtime)
+
+
+async def handle(event_type, context):
+    try:
+        _runtime.gateway_handle(event_type, context or {})
+    except Exception:
+        return None
+"""#
+
+    nonisolated private static let remoteHermesGatewayHookYAML = #"""
+name: ping-island-runtime
+description: Forward Hermes gateway lifecycle events to Ping Island
+events:
+  - session:start
+  - agent:start
+  - agent:step
+  - agent:end
+  - session:end
+  - session:reset
+"""#
+
     nonisolated static func remoteConfigurationPath(relativePath: String, homeDirectory: String) -> String {
         guard !relativePath.isEmpty else { return homeDirectory }
         return relativePath
@@ -1840,7 +2399,7 @@ final class RemoteConnectorManager: ObservableObject {
 }
 
 private extension Array where Element: Hashable {
-    func uniquedPreservingOrder() -> [Element] {
+    nonisolated func uniquedPreservingOrder() -> [Element] {
         var seen: Set<Element> = []
         return filter { seen.insert($0).inserted }
     }
@@ -2032,7 +2591,10 @@ private final class RemoteAttachConnector {
         self.stdinHandle = stdinPipe.fileHandleForWriting
         self.stdoutHandle = stdoutPipe.fileHandleForReading
         stdoutPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
-            self?.drainStdout(from: handle)
+            guard let connector = self else { return }
+            Task { @MainActor in
+                connector.drainStdout(from: handle)
+            }
         }
         process.terminationHandler = { [weak self] process in
             let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
