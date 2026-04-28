@@ -916,7 +916,26 @@ struct SessionState: Equatable, Identifiable, Sendable {
         if needsManualAttention {
             return false
         }
+        if shouldAutoArchiveInactiveRemoteHookSession {
+            return true
+        }
         return Date().timeIntervalSince(lastActivity) >= Self.autoArchiveDelay
+    }
+
+    /// Remote hook-only agents such as Hermes/Praduck/OpenClaw are message streams,
+    /// not long-lived local terminal panes. Once they report idle/ended and have no
+    /// outstanding decision, remove them from the primary notch immediately so the
+    /// closed island returns to rest when the remote message stops.
+    nonisolated var shouldAutoArchiveInactiveRemoteHookSession: Bool {
+        guard isRemoteSession else { return false }
+        guard clientInfo.prefersHookMessageAsLastMessageFallback else { return false }
+
+        switch phase {
+        case .idle, .ended:
+            return true
+        case .processing, .compacting, .waitingForInput, .waitingForApproval:
+            return false
+        }
     }
 
     /// Older background sessions collapse to a header-only presentation in compact surfaces.

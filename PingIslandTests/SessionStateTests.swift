@@ -383,6 +383,69 @@ final class SessionStateTests: XCTestCase {
         XCTAssertTrue(session.shouldShowArchiveActionInPrimaryUI)
     }
 
+    func testIdleRemoteHermesSessionAutoArchivesImmediately() {
+        let session = SessionState(
+            sessionId: "hermes-remote-idle",
+            cwd: "/opt/data/workspace",
+            clientInfo: SessionClientInfo(
+                kind: .custom,
+                profileID: "hermes",
+                name: "Hermes",
+                threadSource: "hermes-plugin",
+                transport: "ssh",
+                remoteHost: "praduck"
+            ),
+            ingress: .remoteBridge,
+            phase: .idle,
+            lastActivity: Date()
+        )
+
+        XCTAssertTrue(session.shouldAutoArchiveInactiveRemoteHookSession)
+        XCTAssertTrue(session.shouldAutoArchiveFromPrimaryUI)
+        XCTAssertTrue(session.shouldHideFromPrimaryUI)
+    }
+
+    func testActiveRemoteHermesSessionStaysVisible() {
+        let session = SessionState(
+            sessionId: "hermes-remote-active",
+            cwd: "/home/joseph",
+            clientInfo: SessionClientInfo(
+                kind: .custom,
+                profileID: "hermes",
+                name: "Hermes",
+                threadSource: "hermes-plugin",
+                transport: "discord",
+                remoteHost: "hermes"
+            ),
+            ingress: .remoteBridge,
+            phase: .processing,
+            lastActivity: Date()
+        )
+
+        XCTAssertFalse(session.shouldAutoArchiveInactiveRemoteHookSession)
+        XCTAssertFalse(session.shouldAutoArchiveFromPrimaryUI)
+        XCTAssertFalse(session.shouldHideFromPrimaryUI)
+    }
+
+    func testLocalIdleClaudeSessionDoesNotAutoArchiveImmediately() {
+        let session = SessionState(
+            sessionId: "local-claude-idle",
+            cwd: "/tmp/project",
+            clientInfo: SessionClientInfo(
+                kind: .claudeCode,
+                name: "Claude Code",
+                terminalBundleIdentifier: "com.mitchellh.ghostty",
+                terminalProgram: "ghostty"
+            ),
+            phase: .idle,
+            lastActivity: Date()
+        )
+
+        XCTAssertFalse(session.shouldAutoArchiveInactiveRemoteHookSession)
+        XCTAssertFalse(session.shouldAutoArchiveFromPrimaryUI)
+        XCTAssertFalse(session.shouldHideFromPrimaryUI)
+    }
+
     func testNativeRuntimeSessionExposesTerminateActionUntilEnded() {
         let activeSession = SessionState(
             sessionId: "native-active",
