@@ -6,7 +6,6 @@ actor TerminalAutomationPermissionCoordinator {
     static let shared = TerminalAutomationPermissionCoordinator()
 
     private var attemptedBundleIdentifiers: Set<String> = []
-    private var reportedDeniedBundleIdentifiers: Set<String> = []
 
     private init() {}
 
@@ -50,18 +49,7 @@ actor TerminalAutomationPermissionCoordinator {
             phase: "focus",
             sessionId: sessionId
         )
-        if status == noErr {
-            reportedDeniedBundleIdentifiers.remove(bundleIdentifier)
-            return true
-        }
-
-        await presentPermissionRecoveryIfNeeded(
-            bundleIdentifier: bundleIdentifier,
-            appName: runningApplication.localizedName ?? bundleIdentifier,
-            sessionId: sessionId,
-            status: status
-        )
-        return false
+        return status == noErr
     }
 
     static func scriptableTerminalBundleIdentifier(for clientInfo: SessionClientInfo) -> String? {
@@ -111,17 +99,14 @@ actor TerminalAutomationPermissionCoordinator {
 
         let status = await determinePermissionStatus(
             for: runningApplication,
-            askUserIfNeeded: false,
+            askUserIfNeeded: true,
             phase: "preflight",
             sessionId: sessionId
         )
 
-        if status == noErr {
-            reportedDeniedBundleIdentifiers.remove(bundleIdentifier)
-            return
+        if status != noErr {
+            attemptedBundleIdentifiers.remove(bundleIdentifier)
         }
-
-        attemptedBundleIdentifiers.remove(bundleIdentifier)
     }
 
     private func determinePermissionStatus(
@@ -134,38 +119,6 @@ actor TerminalAutomationPermissionCoordinator {
         await FocusDiagnosticsStore.shared.record(
             "AutomationPermission \(phase)-start session=\(sessionId ?? "nil") bundle=\(bundleIdentifier) pid=\(runningApplication.processIdentifier) prompt=\(askUserIfNeeded)"
         )
-
-        if askUserIfNeeded {
-            let requestStatus = await requestAutomationPermission(
-                for: runningApplication,
-                phase: phase,
-                sessionId: sessionId
-            )
-            guard requestStatus == noErr else {
-                await FocusDiagnosticsStore.shared.record(
-                    "AutomationPermission \(phase)-request-denied session=\(sessionId ?? "nil") bundle=\(bundleIdentifier) status=\(requestStatus)"
-                )
-                return requestStatus
-            }
-
-            let probeStatus = await runAuthorizationProbe(
-                bundleIdentifier: bundleIdentifier,
-                phase: phase,
-                sessionId: sessionId,
-                bringsAppForward: phase == "focus"
-            )
-            if probeStatus == noErr {
-                await FocusDiagnosticsStore.shared.record(
-                    "AutomationPermission \(phase)-probe-authorized session=\(sessionId ?? "nil") bundle=\(bundleIdentifier)"
-                )
-                return noErr
-            }
-
-            await FocusDiagnosticsStore.shared.record(
-                "AutomationPermission \(phase)-probe-denied session=\(sessionId ?? "nil") bundle=\(bundleIdentifier) probeStatus=\(probeStatus)"
-            )
-            return probeStatus
-        }
 
         guard let targetDescriptor = automationTargetDescriptor(for: runningApplication) else {
             await FocusDiagnosticsStore.shared.record(
@@ -191,77 +144,39 @@ actor TerminalAutomationPermissionCoordinator {
         await FocusDiagnosticsStore.shared.record(
             "AutomationPermission \(phase)-result session=\(sessionId ?? "nil") bundle=\(bundleIdentifier) pid=\(runningApplication.processIdentifier) status=\(status)"
         )
-        return status
+
+        guard askUserIfNeeded else {
+            return status
+        }
+
+        let probeStatus = await runAuthorizationProbe(
+            bundleIdentifier: bundleIdentifier,
+            phase: phase,
+            sessionId: sessionId
+        )
+        if probeStatus == noErr {
+            await FocusDiagnosticsStore.shared.record(
+                "AutomationPermission \(phase)-probe-authorized session=\(sessionId ?? "nil") bundle=\(bundleIdentifier)"
+            )
+            return noErr
+        }
+
+        await FocusDiagnosticsStore.shared.record(
+            "AutomationPermission \(phase)-probe-denied session=\(sessionId ?? "nil") bundle=\(bundleIdentifier) status=\(status) probeStatus=\(probeStatus)"
+        )
+        return probeStatus
     }
 
     private func automationTargetDescriptor(
         for runningApplication: NSRunningApplication
     ) -> NSAppleEventDescriptor? {
-        if let bundleIdentifier = runningApplication.bundleIdentifier?
-            .trimmingCharacters(in: .whitespacesAndNewlines),
-           !bundleIdentifier.isEmpty {
-            return NSAppleEventDescriptor(bundleIdentifier: bundleIdentifier)
-        }
-
-        return NSAppleEventDescriptor(processIdentifier: runningApplication.processIdentifier)
-    }
-
-    private func requestAutomationPermission(
-        for runningApplication: NSRunningApplication,
-        phase: String,
-        sessionId: String?
-    ) async -> OSStatus {
-        let bundleIdentifier = runningApplication.bundleIdentifier ?? "unknown"
-
-        guard let targetDescriptor = automationTargetDescriptor(for: runningApplication),
-              let address = targetDescriptor.aeDesc else {
-            await FocusDiagnosticsStore.shared.record(
-                "AutomationPermission \(phase)-request-skip-no-descriptor session=\(sessionId ?? "nil") bundle=\(bundleIdentifier) pid=\(runningApplication.processIdentifier)"
-            )
-            return OSStatus(procNotFound)
-        }
-
-        await FocusDiagnosticsStore.shared.record(
-            "AutomationPermission \(phase)-request-start session=\(sessionId ?? "nil") bundle=\(bundleIdentifier) pid=\(runningApplication.processIdentifier)"
-        )
-
-        return await MainActor.run {
-            let previousActivationPolicy = NSApp.activationPolicy()
-            if phase == "focus", previousActivationPolicy != .regular {
-                NSApp.setActivationPolicy(.regular)
-            }
-            if phase == "focus" {
-                NSApp.activate(ignoringOtherApps: true)
-            }
-            defer {
-                if phase == "focus", NSApp.activationPolicy() != previousActivationPolicy {
-                    NSApp.setActivationPolicy(previousActivationPolicy)
-                }
-            }
-
-            let status = AEDeterminePermissionToAutomateTarget(
-                address,
-                AEEventClass(kCoreEventClass),
-                AEEventID(kAEGetData),
-                true
-            )
-
-            Task {
-                let appBundleIdentifier = Bundle.main.bundleIdentifier ?? "unknown"
-                let appPath = Bundle.main.bundleURL.path
-                await FocusDiagnosticsStore.shared.record(
-                    "AutomationPermission \(phase)-request-result session=\(sessionId ?? "nil") bundle=\(bundleIdentifier) status=\(status) appBundle=\(appBundleIdentifier) appPath=\(appPath)"
-                )
-            }
-            return status
-        }
+        NSAppleEventDescriptor(processIdentifier: runningApplication.processIdentifier)
     }
 
     private func runAuthorizationProbe(
         bundleIdentifier: String,
         phase: String,
-        sessionId: String?,
-        bringsAppForward: Bool
+        sessionId: String?
     ) async -> OSStatus {
         let trimmedBundleIdentifier = bundleIdentifier.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedBundleIdentifier.isEmpty, trimmedBundleIdentifier != "unknown" else {
@@ -275,19 +190,6 @@ actor TerminalAutomationPermissionCoordinator {
         """
 
         return await MainActor.run {
-            let previousActivationPolicy = NSApp.activationPolicy()
-            if bringsAppForward {
-                if previousActivationPolicy != .regular {
-                    NSApp.setActivationPolicy(.regular)
-                }
-                NSApp.activate(ignoringOtherApps: true)
-            }
-            defer {
-                if bringsAppForward, NSApp.activationPolicy() != previousActivationPolicy {
-                    NSApp.setActivationPolicy(previousActivationPolicy)
-                }
-            }
-
             var errorInfo: NSDictionary?
             guard let script = NSAppleScript(source: source) else {
                 Task {
@@ -317,21 +219,6 @@ actor TerminalAutomationPermissionCoordinator {
             }
             return noErr
         }
-    }
-
-    private func presentPermissionRecoveryIfNeeded(
-        bundleIdentifier: String,
-        appName: String,
-        sessionId: String?,
-        status: OSStatus
-    ) async {
-        guard reportedDeniedBundleIdentifiers.insert(bundleIdentifier).inserted else {
-            return
-        }
-
-        await FocusDiagnosticsStore.shared.record(
-            "AutomationPermission denied-help session=\(sessionId ?? "nil") bundle=\(bundleIdentifier) status=\(status)"
-        )
     }
 
     private static func appleScriptStringLiteral(_ value: String) -> String {
