@@ -99,6 +99,7 @@ final class RemoteHookConfigurationTests: XCTestCase {
             "qwen-code-hooks",
             "openclaw-hooks",
             "qoder-hooks",
+            "qoder-cli-hooks",
             "qoderwork-hooks",
         ])
     }

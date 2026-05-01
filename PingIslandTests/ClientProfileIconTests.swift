@@ -12,6 +12,7 @@ final class ClientProfileIconTests: XCTestCase {
             "workbuddy-hooks": "WorkBuddyLogo",
             "cursor-hooks": "CursorLogo",
             "qoder-hooks": "QoderLogo",
+            "qoder-cli-hooks": "QoderLogo",
             "qoderwork-hooks": "QoderWorkLogo",
             "copilot-hooks": "CopilotLogo",
             "opencode-hooks": "OpenCodeLogo",
@@ -47,18 +48,21 @@ final class ClientProfileIconTests: XCTestCase {
     }
 
     func testQoderCLIHookProfileMatchesClaudeCodeHooks() throws {
-        let qoderProfile = try XCTUnwrap(ClientProfileRegistry.managedHookProfile(id: "qoder-hooks"))
-        let qoderEvents = Set(qoderProfile.events.map(\.name))
+        let qoderCLIProfile = try XCTUnwrap(ClientProfileRegistry.managedHookProfile(id: "qoder-cli-hooks"))
+        let qoderEvents = Set(qoderCLIProfile.events.map(\.name))
         let claudeProfile = try XCTUnwrap(ClientProfileRegistry.managedHookProfile(id: "claude-hooks"))
         let claudeEvents = Set(claudeProfile.events.map(\.name))
 
         XCTAssertEqual(qoderEvents, claudeEvents)
+        XCTAssertNil(
+            qoderCLIProfile.events.first { $0.name == "PreToolUse" }?.timeout
+        )
         XCTAssertEqual(
-            qoderProfile.events.first { $0.name == "PreToolUse" }?.timeout,
+            qoderCLIProfile.events.first { $0.name == "PermissionRequest" }?.timeout,
             86_400
         )
         XCTAssertEqual(
-            qoderProfile.bridgeExtraArguments,
+            qoderCLIProfile.bridgeExtraArguments,
             [
                 "--client-kind", "qoder-cli",
                 "--client-name", "Qoder CLI",
@@ -66,5 +70,24 @@ final class ClientProfileIconTests: XCTestCase {
                 "--client-originator", "Qoder"
             ]
         )
+    }
+
+    func testQoderIDEHookProfileKeepsSeparateImplementation() throws {
+        let qoderProfile = try XCTUnwrap(ClientProfileRegistry.managedHookProfile(id: "qoder-hooks"))
+        let qoderEvents = Set(qoderProfile.events.map(\.name))
+
+        XCTAssertTrue(qoderEvents.contains("PostToolUseFailure"))
+        XCTAssertFalse(qoderEvents.contains("SessionStart"))
+        XCTAssertNil(qoderProfile.events.first { $0.name == "PermissionRequest" }?.timeout)
+        XCTAssertEqual(qoderProfile.bridgeExtraArguments, ["--client-kind", "qoder"])
+    }
+
+    func testQoderWorkHookProfileKeepsNotifyOnlySemantics() throws {
+        let qoderWorkProfile = try XCTUnwrap(ClientProfileRegistry.managedHookProfile(id: "qoderwork-hooks"))
+
+        XCTAssertTrue(qoderWorkProfile.events.contains { $0.name == "PostToolUseFailure" })
+        XCTAssertFalse(qoderWorkProfile.events.contains { $0.name == "SessionStart" })
+        XCTAssertNil(qoderWorkProfile.events.first { $0.name == "PreToolUse" }?.timeout)
+        XCTAssertNil(qoderWorkProfile.events.first { $0.name == "PermissionRequest" }?.timeout)
     }
 }

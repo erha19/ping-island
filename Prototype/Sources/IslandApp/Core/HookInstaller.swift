@@ -272,11 +272,22 @@ struct HookInstaller {
     func installQoderAssets() throws {
         try installQoderCompatibleAssets(
             relativePath: ".qoder/settings.json",
+            clientKind: "qoder",
+            clientName: "Qoder",
+            clientOrigin: nil,
+            clientOriginator: "Qoder",
+            preToolUseTimeout: nil
+        )
+    }
+
+    func installQoderCLIAssets() throws {
+        try installQoderCompatibleAssets(
+            relativePath: ".qoder/settings.json",
             clientKind: "qoder-cli",
             clientName: "Qoder CLI",
             clientOrigin: "cli",
             clientOriginator: "Qoder",
-            preToolUseTimeout: 86_400
+            preToolUseTimeout: nil
         )
     }
 
@@ -287,7 +298,7 @@ struct HookInstaller {
             clientName: "QoderWork",
             clientOrigin: nil,
             clientOriginator: "QoderWork",
-            preToolUseTimeout: 86_400
+            preToolUseTimeout: nil
         )
     }
 
@@ -303,9 +314,10 @@ struct HookInstaller {
         let fileURL = homeDirectory.appending(path: relativePath)
         let current = try readJSON(fileURL) ?? [:]
         var updated = current
-        var hooks = removingIslandManagedHooks(from: current["hooks"] as? [String: Any] ?? [:])
+        var hooks = removingIslandManagedHooks(from: current["hooks"] as? [String: Any] ?? [:], clientKind: clientKind)
 
         let isQoderCLI = clientKind == "qoder-cli"
+        let permissionRequestTimeout = isQoderCLI ? 86_400 : nil
         let plainEvents = isQoderCLI
             ? ["UserPromptSubmit", "Stop", "SubagentStop", "SessionStart", "SessionEnd"]
             : ["UserPromptSubmit", "Stop"]
@@ -330,16 +342,18 @@ struct HookInstaller {
                 existing: hooks[event],
                 command: command,
                 matcher: nil,
-                preferredFirst: isQoderCLI
+                preferredFirst: isQoderCLI,
+                clientKind: clientKind
             )
         }
         for event in wildcardEvents {
             hooks[event] = installHookArray(
                 existing: hooks[event],
                 command: command,
-                timeout: event == "PermissionRequest" ? 86_400 : (event == "PreToolUse" ? preToolUseTimeout : nil),
+                timeout: event == "PermissionRequest" ? permissionRequestTimeout : (event == "PreToolUse" ? preToolUseTimeout : nil),
                 matcher: "*",
-                preferredFirst: isQoderCLI
+                preferredFirst: isQoderCLI,
+                clientKind: clientKind
             )
         }
         if !compactMatchers.isEmpty {
@@ -349,7 +363,8 @@ struct HookInstaller {
                     existing: entries,
                     command: command,
                     matcher: matcher,
-                    preferredFirst: isQoderCLI
+                    preferredFirst: isQoderCLI,
+                    clientKind: clientKind
                 )
             }
             hooks["PreCompact"] = entries
@@ -359,7 +374,7 @@ struct HookInstaller {
         try writeJSON(updated, to: fileURL)
     }
 
-    private func removingIslandManagedHooks(from hooks: [String: Any]) -> [String: Any] {
+    private func removingIslandManagedHooks(from hooks: [String: Any], clientKind: String? = nil) -> [String: Any] {
         var updated = hooks
         for (event, value) in hooks {
             guard var entries = value as? [[String: Any]] else { continue }
@@ -370,7 +385,7 @@ struct HookInstaller {
 
                 return hookCommands.contains { entry in
                     let existingCommand = entry["command"] as? String ?? ""
-                    return Self.isIslandManagedHookCommand(existingCommand)
+                    return Self.isIslandManagedHookCommand(existingCommand, clientKind: clientKind)
                 }
             }
 
@@ -580,7 +595,8 @@ struct HookInstaller {
         command: String,
         timeout: Int? = nil,
         matcher: String? = "*",
-        preferredFirst: Bool = false
+        preferredFirst: Bool = false,
+        clientKind: String? = nil
     ) -> [[String: Any]] {
         var hooks = (existing as? [[String: Any]] ?? []).filter { hook in
             guard let hookCommands = hook["hooks"] as? [[String: Any]] else {
@@ -589,7 +605,7 @@ struct HookInstaller {
 
             return !hookCommands.contains { entry in
                 let existingCommand = entry["command"] as? String ?? ""
-                return Self.isIslandManagedHookCommand(existingCommand)
+                return Self.isIslandManagedHookCommand(existingCommand, clientKind: clientKind)
             }
         }
 
@@ -679,10 +695,25 @@ struct HookInstaller {
         return hooks
     }
 
-    private static func isIslandManagedHookCommand(_ command: String) -> Bool {
+    private static func isIslandManagedHookCommand(_ command: String, clientKind: String? = nil) -> Bool {
         let normalized = command.lowercased()
-        return normalized.contains("/.ping-island/bin/ping-island-bridge")
+        let isManaged = normalized.contains("/.ping-island/bin/ping-island-bridge")
             || normalized.contains("/.ping-island/bin/island-bridge")
+        guard isManaged, let clientKind else {
+            return isManaged
+        }
+
+        return hookCommand(command, hasClientKind: clientKind)
+    }
+
+    private static func hookCommand(_ command: String, hasClientKind clientKind: String) -> Bool {
+        let escapedKind = NSRegularExpression.escapedPattern(for: clientKind)
+        let pattern = #"(^|\s)--client-kind\s+(?:'\#(escapedKind)'|"\#(escapedKind)"|\#(escapedKind))(?=\s|$)"#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
+            return false
+        }
+        let range = NSRange(command.startIndex..., in: command)
+        return regex.firstMatch(in: command, range: range) != nil
     }
 
     private static func hookCommandString(_ entry: [String: Any]) -> String? {

@@ -17,7 +17,7 @@ final class HookInstallerTemporarySettingsTests: XCTestCase {
     }
 
     func testCreateTemporaryQoderSettingsQuotesClientName() throws {
-        let settingsURL = try XCTUnwrap(HookInstaller.createTemporarySettingsFile(for: "qoder-hooks"))
+        let settingsURL = try XCTUnwrap(HookInstaller.createTemporarySettingsFile(for: "qoder-cli-hooks"))
         defer { HookInstaller.removeTemporarySettingsFile(at: settingsURL) }
 
         let data = try Data(contentsOf: settingsURL)

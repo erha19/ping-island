@@ -47,6 +47,17 @@ actor SessionLauncher {
             return true
         }
 
+        if shouldPrioritizeIDEChatSession(for: session),
+           await activateIDEChatSession(session) {
+            Self.logger.debug("Activated session \(session.sessionId, privacy: .public) via prioritized IDE chat session focus")
+            return true
+        }
+
+        if await activateTrackedTerminalSession(session) {
+            Self.logger.debug("Activated session \(session.sessionId, privacy: .public) via tracked terminal identifiers")
+            return true
+        }
+
         if !session.isInTmux,
            let tty = session.tty,
            await activateTerminal(
@@ -72,11 +83,6 @@ actor SessionLauncher {
             return true
         }
 
-        if await activateTrackedTerminalSession(session) {
-            Self.logger.debug("Activated session \(session.sessionId, privacy: .public) via tracked terminal identifiers")
-            return true
-        }
-
         if session.tty == nil,
            session.pid == nil,
            await activateIDEChatSession(session) {
@@ -94,15 +100,30 @@ actor SessionLauncher {
             return true
         }
 
-        if let terminalBundleIdentifier = session.clientInfo.terminalBundleIdentifier,
-           await activateApplication(
-               bundleIdentifier: terminalBundleIdentifier,
-               activateAllWindows: Self.shouldActivateAllWindowsForTerminalFallback(
-                   bundleIdentifier: terminalBundleIdentifier
-               )
-           ) {
-            Self.logger.debug("Activated session \(session.sessionId, privacy: .public) via terminal bundle \(terminalBundleIdentifier, privacy: .public)")
-            return true
+        if let terminalBundleIdentifier = session.clientInfo.terminalBundleIdentifier {
+            let canReportFallbackSuccess = Self.shouldUseProcessActivationForTerminalFallback(
+                bundleIdentifier: terminalBundleIdentifier
+            )
+            if await activateApplication(
+                   bundleIdentifier: terminalBundleIdentifier,
+                   activateAllWindows: Self.shouldActivateAllWindowsForTerminalFallback(
+                       bundleIdentifier: terminalBundleIdentifier
+                   )
+               ) {
+                guard canReportFallbackSuccess else {
+                    await FocusDiagnosticsStore.shared.record(
+                        "SessionLauncher terminal-bundle best-effort-activation session=\(session.sessionId) bundle=\(terminalBundleIdentifier)"
+                    )
+                    return false
+                }
+
+                Self.logger.debug("Activated session \(session.sessionId, privacy: .public) via terminal bundle \(terminalBundleIdentifier, privacy: .public)")
+                return true
+            }
+
+            await FocusDiagnosticsStore.shared.record(
+                "SessionLauncher terminal-bundle fallback-skipped session=\(session.sessionId) bundle=\(terminalBundleIdentifier)"
+            )
         }
 
         if allowsAppFallback,
@@ -274,6 +295,10 @@ actor SessionLauncher {
 
     private func allowsAppFallback(for session: SessionState) -> Bool {
         Self.allowsAppFallback(provider: session.provider, clientInfo: session.clientInfo)
+    }
+
+    private func shouldPrioritizeIDEChatSession(for session: SessionState) -> Bool {
+        session.clientInfo.isQoderFamily && session.clientInfo.isHostedInIDE
     }
 
     nonisolated static func allowsAppFallback(
@@ -735,6 +760,16 @@ actor SessionLauncher {
             }
         }
 
+        guard Self.shouldUseProcessActivationForTerminalFallback(
+            bundleIdentifier: clientInfo.terminalBundleIdentifier
+        ) else {
+            let didActivate = await activateApplication(processIdentifier: terminalPid, activateAllWindows: false)
+            await FocusDiagnosticsStore.shared.record(
+                "SessionLauncher \(source) fallback-process-best-effort session=\(sessionId) bundle=\(clientInfo.terminalBundleIdentifier ?? "nil") activated=\(didActivate)"
+            )
+            return false
+        }
+
         return await activateApplication(processIdentifier: terminalPid, activateAllWindows: false)
     }
 
@@ -753,6 +788,24 @@ actor SessionLauncher {
 
         return normalizedBundleIdentifier == "com.mitchellh.ghostty"
             || normalizedBundleIdentifier == "com.cmuxterm.app"
+    }
+
+    nonisolated static func shouldUseProcessActivationForTerminalFallback(
+        bundleIdentifier: String?
+    ) -> Bool {
+        guard let trimmedBundleIdentifier = bundleIdentifier?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+              !trimmedBundleIdentifier.isEmpty else {
+            return true
+        }
+
+        let normalizedBundleIdentifier = TerminalAppRegistry.normalizedHostBundleIdentifier(
+            for: trimmedBundleIdentifier
+        )
+        .lowercased()
+
+        return normalizedBundleIdentifier != "com.apple.terminal"
+            && normalizedBundleIdentifier != "com.googlecode.iterm2"
     }
 
     private func resolvedTerminalApplicationPID(

@@ -66,6 +66,41 @@ final class SessionMonitorAskUserQuestionTests: XCTestCase {
         XCTAssertEqual(answers?["先选一个主题"] as? String, "A 方案")
     }
 
+    func testUpdatedHookToolInputUsesClaudeAnswerShapeForQoderCLI() {
+        let rawJSON = """
+        {
+          "questions": [
+            {
+              "id": "task_intent",
+              "header": "Task",
+              "question": "Would you like me to help you with a specific coding task?",
+              "options": [
+                { "label": "Yes" },
+                { "label": "No" }
+              ],
+              "multiSelect": false
+            }
+          ]
+        }
+        """
+
+        let updated = SessionMonitor.updatedHookToolInput(
+            rawJSON: rawJSON,
+            answers: ["task_intent": ["Yes"]],
+            clientInfo: SessionClientInfo(
+                kind: .qoder,
+                profileID: "qoder-cli",
+                name: "Qoder CLI",
+                origin: "cli"
+            )
+        )
+
+        let answers = updated?["answers"] as? [String: Any]
+        XCTAssertEqual(answers?["Would you like me to help you with a specific coding task?"] as? String, "Yes")
+        XCTAssertNil(answers?["task_intent"])
+        XCTAssertNil(answers?["0"])
+    }
+
     func testUpdatedHookToolInputUsesQuestionIndexForQwenCode() {
         let rawJSON = """
         {

@@ -423,6 +423,8 @@ private enum BridgeDebugLogger {
             return "openclaw-hooks"
         case "qoder", "qoderwork":
             return "qoder-hooks"
+        case "qoder-cli":
+            return "qoder-cli-hooks"
         default:
             break
         }

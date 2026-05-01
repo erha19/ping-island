@@ -1440,7 +1440,9 @@ final class DetachedIslandWindowController: NSWindowController, NSWindowDelegate
         guard AppSettings.autoOpenCompletionPanel else { return false }
         guard session.phase == .ended else { return false }
         guard previousPhase != .ended else { return false }
-        guard previousPhase != .waitingForInput else { return false }
+        if previousPhase == .waitingForInput {
+            return SessionCompletionStateEvaluator.allowsEndedNotificationAfterWaitingForInput(session)
+        }
         return true
     }
 

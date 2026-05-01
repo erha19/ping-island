@@ -8,26 +8,12 @@ struct SessionQuestionForm: View {
     var onSecondaryAction: (() -> Void)? = nil
     var isEditable: Bool = true
 
+    @ObservedObject private var settings = AppSettings.shared
     @State private var answers: [String: [String]] = [:]
     @State private var otherAnswers: [String: String] = [:]
 
     private var displayQuestions: [SessionInterventionQuestion] {
         intervention.resolvedQuestions
-    }
-
-    nonisolated static func shouldUseScrollableQuestionList(
-        for questions: [SessionInterventionQuestion]
-    ) -> Bool {
-        if questions.count > 1 {
-            return true
-        }
-
-        return questions.contains { question in
-            let weightedOptions = question.options.reduce(0) { partial, option in
-                partial + (option.detail == nil ? 1 : 2)
-            }
-            return weightedOptions >= 3 || question.allowsOther || question.isSecret
-        }
     }
 
     nonisolated static func optionColumns(
@@ -49,8 +35,35 @@ struct SessionQuestionForm: View {
         }
     }
 
-    private var shouldUseScrollableQuestionList: Bool {
-        Self.shouldUseScrollableQuestionList(for: displayQuestions)
+    nonisolated static func questionListMaximumHeight(for maxPanelHeight: Double) -> CGFloat {
+        let minimumQuestionListHeight: CGFloat = 230
+        let reservedPanelChromeHeight: CGFloat = 250
+
+        return max(
+            minimumQuestionListHeight,
+            CGFloat(maxPanelHeight) - reservedPanelChromeHeight
+        )
+    }
+
+    nonisolated static func optionSequenceLabel(for index: Int) -> String {
+        guard index >= 0 else { return "" }
+
+        var remaining = index
+        var label = ""
+
+        repeat {
+            let scalarValue = 65 + remaining % 26
+            if let scalar = UnicodeScalar(scalarValue) {
+                label.insert(Character(scalar), at: label.startIndex)
+            }
+            remaining = remaining / 26 - 1
+        } while remaining >= 0
+
+        return label
+    }
+
+    private var questionListMaximumHeight: CGFloat {
+        Self.questionListMaximumHeight(for: settings.maxPanelHeight)
     }
 
     init(
@@ -73,18 +86,12 @@ struct SessionQuestionForm: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Group {
-                if shouldUseScrollableQuestionList {
-                    ScrollView(.vertical, showsIndicators: false) {
-                        questionsContent
-                            .padding(.vertical, 1)
-                    }
-                    .scrollBounceBehavior(.basedOnSize)
-                    .frame(maxHeight: 230)
-                } else {
-                    questionsContent
-                }
+            ScrollView(.vertical, showsIndicators: false) {
+                questionsContent
+                    .padding(.vertical, 1)
             }
+            .scrollBounceBehavior(.basedOnSize)
+            .frame(maxHeight: questionListMaximumHeight)
 
             HStack(spacing: 8) {
                 if let submitLabel {
@@ -156,12 +163,25 @@ struct SessionQuestionForm: View {
         if !question.options.isEmpty {
             let reservesDetailSpace = question.options.contains { optionDetail(for: $0) != nil }
             LazyVGrid(columns: Self.optionColumns(for: question), spacing: 8) {
-                ForEach(question.options) { option in
+                ForEach(Array(question.options.enumerated()), id: \.element.id) { optionIndex, option in
                     Button {
                         guard isEditable else { return }
                         toggle(option.title, for: question)
                     } label: {
                         HStack(alignment: .top, spacing: 8) {
+                            Text(Self.optionSequenceLabel(for: optionIndex))
+                                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                .foregroundColor(isSelected(option.title, for: question) ? TerminalColors.blue : .white.opacity(0.62))
+                                .frame(width: 20, height: 20)
+                                .background(
+                                    Circle()
+                                        .fill(
+                                            isSelected(option.title, for: question)
+                                                ? TerminalColors.blue.opacity(0.16)
+                                                : Color.white.opacity(0.06)
+                                        )
+                                )
+
                             if question.allowsMultiple {
                                 Image(systemName: isSelected(option.title, for: question) ? "checkmark.square.fill" : "square")
                                     .font(.system(size: 15, weight: .semibold))
@@ -199,7 +219,7 @@ struct SessionQuestionForm: View {
                         )
                         .overlay(
                             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .stroke(
+                                .strokeBorder(
                                     isSelected(option.title, for: question)
                                         ? TerminalColors.blue.opacity(0.72)
                                         : Color.white.opacity(0.14),
@@ -224,7 +244,7 @@ struct SessionQuestionForm: View {
                 .disabled(!isEditable)
                 .overlay(
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .stroke(Color.white.opacity(0.14), lineWidth: 1)
+                        .strokeBorder(Color.white.opacity(0.14), lineWidth: 1)
                 )
             }
         } else if question.isSecret {
@@ -237,7 +257,7 @@ struct SessionQuestionForm: View {
             .disabled(!isEditable)
             .overlay(
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(Color.white.opacity(0.14), lineWidth: 1)
+                    .strokeBorder(Color.white.opacity(0.14), lineWidth: 1)
             )
         } else {
             TextField("Answer", text: Binding(
@@ -249,7 +269,7 @@ struct SessionQuestionForm: View {
             .disabled(!isEditable)
             .overlay(
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(Color.white.opacity(0.14), lineWidth: 1)
+                    .strokeBorder(Color.white.opacity(0.14), lineWidth: 1)
             )
         }
     }

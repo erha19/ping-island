@@ -459,7 +459,7 @@ actor TerminalSessionFocuser {
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .replacingOccurrences(of: "/dev/", with: "")
         let usableTTY = normalizedTTY?.isEmpty == false ? normalizedTTY : nil
-        let usableSessionIdentifier = usableTTY == nil && normalizedSessionIdentifier?.isEmpty == false
+        let usableSessionIdentifier = normalizedSessionIdentifier?.isEmpty == false
             ? normalizedSessionIdentifier
             : nil
         let usableTitleHint: String?
@@ -560,16 +560,6 @@ actor TerminalSessionFocuser {
         selector: ITermScriptSelector,
         body: () -> [String]
     ) {
-        if let usableTTY = selector.tty {
-            let fullTTY = "/dev/\(usableTTY)"
-            lines.append(contentsOf: [
-                "set sessionTTY to tty of theSession",
-                "if sessionTTY is \"\(usableTTY)\" or sessionTTY is \"\(fullTTY)\" then"
-            ])
-            lines.append(contentsOf: body())
-            lines.append("end if")
-        }
-
         if let usableSessionIdentifier = selector.sessionIdentifier {
             lines.append(contentsOf: [
                 "try",
@@ -580,6 +570,16 @@ actor TerminalSessionFocuser {
                 "end if",
                 "end try"
             ])
+        }
+
+        if let usableTTY = selector.tty {
+            let fullTTY = "/dev/\(usableTTY)"
+            lines.append(contentsOf: [
+                "set sessionTTY to tty of theSession",
+                "if sessionTTY is \"\(usableTTY)\" or sessionTTY is \"\(fullTTY)\" then"
+            ])
+            lines.append(contentsOf: body())
+            lines.append("end if")
         }
     }
 

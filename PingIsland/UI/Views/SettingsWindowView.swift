@@ -323,7 +323,7 @@ final class SettingsPanelViewModel: ObservableObject {
     var visibleHookProfiles: [ManagedHookClientProfile] {
         let profiles = ClientProfileRegistry.managedHookProfiles.filter { profile in
             profile.alwaysVisibleInSettings
-                || (profile.id == "qoder-hooks" && qoderCLIHookRefreshStatus != nil)
+                || (profile.id == "qoder-cli-hooks" && qoderCLIHookRefreshStatus != nil)
                 || ClientAppLocator.isInstalled(bundleIdentifiers: profile.localAppBundleIdentifiers)
         }
 
@@ -488,13 +488,13 @@ final class SettingsPanelViewModel: ObservableObject {
     }
 
     func hookNotice(for profile: ManagedHookClientProfile) -> String? {
-        guard profile.id == "qoder-hooks",
+        guard profile.id == "qoder-cli-hooks",
               let status = qoderCLIHookRefreshStatus else {
             return nil
         }
 
         return AppLocalization.format(
-            "检测到 Qoder CLI %@；启动时会覆盖并刷新 Island 托管的 ~/.qoder/settings.json hooks，并保留其他 JSON 配置。",
+            "检测到 Qoder CLI %@；启动时会刷新 Island 托管的 Qoder CLI hooks，并保留同一 ~/.qoder/settings.json 内的 Qoder IDE hooks 与其他 JSON 配置。",
             status.version
         )
     }

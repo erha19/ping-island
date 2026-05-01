@@ -1091,6 +1091,22 @@ final class SessionStateTests: XCTestCase {
         XCTAssertEqual(normalized.interactionLabel(for: .claude), "Qoder")
     }
 
+    func testIDEHostedQoderCLIMetadataNormalizesBackToIDEIdentity() {
+        let normalized = SessionClientInfo(
+            kind: .qoder,
+            profileID: "qoder-cli",
+            name: "Qoder CLI",
+            origin: "cli",
+            originator: "Qoder",
+            terminalBundleIdentifier: "com.qoder.ide"
+        ).normalizedForClaudeRouting()
+
+        XCTAssertEqual(normalized.profileID, "qoder")
+        XCTAssertEqual(normalized.name, "Qoder")
+        XCTAssertEqual(normalized.badgeLabel(for: .claude), "Qoder")
+        XCTAssertEqual(normalized.interactionLabel(for: .claude), "Qoder")
+    }
+
     func testQoderWorkDoesNotResolveToIDEExtensionHost() {
         let normalized = SessionClientInfo(
             kind: .qoder,
@@ -1420,6 +1436,29 @@ final class SessionStateTests: XCTestCase {
         XCTAssertFalse(
             SessionLauncher.shouldActivateAllWindowsForTerminalFallback(
                 bundleIdentifier: "com.googlecode.iterm2"
+            )
+        )
+    }
+
+    func testTerminalFallbackDoesNotClaimExactITermOrTerminalActivation() {
+        XCTAssertFalse(
+            SessionLauncher.shouldUseProcessActivationForTerminalFallback(
+                bundleIdentifier: "com.googlecode.iterm2"
+            )
+        )
+        XCTAssertFalse(
+            SessionLauncher.shouldUseProcessActivationForTerminalFallback(
+                bundleIdentifier: "com.apple.Terminal"
+            )
+        )
+        XCTAssertTrue(
+            SessionLauncher.shouldUseProcessActivationForTerminalFallback(
+                bundleIdentifier: "com.mitchellh.ghostty"
+            )
+        )
+        XCTAssertTrue(
+            SessionLauncher.shouldUseProcessActivationForTerminalFallback(
+                bundleIdentifier: nil
             )
         )
     }

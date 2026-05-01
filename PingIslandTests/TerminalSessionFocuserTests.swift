@@ -2,7 +2,7 @@ import XCTest
 @testable import Ping_Island
 
 final class TerminalSessionFocuserTests: XCTestCase {
-    func testITermSelectionScriptPrefersTTYOverSessionIdentifier() {
+    func testITermSelectionScriptUsesSessionIdentifierAlongsideTTY() {
         let lines = TerminalSessionFocuser.iTermSelectionScriptLinesForTesting(
             tty: "ttys194",
             sessionIdentifier: "w6t0p0:AF9E91C7-A845-4A30-8A18-54C51B61B1B4"
@@ -11,7 +11,11 @@ final class TerminalSessionFocuserTests: XCTestCase {
 
         XCTAssertTrue(script.contains("set sessionTTY to tty of theSession"))
         XCTAssertTrue(script.contains("ttys194"))
-        XCTAssertFalse(script.contains("AF9E91C7-A845-4A30-8A18-54C51B61B1B4"))
+        XCTAssertTrue(script.contains("AF9E91C7-A845-4A30-8A18-54C51B61B1B4"))
+        XCTAssertLessThan(
+            script.range(of: "AF9E91C7-A845-4A30-8A18-54C51B61B1B4")!.lowerBound,
+            script.range(of: "set sessionTTY to tty of theSession")!.lowerBound
+        )
     }
 
     func testITermSelectionScriptFallsBackToSessionIdentifierWhenTTYMissing() {

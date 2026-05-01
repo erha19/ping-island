@@ -103,7 +103,7 @@ Ping Island focuses on the moments that actually interrupt coding flow, then kee
 
 Ping Island also ships VS Code-compatible focus extensions for VS Code, Cursor, CodeBuddy, WorkBuddy, and Qoder. `QoderWork` is hook-only today and does not participate in the IDE extension path.
 
-Qoder CLI uses the Claude Code-compatible hooks path through `~/.qoder/settings.json`, so Ping Island installs the same core lifecycle coverage there while preserving Qoder branding and terminal-vs-IDE routing. On launch, Ping Island checks `qodercli -v`; when the local CLI is newer than 0.2.5, it refreshes only the Ping Island-managed hook entries and leaves unrelated JSON settings intact. `QoderWork` stays on its separate `~/.qoderwork/settings.json` integration.
+Qoder IDE and Qoder CLI both store hooks in `~/.qoder/settings.json`, but Ping Island treats them as separate managed integrations because their hook behavior is not identical. On launch, Ping Island checks `qodercli -v`; when the local CLI is newer than 0.2.5, it refreshes only the Qoder CLI managed entries while preserving Qoder IDE hooks and unrelated JSON settings. New Qoder CLI follows Claude Code-compatible blocking hooks and response payloads, while Qoder IDE and `QoderWork` stay notify-only so Ping Island does not submit answers or approvals back into those clients.
 
 Hermes Agent is integrated through a generated plugin directory at `~/.hermes/plugins/ping_island/`. Hermes' gateway hook directories under `~/.hermes/hooks/` do not run in the CLI, so Ping Island uses the official `ctx.register_hook()` plugin surface to observe prompt submission, tool activity, model replies, and session end events.
 

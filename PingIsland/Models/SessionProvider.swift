@@ -292,7 +292,8 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
         let normalizedProfileID = profileID?
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
-        if normalizedProfileID == "qoderwork"
+        if normalizedProfileID == "qoder"
+            || normalizedProfileID == "qoderwork"
             || normalizedProfileID == "codebuddy"
             || normalizedProfileID == "workbuddy" {
             return true
@@ -302,7 +303,7 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
         switch normalizedHostBundleIdentifier {
-        case "com.qoder.work", "com.tencent.codebuddy", "com.codebuddy.app", "com.workbuddy.workbuddy":
+        case "com.qoder.ide", "com.qoder.work", "com.tencent.codebuddy", "com.codebuddy.app", "com.workbuddy.workbuddy":
             return true
         default:
             return false
@@ -504,30 +505,33 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
             (hostBundleIdentifier.map { TerminalAppRegistry.isTerminalBundle($0) } ?? false)
             && !isIDEBundle
             && !isQoderWorkHosted
+        let hasQoderIDEHostEvidence =
+            hostBundleIdentifier == "com.qoder.ide"
+            || normalized.terminalBundleIdentifier?.lowercased() == "com.qoder.ide"
+            || normalized.bundleIdentifier?.lowercased() == "com.qoder.ide"
+            || normalized.threadSource?.lowercased().contains("ide") == true
         let isQoderIDEHosted =
-            !isExplicitQoderCLI
-            && (
-                hostBundleIdentifier == "com.qoder.ide"
-                || (
-                    normalized.ideHostProfile?.id == "qoder-extension"
-                        && !isQoderWorkHosted
-                )
-                || normalized.profileID == "qoder"
-                    && (
-                        normalized.terminalBundleIdentifier?.lowercased() == "com.qoder.ide"
-                            || normalized.bundleIdentifier?.lowercased() == "com.qoder.ide"
-                    )
+            hostBundleIdentifier == "com.qoder.ide"
+            || (
+                normalized.ideHostProfile?.id == "qoder-extension"
+                    && !isQoderWorkHosted
+                    && hasQoderIDEHostEvidence
             )
+            || normalized.profileID == "qoder"
+                && (
+                    normalized.terminalBundleIdentifier?.lowercased() == "com.qoder.ide"
+                        || normalized.bundleIdentifier?.lowercased() == "com.qoder.ide"
+                )
 
-        if isTerminalHosted {
-            normalized.profileID = "qoder-cli"
-            normalized.name = "Qoder CLI"
-        } else if isQoderWorkHosted {
+        if isQoderWorkHosted {
             normalized.profileID = "qoderwork"
             normalized.name = "QoderWork"
         } else if isQoderIDEHosted {
             normalized.profileID = "qoder"
             normalized.name = "Qoder"
+        } else if isTerminalHosted {
+            normalized.profileID = "qoder-cli"
+            normalized.name = "Qoder CLI"
         } else if isExplicitQoderCLI {
             normalized.profileID = "qoder-cli"
             normalized.name = "Qoder CLI"

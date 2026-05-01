@@ -704,6 +704,69 @@ final class DetachedIslandWindowControllerTests: XCTestCase {
         wait(for: [bubblePresented], timeout: 1.0)
     }
 
+    func testQoderCLIEndedSessionAutoOpensCompletionBubbleAfterWaitingForInput() {
+        let originalAutoOpenCompletionPanel = AppSettings.autoOpenCompletionPanel
+        AppSettings.autoOpenCompletionPanel = true
+        defer { AppSettings.autoOpenCompletionPanel = originalAutoOpenCompletionPanel }
+
+        let qoderCLIClientInfo = makeQoderCLIClientInfo()
+        let viewModel = makeViewModel()
+        let sessionMonitor = makeSessionMonitor()
+        sessionMonitor.instances = [
+            makeSession(
+                id: "qoder-cli",
+                phase: .waitingForInput,
+                clientInfo: qoderCLIClientInfo
+            )
+        ]
+
+        let controller = DetachedIslandWindowController(
+            viewModel: viewModel,
+            sessionMonitor: sessionMonitor,
+            onClose: {}
+        )
+        defer { controller.dismiss() }
+
+        controller.present(atPetAnchor: CGPoint(x: 1200, y: 220))
+        controller.applySessionSnapshotForTesting([
+            makeSession(
+                id: "qoder-cli",
+                phase: .ended,
+                clientInfo: qoderCLIClientInfo,
+                conversationInfo: ConversationInfo(
+                    summary: nil,
+                    lastMessage: "Qoder finished",
+                    lastMessageRole: "assistant",
+                    lastToolName: nil,
+                    firstUserMessage: "Do it",
+                    lastUserMessageDate: Date()
+                )
+            )
+        ])
+
+        let bubblePresented = expectation(description: "qoder cli ended bubble auto-opens")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            XCTAssertEqual(controller.renderedBubbleStateForTesting, .hoverPreview)
+            XCTAssertTrue(controller.isBubbleVisibleForTesting)
+
+            guard let notification = controller.currentActiveCompletionNotificationForTesting else {
+                XCTFail("Expected active completion notification")
+                bubblePresented.fulfill()
+                return
+            }
+
+            XCTAssertEqual(notification.session.stableId, "qoder-cli")
+            XCTAssertEqual(notification.kind, .ended)
+            XCTAssertEqual(
+                controller.currentExpandedRoute,
+                .completionNotification(notification)
+            )
+            bubblePresented.fulfill()
+        }
+
+        wait(for: [bubblePresented], timeout: 1.0)
+    }
+
     func testCompletionBubbleAutoDismissesEvenWhileHoveredInFloatingMode() {
         let viewModel = makeViewModel()
         let sessionMonitor = makeSessionMonitor()
@@ -1137,6 +1200,7 @@ final class DetachedIslandWindowControllerTests: XCTestCase {
         id: String,
         phase: SessionPhase,
         intervention: SessionIntervention? = nil,
+        clientInfo: SessionClientInfo? = nil,
         chatItems: [ChatHistoryItem] = [],
         conversationInfo: ConversationInfo = ConversationInfo(
             summary: nil,
@@ -1150,6 +1214,7 @@ final class DetachedIslandWindowControllerTests: XCTestCase {
         SessionState(
             sessionId: id,
             cwd: "/tmp/\(id)",
+            clientInfo: clientInfo,
             intervention: intervention,
             phase: phase,
             chatItems: chatItems,
@@ -1173,6 +1238,15 @@ final class DetachedIslandWindowControllerTests: XCTestCase {
                 firstUserMessage: "Do it",
                 lastUserMessageDate: Date()
             )
+        )
+    }
+
+    private func makeQoderCLIClientInfo() -> SessionClientInfo {
+        SessionClientInfo(
+            kind: .qoder,
+            profileID: "qoder-cli",
+            name: "Qoder CLI",
+            origin: "cli"
         )
     }
 

@@ -54,16 +54,43 @@ final class ClaudeAskUserQuestionSessionTests: XCTestCase {
         await store.process(.sessionArchived(sessionId: sessionId))
     }
 
-    func testQoderWorkPermissionRequestIsNotIgnoredAsClaudeDuplicate() async {
+    func testQoderWorkPermissionRequestStaysNotifyOnly() async {
         let sessionId = "qoderwork-permission-\(UUID().uuidString)"
         let store = SessionStore.shared
 
+        await store.process(.hookReceived(makeQoderPromptSubmitEvent(
+            sessionId: sessionId,
+            profileID: "qoderwork",
+            name: "QoderWork",
+            bundleIdentifier: "com.qoder.work"
+        )))
         await store.process(.hookReceived(makeQoderWorkPermissionRequest(sessionId: sessionId)))
 
         let session = await store.session(for: sessionId)
-        XCTAssertEqual(session?.intervention?.kind, .question)
-        XCTAssertEqual(session?.phase, .waitingForInput)
+        XCTAssertNil(session?.intervention)
+        XCTAssertEqual(session?.phase, .processing)
         XCTAssertFalse(session?.needsApprovalResponse ?? true)
+
+        await store.process(.sessionArchived(sessionId: sessionId))
+    }
+
+    func testQoderIDEPermissionRequestQuestionDoesNotCreateApproval() async {
+        let sessionId = "qoderide-permission-\(UUID().uuidString)"
+        let store = SessionStore.shared
+
+        await store.process(.hookReceived(makeQoderPromptSubmitEvent(
+            sessionId: sessionId,
+            profileID: "qoder",
+            name: "Qoder",
+            bundleIdentifier: "com.qoder.ide"
+        )))
+        await store.process(.hookReceived(makeQoderIDEPermissionRequest(sessionId: sessionId)))
+
+        let session = await store.session(for: sessionId)
+        XCTAssertNil(session?.intervention)
+        XCTAssertNil(session?.activePermission)
+        XCTAssertFalse(session?.needsApprovalResponse ?? true)
+        XCTAssertEqual(session?.phase, .processing)
 
         await store.process(.sessionArchived(sessionId: sessionId))
     }
@@ -308,6 +335,41 @@ final class ClaudeAskUserQuestionSessionTests: XCTestCase {
         )
     }
 
+    private func makeQoderIDEPermissionRequest(sessionId: String) -> HookEvent {
+        HookEvent(
+            sessionId: sessionId,
+            cwd: "/tmp/project",
+            event: "PermissionRequest",
+            status: "waiting_for_approval",
+            provider: .claude,
+            clientInfo: SessionClientInfo(
+                kind: .qoder,
+                profileID: "qoder",
+                name: "Qoder",
+                bundleIdentifier: "com.qoder.ide"
+            ),
+            pid: nil,
+            tty: nil,
+            tool: "ask_user_question",
+            toolInput: [
+                "questions": AnyCodable([
+                    [
+                        "id": "topic",
+                        "header": "主题",
+                        "question": "先选一个主题",
+                        "options": [
+                            ["label": "A 方案"],
+                            ["label": "B 方案"]
+                        ]
+                    ]
+                ])
+            ],
+            toolUseId: nil,
+            notificationType: nil,
+            message: nil
+        )
+    }
+
     private func makeQoderCLIQuestionEvent(sessionId: String) -> HookEvent {
         HookEvent(
             sessionId: sessionId,
@@ -425,6 +487,34 @@ final class ClaudeAskUserQuestionSessionTests: XCTestCase {
             notificationType: nil,
             message: "使用工具问我一个问题",
             ingress: .remoteBridge
+        )
+    }
+
+    private func makeQoderPromptSubmitEvent(
+        sessionId: String,
+        profileID: String,
+        name: String,
+        bundleIdentifier: String
+    ) -> HookEvent {
+        HookEvent(
+            sessionId: sessionId,
+            cwd: "/tmp/project",
+            event: "UserPromptSubmit",
+            status: "processing",
+            provider: .claude,
+            clientInfo: SessionClientInfo(
+                kind: .qoder,
+                profileID: profileID,
+                name: name,
+                bundleIdentifier: bundleIdentifier
+            ),
+            pid: nil,
+            tty: nil,
+            tool: nil,
+            toolInput: nil,
+            toolUseId: nil,
+            notificationType: nil,
+            message: "使用工具问我一个问题"
         )
     }
 }

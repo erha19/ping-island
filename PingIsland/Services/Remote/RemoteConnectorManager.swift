@@ -1301,6 +1301,7 @@ final class RemoteConnectorManager: ObservableObject {
             "qwen-code-hooks",
             "openclaw-hooks",
             "qoder-hooks",
+            "qoder-cli-hooks",
             "qoderwork-hooks"
         ]
         return ClientProfileRegistry.managedHookProfiles.filter { profile in

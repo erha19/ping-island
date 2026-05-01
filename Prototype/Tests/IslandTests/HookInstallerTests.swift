@@ -174,6 +174,7 @@ func installerDeduplicatesManagedHooksButKeepsUnrelatedHooks() throws {
     try installer.installClaudeAssets()
     try installer.installCodexAssets()
     try installer.installQoderAssets()
+    try installer.installQoderCLIAssets()
     try installer.installQoderWorkAssets()
     try installer.installWorkBuddyAssets()
 
@@ -210,7 +211,8 @@ func installerDeduplicatesManagedHooksButKeepsUnrelatedHooks() throws {
     let qoderPostToolUseFailureCommands = postToolUseFailure.compactMap { hook in
         ((hook["hooks"] as? [[String: Any]])?.first?["command"] as? String)
     }
-    #expect(qoderPostToolUseFailureCommands == ["/usr/bin/printf qoder-keep"])
+    #expect(qoderPostToolUseFailureCommands.contains("/usr/bin/printf qoder-keep"))
+    #expect(qoderPostToolUseFailureCommands.contains { $0.contains("/.ping-island/bin/ping-island-bridge --source claude --client-kind qoder --client-name Qoder --client-originator Qoder") })
     #expect(qoderHooks["UserPromptSubmit"] != nil)
     #expect(qoderHooks["PermissionRequest"] != nil)
     #expect(qoderHooks["Notification"] != nil)
@@ -223,12 +225,15 @@ func installerDeduplicatesManagedHooksButKeepsUnrelatedHooks() throws {
     let qoderCommands = qoderPreToolUse.compactMap { hook in
         ((hook["hooks"] as? [[String: Any]])?.first?["command"] as? String)
     }
+    let qoderIDECommand = "/.ping-island/bin/ping-island-bridge --source claude --client-kind qoder --client-name Qoder --client-originator Qoder"
     let qoderCLICommand = "/.ping-island/bin/ping-island-bridge --source claude --client-kind qoder-cli --client-name 'Qoder CLI' --client-origin cli --client-originator Qoder"
     #expect(qoderCommands.first?.contains(qoderCLICommand) == true)
+    #expect(qoderCommands.contains { $0.contains(qoderIDECommand) })
+    #expect(qoderCommands.filter { $0.contains(qoderIDECommand) }.count == 1)
     #expect(qoderCommands.filter { $0.contains(qoderCLICommand) }.count == 1)
     let qoderManagedPreToolUse = try #require(qoderPreToolUse.first)
     let qoderManagedPreToolUseHook = try #require((qoderManagedPreToolUse["hooks"] as? [[String: Any]])?.first)
-    #expect(qoderManagedPreToolUseHook["timeout"] as? Int == 86_400)
+    #expect(qoderManagedPreToolUseHook["timeout"] == nil)
 
     let qoderWorkData = try Data(contentsOf: qoderWorkSettingsURL)
     let qoderWorkJSON = try #require(JSONSerialization.jsonObject(with: qoderWorkData) as? [String: Any])
@@ -252,7 +257,7 @@ func installerDeduplicatesManagedHooksButKeepsUnrelatedHooks() throws {
         }
     )
     let qoderWorkManagedPreToolUseHook = try #require((qoderWorkManagedPreToolUse["hooks"] as? [[String: Any]])?.first)
-    #expect(qoderWorkManagedPreToolUseHook["timeout"] as? Int == 86_400)
+    #expect(qoderWorkManagedPreToolUseHook["timeout"] == nil)
 
     let workBuddyData = try Data(contentsOf: workBuddySettingsURL)
     let workBuddyJSON = try #require(JSONSerialization.jsonObject(with: workBuddyData) as? [String: Any])

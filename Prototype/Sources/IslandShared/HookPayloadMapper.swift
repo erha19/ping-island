@@ -90,6 +90,13 @@ public enum HookPayloadMapper {
                 {"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"deny","message":"Denied from Island"}}}
                 """#
             case .answer(let answers):
+                if clientKind == "qoder-cli" {
+                    return qoderCLIAnswerPayload(
+                        response: response,
+                        eventType: eventType,
+                        answers: answers
+                    )
+                }
                 if clientKind == "qoderwork" {
                     return qoderWorkAnswerPayload(
                         response: response,
@@ -627,6 +634,10 @@ public enum HookPayloadMapper {
             ) else {
                 return nil
             }
+            if clientKind == "qoder",
+               isQoderQuestionToolEvent(eventType: eventType, payload: payload) {
+                return nil
+            }
             let options = questions.flatMap { question -> [InterventionOption] in
                 let baseID = (question["id"] as? String) ?? UUID().uuidString
                 let objectEntries = question["options"] as? [[String: Any]] ?? []
@@ -950,13 +961,6 @@ public enum HookPayloadMapper {
     }
 
     private static func normalizedClientKind(from metadata: [String: String]) -> String? {
-        if let explicitClientKind = metadata["client_kind"]?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased(),
-           !explicitClientKind.isEmpty {
-            return explicitClientKind
-        }
-
         let bundleIdentifier = metadata["client_bundle_id"]?
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
@@ -968,6 +972,22 @@ public enum HookPayloadMapper {
             return "qoderwork"
         case "com.qoder.ide":
             return "qoder"
+        default:
+            break
+        }
+
+        if let explicitClientKind = metadata["client_kind"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased(),
+           !explicitClientKind.isEmpty {
+            if explicitClientKind == "qoder",
+               metadataLooksLikeQoderCLI(metadata) {
+                return "qoder-cli"
+            }
+            return explicitClientKind
+        }
+
+        switch bundleIdentifier {
         case "com.tencent.codebuddy", "com.codebuddy.app":
             return "codebuddy"
         case "com.workbuddy.workbuddy":
@@ -983,6 +1003,9 @@ public enum HookPayloadMapper {
                 .trimmingCharacters(in: .whitespacesAndNewlines)
                 .lowercased()
         if let nameHint {
+            if nameHint.contains("qoder cli") || nameHint.contains("qoder-cli") {
+                return "qoder-cli"
+            }
             if nameHint.contains("qoderwork") || nameHint.contains("qoder work") {
                 return "qoderwork"
             }
@@ -998,6 +1021,37 @@ public enum HookPayloadMapper {
         }
 
         return nil
+    }
+
+    private static func metadataLooksLikeQoderCLI(_ metadata: [String: String]) -> Bool {
+        let normalizedOrigin = metadata["client_origin"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        let normalizedBundleIdentifier = (
+            metadata["client_bundle_id"]
+                ?? metadata["terminal_bundle_id"]
+        )?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        if normalizedBundleIdentifier == "com.qoder.ide"
+            || normalizedBundleIdentifier == "com.qoder.work" {
+            return false
+        }
+
+        let nameHints = [
+            metadata["client_name"],
+            metadata["client_originator"],
+            metadata["client"]
+        ].compactMap {
+            $0?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        }
+
+        if nameHints.contains(where: { $0.contains("qoder cli") || $0.contains("qoder-cli") }) {
+            return true
+        }
+
+        return normalizedOrigin == "cli"
+            && nameHints.contains(where: { $0 == "qoder" || $0.contains("qoder ") })
     }
 
     private static func isCodeBuddyFamilyHookClient(_ clientKind: String?) -> Bool {
@@ -1242,6 +1296,34 @@ public enum HookPayloadMapper {
                 payload["modifiedInput"] = updatedInput.mapValues(\.foundationObject)
             }
         }
+
+        guard JSONSerialization.isValidJSONObject(payload),
+              let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]),
+              let string = String(data: data, encoding: .utf8) else {
+            return "{}"
+        }
+
+        return string
+    }
+
+    private static func qoderCLIAnswerPayload(
+        response: BridgeResponse,
+        eventType: String,
+        answers: [String: String]
+    ) -> String {
+        let updatedInput = response.updatedInput?.mapValues(\.foundationObject)
+            ?? ["answers": answers]
+        let payload: [String: Any] = [
+            "hookSpecificOutput": [
+                "hookEventName": eventType,
+                "permissionDecision": "allow",
+                "decision": [
+                    "behavior": "allow",
+                    "updatedInput": updatedInput
+                ],
+                "updatedInput": updatedInput
+            ]
+        ]
 
         guard JSONSerialization.isValidJSONObject(payload),
               let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]),

@@ -580,12 +580,28 @@ private extension BridgeEnvelope {
             metadata["source_process_name"],
             metadata["process_name"]
         )
+        let hostBundleIdentifier = (explicitBundleID ?? terminalBundleID)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        let effectiveExplicitKind: String?
+        let effectiveExplicitName: String?
+        switch hostBundleIdentifier {
+        case "com.qoder.ide":
+            effectiveExplicitKind = "qoder"
+            effectiveExplicitName = "Qoder"
+        case "com.qoder.work":
+            effectiveExplicitKind = "qoderwork"
+            effectiveExplicitName = "QoderWork"
+        default:
+            effectiveExplicitKind = explicitKind
+            effectiveExplicitName = explicitName
+        }
         let hasExplicitNonTerminalBundle = explicitBundleID.map { !TerminalAppRegistry.isTerminalBundle($0) } ?? false
         let providerKind = provider.sessionProvider
         let matchedProfile = ClientProfileRegistry.matchRuntimeProfile(
             provider: providerKind,
-            explicitKind: explicitKind,
-            explicitName: explicitName,
+            explicitKind: effectiveExplicitKind,
+            explicitName: effectiveExplicitName,
             explicitBundleIdentifier: explicitBundleID,
             terminalBundleIdentifier: terminalBundleID,
             origin: explicitOrigin,
@@ -644,8 +660,8 @@ private extension BridgeEnvelope {
         }
 
         let resolvedName: String?
-        if let explicitName {
-            resolvedName = explicitName
+        if let effectiveExplicitName {
+            resolvedName = effectiveExplicitName
         } else {
             resolvedName = resolvedProfile?.displayName
                 ?? (kind == .claudeCode ? "Claude Code" : nil)

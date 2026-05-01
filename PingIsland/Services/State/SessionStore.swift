@@ -3408,13 +3408,11 @@ actor SessionStore {
             return false
         }
 
-        let profileID = event.clientInfo.profileID?.lowercased()
-        let bundleIdentifier = event.clientInfo.bundleIdentifier?.lowercased()
-        if profileID == "qoder"
-            || profileID == "qoderwork"
+        let normalizedClientInfo = event.clientInfo.normalizedForClaudeRouting()
+        let profileID = normalizedClientInfo.profileID?.lowercased()
+        if profileID == "qoder-cli"
             || profileID == "qwen-code"
-            || bundleIdentifier == "com.qoder.ide"
-            || bundleIdentifier == "com.qoder.work" {
+            || normalizedClientInfo.isQwenCodeClient {
             return false
         }
 
@@ -3422,6 +3420,23 @@ actor SessionStore {
             .lowercased()
             .replacingOccurrences(of: "_", with: "")
             .replacingOccurrences(of: "-", with: "")
+        let isQuestionTool = normalizedTool == "askuserquestion"
+            || normalizedTool == "askfollowupquestion"
+        guard isQuestionTool, event.toolInput?["questions"] != nil else {
+            return false
+        }
+
+        let bundleIdentifier = (
+            normalizedClientInfo.terminalBundleIdentifier
+                ?? normalizedClientInfo.bundleIdentifier
+        )?.lowercased()
+        if profileID == "qoder"
+            || profileID == "qoderwork"
+            || bundleIdentifier == "com.qoder.ide"
+            || bundleIdentifier == "com.qoder.work" {
+            return true
+        }
+
         return normalizedTool == "askuserquestion"
     }
 

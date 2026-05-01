@@ -124,6 +124,12 @@ enum SessionCompletionStateEvaluator {
         return hasCompletedAssistantReply(for: session)
     }
 
+    static func allowsEndedNotificationAfterWaitingForInput(_ session: SessionState) -> Bool {
+        guard session.phase == .ended else { return false }
+        guard session.intervention == nil else { return false }
+        return session.clientInfo.normalizedForClaudeRouting().profileID == "qoder-cli"
+    }
+
     /// Treat tool-only or commentary-only updates as in-progress. A completion notification
     /// should only fire once the session has an actual assistant reply ready for the user.
     static func hasCompletedAssistantReply(for session: SessionState) -> Bool {

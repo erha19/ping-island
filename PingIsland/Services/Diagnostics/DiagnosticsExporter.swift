@@ -286,6 +286,16 @@ actor DiagnosticsExporter {
 
         do {
             try copyDirectoryContentsIfPresent(
+                from: preferredQoderCLIHookDebugDirectory(),
+                toRelativeDirectory: "debug/qoder-cli-hooks",
+                under: exportRoot
+            )
+        } catch {
+            warnings.append("Failed to copy Qoder CLI hook debug logs: \(error.localizedDescription)")
+        }
+
+        do {
+            try copyDirectoryContentsIfPresent(
                 from: preferredHermesHookDebugDirectory(),
                 toRelativeDirectory: "debug/hermes-hooks",
                 under: exportRoot
@@ -505,6 +515,10 @@ actor DiagnosticsExporter {
 
     private func preferredQoderHookDebugDirectory() -> URL {
         fileManager.homeDirectoryForCurrentUser.appendingPathComponent(".ping-island-debug/qoder-hooks", isDirectory: true)
+    }
+
+    private func preferredQoderCLIHookDebugDirectory() -> URL {
+        fileManager.homeDirectoryForCurrentUser.appendingPathComponent(".ping-island-debug/qoder-cli-hooks", isDirectory: true)
     }
 
     private func preferredHermesHookDebugDirectory() -> URL {

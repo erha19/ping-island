@@ -315,6 +315,48 @@ final class QoderWorkHookEventTimingTests: XCTestCase {
         XCTAssertNil(SessionMonitor.defaultQoderAutoAnswer(for: event))
     }
 
+    func testQoderCLIWithGenericQoderProfileStillRequiresResponse() {
+        let event = HookEvent(
+            sessionId: "qoder-cli-session",
+            cwd: "/tmp/project",
+            event: "PreToolUse",
+            status: "waiting_for_input",
+            provider: .claude,
+            clientInfo: SessionClientInfo(
+                kind: .qoder,
+                profileID: "qoder",
+                name: "Qoder CLI",
+                origin: "cli",
+                originator: "Qoder"
+            ),
+            pid: nil,
+            tty: nil,
+            tool: "AskUserQuestion",
+            toolInput: [
+                "questions": AnyCodable([
+                    [
+                        "id": "topic",
+                        "header": "主题",
+                        "question": "先选一个主题",
+                        "options": [
+                            ["label": "A 方案"],
+                            ["label": "B 方案"]
+                        ]
+                    ]
+                ])
+            ],
+            toolUseId: "call_cli",
+            notificationType: nil,
+            message: nil
+        )
+
+        XCTAssertEqual(event.clientInfo.normalizedForClaudeRouting().profileID, "qoder-cli")
+        XCTAssertTrue(event.isAskUserQuestionRequest)
+        XCTAssertEqual(event.intervention?.kind, .question)
+        XCTAssertTrue(event.expectsResponse)
+        XCTAssertEqual(event.determinePhase(), .waitingForInput)
+    }
+
     func testQoderWorkAutoAnswerUsesFirstOptionForEveryQuestion() {
         let event = HookEvent(
             sessionId: "qoderwork-session",

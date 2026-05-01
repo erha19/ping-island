@@ -223,8 +223,8 @@ struct HookInstaller {
         let qoderCLISupportsClaudeHooks = qoderCLIUsesClaudeCompatibleHooks()
         var preferredTargets = preferredTargets()
         if qoderCLISupportsClaudeHooks,
-           let qoderProfile = ClientProfileRegistry.managedHookProfile(id: "qoder-hooks") {
-            preferredTargets.insert(qoderProfile.id)
+           let qoderCLIProfile = ClientProfileRegistry.managedHookProfile(id: "qoder-cli-hooks") {
+            preferredTargets.insert(qoderCLIProfile.id)
             persistPreferredTargets(preferredTargets)
         }
 
@@ -233,7 +233,7 @@ struct HookInstaller {
 
         for profile in ClientProfileRegistry.managedHookProfiles {
             let canManageProfile = canManage(profile)
-                || (profile.id == "qoder-hooks" && qoderCLISupportsClaudeHooks)
+                || (profile.id == "qoder-cli-hooks" && qoderCLISupportsClaudeHooks)
             // For first launch, auto-install all defaultEnabled profiles
             if isFirstLaunch && profile.defaultEnabled && canManageProfile {
                 install(profile, persistPreference: true, bypassAvailabilityCheck: !canManage(profile))
@@ -373,7 +373,7 @@ struct HookInstaller {
     static func isInstalled(_ profile: ManagedHookClientProfile) -> Bool {
         switch profile.installationKind {
         case .jsonHooks:
-            return profile.configurationURLs.contains { containsManagedHooks(at: $0) }
+            return profile.configurationURLs.contains { containsManagedHooks(at: $0, profile: profile) }
         case .pluginFile:
             return profile.configurationURLs.contains { containsManagedPlugin(at: $0, profile: profile) }
                 && isManagedPluginEnabled(profile)
@@ -445,7 +445,7 @@ struct HookInstaller {
         switch profile.installationKind {
         case .jsonHooks:
             for url in profile.configurationURLs {
-                removeManagedHooks(at: url)
+                removeManagedHooks(at: url, profile: profile)
             }
         case .pluginFile:
             for url in profile.configurationURLs {
@@ -465,13 +465,17 @@ struct HookInstaller {
     }
 
     private static func canManage(_ profile: ManagedHookClientProfile) -> Bool {
-        profile.alwaysVisibleInSettings
+        if profile.id == "qoder-cli-hooks" {
+            return qoderCLIUsesClaudeCompatibleHooks()
+        }
+
+        return profile.alwaysVisibleInSettings
             || ClientAppLocator.isInstalled(bundleIdentifiers: profile.localAppBundleIdentifiers)
     }
 
     static func qoderCLIHookRefreshStatus() -> QoderCLIHookRefreshStatus? {
         guard let version = qoderCLIInstalledVersion(),
-              compareSemanticVersions(version, qoderCLIClaudeHooksMinimumVersion) != .orderedAscending else {
+              qoderCLIClaudeHooksSupported(version: version) else {
             return nil
         }
 
@@ -483,6 +487,10 @@ struct HookInstaller {
 
     private static func qoderCLIUsesClaudeCompatibleHooks() -> Bool {
         qoderCLIHookRefreshStatus() != nil
+    }
+
+    static func qoderCLIClaudeHooksSupported(version: String) -> Bool {
+        compareSemanticVersions(version, qoderCLIClaudeHooksMinimumVersion) != .orderedAscending
     }
 
     private static func qoderCLIInstalledVersion() -> String? {
@@ -700,7 +708,7 @@ struct HookInstaller {
         }
     }
 
-    private static func removeManagedHooks(at url: URL) {
+    private static func removeManagedHooks(at url: URL, profile: ManagedHookClientProfile? = nil) {
         guard let data = try? Data(contentsOf: url),
               var json = HookConfigParser.parseJSONObject(from: data),
               var hooks = json["hooks"] as? [String: Any] else {
@@ -710,7 +718,7 @@ struct HookInstaller {
         for (event, value) in hooks {
             if var entries = value as? [[String: Any]] {
                 entries.removeAll { entry in
-                    isIslandManagedHookEntry(entry)
+                    isIslandManagedHookEntry(entry, for: profile)
                 }
 
                 if entries.isEmpty {
@@ -928,17 +936,21 @@ struct HookInstaller {
     private static func normalizedHookEntries(
         _ existingEntries: [[String: Any]]?,
         preferred: [[String: Any]],
-        preferredFirst: Bool = false
+        preferredFirst: Bool = false,
+        profile: ManagedHookClientProfile? = nil
     ) -> [[String: Any]] {
-        let preservedEntries = (existingEntries ?? []).filter { !isIslandManagedHookEntry($0) }
+        let preservedEntries = (existingEntries ?? []).filter { !isIslandManagedHookEntry($0, for: profile) }
         return preferredFirst ? preferred + preservedEntries : preservedEntries + preferred
     }
 
-    private static func removingIslandManagedHooks(from hooks: [String: Any]) -> [String: Any] {
+    private static func removingIslandManagedHooks(
+        from hooks: [String: Any],
+        profile: ManagedHookClientProfile? = nil
+    ) -> [String: Any] {
         var updated = hooks
         for (event, value) in hooks {
             guard var entries = value as? [[String: Any]] else { continue }
-            entries.removeAll { isIslandManagedHookEntry($0) }
+            entries.removeAll { isIslandManagedHookEntry($0, for: profile) }
             if entries.isEmpty {
                 updated.removeValue(forKey: event)
             } else {
@@ -977,15 +989,16 @@ struct HookInstaller {
         }
 
         let command = bridgeCommand(source: profile.bridgeSource, extraArguments: profile.bridgeExtraArguments)
-        let preferredFirst = profile.id == "qoder-hooks"
+        let preferredFirst = profile.id == "qoder-cli-hooks"
 
-        var hooks = removingIslandManagedHooks(from: json["hooks"] as? [String: Any] ?? [:])
+        var hooks = removingIslandManagedHooks(from: json["hooks"] as? [String: Any] ?? [:], profile: profile)
         for event in profile.events {
             let existingEvent = hooks[event.name] as? [[String: Any]]
             hooks[event.name] = normalizedHookEntries(
                 existingEvent,
                 preferred: makeHookEntries(command: command, event: event),
-                preferredFirst: preferredFirst
+                preferredFirst: preferredFirst,
+                profile: profile
             )
         }
 
@@ -1196,7 +1209,7 @@ struct HookInstaller {
             .joined(separator: " ")
     }
 
-    private static func containsManagedHooks(at url: URL) -> Bool {
+    private static func containsManagedHooks(at url: URL, profile: ManagedHookClientProfile? = nil) -> Bool {
         guard let data = try? Data(contentsOf: url),
               let json = HookConfigParser.parseJSONObject(from: data),
               let hooks = json["hooks"] as? [String: Any] else {
@@ -1206,7 +1219,7 @@ struct HookInstaller {
         for (_, value) in hooks {
             if let entries = value as? [[String: Any]] {
                 for entry in entries {
-                    if isIslandManagedHookEntry(entry) {
+                    if isIslandManagedHookEntry(entry, for: profile) {
                         return true
                     }
                 }
@@ -1215,15 +1228,18 @@ struct HookInstaller {
         return false
     }
 
-    private static func isIslandManagedHookEntry(_ entry: [String: Any]) -> Bool {
+    private static func isIslandManagedHookEntry(
+        _ entry: [String: Any],
+        for profile: ManagedHookClientProfile? = nil
+    ) -> Bool {
         if let command = hookCommandString(from: entry) {
-            return isIslandManagedHookCommand(command)
+            return isIslandManagedHookCommand(command, for: profile)
         }
 
         if let nestedHooks = entry["hooks"] as? [[String: Any]] {
             return nestedHooks.contains { hook in
                 guard let command = hookCommandString(from: hook) else { return false }
-                return isIslandManagedHookCommand(command)
+                return isIslandManagedHookCommand(command, for: profile)
             }
         }
 
@@ -1242,10 +1258,37 @@ struct HookInstaller {
         }.first
     }
 
-    private static func isIslandManagedHookCommand(_ command: String) -> Bool {
+    private static func isIslandManagedHookCommand(
+        _ command: String,
+        for profile: ManagedHookClientProfile? = nil
+    ) -> Bool {
         let normalized = command.lowercased()
-        return normalized.contains("/.ping-island/bin/ping-island-bridge")
+        let isManaged = normalized.contains("/.ping-island/bin/ping-island-bridge")
             || normalized.contains("/.ping-island/bin/island-bridge")
+        guard isManaged, let profile else {
+            return isManaged
+        }
+
+        switch profile.id {
+        case "qoder-hooks":
+            return hookCommand(command, hasClientKind: "qoder")
+        case "qoder-cli-hooks":
+            return hookCommand(command, hasClientKind: "qoder-cli")
+        case "qoderwork-hooks":
+            return hookCommand(command, hasClientKind: "qoderwork")
+        default:
+            return true
+        }
+    }
+
+    private static func hookCommand(_ command: String, hasClientKind clientKind: String) -> Bool {
+        let escapedKind = NSRegularExpression.escapedPattern(for: clientKind)
+        let pattern = #"(^|\s)--client-kind\s+(?:'\#(escapedKind)'|"\#(escapedKind)"|\#(escapedKind))(?=\s|$)"#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
+            return false
+        }
+        let range = NSRange(command.startIndex..., in: command)
+        return regex.firstMatch(in: command, range: range) != nil
     }
 
     private static func managedMarker(for profile: ManagedHookClientProfile) -> String {
@@ -2695,8 +2738,8 @@ struct HookInstaller {
         case .jsonHooks:
             var hooks = json["hooks"] as? [String: Any] ?? [:]
             if installing {
-                hooks = removingIslandManagedHooks(from: hooks)
-                let preferredFirst = profile.id == "qoder-hooks"
+                hooks = removingIslandManagedHooks(from: hooks, profile: profile)
+                let preferredFirst = profile.id == "qoder-cli-hooks"
                 for event in profile.events {
                     let existingEvent = sanitizedHookEntries(
                         hooks[event.name] as? [[String: Any]],
@@ -2705,14 +2748,15 @@ struct HookInstaller {
                     hooks[event.name] = normalizedHookEntries(
                         existingEvent,
                         preferred: makeHookEntries(command: customCommand, event: event),
-                        preferredFirst: preferredFirst
+                        preferredFirst: preferredFirst,
+                        profile: profile
                     )
                 }
             } else {
                 for (event, value) in hooks {
                     guard var entries = value as? [[String: Any]] else { continue }
                     entries.removeAll { entry in
-                        isIslandManagedHookEntry(entry)
+                        isIslandManagedHookEntry(entry, for: profile)
                     }
                     if entries.isEmpty {
                         hooks.removeValue(forKey: event)

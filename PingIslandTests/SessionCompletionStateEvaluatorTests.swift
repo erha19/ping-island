@@ -113,4 +113,27 @@ final class SessionCompletionStateEvaluatorTests: XCTestCase {
         XCTAssertTrue(SessionCompletionStateEvaluator.hasCompletedAssistantReply(for: session))
         XCTAssertFalse(SessionCompletionStateEvaluator.isCompletedReadySession(session))
     }
+
+    func testEndedNotificationAfterWaitingForInputIsLimitedToQoderCLI() {
+        let qoderCLI = SessionState(
+            sessionId: "qoder-cli",
+            cwd: "/tmp/project",
+            clientInfo: SessionClientInfo(
+                kind: .qoder,
+                profileID: "qoder-cli",
+                name: "Qoder CLI",
+                origin: "cli"
+            ),
+            phase: .ended
+        )
+        let claude = SessionState(
+            sessionId: "claude",
+            cwd: "/tmp/project",
+            clientInfo: SessionClientInfo(kind: .claudeCode, name: "Claude Code"),
+            phase: .ended
+        )
+
+        XCTAssertTrue(SessionCompletionStateEvaluator.allowsEndedNotificationAfterWaitingForInput(qoderCLI))
+        XCTAssertFalse(SessionCompletionStateEvaluator.allowsEndedNotificationAfterWaitingForInput(claude))
+    }
 }

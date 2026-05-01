@@ -3,6 +3,83 @@ import XCTest
 @testable import Ping_Island
 
 final class QoderWorkContinuationTests: XCTestCase {
+    func testQoderIDEResolvedInterventionWaitsForClientContinuationNotification() async {
+        let sessionId = "qoderide-cont-\(UUID().uuidString)"
+        let store = SessionStore.shared
+
+        await store.process(.hookReceived(
+            makeQuestionEvent(
+                sessionId: sessionId,
+                profileID: "qoder",
+                name: "Qoder",
+                bundleIdentifier: "com.qoder.ide"
+            )
+        ))
+        await store.process(
+            .interventionResolved(
+                sessionId: sessionId,
+                nextPhase: .processing,
+                submittedAnswers: ["topic": ["A 方案"]]
+            )
+        )
+
+        let session = await store.session(for: sessionId)
+        XCTAssertEqual(session?.phase, .waitingForInput)
+        XCTAssertTrue(session?.needsQuestionResponse ?? false)
+        XCTAssertTrue(session?.intervention?.awaitsExternalContinuation ?? false)
+        XCTAssertTrue(session?.intervention?.supportsInlineResponse ?? false)
+        XCTAssertEqual(session?.intervention?.submittedAnswers["topic"], ["A 方案"])
+        XCTAssertEqual(session?.intervention?.externalContinuationStatusMessage, "Qoder 有问题需要介入处理，可通过上方按钮快速打开并继续操作")
+
+        await store.process(.sessionArchived(sessionId: sessionId))
+    }
+
+    func testQoderIDEContinuationClearsAfterNewMessageArrives() async {
+        let sessionId = "qoderide-msg-\(UUID().uuidString)"
+        let store = SessionStore.shared
+
+        await store.process(.hookReceived(
+            makeQuestionEvent(
+                sessionId: sessionId,
+                profileID: "qoder",
+                name: "Qoder",
+                bundleIdentifier: "com.qoder.ide"
+            )
+        ))
+        await store.process(
+            .interventionResolved(
+                sessionId: sessionId,
+                nextPhase: .processing,
+                submittedAnswers: ["topic": ["A 方案"]]
+            )
+        )
+        let answeredAt = await store.session(for: sessionId)?.intervention?.externalContinuationAnsweredAt ?? Date()
+        await store.process(.fileUpdated(
+            FileUpdatePayload(
+                sessionId: sessionId,
+                cwd: "/tmp/project",
+                messages: [
+                    ChatMessage(
+                        id: "assistant-next",
+                        role: .assistant,
+                        timestamp: answeredAt.addingTimeInterval(1),
+                        content: [.text("继续处理后续任务")]
+                    )
+                ],
+                isIncremental: true,
+                completedToolIds: [],
+                toolResults: [:],
+                structuredResults: [:]
+            )
+        ))
+
+        let session = await store.session(for: sessionId)
+        XCTAssertNil(session?.intervention)
+        XCTAssertEqual(session?.phase, .processing)
+
+        await store.process(.sessionArchived(sessionId: sessionId))
+    }
+
     func testQoderWorkResolvedInterventionWaitsForClientContinuation() async {
         let sessionId = "qoderwork-cont-\(UUID().uuidString)"
         let store = SessionStore.shared
@@ -525,7 +602,7 @@ final class QoderWorkContinuationTests: XCTestCase {
             status: "waiting_for_input",
             provider: .claude,
             clientInfo: SessionClientInfo(
-                kind: profileID == "qoderwork" ? .qoder : .claudeCode,
+                kind: profileID == "qoder" || profileID == "qoderwork" ? .qoder : .claudeCode,
                 profileID: profileID,
                 name: name,
                 bundleIdentifier: bundleIdentifier

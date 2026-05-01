@@ -665,6 +665,10 @@ class SessionMonitor: ObservableObject {
         let profileID = normalizedClientInfo?.profileID?.lowercased()
         let bundleIdentifier = normalizedClientInfo?.bundleIdentifier?.lowercased()
 
+        if profileID == "qoder-cli" {
+            return .questionText
+        }
+
         if profileID == "qoder"
             || profileID == "qoderwork"
             || profileID == "codebuddy"
