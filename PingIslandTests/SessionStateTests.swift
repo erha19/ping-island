@@ -1422,6 +1422,37 @@ final class SessionStateTests: XCTestCase {
         )
     }
 
+    func testQoderWorkClientApplicationFallbackIsPrioritized() {
+        let qoderWork = SessionClientInfo(
+            kind: .qoder,
+            profileID: " qoderwork ",
+            name: "Qoder Work",
+            bundleIdentifier: "com.googlecode.iterm2",
+            terminalBundleIdentifier: " com.qoder.work "
+        )
+
+        XCTAssertTrue(SessionLauncher.shouldPrioritizeClientApplicationFallback(for: qoderWork))
+        XCTAssertEqual(
+            SessionLauncher.clientApplicationBundleIdentifiers(for: qoderWork),
+            ["com.qoder.work", "com.googlecode.iterm2"]
+        )
+    }
+
+    func testGenericClientApplicationFallbackDoesNotPrependQoderWork() {
+        let qoderCLI = SessionClientInfo(
+            kind: .qoder,
+            profileID: "qoder-cli",
+            name: "Qoder CLI",
+            terminalBundleIdentifier: "com.googlecode.iterm2"
+        )
+
+        XCTAssertFalse(SessionLauncher.shouldPrioritizeClientApplicationFallback(for: qoderCLI))
+        XCTAssertEqual(
+            SessionLauncher.clientApplicationBundleIdentifiers(for: qoderCLI),
+            ["com.googlecode.iterm2"]
+        )
+    }
+
     func testTerminalFallbackActivationRestoresGhosttyFamilyWindows() {
         XCTAssertTrue(
             SessionLauncher.shouldActivateAllWindowsForTerminalFallback(

@@ -1,13 +1,31 @@
 import Foundation
 struct SessionManualAttentionTracker {
     private var previousApprovalIds = Set<String>()
+    private var previousApprovalToolUseIDs: [String: String] = [:]
     private var previousQuestionIds = Set<String>()
     private var previousQuestionInterventionIDs: [String: String] = [:]
 
     mutating func consumeNewAttentionSession(from instances: [SessionState]) -> SessionState? {
         let approvalSessions = instances.filter { $0.needsApprovalResponse }
         let currentApprovalIds = Set(approvalSessions.map(\.stableId))
+        let currentApprovalToolUseIDs = Dictionary(
+            uniqueKeysWithValues: approvalSessions.map { session in
+                (session.stableId, session.activePermission?.toolUseId ?? "")
+            }
+        )
         let newApprovalIds = currentApprovalIds.subtracting(previousApprovalIds)
+        let refreshedApprovalIds = Set<String>(
+            currentApprovalToolUseIDs.compactMap { sessionId, toolUseId in
+                guard let previousToolUseId = previousApprovalToolUseIDs[sessionId],
+                      !previousToolUseId.isEmpty,
+                      !toolUseId.isEmpty,
+                      previousToolUseId != toolUseId else {
+                    return nil
+                }
+                return sessionId
+            }
+        )
+        let attentionApprovalIds = newApprovalIds.union(refreshedApprovalIds)
 
         let questionSessions = instances.filter { $0.needsQuestionResponse }
         let currentQuestionIds = Set(questionSessions.map(\.stableId))
@@ -31,12 +49,13 @@ struct SessionManualAttentionTracker {
 
         defer {
             previousApprovalIds = currentApprovalIds
+            previousApprovalToolUseIDs = currentApprovalToolUseIDs
             previousQuestionIds = currentQuestionIds
             previousQuestionInterventionIDs = currentQuestionInterventionIDs
         }
 
         let attentionCandidates = instances.filter { session in
-            newApprovalIds.contains(session.stableId) || attentionQuestionIds.contains(session.stableId)
+            attentionApprovalIds.contains(session.stableId) || attentionQuestionIds.contains(session.stableId)
         }
 
         return attentionCandidates.sorted(by: attentionSort).first

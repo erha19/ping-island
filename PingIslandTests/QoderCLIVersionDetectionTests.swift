@@ -94,6 +94,6 @@ final class QoderCLIVersionDetectionTests: XCTestCase {
             2
         )
         let managedPreToolUseHook = try XCTUnwrap((preToolUse.first?["hooks"] as? [[String: Any]])?.first)
-        XCTAssertNil(managedPreToolUseHook["timeout"])
+        XCTAssertEqual(managedPreToolUseHook["timeout"] as? Int, 86_400)
     }
 }

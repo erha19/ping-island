@@ -287,7 +287,7 @@ struct HookInstaller {
             clientName: "Qoder CLI",
             clientOrigin: "cli",
             clientOriginator: "Qoder",
-            preToolUseTimeout: nil
+            preToolUseTimeout: 86_400
         )
     }
 

@@ -278,6 +278,10 @@ extension HookEvent {
     }
 
     nonisolated var intervention: SessionIntervention? {
+        if let bridgeIntervention {
+            return bridgeIntervention
+        }
+
         if provider == .codex,
            event == "PermissionRequest",
            expectsResponse,
@@ -375,10 +379,19 @@ extension HookEvent {
         if let toolUseId = toolUseId {
             metadata["originalToolUseId"] = toolUseId
         }
+        let normalizedClientInfo = clientInfo.normalizedForClaudeRouting()
+        let isQoderWorkQuestion =
+            normalizedClientInfo.profileID == "qoderwork"
+            || normalizedClientInfo.bundleIdentifier == "com.qoder.work"
+        let canSubmitDefaultOption =
+            isQoderWorkQuestion && parsedQuestions.allSatisfy { !$0.options.isEmpty }
+
         let message: String
-        if isExternalClientQuestionEvent {
+        if isExternalClientQuestionEvent && !canSubmitDefaultOption {
             metadata["responseMode"] = "external_only"
             message = "\(actorName) 已在客户端内发起提问，请切回 \(actorName) 完成回答。Island 暂不支持直接提交这类回答。"
+        } else if canSubmitDefaultOption {
+            message = "\(actorName) 需要你补充回答，Island 会默认提交每个问题的首个选项。"
         } else {
             message = "\(actorName) 需要你补充回答，提交后会继续执行当前会话。"
         }
@@ -464,6 +477,13 @@ extension HookEvent {
         }
 
         switch status {
+        case "waiting_for_approval":
+            return .waitingForApproval(PermissionContext(
+                toolUseId: toolUseId ?? "",
+                toolName: tool ?? "unknown",
+                toolInput: toolInput,
+                receivedAt: Date()
+            ))
         case "waiting_for_input":
             return .waitingForInput
         case "running_tool", "processing", "starting":

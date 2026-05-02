@@ -11,6 +11,7 @@ struct SessionQuestionForm: View {
     @ObservedObject private var settings = AppSettings.shared
     @State private var answers: [String: [String]] = [:]
     @State private var otherAnswers: [String: String] = [:]
+    @State private var measuredQuestionContentHeight: CGFloat = 0
 
     private var displayQuestions: [SessionInterventionQuestion] {
         intervention.resolvedQuestions
@@ -45,6 +46,17 @@ struct SessionQuestionForm: View {
         )
     }
 
+    nonisolated static func questionListHeight(
+        contentHeight: CGFloat,
+        maximumHeight: CGFloat
+    ) -> CGFloat {
+        guard contentHeight > 0 else {
+            return maximumHeight
+        }
+
+        return min(contentHeight, maximumHeight)
+    }
+
     nonisolated static func optionSequenceLabel(for index: Int) -> String {
         guard index >= 0 else { return "" }
 
@@ -62,8 +74,34 @@ struct SessionQuestionForm: View {
         return label
     }
 
+    nonisolated static func nextQuestionIDToReveal(
+        after questionID: String,
+        in questions: [SessionInterventionQuestion],
+        answeredQuestionIDs: Set<String>
+    ) -> String? {
+        guard questions.count > 1,
+              let currentIndex = questions.firstIndex(where: { $0.id == questionID })
+        else {
+            return nil
+        }
+
+        let laterQuestions = questions[questions.index(after: currentIndex)...]
+        if let nextUnansweredQuestion = laterQuestions.first(where: { !answeredQuestionIDs.contains($0.id) }) {
+            return nextUnansweredQuestion.id
+        }
+
+        return laterQuestions.first?.id
+    }
+
     private var questionListMaximumHeight: CGFloat {
         Self.questionListMaximumHeight(for: settings.maxPanelHeight)
+    }
+
+    private var questionListHeight: CGFloat {
+        Self.questionListHeight(
+            contentHeight: measuredQuestionContentHeight,
+            maximumHeight: questionListMaximumHeight
+        )
     }
 
     init(
@@ -86,12 +124,16 @@ struct SessionQuestionForm: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            ScrollView(.vertical, showsIndicators: false) {
-                questionsContent
-                    .padding(.vertical, 1)
+            ScrollViewReader { scrollProxy in
+                ScrollView(.vertical, showsIndicators: false) {
+                    questionsContent(scrollProxy: scrollProxy)
+                        .padding(.vertical, 1)
+                        .readHeight { measuredQuestionContentHeight = $0 }
+                }
+                .scrollBounceBehavior(.basedOnSize)
             }
-            .scrollBounceBehavior(.basedOnSize)
-            .frame(maxHeight: questionListMaximumHeight)
+            .frame(height: questionListHeight)
+            .clipped()
 
             HStack(spacing: 8) {
                 if let submitLabel {
@@ -119,7 +161,7 @@ struct SessionQuestionForm: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private var questionsContent: some View {
+    private func questionsContent(scrollProxy: ScrollViewProxy) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             ForEach(displayQuestions) { question in
                 VStack(alignment: .leading, spacing: 8) {
@@ -151,15 +193,19 @@ struct SessionQuestionForm: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
 
-                    questionInput(question)
+                    questionInput(question, scrollProxy: scrollProxy)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .id(question.id)
             }
         }
     }
 
     @ViewBuilder
-    private func questionInput(_ question: SessionInterventionQuestion) -> some View {
+    private func questionInput(
+        _ question: SessionInterventionQuestion,
+        scrollProxy: ScrollViewProxy
+    ) -> some View {
         if !question.options.isEmpty {
             let reservesDetailSpace = question.options.contains { optionDetail(for: $0) != nil }
             LazyVGrid(columns: Self.optionColumns(for: question), spacing: 8) {
@@ -167,6 +213,7 @@ struct SessionQuestionForm: View {
                     Button {
                         guard isEditable else { return }
                         toggle(option.title, for: question)
+                        revealNextQuestion(after: question, using: scrollProxy)
                     } label: {
                         HStack(alignment: .top, spacing: 8) {
                             Text(Self.optionSequenceLabel(for: optionIndex))
@@ -282,6 +329,12 @@ struct SessionQuestionForm: View {
         answers[question.id, default: []].contains(title)
     }
 
+    private var answeredQuestionIDs: Set<String> {
+        Set(displayQuestions.compactMap { question in
+            finalAnswers(for: question).isEmpty ? nil : question.id
+        })
+    }
+
     private func toggle(_ title: String, for question: SessionInterventionQuestion) {
         if question.allowsMultiple {
             var current = answers[question.id, default: []]
@@ -295,6 +348,27 @@ struct SessionQuestionForm: View {
         }
 
         answers[question.id] = [title]
+    }
+
+    private func revealNextQuestion(
+        after question: SessionInterventionQuestion,
+        using scrollProxy: ScrollViewProxy
+    ) {
+        guard !finalAnswers(for: question).isEmpty,
+              let nextQuestionID = Self.nextQuestionIDToReveal(
+                after: question.id,
+                in: displayQuestions,
+                answeredQuestionIDs: answeredQuestionIDs
+              )
+        else {
+            return
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+            withAnimation(.spring(response: 0.42, dampingFraction: 0.78, blendDuration: 0.08)) {
+                scrollProxy.scrollTo(nextQuestionID, anchor: .top)
+            }
+        }
     }
 
     private func finalAnswers(for question: SessionInterventionQuestion) -> [String] {
@@ -353,5 +427,27 @@ private struct SessionQuestionButtonStyle: ButtonStyle {
                         )
                     )
             )
+    }
+}
+
+private struct QuestionContentHeightPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
+private extension View {
+    func readHeight(_ onChange: @escaping (CGFloat) -> Void) -> some View {
+        background(
+            GeometryReader { proxy in
+                Color.clear.preference(
+                    key: QuestionContentHeightPreferenceKey.self,
+                    value: proxy.size.height
+                )
+            }
+        )
+        .onPreferenceChange(QuestionContentHeightPreferenceKey.self, perform: onChange)
     }
 }

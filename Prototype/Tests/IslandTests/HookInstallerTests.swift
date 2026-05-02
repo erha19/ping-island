@@ -233,7 +233,7 @@ func installerDeduplicatesManagedHooksButKeepsUnrelatedHooks() throws {
     #expect(qoderCommands.filter { $0.contains(qoderCLICommand) }.count == 1)
     let qoderManagedPreToolUse = try #require(qoderPreToolUse.first)
     let qoderManagedPreToolUseHook = try #require((qoderManagedPreToolUse["hooks"] as? [[String: Any]])?.first)
-    #expect(qoderManagedPreToolUseHook["timeout"] == nil)
+    #expect(qoderManagedPreToolUseHook["timeout"] as? Int == 86_400)
 
     let qoderWorkData = try Data(contentsOf: qoderWorkSettingsURL)
     let qoderWorkJSON = try #require(JSONSerialization.jsonObject(with: qoderWorkData) as? [String: Any])

@@ -705,7 +705,7 @@ enum ClientProfileRegistry {
             brand: .qoder,
             events: [
                 HookInstallEventDescriptor(name: "UserPromptSubmit", templates: [.plain]),
-                HookInstallEventDescriptor(name: "PreToolUse", templates: [.matcher("*")]),
+                HookInstallEventDescriptor(name: "PreToolUse", templates: [.matcher("*")], timeout: 86_400),
                 HookInstallEventDescriptor(name: "PostToolUse", templates: [.matcher("*")]),
                 HookInstallEventDescriptor(name: "PermissionRequest", templates: [.matcher("*")], timeout: 86_400),
                 HookInstallEventDescriptor(name: "Notification", templates: [.matcher("*")]),

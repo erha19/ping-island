@@ -54,8 +54,9 @@ final class ClientProfileIconTests: XCTestCase {
         let claudeEvents = Set(claudeProfile.events.map(\.name))
 
         XCTAssertEqual(qoderEvents, claudeEvents)
-        XCTAssertNil(
-            qoderCLIProfile.events.first { $0.name == "PreToolUse" }?.timeout
+        XCTAssertEqual(
+            qoderCLIProfile.events.first { $0.name == "PreToolUse" }?.timeout,
+            86_400
         )
         XCTAssertEqual(
             qoderCLIProfile.events.first { $0.name == "PermissionRequest" }?.timeout,

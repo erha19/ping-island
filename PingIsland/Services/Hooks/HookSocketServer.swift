@@ -81,6 +81,7 @@ struct HookEvent: Sendable {
     let notificationType: String?
     let message: String?
     let ingress: SessionIngress
+    let bridgeIntervention: SessionIntervention?
 
     init(
         sessionId: String,
@@ -96,7 +97,8 @@ struct HookEvent: Sendable {
         toolUseId: String?,
         notificationType: String?,
         message: String?,
-        ingress: SessionIngress = .hookBridge
+        ingress: SessionIngress = .hookBridge,
+        bridgeIntervention: SessionIntervention? = nil
     ) {
         self.sessionId = sessionId
         self.cwd = cwd
@@ -112,6 +114,7 @@ struct HookEvent: Sendable {
         self.notificationType = notificationType
         self.message = message
         self.ingress = ingress
+        self.bridgeIntervention = bridgeIntervention
     }
 
     nonisolated var sessionPhase: SessionPhase {
@@ -142,6 +145,7 @@ struct HookEvent: Sendable {
         let normalizedTool = tool?
             .lowercased()
             .replacingOccurrences(of: "_", with: "")
+            .replacingOccurrences(of: "-", with: "")
         return (event == "PermissionRequest" && status == "waiting_for_approval")
             || (event == "Notification" && status == "waiting_for_approval"
                 && clientInfo.isQwenCodeClient && notificationType == "permission_prompt")
@@ -150,6 +154,11 @@ struct HookEvent: Sendable {
                     && normalizedTool == "askuserquestion"
                     && toolInput?["questions"] != nil
                     && !isAnsweredAskUserQuestionEvent
+            )
+            || (
+                event == "PreToolUse"
+                    && normalizedTool == "exitplanmode"
+                    && clientInfo.normalizedForClaudeRouting().profileID == "qoder-cli"
             )
     }
 }
@@ -170,7 +179,8 @@ extension HookEvent {
             toolUseId: toolUseId,
             notificationType: notificationType,
             message: message,
-            ingress: ingress
+            ingress: ingress,
+            bridgeIntervention: bridgeIntervention
         )
     }
 
@@ -189,7 +199,8 @@ extension HookEvent {
             toolUseId: toolUseId,
             notificationType: notificationType,
             message: message,
-            ingress: ingress
+            ingress: ingress,
+            bridgeIntervention: bridgeIntervention
         )
     }
 }
@@ -244,6 +255,7 @@ private struct BridgeEnvelope: Codable, Sendable {
     let cwd: String?
     let status: BridgeStatus?
     let terminalContext: BridgeTerminalContext
+    let intervention: BridgeEnvelopeIntervention?
     let expectsResponse: Bool
     let metadata: [String: String]
     let sentAt: Date
@@ -258,6 +270,7 @@ private struct BridgeEnvelope: Codable, Sendable {
         case cwd
         case status
         case terminalContext
+        case intervention
         case expectsResponse
         case metadata
         case sentAt
@@ -289,6 +302,7 @@ private struct BridgeEnvelope: Codable, Sendable {
                 tmuxSession: nil,
                 tmuxPane: nil
             )
+        intervention = try container.decodeIfPresent(BridgeEnvelopeIntervention.self, forKey: .intervention)
 
         var decodedMetadata = try container.decodeIfPresent([String: String].self, forKey: .metadata) ?? [:]
         let expectation = try Self.decodeResponseExpectation(from: container)
@@ -348,6 +362,67 @@ private struct BridgeEnvelope: Codable, Sendable {
             return nil
         }
         return json
+    }
+}
+
+private struct BridgeEnvelopeIntervention: Codable, Sendable {
+    let id: String?
+    let kind: String
+    let title: String?
+    let message: String?
+    let options: [BridgeEnvelopeInterventionOption]?
+    let sessionID: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case kind
+        case title
+        case message
+        case options
+        case sessionID
+    }
+
+    func sessionIntervention(fallbackID: String?, metadata: [String: String]) -> SessionIntervention? {
+        guard let kind = SessionInterventionKind(rawValue: self.kind) else {
+            return nil
+        }
+
+        var interventionMetadata: [String: String] = [:]
+        for key in ["tool_name", "toolName", "tool_input_json", "toolInputJSON", "tool_use_id"] {
+            if let value = metadata[key], !value.isEmpty {
+                interventionMetadata[key] = value
+            }
+        }
+
+        return SessionIntervention(
+            id: id ?? fallbackID ?? UUID().uuidString,
+            kind: kind,
+            title: title ?? defaultTitle(for: kind),
+            message: message ?? "",
+            options: (options ?? []).map(\.sessionOption),
+            questions: [],
+            supportsSessionScope: false,
+            metadata: interventionMetadata
+        )
+    }
+
+    private func defaultTitle(for kind: SessionInterventionKind) -> String {
+        switch kind {
+        case .approval:
+            return "Approval Needed"
+        case .question:
+            return "Question"
+        }
+    }
+}
+
+private struct BridgeEnvelopeInterventionOption: Codable, Sendable {
+    let id: String
+    let title: String
+    let detail: String?
+
+    var sessionOption: SessionInterventionOption {
+        SessionInterventionOption(id: id, title: title, detail: detail)
     }
 }
 
@@ -446,6 +521,10 @@ private extension BridgeEnvelope {
                 eventType: eventType,
                 metadata: metadata,
                 preview: preview
+            ),
+            bridgeIntervention: intervention?.sessionIntervention(
+                fallbackID: metadata["tool_use_id"],
+                metadata: metadata
             )
         )
     }

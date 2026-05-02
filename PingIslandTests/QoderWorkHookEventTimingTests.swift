@@ -38,8 +38,9 @@ final class QoderWorkHookEventTimingTests: XCTestCase {
         XCTAssertTrue(event.isAskUserQuestionRequest)
         XCTAssertEqual(event.intervention?.kind, .question)
         XCTAssertEqual(event.intervention?.id, "call_123")
-        XCTAssertFalse(event.intervention?.supportsInlineResponse ?? true)
-        XCTAssertTrue(event.intervention?.message.contains("暂不支持直接提交") ?? false)
+        XCTAssertTrue(event.intervention?.supportsInlineResponse ?? false)
+        XCTAssertNil(event.intervention?.metadata["responseMode"])
+        XCTAssertTrue(event.intervention?.message.contains("默认提交") ?? false)
         XCTAssertEqual(event.determinePhase(), .waitingForInput)
     }
 
@@ -82,8 +83,45 @@ final class QoderWorkHookEventTimingTests: XCTestCase {
             event.intervention?.id,
             "qoderwork-question-qoderwork-session-topic"
         )
-        XCTAssertFalse(event.intervention?.supportsInlineResponse ?? true)
+        XCTAssertTrue(event.intervention?.supportsInlineResponse ?? false)
+        XCTAssertNil(event.intervention?.metadata["responseMode"])
         XCTAssertEqual(event.determinePhase(), .waitingForInput)
+    }
+
+    func testQoderWorkQuestionWithoutOptionsStaysExternalOnly() {
+        let event = HookEvent(
+            sessionId: "qoderwork-session",
+            cwd: "/tmp/project",
+            event: "PreToolUse",
+            status: "waiting_for_input",
+            provider: .claude,
+            clientInfo: SessionClientInfo(
+                kind: .qoder,
+                profileID: "qoderwork",
+                name: "QoderWork",
+                bundleIdentifier: "com.qoder.work"
+            ),
+            pid: nil,
+            tty: nil,
+            tool: "AskUserQuestion",
+            toolInput: [
+                "questions": AnyCodable([
+                    [
+                        "id": "path",
+                        "header": "文件",
+                        "question": "请告诉我文件路径",
+                        "options": []
+                    ]
+                ])
+            ],
+            toolUseId: "call_free_text",
+            notificationType: nil,
+            message: nil
+        )
+
+        XCTAssertEqual(event.intervention?.metadata["responseMode"], "external_only")
+        XCTAssertFalse(event.intervention?.supportsInlineResponse ?? true)
+        XCTAssertTrue(event.intervention?.message.contains("暂不支持直接提交") ?? false)
     }
 
     func testWorkBuddyPreToolUseQuestionUsesExternalClientMode() {

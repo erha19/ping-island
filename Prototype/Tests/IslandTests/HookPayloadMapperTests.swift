@@ -695,6 +695,78 @@ func qoderCLIClientMetadataCanBeInjectedFromBridgeArguments() throws {
 }
 
 @Test
+func qoderCLIExitPlanModePreToolUseBecomesBlockingApproval() throws {
+    let payload = """
+    {
+      "hook_event_name": "PreToolUse",
+      "session_id": "qoder-cli-plan",
+      "permission_mode": "plan",
+      "tool_name": "ExitPlanMode",
+      "tool_input": {
+        "plan": "# Plan\\nImplement the requested feature.",
+        "allowedPrompts": [{"tool": "Bash", "prompt": "Run tests"}]
+      }
+    }
+    """.data(using: .utf8)!
+
+    let envelope = HookPayloadMapper.makeEnvelope(
+        source: .claude,
+        arguments: [
+            "island-bridge",
+            "--source", "claude",
+            "--client-kind", "qoder-cli",
+            "--client-name", "Qoder CLI",
+            "--client-origin", "cli",
+            "--client-originator", "Qoder"
+        ],
+        environment: ["PWD": "/tmp/demo"],
+        stdinData: payload
+    )
+
+    #expect(envelope.eventType == "PreToolUse")
+    #expect(envelope.status?.kind == .waitingForApproval)
+    #expect(envelope.expectsResponse == true)
+    #expect(envelope.intervention?.kind == .approval)
+    #expect(envelope.intervention?.title == "Qoder CLI needs plan approval")
+    #expect(envelope.intervention?.message.contains("Implement the requested feature.") == true)
+    #expect(envelope.metadata["tool_input_json"]?.contains("allowedPrompts") == true)
+    #expect(envelope.preview?.hasPrefix("ExitPlanMode ") == true)
+}
+
+@Test
+func qoderCLIExitPlanModeDefaultPermissionModeStillBlocksForReview() throws {
+    let payload = """
+    {
+      "hook_event_name": "PreToolUse",
+      "session_id": "qoder-cli-default-plan",
+      "permission_mode": "default",
+      "tool_name": "ExitPlanMode",
+      "tool_input": {}
+    }
+    """.data(using: .utf8)!
+
+    let envelope = HookPayloadMapper.makeEnvelope(
+        source: .claude,
+        arguments: [
+            "island-bridge",
+            "--source", "claude",
+            "--client-kind", "qoder-cli",
+            "--client-name", "Qoder CLI",
+            "--client-origin", "cli",
+            "--client-originator", "Qoder"
+        ],
+        environment: ["PWD": "/tmp/demo"],
+        stdinData: payload
+    )
+
+    #expect(envelope.eventType == "PreToolUse")
+    #expect(envelope.status?.kind == .waitingForApproval)
+    #expect(envelope.expectsResponse == true)
+    #expect(envelope.intervention?.kind == .approval)
+    #expect(envelope.intervention?.title == "Qoder CLI needs plan approval")
+}
+
+@Test
 func qoderPreToolUseQuestionUsesWaitingForInputWithoutBlockingHook() throws {
     let payload = """
     {
@@ -925,6 +997,33 @@ func qoderCLIAnswerPayloadIncludesTopLevelUpdatedInputForQoderParser() throws {
     let updatedInput = try #require(decision["updatedInput"] as? [String: Any])
     let answers = try #require(updatedInput["answers"] as? [String: String])
     #expect(answers["Which model?"] == "Pro")
+}
+
+@Test
+func qoderCLIExitPlanModeApprovalPayloadUsesPreToolUseEventName() throws {
+    let response = BridgeResponse(
+        requestID: UUID(),
+        decision: .approve
+    )
+
+    let payload = HookPayloadMapper.stdoutPayload(
+        for: .claude,
+        response: response,
+        eventType: "PreToolUse",
+        metadata: [
+            "client_kind": "qoder-cli",
+            "client_name": "Qoder CLI",
+            "permission_mode": "default",
+            "tool_name": "ExitPlanMode"
+        ]
+    )
+
+    let json = try #require(JSONSerialization.jsonObject(with: Data(payload.utf8)) as? [String: Any])
+    let hookSpecificOutput = try #require(json["hookSpecificOutput"] as? [String: Any])
+    #expect(hookSpecificOutput["hookEventName"] as? String == "PreToolUse")
+    #expect(hookSpecificOutput["permissionDecision"] as? String == "allow")
+    let decision = try #require(hookSpecificOutput["decision"] as? [String: Any])
+    #expect(decision["behavior"] as? String == "allow")
 }
 
 @Test

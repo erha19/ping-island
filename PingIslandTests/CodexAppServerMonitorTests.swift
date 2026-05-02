@@ -3,6 +3,17 @@ import XCTest
 @testable import Ping_Island
 
 final class CodexAppServerMonitorTests: XCTestCase {
+    func testWebSocketTaskAllowsLargeCodexMessages() throws {
+        let url = try XCTUnwrap(URL(string: "ws://127.0.0.1:41241"))
+        let task = CodexAppServerMonitor.makeWebSocketTask(url: url)
+        defer {
+            task.cancel(with: .goingAway, reason: nil)
+        }
+
+        XCTAssertEqual(task.maximumMessageSize, CodexAppServerMonitor.maximumWebSocketMessageSize)
+        XCTAssertGreaterThan(task.maximumMessageSize, 1_214_839)
+    }
+
     func testWebSocketPayloadsEncodeAsTextJSON() throws {
         let message = try CodexAppServerMonitor.webSocketTextMessage(from: [
             "jsonrpc": "2.0",

@@ -73,6 +73,13 @@ public enum HookPayloadMapper {
         switch provider {
         case .claude:
             let clientKind = normalizedClientKind(from: metadata)
+            if clientKind == "qoder-cli",
+               isQoderCLIPlanExitApproval(
+                   eventType: eventType,
+                   toolName: metadata["tool_name"]
+               ) {
+                return qoderCLIPermissionPayload(response: response, decision: decision, eventType: eventType)
+            }
             if isCodeBuddyFamilyHookClient(clientKind) {
                 return codeBuddyStdoutPayload(response: response, decision: decision)
             }
@@ -624,6 +631,21 @@ public enum HookPayloadMapper {
            questionToolNames.contains(normalizedToolName(from: payload) ?? ""),
            payload["tool_response"] != nil {
             return nil
+        }
+
+        if clientKind == "qoder-cli",
+           isQoderCLIPlanExitApproval(eventType: eventType, payload: payload) {
+            return InterventionRequest(
+                sessionID: sessionKey,
+                kind: .approval,
+                title: "Qoder CLI needs plan approval",
+                message: qoderCLIPlanApprovalMessage(from: payload),
+                options: [
+                    InterventionOption(id: "approve", title: "Allow Once"),
+                    InterventionOption(id: "deny", title: "Deny")
+                ],
+                rawContext: flattenMetadata(payload: payload)
+            )
         }
 
         if let questions = questionPayloads(from: payload), !questions.isEmpty {
@@ -1220,6 +1242,39 @@ public enum HookPayloadMapper {
             .lowercased()
     }
 
+    private static func isQoderCLIPlanExitApproval(eventType: String, payload: [String: Any]) -> Bool {
+        isQoderCLIPlanExitApproval(
+            eventType: eventType,
+            toolName: payload["tool_name"] as? String
+        )
+    }
+
+    private static func isQoderCLIPlanExitApproval(
+        eventType: String,
+        toolName: String?
+    ) -> Bool {
+        eventType == "PreToolUse"
+            && normalizedToolName(toolName) == "exitplanmode"
+    }
+
+    private static func qoderCLIPlanApprovalMessage(from payload: [String: Any]) -> String {
+        if let toolInput = payload["tool_input"] as? [String: Any],
+           let plan = nonEmpty(toolInput["plan"] as? String) {
+            return plan
+        }
+
+        return "Qoder CLI wants to exit plan mode and start coding."
+    }
+
+    private static func normalizedToolName(_ toolName: String?) -> String? {
+        guard let toolName else { return nil }
+        return toolName
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "_", with: "")
+            .replacingOccurrences(of: "-", with: "")
+            .lowercased()
+    }
+
     private static func shouldRequestCodeBuddyApproval(
         eventType: String,
         payload: [String: Any],
@@ -1325,6 +1380,49 @@ public enum HookPayloadMapper {
             ]
         ]
 
+        guard JSONSerialization.isValidJSONObject(payload),
+              let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]),
+              let string = String(data: data, encoding: .utf8) else {
+            return "{}"
+        }
+
+        return string
+    }
+
+    private static func qoderCLIPermissionPayload(
+        response: BridgeResponse,
+        decision: InterventionDecision,
+        eventType: String
+    ) -> String {
+        let behavior: String
+        var decisionOutput: [String: Any]
+
+        switch decision {
+        case .approve, .approveForSession:
+            behavior = "allow"
+            decisionOutput = ["behavior": "allow"]
+        case .deny, .cancel:
+            behavior = "deny"
+            decisionOutput = [
+                "behavior": "deny",
+                "message": response.reason ?? "Denied from Island"
+            ]
+        case .answer:
+            behavior = "allow"
+            decisionOutput = ["behavior": "allow"]
+        }
+
+        var hookSpecificOutput: [String: Any] = [
+            "hookEventName": eventType,
+            "permissionDecision": behavior,
+            "decision": decisionOutput
+        ]
+
+        if behavior == "deny" {
+            hookSpecificOutput["permissionDecisionReason"] = response.reason ?? "Denied from Island"
+        }
+
+        let payload: [String: Any] = ["hookSpecificOutput": hookSpecificOutput]
         guard JSONSerialization.isValidJSONObject(payload),
               let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]),
               let string = String(data: data, encoding: .utf8) else {

@@ -41,6 +41,7 @@ actor CodexAppServerMonitor {
     private let logger = Logger(subsystem: "com.wudanwu.pingisland", category: "Codex")
     private let port = 41241
     private let threadListRefreshInterval: Duration = .seconds(15)
+    static let maximumWebSocketMessageSize = 32 * 1024 * 1024
 
     private var process: Process?
     private var websocket: URLSessionWebSocketTask?
@@ -336,7 +337,7 @@ actor CodexAppServerMonitor {
         guard websocket == nil else { return true }
         guard let url = URL(string: "ws://127.0.0.1:\(port)") else { return false }
 
-        let websocket = URLSession.shared.webSocketTask(with: url)
+        let websocket = Self.makeWebSocketTask(url: url)
         websocket.resume()
         self.websocket = websocket
 
@@ -370,6 +371,15 @@ actor CodexAppServerMonitor {
             self.websocket = nil
             return false
         }
+    }
+
+    static func makeWebSocketTask(
+        url: URL,
+        session: URLSession = .shared
+    ) -> URLSessionWebSocketTask {
+        let task = session.webSocketTask(with: url)
+        task.maximumMessageSize = maximumWebSocketMessageSize
+        return task
     }
 
     private func receiveLoop() async {

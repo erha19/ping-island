@@ -150,11 +150,8 @@ actor SessionLauncher {
         guard !session.clientInfo.suppressesActivationNavigation else {
             return false
         }
-        if await activate(session) {
-            return true
-        }
 
-        let candidateBundleIdentifiers = clientApplicationBundleIdentifiers(for: session)
+        let candidateBundleIdentifiers = Self.clientApplicationBundleIdentifiers(for: session.clientInfo)
         let resolvedLaunchURL = session.clientInfo.launchURL
             ?? session.clientInfo.bundleIdentifier.flatMap {
                 SessionClientInfo.appLaunchURL(
@@ -163,6 +160,23 @@ actor SessionLauncher {
                     workspacePath: session.cwd
                 )
             }
+
+        if Self.shouldPrioritizeClientApplicationFallback(for: session.clientInfo) {
+            for bundleIdentifier in candidateBundleIdentifiers {
+                if await activateClientFallbackApplication(bundleIdentifier: bundleIdentifier) {
+                    return true
+                }
+            }
+
+            if let resolvedLaunchURL,
+               await activateURL(resolvedLaunchURL) {
+                return true
+            }
+        }
+
+        if await activate(session) {
+            return true
+        }
 
         for bundleIdentifier in candidateBundleIdentifiers {
             if await activateClientFallbackApplication(bundleIdentifier: bundleIdentifier) {
@@ -889,7 +903,11 @@ actor SessionLauncher {
         return nil
     }
 
-    private func activateApplication(processIdentifier pid: Int, activateAllWindows: Bool = true) async -> Bool {
+    private func activateApplication(
+        processIdentifier pid: Int,
+        activateAllWindows: Bool = true,
+        activateIgnoringOtherApps: Bool = false
+    ) async -> Bool {
         if let bundleIdentifier = await MainActor.run(body: {
             NSRunningApplication(processIdentifier: pid_t(pid))?.bundleIdentifier
         }) {
@@ -898,7 +916,8 @@ actor SessionLauncher {
                 Self.logger.debug("activateApplication(processIdentifier:) remapping helper bundle \(bundleIdentifier, privacy: .public) -> \(normalizedBundleIdentifier, privacy: .public)")
                 return await activateApplication(
                     bundleIdentifier: normalizedBundleIdentifier,
-                    activateAllWindows: activateAllWindows
+                    activateAllWindows: activateAllWindows,
+                    activateIgnoringOtherApps: activateIgnoringOtherApps
                 )
             }
         }
@@ -909,13 +928,21 @@ actor SessionLauncher {
                 return false
             }
 
-            let success = activateRunningApplication(app, activateAllWindows: activateAllWindows)
+            let success = activateRunningApplication(
+                app,
+                activateAllWindows: activateAllWindows,
+                activateIgnoringOtherApps: activateIgnoringOtherApps
+            )
             Self.logger.debug("activateApplication(processIdentifier:) pid=\(pid, privacy: .public) bundle=\(app.bundleIdentifier ?? "unknown", privacy: .public) success=\(success)")
             return success
         }
     }
 
-    private func activateApplication(bundleIdentifier: String, activateAllWindows: Bool = true) async -> Bool {
+    private func activateApplication(
+        bundleIdentifier: String,
+        activateAllWindows: Bool = true,
+        activateIgnoringOtherApps: Bool = false
+    ) async -> Bool {
         let normalizedBundleIdentifier = TerminalAppRegistry.normalizedHostBundleIdentifier(for: bundleIdentifier)
 
         if let runningActivation = await MainActor.run(resultType: Bool?.self, body: {
@@ -923,7 +950,11 @@ actor SessionLauncher {
                 return nil
             }
 
-            let didActivate = activateRunningApplication(app, activateAllWindows: activateAllWindows)
+            let didActivate = activateRunningApplication(
+                app,
+                activateAllWindows: activateAllWindows,
+                activateIgnoringOtherApps: activateIgnoringOtherApps
+            )
             if activateAllWindows,
                let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: normalizedBundleIdentifier) {
                 let configuration = NSWorkspace.OpenConfiguration()
@@ -963,7 +994,8 @@ actor SessionLauncher {
                         if let app {
                             didActivate = self.activateRunningApplication(
                                 app,
-                                activateAllWindows: activateAllWindows
+                                activateAllWindows: activateAllWindows,
+                                activateIgnoringOtherApps: activateIgnoringOtherApps
                             )
                         } else {
                             didActivate = true
@@ -978,22 +1010,33 @@ actor SessionLauncher {
     private func activateClientFallbackApplication(bundleIdentifier: String) async -> Bool {
         await activateApplication(
             bundleIdentifier: bundleIdentifier,
-            activateAllWindows: Self.shouldActivateAllWindowsForClientFallback(bundleIdentifier: bundleIdentifier)
+            activateAllWindows: Self.shouldActivateAllWindowsForClientFallback(bundleIdentifier: bundleIdentifier),
+            activateIgnoringOtherApps: true
         )
     }
 
     @MainActor
-    private func activateRunningApplication(_ app: NSRunningApplication, activateAllWindows: Bool = true) -> Bool {
+    private func activateRunningApplication(
+        _ app: NSRunningApplication,
+        activateAllWindows: Bool = true,
+        activateIgnoringOtherApps: Bool = false
+    ) -> Bool {
         if app.isHidden {
             app.unhide()
         }
 
-        if activateAllWindows {
-            restoreMiniaturizedWindows(for: app)
-            return app.activate(options: [.activateAllWindows])
+        var options: NSApplication.ActivationOptions = []
+        if activateIgnoringOtherApps {
+            options.insert(.activateIgnoringOtherApps)
         }
 
-        return app.activate(options: [])
+        if activateAllWindows {
+            restoreMiniaturizedWindows(for: app)
+            options.insert(.activateAllWindows)
+            return app.activate(options: options)
+        }
+
+        return app.activate(options: options)
     }
 
     @MainActor
@@ -1132,19 +1175,45 @@ actor SessionLauncher {
         )
     }
 
-    private func clientApplicationBundleIdentifiers(for session: SessionState) -> [String] {
+    nonisolated static func shouldPrioritizeClientApplicationFallback(for clientInfo: SessionClientInfo) -> Bool {
+        let normalizedProfileID = clientInfo.profileID?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        let normalizedBundleIdentifier = clientInfo.bundleIdentifier?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        let normalizedTerminalBundleIdentifier = clientInfo.terminalBundleIdentifier?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        let normalizedName = clientInfo.name?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: " ", with: "")
+            .replacingOccurrences(of: "-", with: "")
+
+        return normalizedProfileID == "qoderwork"
+            || normalizedBundleIdentifier == "com.qoder.work"
+            || normalizedTerminalBundleIdentifier == "com.qoder.work"
+            || normalizedName == "qoderwork"
+    }
+
+    nonisolated static func clientApplicationBundleIdentifiers(for clientInfo: SessionClientInfo) -> [String] {
         var candidates: [String] = []
 
-        if session.clientInfo.profileID == "qoderwork"
-            || session.clientInfo.bundleIdentifier == "com.qoder.work"
-            || session.clientInfo.terminalBundleIdentifier == "com.qoder.work" {
+        if shouldPrioritizeClientApplicationFallback(for: clientInfo) {
             candidates.append("com.qoder.work")
         }
 
         candidates.append(contentsOf: [
-            session.clientInfo.bundleIdentifier,
-            session.clientInfo.terminalBundleIdentifier
-        ].compactMap { $0 })
+            clientInfo.bundleIdentifier,
+            clientInfo.terminalBundleIdentifier
+        ].compactMap { rawValue in
+            guard let trimmed = rawValue?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !trimmed.isEmpty else {
+                return nil
+            }
+            return trimmed
+        })
 
         return Self.orderedUniqueBundleIdentifiers(
             candidates.map(TerminalAppRegistry.normalizedHostBundleIdentifier(for:))
