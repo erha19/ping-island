@@ -285,7 +285,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/zsh;
-			shellScript = "set -euo pipefail\n\nPACKAGE_PATH=\"$SRCROOT/Prototype\"\nPRODUCT_NAME=\"PingIslandBridge\"\nBUILD_CONFIGURATION=$(echo \"$CONFIGURATION\" | tr '[:upper:]' '[:lower:]')\nSCRATCH_PATH=\"$DERIVED_FILE_DIR/PingIslandBridge-build\"\nAPP_BRIDGE_PATH=\"$TARGET_BUILD_DIR/$EXECUTABLE_FOLDER_PATH/$PRODUCT_NAME\"\n\nxcrun swift build \\\n  --package-path \"$PACKAGE_PATH\" \\\n  --product \"$PRODUCT_NAME\" \\\n  --configuration \"$BUILD_CONFIGURATION\" \\\n  --scratch-path \"$SCRATCH_PATH\"\n\nBRIDGE_PATH=$(find \"$SCRATCH_PATH\" -type f -path \"*/$BUILD_CONFIGURATION/$PRODUCT_NAME\" | head -n 1)\nif [ -z \"$BRIDGE_PATH\" ] || [ ! -x \"$BRIDGE_PATH\" ]; then\n  echo \"error: Failed to build $PRODUCT_NAME\" >&2\n  exit 1\nfi\n\ncp \"$BRIDGE_PATH\" \"$APP_BRIDGE_PATH\"\nchmod 755 \"$APP_BRIDGE_PATH\"\n\nif [[ \"${CODE_SIGNING_ALLOWED:-NO}\" == \"YES\" && -n \"${EXPANDED_CODE_SIGN_IDENTITY:-}\" ]]; then\n  codesign_args=(\n    --force\n    --sign \"$EXPANDED_CODE_SIGN_IDENTITY\"\n    --timestamp\n  )\n\n  if [[ \"${ENABLE_HARDENED_RUNTIME:-NO}\" == \"YES\" ]]; then\n    codesign_args+=(--options runtime)\n  fi\n\n  if [[ -n \"${OTHER_CODE_SIGN_FLAGS:-}\" ]]; then\n    codesign_args+=(${=OTHER_CODE_SIGN_FLAGS})\n  fi\n\n  codesign_args+=(\"$APP_BRIDGE_PATH\")\n  /usr/bin/codesign \"${codesign_args[@]}\"\nfi\n";
+			shellScript = "\"$SRCROOT/scripts/embed-ping-island-bridge.sh\"\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
