@@ -136,7 +136,7 @@ final class RemoteHookConfigurationTests: XCTestCase {
         let files = HookInstaller.managedPluginDirectoryFiles(for: profile)
 
         XCTAssertEqual(Set(files.keys), ["plugin.yaml", "__init__.py"])
-        XCTAssertTrue(files["plugin.yaml"]?.contains("name: ping-island") == true)
+        XCTAssertTrue(files["plugin.yaml"]?.contains("name: ping_island") == true)
         XCTAssertTrue(files["__init__.py"]?.contains("ctx.register_hook(\"pre_llm_call\"") == true)
     }
 

@@ -1836,7 +1836,7 @@ struct HookInstaller {
 
         let pluginYAML = """
         # \(marker)
-        name: ping-island
+        name: ping_island
         version: 1.0.0
         description: Forward Hermes Agent plugin hooks to Ping Island
         provides_hooks:

@@ -20,7 +20,7 @@ final class HermesIntegrationTests: XCTestCase {
         let pluginYAML = try XCTUnwrap(files["plugin.yaml"])
         let pluginSource = try XCTUnwrap(files["__init__.py"])
 
-        XCTAssertTrue(pluginYAML.contains("name: ping-island"))
+        XCTAssertTrue(pluginYAML.contains("name: ping_island"))
         XCTAssertTrue(pluginYAML.contains("provides_hooks:"))
         XCTAssertTrue(pluginYAML.contains("- on_session_finalize"))
         XCTAssertTrue(pluginYAML.contains("- on_session_reset"))
