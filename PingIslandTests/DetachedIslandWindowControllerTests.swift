@@ -1107,14 +1107,45 @@ final class DetachedIslandWindowControllerTests: XCTestCase {
 
         controller.hideBubbleForTesting()
 
+        XCTAssertEqual(controller.renderedBubbleStateForTesting, .hoverPreview)
+        XCTAssertFalse(controller.isBubbleVisibleForTesting)
+
+        waitForBubbleHidden(controller)
+    }
+
+    private func waitForBubbleHidden(
+        _ controller: DetachedIslandWindowController,
+        timeout: TimeInterval = 1.0,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
         let bubbleDismissed = expectation(description: "bubble fade completes before layout collapse")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-            XCTAssertEqual(controller.renderedBubbleStateForTesting, .hidden)
-            XCTAssertFalse(controller.isBubbleVisibleForTesting)
-            bubbleDismissed.fulfill()
+        let deadline = Date().addingTimeInterval(timeout)
+
+        func poll() {
+            if controller.renderedBubbleStateForTesting == .hidden,
+               controller.isBubbleVisibleForTesting == false {
+                bubbleDismissed.fulfill()
+                return
+            }
+
+            guard Date() < deadline else {
+                XCTFail(
+                    "Expected bubble to become hidden; got state=\(controller.renderedBubbleStateForTesting), visible=\(controller.isBubbleVisibleForTesting)",
+                    file: file,
+                    line: line
+                )
+                bubbleDismissed.fulfill()
+                return
+            }
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) {
+                poll()
+            }
         }
 
-        wait(for: [bubbleDismissed], timeout: 1.0)
+        poll()
+        wait(for: [bubbleDismissed], timeout: timeout + 0.25)
     }
 
     private func makeViewModel() -> NotchViewModel {
