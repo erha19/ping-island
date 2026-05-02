@@ -1420,6 +1420,11 @@ final class SessionStateTests: XCTestCase {
                 bundleIdentifier: "com.apple.finder"
             )
         )
+        XCTAssertTrue(
+            SessionLauncher.shouldActivateAllWindowsForClientFallback(
+                bundleIdentifier: "com.qoder.work"
+            )
+        )
     }
 
     func testQoderWorkClientApplicationFallbackIsPrioritized() {

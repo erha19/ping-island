@@ -3431,8 +3431,11 @@ actor SessionStore {
                 ?? normalizedClientInfo.bundleIdentifier
         )?.lowercased()
         if profileID == "qoder"
-            || profileID == "qoderwork"
-            || bundleIdentifier == "com.qoder.ide"
+            || bundleIdentifier == "com.qoder.ide" {
+            return false
+        }
+
+        if profileID == "qoderwork"
             || bundleIdentifier == "com.qoder.work" {
             return true
         }

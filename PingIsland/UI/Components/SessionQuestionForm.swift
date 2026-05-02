@@ -39,10 +39,11 @@ struct SessionQuestionForm: View {
     nonisolated static func questionListMaximumHeight(for maxPanelHeight: Double) -> CGFloat {
         let minimumQuestionListHeight: CGFloat = 230
         let reservedPanelChromeHeight: CGFloat = 250
+        let outerScrollSafetyInset: CGFloat = 80
 
         return max(
             minimumQuestionListHeight,
-            CGFloat(maxPanelHeight) - reservedPanelChromeHeight
+            CGFloat(maxPanelHeight) - reservedPanelChromeHeight - outerScrollSafetyInset
         )
     }
 

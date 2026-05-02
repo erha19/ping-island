@@ -7,7 +7,11 @@ final class SessionQuestionFormTests: XCTestCase {
     }
 
     func testQuestionListHeightGrowsWithUserPanelHeightSetting() {
-        XCTAssertEqual(SessionQuestionForm.questionListMaximumHeight(for: 700), 450)
+        XCTAssertEqual(SessionQuestionForm.questionListMaximumHeight(for: 700), 370)
+    }
+
+    func testQuestionListHeightKeepsOuterPanelScrollMargin() {
+        XCTAssertEqual(SessionQuestionForm.questionListMaximumHeight(for: 600), 270)
     }
 
     func testQuestionListHeightCapsOversizedContent() {

@@ -189,7 +189,8 @@ extension HookEvent {
     }
 
     private nonisolated var isExternalClientQuestionEvent: Bool {
-        (clientInfo.profileID == "qoderwork"
+        (isQoderIDEQuestionNotificationClient
+            || clientInfo.profileID == "qoderwork"
             || clientInfo.bundleIdentifier == "com.qoder.work"
             || clientInfo.profileID == "workbuddy"
             || clientInfo.bundleIdentifier == "com.workbuddy.workbuddy")
@@ -197,9 +198,28 @@ extension HookEvent {
             && !(questionPayloads?.isEmpty ?? true)
     }
 
+    private nonisolated var isQoderIDEQuestionNotificationClient: Bool {
+        let normalizedClientInfo = clientInfo.normalizedForClaudeRouting()
+        let bundleIdentifiers = [
+            normalizedClientInfo.terminalBundleIdentifier,
+            normalizedClientInfo.bundleIdentifier,
+            clientInfo.terminalBundleIdentifier,
+            clientInfo.bundleIdentifier
+        ]
+        let isQoderIDEHosted = bundleIdentifiers.contains { value in
+            value?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased() == "com.qoder.ide"
+        }
+
+        return normalizedClientInfo.profileID == "qoder" && isQoderIDEHosted
+    }
+
     private nonisolated var externalClientQuestionInterventionID: String? {
         guard isExternalClientQuestionEvent else { return nil }
-        if let toolUseId, !toolUseId.isEmpty {
+        if !isQoderIDEQuestionNotificationClient,
+           let toolUseId,
+           !toolUseId.isEmpty {
             return toolUseId
         }
 
@@ -215,6 +235,8 @@ extension HookEvent {
         let prefix: String
         if clientInfo.profileID == "workbuddy" || clientInfo.bundleIdentifier == "com.workbuddy.workbuddy" {
             prefix = "workbuddy-question"
+        } else if isQoderIDEQuestionNotificationClient {
+            prefix = "qoder-question"
         } else {
             prefix = "qoderwork-question"
         }
@@ -278,7 +300,8 @@ extension HookEvent {
     }
 
     nonisolated var intervention: SessionIntervention? {
-        if let bridgeIntervention {
+        if let bridgeIntervention,
+           !isAskUserQuestionRequest {
             return bridgeIntervention
         }
 
@@ -379,19 +402,10 @@ extension HookEvent {
         if let toolUseId = toolUseId {
             metadata["originalToolUseId"] = toolUseId
         }
-        let normalizedClientInfo = clientInfo.normalizedForClaudeRouting()
-        let isQoderWorkQuestion =
-            normalizedClientInfo.profileID == "qoderwork"
-            || normalizedClientInfo.bundleIdentifier == "com.qoder.work"
-        let canSubmitDefaultOption =
-            isQoderWorkQuestion && parsedQuestions.allSatisfy { !$0.options.isEmpty }
-
         let message: String
-        if isExternalClientQuestionEvent && !canSubmitDefaultOption {
+        if isExternalClientQuestionEvent {
             metadata["responseMode"] = "external_only"
             message = "\(actorName) 已在客户端内发起提问，请切回 \(actorName) 完成回答。Island 暂不支持直接提交这类回答。"
-        } else if canSubmitDefaultOption {
-            message = "\(actorName) 需要你补充回答，Island 会默认提交每个问题的首个选项。"
         } else {
             message = "\(actorName) 需要你补充回答，提交后会继续执行当前会话。"
         }

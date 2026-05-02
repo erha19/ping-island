@@ -848,6 +848,246 @@ func qoderCLIHooksExecutedInsideQoderIDEStayNotifyOnly() throws {
     #expect(envelope.expectsResponse == false)
     #expect(envelope.status?.kind == .waitingForInput)
     #expect(envelope.intervention == nil)
+    #expect(HookPayloadMapper.shouldDeliverEnvelope(envelope))
+}
+
+@Test
+func qoderCLINonQuestionHooksExecutedInsideQoderIDESkipDelivery() throws {
+    let payload = """
+    {
+      "hook_event_name": "PreToolUse",
+      "session_id": "qoder-ide-bash",
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pwd"
+      }
+    }
+    """.data(using: .utf8)!
+
+    let envelope = HookPayloadMapper.makeEnvelope(
+        source: .claude,
+        arguments: [
+            "island-bridge",
+            "--source", "claude",
+            "--client-kind", "qoder-cli",
+            "--client-name", "Qoder CLI",
+            "--client-origin", "cli",
+            "--client-originator", "Qoder"
+        ],
+        environment: [
+            "__CFBundleIdentifier": "com.qoder.ide",
+            "PWD": "/tmp/demo"
+        ],
+        stdinData: payload
+    )
+
+    #expect(envelope.metadata["client_kind"] == "qoder-cli")
+    #expect(envelope.metadata["terminal_bundle_id"] == "com.qoder.ide")
+    #expect(envelope.eventType == "PreToolUse")
+    #expect(envelope.expectsResponse == false)
+    #expect(HookPayloadMapper.shouldDeliverEnvelope(envelope) == false)
+}
+
+@Test
+func qoderCLIHooksExecutedInsideQoderIDEStillForwardCompletion() throws {
+    let payload = """
+    {
+      "hook_event_name": "Stop",
+      "session_id": "qoder-ide-stop",
+      "last_assistant_message": "Done from Qoder IDE."
+    }
+    """.data(using: .utf8)!
+
+    let envelope = HookPayloadMapper.makeEnvelope(
+        source: .claude,
+        arguments: [
+            "island-bridge",
+            "--source", "claude",
+            "--client-kind", "qoder-cli",
+            "--client-name", "Qoder CLI",
+            "--client-origin", "cli",
+            "--client-originator", "Qoder"
+        ],
+        environment: [
+            "__CFBundleIdentifier": "com.qoder.ide",
+            "PWD": "/tmp/demo"
+        ],
+        stdinData: payload
+    )
+
+    #expect(envelope.metadata["client_kind"] == "qoder-cli")
+    #expect(envelope.metadata["terminal_bundle_id"] == "com.qoder.ide")
+    #expect(envelope.eventType == "Stop")
+    #expect(envelope.expectsResponse == false)
+    #expect(HookPayloadMapper.shouldDeliverEnvelope(envelope))
+}
+
+@Test
+func qoderIDEPermissionRequestForwardsQuestionNotification() throws {
+    let payload = """
+    {
+      "hook_event_name": "PermissionRequest",
+      "session_id": "qoder-ide-native-question",
+      "tool_name": "ask_user_question",
+      "tool_input": {
+        "question": "Pick the next action",
+        "questions": [
+          {
+            "header": "Next Step",
+            "question": "What should happen inside Qoder IDE?",
+            "options": [{"label": "Use IDE card"}]
+          }
+        ]
+      }
+    }
+    """.data(using: .utf8)!
+
+    let envelope = HookPayloadMapper.makeEnvelope(
+        source: .claude,
+        arguments: [
+            "island-bridge",
+            "--source", "claude",
+            "--client-kind", "qoder",
+            "--client-name", "Qoder",
+            "--client-originator", "Qoder"
+        ],
+        environment: [
+            "__CFBundleIdentifier": "com.qoder.ide",
+            "PWD": "/tmp/demo"
+        ],
+        stdinData: payload
+    )
+
+    #expect(envelope.metadata["client_kind"] == "qoder")
+    #expect(envelope.metadata["terminal_bundle_id"] == "com.qoder.ide")
+    #expect(envelope.eventType == "PermissionRequest")
+    #expect(envelope.expectsResponse == false)
+    #expect(envelope.status?.kind == .waitingForApproval)
+    #expect(envelope.intervention == nil)
+    #expect(HookPayloadMapper.shouldDeliverEnvelope(envelope))
+}
+
+@Test
+func qoderIDEAnsweredQuestionForwardsCleanupWithoutNewIntervention() throws {
+    let payload = """
+    {
+      "hook_event_name": "PreToolUse",
+      "session_id": "qoder-ide-native-answer",
+      "tool_name": "ask_user_question",
+      "tool_input": {
+        "questions": [
+          {
+            "header": "Next Step",
+            "question": "What should happen inside Qoder IDE?",
+            "options": [{"label": "Use IDE card"}]
+          }
+        ],
+        "answers": {
+          "What should happen inside Qoder IDE?": "Use IDE card"
+        }
+      }
+    }
+    """.data(using: .utf8)!
+
+    let envelope = HookPayloadMapper.makeEnvelope(
+        source: .claude,
+        arguments: [
+            "island-bridge",
+            "--source", "claude",
+            "--client-kind", "qoder",
+            "--client-name", "Qoder",
+            "--client-originator", "Qoder"
+        ],
+        environment: [
+            "__CFBundleIdentifier": "com.qoder.ide",
+            "PWD": "/tmp/demo"
+        ],
+        stdinData: payload
+    )
+
+    #expect(envelope.metadata["client_kind"] == "qoder")
+    #expect(envelope.eventType == "PreToolUse")
+    #expect(envelope.expectsResponse == false)
+    #expect(envelope.status?.kind == .runningTool)
+    #expect(envelope.intervention == nil)
+    #expect(HookPayloadMapper.shouldDeliverEnvelope(envelope))
+}
+
+@Test
+func qoderIDEPostToolUseResolvedQuestionForwardsCleanup() throws {
+    let payload = """
+    {
+      "hook_event_name": "PostToolUse",
+      "session_id": "qoder-ide-native-post-answer",
+      "tool_name": "ask_user_question",
+      "tool_input": {
+        "questions": [
+          {
+            "header": "Next Step",
+            "question": "What should happen inside Qoder IDE?",
+            "options": [{"label": "Use IDE card"}]
+          }
+        ]
+      },
+      "tool_response": "User has answered your questions."
+    }
+    """.data(using: .utf8)!
+
+    let envelope = HookPayloadMapper.makeEnvelope(
+        source: .claude,
+        arguments: [
+            "island-bridge",
+            "--source", "claude",
+            "--client-kind", "qoder",
+            "--client-name", "Qoder",
+            "--client-originator", "Qoder"
+        ],
+        environment: [
+            "__CFBundleIdentifier": "com.qoder.ide",
+            "PWD": "/tmp/demo"
+        ],
+        stdinData: payload
+    )
+
+    #expect(envelope.metadata["client_kind"] == "qoder")
+    #expect(envelope.eventType == "PostToolUse")
+    #expect(envelope.expectsResponse == false)
+    #expect(envelope.status?.kind == .active)
+    #expect(envelope.intervention == nil)
+    #expect(HookPayloadMapper.shouldDeliverEnvelope(envelope))
+}
+
+@Test
+func qoderIDEStillForwardsCompletion() throws {
+    let payload = """
+    {
+      "hook_event_name": "Stop",
+      "session_id": "qoder-ide-native-stop",
+      "last_assistant_message": "Done from Qoder IDE."
+    }
+    """.data(using: .utf8)!
+
+    let envelope = HookPayloadMapper.makeEnvelope(
+        source: .claude,
+        arguments: [
+            "island-bridge",
+            "--source", "claude",
+            "--client-kind", "qoder",
+            "--client-name", "Qoder",
+            "--client-originator", "Qoder"
+        ],
+        environment: [
+            "__CFBundleIdentifier": "com.qoder.ide",
+            "PWD": "/tmp/demo"
+        ],
+        stdinData: payload
+    )
+
+    #expect(envelope.metadata["client_kind"] == "qoder")
+    #expect(envelope.metadata["terminal_bundle_id"] == "com.qoder.ide")
+    #expect(envelope.eventType == "Stop")
+    #expect(envelope.expectsResponse == false)
+    #expect(HookPayloadMapper.shouldDeliverEnvelope(envelope))
 }
 
 @Test

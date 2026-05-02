@@ -38,9 +38,9 @@ final class QoderWorkHookEventTimingTests: XCTestCase {
         XCTAssertTrue(event.isAskUserQuestionRequest)
         XCTAssertEqual(event.intervention?.kind, .question)
         XCTAssertEqual(event.intervention?.id, "call_123")
-        XCTAssertTrue(event.intervention?.supportsInlineResponse ?? false)
-        XCTAssertNil(event.intervention?.metadata["responseMode"])
-        XCTAssertTrue(event.intervention?.message.contains("默认提交") ?? false)
+        XCTAssertFalse(event.intervention?.supportsInlineResponse ?? true)
+        XCTAssertEqual(event.intervention?.metadata["responseMode"], "external_only")
+        XCTAssertTrue(event.intervention?.message.contains("暂不支持直接提交") ?? false)
         XCTAssertEqual(event.determinePhase(), .waitingForInput)
     }
 
@@ -83,12 +83,25 @@ final class QoderWorkHookEventTimingTests: XCTestCase {
             event.intervention?.id,
             "qoderwork-question-qoderwork-session-topic"
         )
-        XCTAssertTrue(event.intervention?.supportsInlineResponse ?? false)
-        XCTAssertNil(event.intervention?.metadata["responseMode"])
+        XCTAssertFalse(event.intervention?.supportsInlineResponse ?? true)
+        XCTAssertEqual(event.intervention?.metadata["responseMode"], "external_only")
         XCTAssertEqual(event.determinePhase(), .waitingForInput)
     }
 
-    func testQoderWorkQuestionWithoutOptionsStaysExternalOnly() {
+    func testQoderWorkBridgeQuestionUsesToolInputForExternalModeAndDefaultAnswer() {
+        let bridgeIntervention = SessionIntervention(
+            id: "call_bridge",
+            kind: .question,
+            title: "Claude needs input",
+            message: "Choose one",
+            options: [
+                .init(id: "topic:0", title: "A 方案", detail: nil),
+                .init(id: "topic:1", title: "B 方案", detail: nil)
+            ],
+            questions: [],
+            supportsSessionScope: false,
+            metadata: ["tool_name": "AskUserQuestion"]
+        )
         let event = HookEvent(
             sessionId: "qoderwork-session",
             cwd: "/tmp/project",
@@ -107,21 +120,32 @@ final class QoderWorkHookEventTimingTests: XCTestCase {
             toolInput: [
                 "questions": AnyCodable([
                     [
-                        "id": "path",
-                        "header": "文件",
-                        "question": "请告诉我文件路径",
-                        "options": []
+                        "id": "topic",
+                        "header": "主题",
+                        "question": "先选一个主题",
+                        "options": [
+                            ["label": "A 方案"],
+                            ["label": "B 方案"]
+                        ]
                     ]
                 ])
             ],
-            toolUseId: "call_free_text",
+            toolUseId: "call_bridge",
             notificationType: nil,
-            message: nil
+            message: nil,
+            bridgeIntervention: bridgeIntervention
         )
 
         XCTAssertEqual(event.intervention?.metadata["responseMode"], "external_only")
         XCTAssertFalse(event.intervention?.supportsInlineResponse ?? true)
-        XCTAssertTrue(event.intervention?.message.contains("暂不支持直接提交") ?? false)
+        XCTAssertEqual(event.intervention?.questions.first?.options.first?.title, "A 方案")
+
+        let autoAnswer = SessionMonitor.defaultQoderAutoAnswer(for: event)
+        XCTAssertEqual(autoAnswer?.toolUseId, "call_bridge")
+        XCTAssertEqual(autoAnswer?.answers["topic"], ["A 方案"])
+        let answers = autoAnswer?.updatedInput["answers"] as? [String: Any]
+        XCTAssertEqual(answers?["topic"] as? String, "A 方案")
+        XCTAssertEqual(answers?["先选一个主题"] as? String, "A 方案")
     }
 
     func testWorkBuddyPreToolUseQuestionUsesExternalClientMode() {

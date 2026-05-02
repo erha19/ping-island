@@ -10,6 +10,12 @@ public enum HookPayloadMapper {
         "askuserquestion",
         "askfollowupquestion"
     ]
+    private static let qoderIDEForwardedEvents: Set<String> = [
+        "Notification",
+        "SessionEnd",
+        "Stop",
+        "SubagentStop"
+    ]
 
     public static func makeEnvelope(
         source: AgentProvider,
@@ -58,6 +64,16 @@ public enum HookPayloadMapper {
             expectsResponse: expectsResponse,
             metadata: metadata
         )
+    }
+
+    public static func shouldDeliverEnvelope(_ envelope: BridgeEnvelope) -> Bool {
+        guard isQoderIDEHostedEnvelope(envelope) else {
+            return true
+        }
+
+        return qoderIDEForwardedEvents.contains(envelope.eventType)
+            || isQuestionNotificationEnvelope(envelope)
+            || isQuestionResolutionEnvelope(envelope)
     }
 
     public static func stdoutPayload(
@@ -1043,6 +1059,96 @@ public enum HookPayloadMapper {
         }
 
         return nil
+    }
+
+    private static func isQoderIDEHostedEnvelope(_ envelope: BridgeEnvelope) -> Bool {
+        let clientKind = envelope.metadata["client_kind"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        guard clientKind == "qoder" || clientKind == "qoder-cli" else {
+            return false
+        }
+
+        return [
+            envelope.terminalContext.terminalBundleID,
+            envelope.terminalContext.ideBundleID,
+            envelope.metadata["terminal_bundle_id"],
+            envelope.metadata["client_bundle_id"]
+        ].contains { value in
+            value?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased() == "com.qoder.ide"
+        }
+    }
+
+    private static func isQuestionNotificationEnvelope(_ envelope: BridgeEnvelope) -> Bool {
+        guard envelope.eventType == "PreToolUse" || envelope.eventType == "PermissionRequest" else {
+            return false
+        }
+        guard !isQuestionResolutionEnvelope(envelope) else {
+            return false
+        }
+
+        guard isQuestionToolEnvelope(envelope) else {
+            return false
+        }
+
+        return !decodedQuestionPayloads(from: envelope).isEmpty
+    }
+
+    private static func isQuestionResolutionEnvelope(_ envelope: BridgeEnvelope) -> Bool {
+        guard isQuestionToolEnvelope(envelope) else {
+            return false
+        }
+
+        if hasAnsweredQuestionPayload(in: envelope) {
+            return true
+        }
+
+        if envelope.eventType == "PostToolUse",
+           !decodedQuestionPayloads(from: envelope).isEmpty {
+            return true
+        }
+
+        return false
+    }
+
+    private static func isQuestionToolEnvelope(_ envelope: BridgeEnvelope) -> Bool {
+        let normalizedTool = envelope.metadata["tool_name"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: "_", with: "")
+            .replacingOccurrences(of: "-", with: "")
+        return normalizedTool == "askuserquestion" || normalizedTool == "askfollowupquestion"
+    }
+
+    private static func decodedQuestionPayloads(from envelope: BridgeEnvelope) -> [[String: Any]] {
+        guard let toolInputJSON = envelope.metadata["tool_input_json"],
+              let data = toolInputJSON.data(using: .utf8),
+              let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let questions = payload["questions"] as? [[String: Any]] else {
+            return []
+        }
+
+        return questions
+    }
+
+    private static func hasAnsweredQuestionPayload(in envelope: BridgeEnvelope) -> Bool {
+        guard let toolInputJSON = envelope.metadata["tool_input_json"],
+              let data = toolInputJSON.data(using: .utf8),
+              let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return envelope.metadata["tool_response"]?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+        }
+
+        let answersCandidate = payload["answers"]
+        if let answers = answersCandidate as? [String: Any] {
+            return !answers.isEmpty
+        }
+        if let answers = answersCandidate as? [String: String] {
+            return !answers.isEmpty
+        }
+
+        return envelope.metadata["tool_response"]?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
     }
 
     private static func metadataLooksLikeQoderCLI(_ metadata: [String: String]) -> Bool {

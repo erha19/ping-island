@@ -49,6 +49,16 @@ struct IslandBridgeMain {
                 )
 
                 let socketPath = environment["ISLAND_SOCKET_PATH"] ?? "/tmp/island.sock"
+                guard HookPayloadMapper.shouldDeliverEnvelope(envelope) else {
+                    try? BridgeDebugLogger.logDeliveryIfNeeded(
+                        envelope: envelope,
+                        environment: environment,
+                        socketPath: socketPath,
+                        outcome: "skipped_qoder_ide_event"
+                    )
+                    return
+                }
+
                 let response: BridgeResponse?
                 do {
                     response = try sendEnvelopeIfPossible(

@@ -950,26 +950,21 @@ actor SessionLauncher {
                 return nil
             }
 
-            let didActivate = activateRunningApplication(
+            return activateRunningApplication(
                 app,
                 activateAllWindows: activateAllWindows,
                 activateIgnoringOtherApps: activateIgnoringOtherApps
             )
+        }) {
             if activateAllWindows,
-               let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: normalizedBundleIdentifier) {
-                let configuration = NSWorkspace.OpenConfiguration()
-                configuration.activates = true
-                configuration.createsNewApplicationInstance = false
-                NSWorkspace.shared.openApplication(at: appURL, configuration: configuration) { _, error in
-                    if let error {
-                        Self.logger.debug("Reopen running app \(normalizedBundleIdentifier, privacy: .public) failed: \(error.localizedDescription, privacy: .public)")
-                    }
-                }
+               await reopenRunningApplication(
+                   bundleIdentifier: normalizedBundleIdentifier,
+                   activateIgnoringOtherApps: activateIgnoringOtherApps
+               ) {
+                return true
             }
 
-            return didActivate
-        }), runningActivation {
-            return true
+            return runningActivation
         }
 
         guard let appURL = await MainActor.run(body: {
@@ -1013,6 +1008,45 @@ actor SessionLauncher {
             activateAllWindows: Self.shouldActivateAllWindowsForClientFallback(bundleIdentifier: bundleIdentifier),
             activateIgnoringOtherApps: true
         )
+    }
+
+    private func reopenRunningApplication(
+        bundleIdentifier: String,
+        activateIgnoringOtherApps: Bool
+    ) async -> Bool {
+        guard let appURL = await MainActor.run(body: {
+            NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleIdentifier)
+        }) else {
+            return false
+        }
+
+        return await withCheckedContinuation { continuation in
+            Task { @MainActor in
+                let configuration = NSWorkspace.OpenConfiguration()
+                configuration.activates = true
+                configuration.createsNewApplicationInstance = false
+                NSWorkspace.shared.openApplication(at: appURL, configuration: configuration) { app, error in
+                    if let error {
+                        Self.logger.debug("Reopen running app \(bundleIdentifier, privacy: .public) failed: \(error.localizedDescription, privacy: .public)")
+                        continuation.resume(returning: false)
+                        return
+                    }
+
+                    Task { @MainActor in
+                        guard let app else {
+                            continuation.resume(returning: true)
+                            return
+                        }
+
+                        continuation.resume(returning: self.activateRunningApplication(
+                            app,
+                            activateAllWindows: true,
+                            activateIgnoringOtherApps: activateIgnoringOtherApps
+                        ))
+                    }
+                }
+            }
+        }
     }
 
     @MainActor
@@ -1228,6 +1262,9 @@ actor SessionLauncher {
         }
 
         let normalizedBundleIdentifier = TerminalAppRegistry.normalizedHostBundleIdentifier(for: bundleIdentifier)
+        if normalizedBundleIdentifier.caseInsensitiveCompare("com.qoder.work") == .orderedSame {
+            return true
+        }
         return !TerminalAppRegistry.isTerminalBundle(normalizedBundleIdentifier)
     }
 

@@ -142,6 +142,10 @@ struct HookEvent: Sendable {
     }
 
     nonisolated var expectsResponse: Bool {
+        if isQoderIDENotifyOnlyClient {
+            return false
+        }
+
         let normalizedTool = tool?
             .lowercased()
             .replacingOccurrences(of: "_", with: "")
@@ -160,6 +164,24 @@ struct HookEvent: Sendable {
                     && normalizedTool == "exitplanmode"
                     && clientInfo.normalizedForClaudeRouting().profileID == "qoder-cli"
             )
+    }
+
+    private nonisolated var isQoderIDENotifyOnlyClient: Bool {
+        let normalizedClientInfo = clientInfo.normalizedForClaudeRouting()
+        if normalizedClientInfo.profileID == "qoder" {
+            return true
+        }
+
+        return [
+            normalizedClientInfo.terminalBundleIdentifier,
+            normalizedClientInfo.bundleIdentifier,
+            clientInfo.terminalBundleIdentifier,
+            clientInfo.bundleIdentifier
+        ].contains { value in
+            value?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased() == "com.qoder.ide"
+        }
     }
 }
 
@@ -1421,6 +1443,14 @@ class HookSocketServer {
             return
         }
 
+        if Self.shouldSkipQoderIDEEvent(envelope) {
+            logger.debug(
+                "Skipping Qoder IDE hook event=\(envelope.eventType, privacy: .public) session=\(envelope.resolvedSessionID.prefix(8), privacy: .public)"
+            )
+            close(clientSocket)
+            return
+        }
+
         let expectsResponse = envelope.expectsResponse || envelope.hookEvent.expectsResponse
         var event = envelope.hookEvent
         logger.debug("Received bridge envelope provider=\(envelope.provider.rawValue, privacy: .public) event=\(envelope.eventType, privacy: .public) session=\(event.sessionId.prefix(8), privacy: .public)")
@@ -1520,6 +1550,55 @@ class HookSocketServer {
 
         close(clientSocket)
         eventHandler?(event)
+    }
+
+    private static func shouldSkipQoderIDEEvent(_ envelope: BridgeEnvelope) -> Bool {
+        let clientKind = envelope.metadata["client_kind"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        guard clientKind == "qoder" || clientKind == "qoder-cli" else {
+            return false
+        }
+
+        let bundleIdentifiers = [
+            envelope.terminalContext.terminalBundleID,
+            envelope.terminalContext.ideBundleID,
+            envelope.metadata["terminal_bundle_id"],
+            envelope.metadata["client_bundle_id"]
+        ]
+        let isQoderIDEHosted = bundleIdentifiers.contains { value in
+            value?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased() == "com.qoder.ide"
+        }
+        guard isQoderIDEHosted else {
+            return false
+        }
+        if envelope.hookEvent.isAskUserQuestionRequest
+            || isQoderIDEQuestionResolutionEvent(envelope.hookEvent) {
+            return false
+        }
+
+        switch envelope.eventType {
+        case "Notification", "SessionEnd", "Stop", "SubagentStop":
+            return false
+        default:
+            return true
+        }
+    }
+
+    private static func isQoderIDEQuestionResolutionEvent(_ event: HookEvent) -> Bool {
+        let normalizedTool = event.tool?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: "_", with: "")
+            .replacingOccurrences(of: "-", with: "")
+        guard normalizedTool == "askuserquestion" || normalizedTool == "askfollowupquestion" else {
+            return false
+        }
+
+        return event.isAnsweredAskUserQuestionEvent
+            || (event.event == "PostToolUse" && !(event.questionPayloads?.isEmpty ?? true))
     }
 
     private func bridgeDecision(for decision: String, updatedInput: [String: AnyCodable]? = nil) -> BridgeDecision? {

@@ -84,12 +84,69 @@ final class ClaudeAskUserQuestionSessionTests: XCTestCase {
             name: "Qoder",
             bundleIdentifier: "com.qoder.ide"
         )))
-        await store.process(.hookReceived(makeQoderIDEPermissionRequest(sessionId: sessionId)))
+        let permissionRequest = makeQoderIDEPermissionRequest(sessionId: sessionId)
+        XCTAssertFalse(permissionRequest.expectsResponse)
+
+        await store.process(.hookReceived(permissionRequest))
 
         let session = await store.session(for: sessionId)
-        XCTAssertNil(session?.intervention)
+        XCTAssertEqual(session?.intervention?.kind, .question)
+        XCTAssertEqual(session?.intervention?.metadata["responseMode"], "external_only")
+        XCTAssertFalse(session?.intervention?.supportsInlineResponse ?? true)
         XCTAssertNil(session?.activePermission)
         XCTAssertFalse(session?.needsApprovalResponse ?? true)
+        XCTAssertTrue(session?.needsQuestionResponse ?? false)
+        XCTAssertEqual(session?.phase, .waitingForInput)
+
+        await store.process(.sessionArchived(sessionId: sessionId))
+    }
+
+    func testQoderIDEPreToolUseQuestionDoesNotExpectResponse() async {
+        let sessionId = "qoderide-pretool-\(UUID().uuidString)"
+        let event = makeQoderIDEPreToolUseQuestion(sessionId: sessionId)
+
+        XCTAssertFalse(event.expectsResponse)
+        XCTAssertEqual(event.sessionPhase, .waitingForInput)
+        XCTAssertEqual(event.intervention?.kind, .question)
+        XCTAssertEqual(event.intervention?.metadata["responseMode"], "external_only")
+        XCTAssertFalse(event.intervention?.supportsInlineResponse ?? true)
+    }
+
+    func testQoderIDEQuestionInterventionIdDoesNotRefreshAcrossHookLifecycle() async {
+        let sessionId = "qoderide-duplicate-\(UUID().uuidString)"
+        let preToolUse = makeQoderIDEPreToolUseQuestion(sessionId: sessionId)
+        let permissionRequest = makeQoderIDEPermissionRequest(
+            sessionId: sessionId,
+            toolUseId: "permission-\(UUID().uuidString)"
+        )
+
+        XCTAssertEqual(preToolUse.intervention?.id, permissionRequest.intervention?.id)
+
+        let store = SessionStore.shared
+        await store.process(.hookReceived(preToolUse))
+        let firstInterventionId = await store.session(for: sessionId)?.intervention?.id
+        await store.process(.hookReceived(permissionRequest))
+        let secondInterventionId = await store.session(for: sessionId)?.intervention?.id
+
+        XCTAssertEqual(firstInterventionId, secondInterventionId)
+
+        await store.process(.sessionArchived(sessionId: sessionId))
+    }
+
+    func testQoderIDEPostToolUseAnsweredQuestionClearsExternalNotification() async {
+        let sessionId = "qoderide-answer-\(UUID().uuidString)"
+        let store = SessionStore.shared
+
+        await store.process(.hookReceived(makeQoderIDEPreToolUseQuestion(sessionId: sessionId)))
+        var session = await store.session(for: sessionId)
+        XCTAssertEqual(session?.intervention?.kind, .question)
+        XCTAssertEqual(session?.phase, .waitingForInput)
+
+        await store.process(.hookReceived(makeQoderIDEPostToolUseAnsweredQuestion(sessionId: sessionId)))
+
+        session = await store.session(for: sessionId)
+        XCTAssertNil(session?.intervention)
+        XCTAssertFalse(session?.needsQuestionResponse ?? true)
         XCTAssertEqual(session?.phase, .processing)
 
         await store.process(.sessionArchived(sessionId: sessionId))
@@ -335,7 +392,7 @@ final class ClaudeAskUserQuestionSessionTests: XCTestCase {
         )
     }
 
-    private func makeQoderIDEPermissionRequest(sessionId: String) -> HookEvent {
+    private func makeQoderIDEPermissionRequest(sessionId: String, toolUseId: String? = nil) -> HookEvent {
         HookEvent(
             sessionId: sessionId,
             cwd: "/tmp/project",
@@ -364,9 +421,79 @@ final class ClaudeAskUserQuestionSessionTests: XCTestCase {
                     ]
                 ])
             ],
+            toolUseId: toolUseId,
+            notificationType: nil,
+            message: nil
+        )
+    }
+
+    private func makeQoderIDEPreToolUseQuestion(sessionId: String) -> HookEvent {
+        HookEvent(
+            sessionId: sessionId,
+            cwd: "/tmp/project",
+            event: "PreToolUse",
+            status: "waiting_for_input",
+            provider: .claude,
+            clientInfo: SessionClientInfo(
+                kind: .qoder,
+                profileID: "qoder",
+                name: "Qoder",
+                bundleIdentifier: "com.qoder.ide"
+            ),
+            pid: nil,
+            tty: nil,
+            tool: "ask_user_question",
+            toolInput: [
+                "questions": AnyCodable([
+                    [
+                        "id": "topic",
+                        "header": "主题",
+                        "question": "先选一个主题",
+                        "options": [
+                            ["label": "A 方案"],
+                            ["label": "B 方案"]
+                        ]
+                    ]
+                ])
+            ],
             toolUseId: nil,
             notificationType: nil,
             message: nil
+        )
+    }
+
+    private func makeQoderIDEPostToolUseAnsweredQuestion(sessionId: String) -> HookEvent {
+        HookEvent(
+            sessionId: sessionId,
+            cwd: "/tmp/project",
+            event: "PostToolUse",
+            status: "processing",
+            provider: .claude,
+            clientInfo: SessionClientInfo(
+                kind: .qoder,
+                profileID: "qoder",
+                name: "Qoder",
+                bundleIdentifier: "com.qoder.ide"
+            ),
+            pid: nil,
+            tty: nil,
+            tool: "ask_user_question",
+            toolInput: [
+                "questions": AnyCodable([
+                    [
+                        "id": "topic",
+                        "header": "主题",
+                        "question": "先选一个主题",
+                        "options": [
+                            ["label": "A 方案"],
+                            ["label": "B 方案"]
+                        ]
+                    ]
+                ])
+            ],
+            toolUseId: nil,
+            notificationType: nil,
+            message: "User has answered your questions."
         )
     }
 
