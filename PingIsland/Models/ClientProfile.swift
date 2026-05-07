@@ -46,6 +46,82 @@ struct HookInstallEventDescriptor: Sendable {
         self.templates = templates
         self.timeout = timeout
     }
+
+    nonisolated var category: HookInstallEventCategory {
+        HookInstallEventCategory.category(forEventName: name)
+    }
+}
+
+enum HookInstallEventCategory: String, CaseIterable, Sendable, Identifiable {
+    case approvals
+    case notifications
+    case lifecycle
+    case activity
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .approvals: return "审批"
+        case .notifications: return "通知"
+        case .lifecycle: return "生命周期"
+        case .activity: return "活动追踪"
+        }
+    }
+
+    var subtitle: String {
+        switch self {
+        case .approvals: return "工具调用审批与权限请求，可能需要用户回应"
+        case .notifications: return "用户提示与通知事件"
+        case .lifecycle: return "会话开始/结束与子任务事件"
+        case .activity: return "工具完成、压缩等后台事件"
+        }
+    }
+
+    var iconSymbolName: String {
+        switch self {
+        case .approvals: return "checkmark.shield.fill"
+        case .notifications: return "bell.fill"
+        case .lifecycle: return "circle.lefthalf.filled"
+        case .activity: return "waveform.path"
+        }
+    }
+
+    static func category(forEventName name: String) -> HookInstallEventCategory {
+        switch name {
+        case "PreToolUse", "PermissionRequest":
+            return .approvals
+        case "Notification", "UserPromptSubmit", "userPromptSubmitted":
+            return .notifications
+        case "SessionStart", "SessionEnd", "Stop", "SubagentStart", "SubagentStop",
+             "BeforeAgent", "AfterAgent",
+             "sessionStart", "sessionEnd", "agentStop", "subagentStop",
+             "command:new", "command:reset", "command:stop":
+            return .lifecycle
+        case "PostToolUse", "PostToolUseFailure", "PreCompact", "PreCompress",
+             "BeforeTool", "AfterTool",
+             "preToolUse", "postToolUse", "errorOccurred",
+             "message:received", "message:sent",
+             "session:compact:before", "session:compact:after", "session:patch":
+            return .activity
+        default:
+            return .activity
+        }
+    }
+}
+
+struct HookInstallSelection: Sendable, Equatable {
+    var enabledEventNames: Set<String>
+
+    static func defaultSelection(for profile: ManagedHookClientProfile) -> HookInstallSelection {
+        HookInstallSelection(enabledEventNames: Set(profile.events.map(\.name)))
+    }
+
+    func filteredEvents(for profile: ManagedHookClientProfile) -> [HookInstallEventDescriptor] {
+        profile.events.filter { enabledEventNames.contains($0.name) }
+    }
+
+    var isEmpty: Bool { enabledEventNames.isEmpty }
 }
 
 struct ManagedHookClientProfile: Identifiable, Sendable {
@@ -158,6 +234,19 @@ struct ManagedHookClientProfile: Identifiable, Sendable {
             return nil
         }
         return Self.resolveConfigurationURL(relativePath: activationConfigurationRelativePath)
+    }
+
+    nonisolated var supportsEventSelection: Bool {
+        installationKind == .jsonHooks && !events.isEmpty
+    }
+
+    nonisolated var availableEventCategories: [HookInstallEventCategory] {
+        let present = Set(events.map(\.category))
+        return HookInstallEventCategory.allCases.filter { present.contains($0) }
+    }
+
+    nonisolated func events(in category: HookInstallEventCategory) -> [HookInstallEventDescriptor] {
+        events.filter { $0.category == category }
     }
 
     nonisolated var reinstallDescriptionFormat: String {

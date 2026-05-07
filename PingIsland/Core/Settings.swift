@@ -15,6 +15,7 @@ enum AppSettingsDefaultKeys {
     static let presentationModeOnboardingPending = "presentationModeOnboardingPending"
     static let notchDetachmentHintPending = "notchDetachmentHintPending"
     static let floatingPetSettingsHintPending = "floatingPetSettingsHintPending"
+    static let hookInstallOnboardingPending = "hookInstallOnboardingPending"
 }
 
 enum AppLanguage: String, CaseIterable, Identifiable {
@@ -332,6 +333,7 @@ final class AppSettingsStore: ObservableObject {
         static let presentationModeOnboardingPending = AppSettingsDefaultKeys.presentationModeOnboardingPending
         static let notchDetachmentHintPending = AppSettingsDefaultKeys.notchDetachmentHintPending
         static let floatingPetSettingsHintPending = AppSettingsDefaultKeys.floatingPetSettingsHintPending
+        static let hookInstallOnboardingPending = AppSettingsDefaultKeys.hookInstallOnboardingPending
         static let labsSettingsUnlocked = "labsSettingsUnlocked"
         static let automaticUpdateChecksEnabled = "automaticUpdateChecksEnabled"
         static let mascotOverrides = "mascotOverrides"
@@ -648,6 +650,13 @@ final class AppSettingsStore: ObservableObject {
         didSet {
             guard !isBootstrapping else { return }
             defaults.set(floatingPetSettingsHintPending, forKey: Keys.floatingPetSettingsHintPending)
+        }
+    }
+
+    @Published var hookInstallOnboardingPending: Bool {
+        didSet {
+            guard !isBootstrapping else { return }
+            defaults.set(hookInstallOnboardingPending, forKey: Keys.hookInstallOnboardingPending)
         }
     }
 
@@ -1110,6 +1119,12 @@ final class AppSettingsStore: ObservableObject {
             exists: persistedKeys.contains(Keys.floatingPetSettingsHintPending),
             default: false
         ))
+        _hookInstallOnboardingPending = Published(initialValue: Self.boolValue(
+            from: defaults,
+            key: Keys.hookInstallOnboardingPending,
+            exists: persistedKeys.contains(Keys.hookInstallOnboardingPending),
+            default: false
+        ))
         _labsSettingsUnlocked = Published(initialValue: Self.boolValue(
             from: defaults,
             key: Keys.labsSettingsUnlocked,
@@ -1298,6 +1313,11 @@ enum AppSettings {
     static var floatingPetSettingsHintPending: Bool {
         get { shared.floatingPetSettingsHintPending }
         set { shared.floatingPetSettingsHintPending = newValue }
+    }
+
+    static var hookInstallOnboardingPending: Bool {
+        get { shared.hookInstallOnboardingPending }
+        set { shared.hookInstallOnboardingPending = newValue }
     }
 
     static func shortcut(for action: GlobalShortcutAction) -> GlobalShortcut? {

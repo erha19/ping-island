@@ -270,6 +270,51 @@ final class SettingsPanelViewModel: ObservableObject {
         refreshHookInstallationStates()
     }
 
+    func installHooks(for profile: ManagedHookClientProfile, selection: HookInstallSelection) {
+        HookInstaller.install(profile, selection: selection)
+        refreshHookInstallationStates()
+    }
+
+    func reinstallHooks(for profile: ManagedHookClientProfile, selection: HookInstallSelection) {
+        guard reinstallingHookProfileID == nil else { return }
+
+        HookInstaller.saveSelection(selection, for: profile)
+
+        hookFeedbackClearTasks[profile.id]?.cancel()
+        hookFeedbackClearTasks[profile.id] = nil
+        hookReinstallFeedbacks[profile.id] = nil
+        reinstallingHookProfileID = profile.id
+
+        Task {
+            await Task.yield()
+
+            HookInstaller.reinstall(profile)
+            let didInstall = HookInstaller.isInstalled(profile)
+
+            try? await Task.sleep(nanoseconds: 450_000_000)
+
+            refreshHookInstallationStates()
+            reinstallingHookProfileID = nil
+            hookReinstallFeedbacks[profile.id] = HookReinstallFeedback(
+                message: didInstall
+                    ? AppLocalization.string("已更新 Hook 配置")
+                    : AppLocalization.string("更新失败，请稍后重试"),
+                isError: !didInstall
+            )
+
+            hookFeedbackClearTasks[profile.id] = Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 2_500_000_000)
+                guard !Task.isCancelled else { return }
+                hookReinstallFeedbacks[profile.id] = nil
+                hookFeedbackClearTasks[profile.id] = nil
+            }
+        }
+    }
+
+    func currentHookSelection(for profile: ManagedHookClientProfile) -> HookInstallSelection {
+        HookInstaller.loadSelection(for: profile)
+    }
+
     func reinstallHooks(for profile: ManagedHookClientProfile) {
         guard reinstallingHookProfileID == nil else { return }
 
@@ -524,6 +569,7 @@ private struct SettingsPanelContentView: View {
     @ObservedObject private var remoteManager = RemoteConnectorManager.shared
     @State private var selectedCategory: SettingsCategory? = .general
     @State private var pendingHookReinstallProfile: ManagedHookClientProfile?
+    @State private var pendingHookOptionsRequest: HookInstallOptionsRequest?
     @State private var showingUninstallAllHooksConfirmation = false
     @State private var showingCustomHookInstallSheet = false
     @State private var showingRemoteHostSheet = false
@@ -607,6 +653,25 @@ private struct SettingsPanelContentView: View {
             CustomHookInstallSheet(viewModel: viewModel) {
                 showingCustomHookInstallSheet = false
             }
+        }
+        .sheet(item: $pendingHookOptionsRequest) { request in
+            HookInstallOptionsSheet(
+                profile: request.profile,
+                mode: request.mode,
+                initialSelection: viewModel.currentHookSelection(for: request.profile),
+                onConfirm: { selection in
+                    switch request.mode {
+                    case .install:
+                        viewModel.installHooks(for: request.profile, selection: selection)
+                    case .edit:
+                        viewModel.reinstallHooks(for: request.profile, selection: selection)
+                    }
+                    pendingHookOptionsRequest = nil
+                },
+                onDismiss: {
+                    pendingHookOptionsRequest = nil
+                }
+            )
         }
         .sheet(isPresented: $showingRemoteHostSheet) {
             AddRemoteHostSheet(remoteManager: remoteManager) {
@@ -1344,7 +1409,23 @@ private struct SettingsPanelContentView: View {
                             isReinstalling: viewModel.isReinstallingHooks(for: profile),
                             reinstallFeedback: viewModel.hookReinstallFeedback(for: profile),
                             noticeMessage: viewModel.hookNotice(for: profile),
-                            installAction: { viewModel.installHooks(for: profile) },
+                            supportsEventSelection: profile.supportsEventSelection,
+                            installAction: {
+                                if profile.supportsEventSelection {
+                                    pendingHookOptionsRequest = HookInstallOptionsRequest(
+                                        profile: profile,
+                                        mode: .install
+                                    )
+                                } else {
+                                    viewModel.installHooks(for: profile)
+                                }
+                            },
+                            configureAction: {
+                                pendingHookOptionsRequest = HookInstallOptionsRequest(
+                                    profile: profile,
+                                    mode: .edit
+                                )
+                            },
                             openConfigurationDirectoryAction: {
                                 viewModel.openHookConfigurationDirectory(for: profile)
                             },
@@ -2029,7 +2110,9 @@ private struct HookManagementLine: View {
     let isReinstalling: Bool
     let reinstallFeedback: SettingsPanelViewModel.HookReinstallFeedback?
     let noticeMessage: String?
+    let supportsEventSelection: Bool
     let installAction: () -> Void
+    let configureAction: () -> Void
     let openConfigurationDirectoryAction: () -> Void
     let reinstallAction: () -> Void
     let uninstallAction: () -> Void
@@ -2086,6 +2169,14 @@ private struct HookManagementLine: View {
 
             HStack(spacing: 10) {
                 if isInstalled {
+                    if supportsEventSelection {
+                        HookManagementButton(
+                            title: "配置",
+                            tint: tint,
+                            isDisabled: isReinstalling,
+                            action: configureAction
+                        )
+                    }
                     HookManagementButton(
                         title: "打开配置目录",
                         tint: TerminalColors.blue,
@@ -2450,6 +2541,352 @@ private struct CustomHookInstallSheet: View {
         guard canInstall else { return }
         viewModel.installCustomHook(profileID: selectedProfileID, directoryPath: customPath)
         onDismiss()
+    }
+}
+
+enum HookInstallOptionsMode {
+    case install
+    case edit
+}
+
+struct HookInstallOptionsRequest: Identifiable {
+    let id = UUID()
+    let profile: ManagedHookClientProfile
+    let mode: HookInstallOptionsMode
+}
+
+private struct HookInstallOptionsSheet: View {
+    let profile: ManagedHookClientProfile
+    let mode: HookInstallOptionsMode
+    let initialSelection: HookInstallSelection
+    let onConfirm: (HookInstallSelection) -> Void
+    let onDismiss: () -> Void
+
+    @State private var enabledEventNames: Set<String>
+    @State private var advancedExpanded: Bool
+
+    init(
+        profile: ManagedHookClientProfile,
+        mode: HookInstallOptionsMode,
+        initialSelection: HookInstallSelection,
+        onConfirm: @escaping (HookInstallSelection) -> Void,
+        onDismiss: @escaping () -> Void
+    ) {
+        self.profile = profile
+        self.mode = mode
+        self.initialSelection = initialSelection
+        self.onConfirm = onConfirm
+        self.onDismiss = onDismiss
+        _enabledEventNames = State(initialValue: initialSelection.enabledEventNames)
+        _advancedExpanded = State(initialValue: false)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            header
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    categoryToggles
+                    advancedSection
+                }
+                .padding(.vertical, 2)
+            }
+            .frame(maxHeight: 360)
+
+            footer
+        }
+        .padding(24)
+        .frame(width: 520)
+        .background(Color(nsColor: .windowBackgroundColor))
+        .preferredColorScheme(.dark)
+    }
+
+    private var header: some View {
+        HStack(alignment: .center, spacing: 14) {
+            HookManagementIcon(profile: profile)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(verbatim: profile.title)
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundColor(.white)
+
+                Text(appLocalized: headerSubtitle)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.white.opacity(0.6))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 12)
+        }
+    }
+
+    private var categoryToggles: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(profile.availableEventCategories) { category in
+                CategoryToggleRow(
+                    category: category,
+                    state: state(for: category),
+                    onToggle: { toggleCategory(category) }
+                )
+
+                if category != profile.availableEventCategories.last {
+                    Divider()
+                        .overlay(Color.white.opacity(0.08))
+                        .padding(.horizontal, 14)
+                }
+            }
+        }
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.white.opacity(0.04))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
+        )
+    }
+
+    private var advancedSection: some View {
+        DisclosureGroup(isExpanded: $advancedExpanded) {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(profile.availableEventCategories) { category in
+                    let events = profile.events(in: category)
+                    if !events.isEmpty {
+                        Text(appLocalized: category.title)
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundColor(.white.opacity(0.5))
+                            .padding(.horizontal, 14)
+                            .padding(.top, 12)
+                            .padding(.bottom, 4)
+
+                        ForEach(events, id: \.name) { event in
+                            EventToggleRow(
+                                event: event,
+                                isOn: enabledEventNames.contains(event.name),
+                                onToggle: { toggleEvent(event.name) }
+                            )
+                        }
+                    }
+                }
+            }
+            .padding(.bottom, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color.white.opacity(0.03))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(Color.white.opacity(0.06), lineWidth: 1)
+            )
+        } label: {
+            Text(appLocalized: "高级 — 按事件单独配置")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(.white.opacity(0.78))
+        }
+        .tint(.white.opacity(0.6))
+    }
+
+    private var footer: some View {
+        HStack(spacing: 12) {
+            Text(appLocalized: footerHint)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundColor(.white.opacity(0.4))
+                .fixedSize(horizontal: false, vertical: true)
+
+            Spacer()
+
+            Button(action: onDismiss) {
+                Text(appLocalized: "取消")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.7))
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 8)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(.white.opacity(0.06))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .strokeBorder(.white.opacity(0.1), lineWidth: 1)
+                    )
+            }
+            .buttonStyle(.plain)
+
+            Button(action: confirm) {
+                Text(appLocalized: confirmTitle)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(canConfirm ? .white : .white.opacity(0.4))
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 8)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(canConfirm ? brandTint(profile.brand).opacity(0.5) : .white.opacity(0.04))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .strokeBorder(canConfirm ? brandTint(profile.brand).opacity(0.55) : .white.opacity(0.08), lineWidth: 1)
+                    )
+            }
+            .buttonStyle(.plain)
+            .disabled(!canConfirm)
+        }
+    }
+
+    private var headerSubtitle: String {
+        switch mode {
+        case .install:
+            return "选择需要安装的 Hook 事件类别。可在高级中按单个事件微调。"
+        case .edit:
+            return "调整已安装的 Hook 事件，保存后会刷新该客户端的 hooks 配置。"
+        }
+    }
+
+    private var footerHint: String {
+        AppLocalization.string("默认全部启用；关闭某些事件后，对应通知或审批将不再触发。")
+    }
+
+    private var confirmTitle: String {
+        switch mode {
+        case .install: return "安装"
+        case .edit: return "保存"
+        }
+    }
+
+    private var canConfirm: Bool {
+        !enabledEventNames.isEmpty
+    }
+
+    private func confirm() {
+        guard canConfirm else { return }
+        onConfirm(HookInstallSelection(enabledEventNames: enabledEventNames))
+    }
+
+    private func state(for category: HookInstallEventCategory) -> CategoryToggleState {
+        let names = profile.events(in: category).map(\.name)
+        guard !names.isEmpty else { return .off }
+        let enabledCount = names.filter { enabledEventNames.contains($0) }.count
+        if enabledCount == 0 { return .off }
+        if enabledCount == names.count { return .on }
+        return .mixed
+    }
+
+    private func toggleCategory(_ category: HookInstallEventCategory) {
+        let names = profile.events(in: category).map(\.name)
+        let currentState = state(for: category)
+        switch currentState {
+        case .on:
+            for name in names { enabledEventNames.remove(name) }
+        case .off, .mixed:
+            for name in names { enabledEventNames.insert(name) }
+        }
+    }
+
+    private func toggleEvent(_ name: String) {
+        if enabledEventNames.contains(name) {
+            enabledEventNames.remove(name)
+        } else {
+            enabledEventNames.insert(name)
+        }
+    }
+}
+
+private enum CategoryToggleState {
+    case on
+    case off
+    case mixed
+}
+
+private struct CategoryToggleRow: View {
+    let category: HookInstallEventCategory
+    let state: CategoryToggleState
+    let onToggle: () -> Void
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 14) {
+            Image(systemName: category.iconSymbolName)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundColor(.white.opacity(0.78))
+                .frame(width: 28, height: 28)
+                .background(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(.white.opacity(0.06))
+                )
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(appLocalized: category.title)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(.white)
+                Text(appLocalized: category.subtitle)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.white.opacity(0.55))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 12)
+
+            Button(action: onToggle) {
+                indicator
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+    }
+
+    @ViewBuilder
+    private var indicator: some View {
+        switch state {
+        case .on:
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 22, weight: .semibold))
+                .foregroundColor(TerminalColors.green)
+        case .mixed:
+            Image(systemName: "minus.circle.fill")
+                .font(.system(size: 22, weight: .semibold))
+                .foregroundColor(TerminalColors.amber)
+        case .off:
+            Image(systemName: "circle")
+                .font(.system(size: 22, weight: .semibold))
+                .foregroundColor(.white.opacity(0.3))
+        }
+    }
+}
+
+private struct EventToggleRow: View {
+    let event: HookInstallEventDescriptor
+    let isOn: Bool
+    let onToggle: () -> Void
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            Text(verbatim: event.name)
+                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                .foregroundColor(.white.opacity(0.86))
+
+            if let timeout = event.timeout {
+                Text(verbatim: "\(timeout)s")
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .foregroundColor(.white.opacity(0.45))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(
+                        Capsule(style: .continuous)
+                            .fill(.white.opacity(0.05))
+                    )
+            }
+
+            Spacer(minLength: 12)
+
+            Button(action: onToggle) {
+                Image(systemName: isOn ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundColor(isOn ? TerminalColors.green : .white.opacity(0.3))
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 6)
     }
 }
 

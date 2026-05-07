@@ -477,3 +477,33 @@
 "这会移除 Island 为所有本机集成写入的托管 Hooks 配置文件，包括自定义配置记录。" = "This removes the managed Hooks configuration files Island wrote for all local integrations, including custom configuration records.";
 "检测到 Qoder CLI %@；启动时会覆盖并刷新 Island 托管的 ~/.qoder/settings.json hooks，并保留其他 JSON 配置。" = "Detected Qoder CLI %@. On launch, Island will overwrite and refresh only its managed ~/.qoder/settings.json hooks, while keeping the rest of the JSON settings intact.";
 "有需要注意的集成提示" = "Integration notice available";
+
+// Hook install option categories
+"审批" = "Approvals";
+"通知" = "Notifications";
+"生命周期" = "Lifecycle";
+"活动追踪" = "Activity";
+"工具调用审批与权限请求，可能需要用户回应" = "Tool-use approvals and permission prompts that may need a response";
+"用户提示与通知事件" = "User prompts and notification events";
+"会话开始/结束与子任务事件" = "Session start / end and subagent events";
+"工具完成、压缩等后台事件" = "Background events like tool completion and compaction";
+
+// Hook install options sheet
+"配置" = "Configure";
+"保存" = "Save";
+"高级 — 按事件单独配置" = "Advanced — toggle individual events";
+"默认全部启用；关闭某些事件后，对应通知或审批将不再触发。" = "Everything is enabled by default. Disable an event to stop the matching notification or approval from firing.";
+"选择需要安装的 Hook 事件类别。可在高级中按单个事件微调。" = "Pick which hook event categories to install. Use Advanced to fine-tune individual events.";
+"调整已安装的 Hook 事件，保存后会刷新该客户端的 hooks 配置。" = "Adjust which hook events are active. Saving rewrites this client's hooks configuration.";
+
+// Hook reinstall feedback
+"已更新 Hook 配置" = "Hook configuration updated";
+"更新失败，请稍后重试" = "Update failed. Please try again.";
+
+// First-run hook install welcome
+"为以下客户端安装 Hooks" = "Install hooks for these clients";
+"Ping Island 通过 Hooks 监听会话事件、显示通知与审批。可以一键安装默认配置，或选择仅启用部分事件。" = "Ping Island listens to session events, notifications, and approvals through hooks. Install the recommended setup or pick which events should fire.";
+"使用默认配置安装（推荐）" = "Install with recommended settings";
+"自定义事件…" = "Customize events…";
+"暂不安装" = "Skip for now";
+"未检测到可自动安装的客户端，可在设置中手动添加。" = "No installable clients detected. You can add them manually from Settings.";

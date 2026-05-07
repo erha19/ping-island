@@ -24,6 +24,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             HookInstaller.installIfNeeded(
                 markPresentationOnboardingPending: {
                     AppSettings.presentationModeOnboardingPending = true
+                },
+                markHookInstallOnboardingPending: {
+                    AppSettings.hookInstallOnboardingPending = true
                 }
             )
             IDEExtensionInstaller.cleanupLegacyTraeExtension()
@@ -68,11 +71,31 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         } else if launchFlow.shouldPresentSettingsWindowImmediately {
             SettingsWindowController.shared.present()
+        } else {
+            presentHookInstallOnboardingIfNeeded()
         }
-        
+
         // Play the fixed client startup sound for the bundled 8-bit theme.
         Task { @MainActor in
             AppSettings.playClientStartupSound()
+        }
+    }
+
+    @MainActor
+    private func presentHookInstallOnboardingIfNeeded() {
+        guard AppSettings.hookInstallOnboardingPending else { return }
+        HookInstallWelcomeWindowController.shared.present { decision in
+            switch decision {
+            case .installDefaults:
+                HookInstaller.performFirstRunDefaultInstall()
+                AppSettings.hookInstallOnboardingPending = false
+            case .customize:
+                HookInstaller.performFirstRunDefaultInstall()
+                AppSettings.hookInstallOnboardingPending = false
+                SettingsWindowController.shared.present()
+            case .skip:
+                AppSettings.hookInstallOnboardingPending = false
+            }
         }
     }
 
@@ -92,6 +115,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if shouldPresentSettingsAfterOnboarding {
             SettingsWindowController.shared.present()
             shouldPresentSettingsAfterOnboarding = false
+        } else {
+            presentHookInstallOnboardingIfNeeded()
         }
     }
 
