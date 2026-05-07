@@ -182,7 +182,7 @@ final class OpenCodeIntegrationTests: XCTestCase {
         XCTAssertEqual(profile?.brand, .opencode)
         XCTAssertEqual(profile?.localAppBundleIdentifiers, ["ai.opencode.desktop"])
         XCTAssertEqual(profile?.primaryConfigurationURL.path, NSHomeDirectory() + "/.config/opencode/plugins/ping-island.js")
-        XCTAssertEqual(profile?.activationConfigurationURL?.path, NSHomeDirectory() + "/.config/opencode/config.json")
+        XCTAssertEqual(profile?.activationConfigurationURL?.path, NSHomeDirectory() + "/.config/opencode/opencode.json")
         XCTAssertTrue(profile?.reinstallDescriptionFormat.contains("插件文件") == true)
     }
 

@@ -640,14 +640,15 @@ struct HookInstaller {
     }
 
     private static func isManagedPluginEnabled(_ profile: ManagedHookClientProfile) -> Bool {
-        guard let url = profile.activationConfigurationURL,
-              let data = try? Data(contentsOf: url) else {
-            return false
+        managedPluginActivationConfigurationURLs(for: profile).contains { url in
+            guard let data = try? Data(contentsOf: url) else {
+                return false
+            }
+            return isManagedPluginEnabled(
+                existingData: data,
+                pluginURL: profile.primaryConfigurationURL
+            )
         }
-        return isManagedPluginEnabled(
-            existingData: data,
-            pluginURL: profile.primaryConfigurationURL
-        )
     }
 
     private static func setInternalHookEnabled(_ enabled: Bool, for profile: ManagedHookClientProfile, customConfigURL: URL? = nil) {
@@ -675,21 +676,47 @@ struct HookInstaller {
         customConfigURL: URL? = nil,
         pluginURL: URL? = nil
     ) {
-        let url = customConfigURL ?? profile.activationConfigurationURL
         let pluginURL = pluginURL ?? profile.primaryConfigurationURL
-        guard let url else {
+        let urls = managedPluginActivationConfigurationURLs(
+            for: profile,
+            customConfigURL: customConfigURL
+        )
+        guard !urls.isEmpty else {
             return
         }
 
-        let existingData = try? Data(contentsOf: url)
-        let data = updatedConfigurationData(
-            existingData: existingData,
-            profile: profile,
-            customCommand: "",
-            installing: enabled,
-            pluginURL: pluginURL
-        )
-        writeData(data, to: url)
+        let targetURLs = enabled ? [urls[0]] : urls
+        for url in targetURLs {
+            let existingData = try? Data(contentsOf: url)
+            let data = updatedConfigurationData(
+                existingData: existingData,
+                profile: profile,
+                customCommand: "",
+                installing: enabled,
+                pluginURL: pluginURL
+            )
+            writeData(data, to: url)
+        }
+    }
+
+    private static func managedPluginActivationConfigurationURLs(
+        for profile: ManagedHookClientProfile,
+        customConfigURL: URL? = nil
+    ) -> [URL] {
+        guard let primaryURL = customConfigURL ?? profile.activationConfigurationURL else {
+            return []
+        }
+
+        guard profile.id == "opencode-hooks" else {
+            return [primaryURL]
+        }
+
+        // OpenCode 1.14 still reads legacy config.json, but current docs name opencode.json as the global config.
+        let legacyURL = primaryURL.deletingLastPathComponent().appendingPathComponent("config.json")
+        if legacyURL.standardizedFileURL == primaryURL.standardizedFileURL {
+            return [primaryURL]
+        }
+        return [primaryURL, legacyURL]
     }
 
     private static func removeLegacyTraeHooks() {
@@ -2983,9 +3010,9 @@ struct HookInstaller {
         switch profile.installationKind {
         case .pluginFile:
             if baseDirectory.lastPathComponent == "plugins" {
-                return baseDirectory.deletingLastPathComponent().appendingPathComponent("config.json")
+                return baseDirectory.deletingLastPathComponent().appendingPathComponent("opencode.json")
             }
-            return baseDirectory.appendingPathComponent("config.json")
+            return baseDirectory.appendingPathComponent("opencode.json")
         case .jsonHooks, .pluginDirectory:
             return nil
         case .hookDirectory:
@@ -3005,7 +3032,7 @@ struct HookInstaller {
     private static func customActivationConfigurationURL(for profile: ManagedHookClientProfile, installedURL: URL) -> URL? {
         switch profile.installationKind {
         case .pluginFile:
-            return installedURL.deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("config.json")
+            return installedURL.deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("opencode.json")
         case .jsonHooks, .pluginDirectory:
             return nil
         case .hookDirectory:
