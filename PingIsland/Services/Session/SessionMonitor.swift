@@ -58,6 +58,7 @@ class SessionMonitor: ObservableObject {
                     await SessionStore.shared.process(
                         .pruneTimedOutExternalContinuations(now: Date())
                     )
+                    await SessionStore.shared.pruneOrphanedSessions()
                 }
             }
             .store(in: &cancellables)

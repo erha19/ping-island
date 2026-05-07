@@ -8,6 +8,7 @@
 
 import AppKit
 import Combine
+import Darwin
 import Foundation
 import os.log
 
@@ -2133,6 +2134,29 @@ actor SessionStore {
             guard !existing.needsManualAttention else { continue }
             markSessionEnded(&existing)
             sessions[existingId] = existing
+        }
+    }
+
+    /// Periodically check active Claude sessions whose bridge process has died without
+    /// sending a Stop event (crash, SIGKILL, terminal closed). End them so the bar
+    /// doesn't keep showing dead sessions as still working.
+    func pruneOrphanedSessions() {
+        for (sessionId, var session) in sessions {
+            guard session.provider == .claude else { continue }
+            guard session.ingress != .nativeRuntime else { continue }
+            guard session.phase != .ended else { continue }
+            guard !session.needsManualAttention else { continue }
+
+            guard let pid = session.pid, pid > 0 else { continue }
+
+            // Give the bridge a grace period — it may be restarting.
+            let idleSeconds = Date().timeIntervalSince(session.lastActivity)
+            guard idleSeconds >= 30 else { continue }
+
+            if Darwin.kill(pid_t(pid), 0) != 0 && errno == ESRCH {
+                markSessionEnded(&session)
+                sessions[sessionId] = session
+            }
         }
     }
 
