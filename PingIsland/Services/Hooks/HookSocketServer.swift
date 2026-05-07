@@ -82,6 +82,7 @@ struct HookEvent: Sendable {
     let message: String?
     let ingress: SessionIngress
     let bridgeIntervention: SessionIntervention?
+    let suppressInAppPrompt: Bool
 
     init(
         sessionId: String,
@@ -98,7 +99,8 @@ struct HookEvent: Sendable {
         notificationType: String?,
         message: String?,
         ingress: SessionIngress = .hookBridge,
-        bridgeIntervention: SessionIntervention? = nil
+        bridgeIntervention: SessionIntervention? = nil,
+        suppressInAppPrompt: Bool = false
     ) {
         self.sessionId = sessionId
         self.cwd = cwd
@@ -115,6 +117,7 @@ struct HookEvent: Sendable {
         self.message = message
         self.ingress = ingress
         self.bridgeIntervention = bridgeIntervention
+        self.suppressInAppPrompt = suppressInAppPrompt
     }
 
     nonisolated var sessionPhase: SessionPhase {
@@ -142,6 +145,9 @@ struct HookEvent: Sendable {
     }
 
     nonisolated var expectsResponse: Bool {
+        if suppressInAppPrompt {
+            return false
+        }
         if isQoderIDENotifyOnlyClient {
             return false
         }
@@ -221,7 +227,8 @@ extension HookEvent {
             notificationType: notificationType,
             message: message,
             ingress: ingress,
-            bridgeIntervention: bridgeIntervention?.withResolvedToolUseId(toolUseId)
+            bridgeIntervention: bridgeIntervention?.withResolvedToolUseId(toolUseId),
+            suppressInAppPrompt: suppressInAppPrompt
         )
     }
 
@@ -241,7 +248,8 @@ extension HookEvent {
             notificationType: notificationType,
             message: message,
             ingress: ingress,
-            bridgeIntervention: bridgeIntervention
+            bridgeIntervention: bridgeIntervention,
+            suppressInAppPrompt: suppressInAppPrompt
         )
     }
 }
@@ -588,7 +596,8 @@ private extension BridgeEnvelope {
             bridgeIntervention: intervention?.sessionIntervention(
                 fallbackID: metadata["tool_use_id"],
                 metadata: metadata
-            )
+            ),
+            suppressInAppPrompt: (metadata["suppress_in_app_prompt"] == "true")
         )
     }
 

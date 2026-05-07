@@ -310,6 +310,9 @@ extension HookEvent {
     }
 
     nonisolated var intervention: SessionIntervention? {
+        if suppressInAppPrompt {
+            return nil
+        }
         if let bridgeIntervention,
            !isAskUserQuestionRequest {
             if provider == .codex,

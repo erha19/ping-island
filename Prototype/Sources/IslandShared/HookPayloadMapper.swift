@@ -30,7 +30,12 @@ public enum HookPayloadMapper {
         let eventType = detectEventType(arguments: arguments, payload: payload)
         let terminalContext = makeTerminalContext(environment: effectiveEnvironment, payload: payload)
         let sessionKey = detectSessionKey(payload: payload, environment: effectiveEnvironment, provider: source)
-        let metadata = mergedMetadata(arguments: arguments, payload: payload, terminalContext: terminalContext)
+        var metadata = mergedMetadata(arguments: arguments, payload: payload, terminalContext: terminalContext)
+        if runtimeConfig.routePromptsToTerminal {
+            // Marker the app side reads to skip building an in-app prompt for
+            // this event. Keeps the envelope flowing for status updates only.
+            metadata["suppress_in_app_prompt"] = "true"
+        }
         let clientKind = normalizedClientKind(from: metadata)
         let detectedIntervention = detectIntervention(
             provider: source,
