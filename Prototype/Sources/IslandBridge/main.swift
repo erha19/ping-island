@@ -1000,7 +1000,7 @@ private enum RemoteBridgeMessageBuilder {
             event: envelope.eventType,
             status: mapStatus(eventType: envelope.eventType, status: envelope.status?.kind, notificationType: metadata["notification_type"]),
             provider: envelope.provider.rawValue,
-            pid: Int(metadata["pid"] ?? ""),
+            pid: Int(metadata["pid"] ?? "") ?? Int(getppid()) ?? Int(getppid()),
             tty: terminalContext.tty,
             tool: normalizedToolName(metadata["tool_name"] ?? envelope.title),
             toolInput: toolInput,
