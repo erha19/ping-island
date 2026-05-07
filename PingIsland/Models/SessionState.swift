@@ -421,7 +421,6 @@ struct SessionState: Equatable, Identifiable, Sendable {
         guard provider == .codex else { return false }
         guard intervention == nil else { return false }
         guard !hasSpecificCodexSessionName else { return false }
-        guard codexParentThreadId?.isEmpty != false else { return false }
         guard codexSubagentDepth == nil else { return false }
         guard codexSubagentNickname?.isEmpty != false else { return false }
         guard codexSubagentRole?.isEmpty != false else { return false }
