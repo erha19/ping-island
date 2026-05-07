@@ -2113,9 +2113,10 @@ actor SessionStore {
         }
     }
 
-    /// When a new session starts for a provider, end any active sessions from the same
-    /// provider + cwd that look orphaned (process died without sending Stop). This keeps
-    /// the primary list clean when the user quits and restarts Claude in the same project.
+    /// When a new session starts for a provider, archive any active sessions from the
+    /// same provider + cwd that look orphaned (process died without sending Stop).
+    /// This prevents duplicate-looking sessions in the expanded list when the user
+    /// quits and restarts Claude in the same project.
     private func endOrphanedSessions(
         sameProviderAs session: SessionState,
         newSessionId: String
@@ -2126,14 +2127,22 @@ actor SessionStore {
         guard provider == .claude else { return }
         guard session.ingress != .nativeRuntime else { return }
 
-        for (existingId, var existing) in sessions {
+        var idsToArchive: [String] = []
+        for (existingId, existing) in sessions {
             guard existingId != newSessionId else { continue }
             guard existing.provider == provider else { continue }
             guard existing.cwd == cwd else { continue }
             guard existing.phase != .ended else { continue }
             guard !existing.needsManualAttention else { continue }
-            markSessionEnded(&existing)
-            sessions[existingId] = existing
+            idsToArchive.append(existingId)
+        }
+
+        for id in idsToArchive {
+            sessions.removeValue(forKey: id)
+            clearCodexSessionAliases(for: id)
+            cancelPendingSync(sessionId: id)
+            cancelPendingCodexPlaceholderPrune(sessionId: id)
+            cancelPendingQoderConversationPoll(sessionId: id)
         }
     }
 
