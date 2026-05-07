@@ -84,13 +84,21 @@ enum CodexUsageLoader {
             return lhs.modifiedAt > rhs.modifiedAt
         }
 
+        var bestSnapshot: CodexUsageSnapshot?
+        var bestCapturedAt: Date = .distantPast
+
         for candidate in sortedCandidates {
-            if let snapshot = loadLatestSnapshot(from: candidate.fileURL, modifiedAt: candidate.modifiedAt) {
-                return snapshot
+            guard let snapshot = loadLatestSnapshot(from: candidate.fileURL, modifiedAt: candidate.modifiedAt) else {
+                continue
+            }
+            let capturedAt = snapshot.capturedAt ?? candidate.modifiedAt
+            if capturedAt > bestCapturedAt {
+                bestSnapshot = snapshot
+                bestCapturedAt = capturedAt
             }
         }
 
-        return nil
+        return bestSnapshot
     }
 
     private nonisolated static func loadLatestSnapshot(from fileURL: URL, modifiedAt: Date) -> CodexUsageSnapshot? {
