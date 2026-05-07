@@ -173,7 +173,7 @@
 "待开启" = "Pending";
 "已安装" = "Installed";
 "未安装" = "Not installed";
-"打开配置目录" = "Open Config Folder";
+"打开配置目录" = "Open Folder";
 "重新安装" = "Reinstall";
 "重新安装中..." = "Reinstalling...";
 "卸载" = "Uninstall";
