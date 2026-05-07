@@ -1494,6 +1494,14 @@ private struct SettingsPanelContentView: View {
                 }
             }
 
+            SettingsSectionCard(title: "审批与提问") {
+                SettingsToggleLine(
+                    title: "保留终端中的提问与审批",
+                    subtitle: "开启后 Ping Island 不再代答 Claude / Codex 等的工具审批和 AskUserQuestion，所有提问保留在终端中处理；状态指示仍会显示。",
+                    isOn: $settings.routePromptsToTerminal
+                )
+            }
+
             SettingsSectionCard(title: "系统权限") {
                 SettingsStatusLine(
                     title: "辅助功能",

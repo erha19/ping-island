@@ -139,6 +139,9 @@
 
 "Hooks 管理" = "Hooks";
 "IDE 扩展" = "IDE extensions";
+"审批与提问" = "Approvals & questions";
+"保留终端中的提问与审批" = "Keep prompts & approvals in the terminal";
+"开启后 Ping Island 不再代答 Claude / Codex 等的工具审批和 AskUserQuestion，所有提问保留在终端中处理；状态指示仍会显示。" = "When on, Ping Island no longer answers tool approvals or AskUserQuestion for Claude / Codex / etc. — those prompts stay in your terminal. Status indicators still appear.";
 "系统权限" = "System permissions";
 "辅助功能" = "Accessibility";
 "管理 ~/.claude/settings.json，使用统一 PingIslandBridge hooks 入口" = "Manage ~/.claude/settings.json using the unified PingIslandBridge hooks entrypoint";

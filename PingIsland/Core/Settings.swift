@@ -339,6 +339,7 @@ final class AppSettingsStore: ObservableObject {
         static let mascotOverrides = "mascotOverrides"
         static let openActiveSessionShortcut = "openActiveSessionShortcut"
         static let openSessionListShortcut = "openSessionListShortcut"
+        static let routePromptsToTerminal = "routePromptsToTerminal"
     }
 
     // MARK: - Published Settings
@@ -697,6 +698,14 @@ final class AppSettingsStore: ObservableObject {
         didSet {
             guard !isBootstrapping else { return }
             Self.persistShortcut(openSessionListShortcut, defaults: defaults, key: Keys.openSessionListShortcut)
+        }
+    }
+
+    @Published var routePromptsToTerminal: Bool {
+        didSet {
+            guard !isBootstrapping else { return }
+            defaults.set(routePromptsToTerminal, forKey: Keys.routePromptsToTerminal)
+            BridgeRuntimeConfigWriter.write(routePromptsToTerminal: routePromptsToTerminal)
         }
     }
 
@@ -1140,6 +1149,13 @@ final class AppSettingsStore: ObservableObject {
         _mascotOverrides = Published(initialValue: Self.sanitizedMascotOverrides(mascotOverrideRaw))
         _openActiveSessionShortcut = Published(initialValue: openActiveSessionShortcut)
         _openSessionListShortcut = Published(initialValue: openSessionListShortcut)
+        let routePromptsToTerminal = Self.boolValue(
+            from: defaults,
+            key: Keys.routePromptsToTerminal,
+            exists: persistedKeys.contains(Keys.routePromptsToTerminal),
+            default: false
+        )
+        _routePromptsToTerminal = Published(initialValue: routePromptsToTerminal)
 
         if defaults.string(forKey: Keys.soundThemeMode) == nil {
             defaults.set(resolvedSoundThemeMode.rawValue, forKey: Keys.soundThemeMode)
@@ -1153,6 +1169,8 @@ final class AppSettingsStore: ObservableObject {
         applyIsland8BitStartSoundMigrationIfNeeded(for: resolvedSoundThemeMode)
 
         isBootstrapping = false
+
+        BridgeRuntimeConfigWriter.write(routePromptsToTerminal: routePromptsToTerminal)
     }
 }
 

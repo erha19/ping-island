@@ -35,11 +35,13 @@ struct IslandBridgeMain {
                 if environment["TTY"]?.isEmpty != false, let tty = detectTTY(parentPID: getppid()) {
                     environment["TTY"] = tty
                 }
+                let runtimeConfig = BridgeRuntimeConfig.load()
                 let envelope = HookPayloadMapper.makeEnvelope(
                     source: source,
                     arguments: CommandLine.arguments,
                     environment: environment,
-                    stdinData: stdinData
+                    stdinData: stdinData,
+                    runtimeConfig: runtimeConfig
                 )
                 try? BridgeDebugLogger.logIfNeeded(
                     envelope: envelope,

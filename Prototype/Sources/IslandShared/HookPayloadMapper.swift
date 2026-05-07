@@ -21,7 +21,8 @@ public enum HookPayloadMapper {
         source: AgentProvider,
         arguments: [String],
         environment: [String: String],
-        stdinData: Data
+        stdinData: Data,
+        runtimeConfig: BridgeRuntimeConfig = .default
     ) -> BridgeEnvelope {
         let rawPayload = BridgeCodec.readJSONObject(from: stdinData) ?? [:]
         let payload = normalizedPayload(rawPayload, source: source)
@@ -31,25 +32,33 @@ public enum HookPayloadMapper {
         let sessionKey = detectSessionKey(payload: payload, environment: effectiveEnvironment, provider: source)
         let metadata = mergedMetadata(arguments: arguments, payload: payload, terminalContext: terminalContext)
         let clientKind = normalizedClientKind(from: metadata)
-        let intervention = detectIntervention(
+        let detectedIntervention = detectIntervention(
             provider: source,
             eventType: eventType,
             sessionKey: sessionKey,
             payload: payload,
             clientKind: clientKind
         )
+        // When the user has opted to keep prompts in the terminal, drop the
+        // intervention before status/expectsResponse are computed so the bridge
+        // does not block and the app does not surface a prompt UI.
+        let intervention: InterventionRequest? = runtimeConfig.routePromptsToTerminal
+            ? nil
+            : detectedIntervention
         let status = detectStatus(
             eventType: eventType,
             payload: payload,
             clientKind: clientKind,
             intervention: intervention
         )
-        let expectsResponse = detectExpectsResponse(
-            eventType: eventType,
-            payload: payload,
-            clientKind: clientKind,
-            intervention: intervention
-        )
+        let expectsResponse = runtimeConfig.routePromptsToTerminal
+            ? false
+            : detectExpectsResponse(
+                eventType: eventType,
+                payload: payload,
+                clientKind: clientKind,
+                intervention: intervention
+            )
 
         return BridgeEnvelope(
             provider: source,

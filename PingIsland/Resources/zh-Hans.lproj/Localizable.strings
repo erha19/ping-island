@@ -139,6 +139,9 @@
 
 "Hooks 管理" = "Hooks 管理";
 "IDE 扩展" = "IDE 扩展";
+"审批与提问" = "审批与提问";
+"保留终端中的提问与审批" = "保留终端中的提问与审批";
+"开启后 Ping Island 不再代答 Claude / Codex 等的工具审批和 AskUserQuestion，所有提问保留在终端中处理；状态指示仍会显示。" = "开启后 Ping Island 不再代答 Claude / Codex 等的工具审批和 AskUserQuestion，所有提问保留在终端中处理；状态指示仍会显示。";
 "系统权限" = "系统权限";
 "辅助功能" = "辅助功能";
 "管理 ~/.claude/settings.json，使用统一 PingIslandBridge hooks 入口" = "管理 ~/.claude/settings.json，使用统一 PingIslandBridge hooks 入口";

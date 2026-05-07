@@ -28,6 +28,56 @@ func mapsApprovalEventFromClaudePayload() throws {
 }
 
 @Test
+func routePromptsToTerminalDropsApprovalIntervention() throws {
+    let payload = """
+    {
+      "hook_event_name": "PermissionRequest",
+      "tool_name": "Bash",
+      "reason": "Needs to run tests",
+      "session_id": "abc123"
+    }
+    """.data(using: .utf8)!
+
+    let envelope = HookPayloadMapper.makeEnvelope(
+        source: .claude,
+        arguments: ["island-bridge", "--source", "claude"],
+        environment: ["TERM_PROGRAM": "iTerm.app", "PWD": "/tmp/demo"],
+        stdinData: payload,
+        runtimeConfig: BridgeRuntimeConfig(routePromptsToTerminal: true)
+    )
+
+    #expect(envelope.intervention == nil)
+    #expect(envelope.expectsResponse == false)
+}
+
+@Test
+func routePromptsToTerminalDropsAskUserQuestionIntervention() throws {
+    let payload = """
+    {
+      "hook_event_name": "PreToolUse",
+      "tool_name": "AskUserQuestion",
+      "tool_input": {
+        "questions": [
+          {"id": "q1", "question": "Pick one", "options": ["A", "B"]}
+        ]
+      },
+      "session_id": "abc123"
+    }
+    """.data(using: .utf8)!
+
+    let envelope = HookPayloadMapper.makeEnvelope(
+        source: .claude,
+        arguments: ["island-bridge", "--source", "claude"],
+        environment: ["TERM_PROGRAM": "iTerm.app", "PWD": "/tmp/demo"],
+        stdinData: payload,
+        runtimeConfig: BridgeRuntimeConfig(routePromptsToTerminal: true)
+    )
+
+    #expect(envelope.intervention == nil)
+    #expect(envelope.expectsResponse == false)
+}
+
+@Test
 func mapsGhosttyTerminalContextFromEnvironment() throws {
     let payload = """
     {

@@ -16,6 +16,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
+        // Touch the settings store early so the bridge runtime config is on disk
+        // before any hook fires.
+        _ = AppSettings.shared
+
         if !launchConfiguration.isRunningTests {
             UpdateManager.shared.start()
         }
