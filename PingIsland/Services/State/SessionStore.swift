@@ -2127,6 +2127,19 @@ actor SessionStore {
             guard existing.cwd == cwd else { continue }
             guard existing.phase != .ended else { continue }
             guard !existing.needsManualAttention else { continue }
+
+            // Don't archive a session that still has live execution evidence
+            // (running tools or thinking in progress) — it may be a legitimate
+            // concurrent instance, like a Qoder parent session with a child.
+            if sessionHasLiveExecutionEvidence(existing) { continue }
+
+            // Don't archive sessions whose process is still alive — two
+            // legitimate Claude instances can run in the same cwd concurrently.
+            if let pid = existing.pid, pid > 0,
+               Darwin.kill(pid_t(pid), 0) == 0 {
+                continue
+            }
+
             idsToArchive.append(existingId)
         }
 

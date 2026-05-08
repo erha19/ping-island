@@ -240,9 +240,9 @@ final class SessionStoreFileUpdateTests: XCTestCase {
         await store.process(.sessionArchived(sessionId: sessionId))
     }
 
-    func testIdlePromptDoesNotDowngradeRecentProcessingSession() async throws {
+    func testIdlePromptTransitionsProcessingToIdleWhenNoLiveEvidence() async throws {
         let store = SessionStore.shared
-        let sessionId = "recent-processing-grace-\(UUID().uuidString)"
+        let sessionId = "recent-processing-idle-transition-\(UUID().uuidString)"
 
         await store.process(.hookReceived(
             HookEvent(
@@ -262,8 +262,6 @@ final class SessionStoreFileUpdateTests: XCTestCase {
             )
         ))
 
-        let previousLastActivity = await store.session(for: sessionId)?.lastActivity
-
         await store.process(.hookReceived(
             HookEvent(
                 sessionId: sessionId,
@@ -282,9 +280,11 @@ final class SessionStoreFileUpdateTests: XCTestCase {
             )
         ))
 
+        // When no tools are running and no thinking is in progress, an idle
+        // notification should transition the session from processing to idle
+        // immediately -- no grace window needed.
         let session = await store.session(for: sessionId)
-        XCTAssertEqual(session?.phase, .processing)
-        XCTAssertEqual(session?.lastActivity, previousLastActivity)
+        XCTAssertEqual(session?.phase, .idle)
 
         await store.process(.sessionArchived(sessionId: sessionId))
     }
