@@ -166,7 +166,49 @@ final class SessionQuestionFormTests: XCTestCase {
         )
     }
 
-    private func makeQuestion(id: String) -> SessionInterventionQuestion {
+    func testCustomAnswerProtectsDraftInteraction() {
+        let question = makeQuestion(id: "scope", allowsOther: true)
+
+        XCTAssertTrue(
+            SessionQuestionForm.protectsDraftInteraction(
+                questions: [question],
+                answers: [:],
+                otherAnswers: ["scope": "Please keep my draft"],
+                focusedQuestionID: nil
+            )
+        )
+    }
+
+    func testFocusedEmptyAnswerProtectsDraftInteraction() {
+        let question = makeQuestion(id: "scope", allowsOther: true)
+
+        XCTAssertTrue(
+            SessionQuestionForm.protectsDraftInteraction(
+                questions: [question],
+                answers: [:],
+                otherAnswers: [:],
+                focusedQuestionID: "scope"
+            )
+        )
+    }
+
+    func testCustomAnswerReplacesSingleChoiceOptionInSubmission() {
+        let question = makeQuestion(id: "scope", allowsOther: true)
+
+        XCTAssertEqual(
+            SessionQuestionForm.finalAnswers(
+                for: question,
+                answers: ["scope": ["Use the selected option"]],
+                otherAnswers: ["scope": "Use the custom draft"]
+            ),
+            ["Use the custom draft"]
+        )
+    }
+
+    private func makeQuestion(
+        id: String,
+        allowsOther: Bool = false
+    ) -> SessionInterventionQuestion {
         SessionInterventionQuestion(
             id: id,
             header: id,
@@ -177,7 +219,7 @@ final class SessionQuestionFormTests: XCTestCase {
                 .init(id: "\(id)-no", title: "否", detail: nil),
             ],
             allowsMultiple: false,
-            allowsOther: false,
+            allowsOther: allowsOther,
             isSecret: false
         )
     }

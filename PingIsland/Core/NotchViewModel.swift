@@ -51,6 +51,7 @@ class NotchViewModel: ObservableObject {
     @Published private(set) var isFullscreenBrowserHiddenActive = false
     @Published private(set) var isIdleAutoHiddenActive = false
     @Published private(set) var isSettingsPopoverPresented = false
+    @Published private(set) var isInlineTextInputActive = false
 
     // MARK: - Geometry
 
@@ -117,6 +118,22 @@ class NotchViewModel: ObservableObject {
         let systemWidth = ceil(deviceNotchRect.width)
         guard systemWidth > 0 else { return defaultClosedWidth }
         return max(defaultClosedWidth, systemWidth + physicalNotchContentAllowance)
+    }
+
+    static func shouldAutoCollapseHoverPreview(
+        isHovering: Bool,
+        status: NotchStatus,
+        openReason: NotchOpenReason,
+        isSettingsPopoverPresented: Bool,
+        isInlineTextInputActive: Bool,
+        autoCollapseOnLeave: Bool
+    ) -> Bool {
+        !isHovering
+            && status == .opened
+            && openReason == .hover
+            && !isSettingsPopoverPresented
+            && !isInlineTextInputActive
+            && autoCollapseOnLeave
     }
 
     private var narrowedClosedWidth: CGFloat {
@@ -531,11 +548,14 @@ class NotchViewModel: ObservableObject {
         hoverTimer?.cancel()
         hoverTimer = nil
 
-        if !newHovering,
-           status == .opened,
-           openReason == .hover,
-           !isSettingsPopoverPresented,
-           AppSettings.autoCollapseOnLeave {
+        if Self.shouldAutoCollapseHoverPreview(
+            isHovering: newHovering,
+            status: status,
+            openReason: openReason,
+            isSettingsPopoverPresented: isSettingsPopoverPresented,
+            isInlineTextInputActive: isInlineTextInputActive,
+            autoCollapseOnLeave: AppSettings.autoCollapseOnLeave
+        ) {
             notchClose()
         }
 
@@ -802,6 +822,7 @@ class NotchViewModel: ObservableObject {
         currentChatSession = nil
         contentType = .instances
         openedMeasuredHeight = nil
+        isInlineTextInputActive = false
     }
 
     func beginDetachedPresentation(contentType: NotchContentType, playSound: Bool = true) {
@@ -859,6 +880,11 @@ class NotchViewModel: ObservableObject {
 
     func setSettingsPopoverPresented(_ isPresented: Bool) {
         isSettingsPopoverPresented = isPresented
+    }
+
+    func setInlineTextInputActive(_ isActive: Bool) {
+        guard isInlineTextInputActive != isActive else { return }
+        isInlineTextInputActive = isActive
     }
 
     func showChat(for session: SessionState) {

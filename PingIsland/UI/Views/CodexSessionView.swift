@@ -194,6 +194,7 @@ struct CodexSessionView: View {
                         sessionMonitor.answerIntervention(sessionId: session.sessionId, answers: payload)
                         viewModel.exitChat()
                     },
+                    onInteractionStateChanged: { viewModel.setInlineTextInputActive($0) },
                     secondaryActionTitle: secondaryActionTitle,
                     onSecondaryAction: {
                         if intervention.supportsInlineResponse && session.clientInfo.prefersAnsweredQuestionFollowupAction {

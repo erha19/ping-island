@@ -63,6 +63,44 @@ final class NotchViewModelTests: XCTestCase {
         }
     }
 
+    func testHoverAutoCollapseWaitsWhileInlineTextInputIsActive() async {
+        await MainActor.run {
+            XCTAssertFalse(
+                NotchViewModel.shouldAutoCollapseHoverPreview(
+                    isHovering: false,
+                    status: .opened,
+                    openReason: .hover,
+                    isSettingsPopoverPresented: false,
+                    isInlineTextInputActive: true,
+                    autoCollapseOnLeave: true
+                )
+            )
+
+            XCTAssertTrue(
+                NotchViewModel.shouldAutoCollapseHoverPreview(
+                    isHovering: false,
+                    status: .opened,
+                    openReason: .hover,
+                    isSettingsPopoverPresented: false,
+                    isInlineTextInputActive: false,
+                    autoCollapseOnLeave: true
+                )
+            )
+        }
+    }
+
+    func testClosingNotchClearsInlineTextInputState() async {
+        await MainActor.run {
+            let viewModel = makeViewModel()
+
+            viewModel.setInlineTextInputActive(true)
+            viewModel.notchOpen(reason: .hover)
+            viewModel.notchClose()
+
+            XCTAssertFalse(viewModel.isInlineTextInputActive)
+        }
+    }
+
     func testPresentSessionListClearsSavedChatAndOpensManualList() async {
         await MainActor.run {
             let viewModel = makeViewModel()

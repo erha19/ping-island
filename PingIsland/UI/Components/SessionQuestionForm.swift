@@ -4,6 +4,7 @@ struct SessionQuestionForm: View {
     let intervention: SessionIntervention
     let submitLabel: String?
     let onSubmit: ([String: [String]]) -> Void
+    var onInteractionStateChanged: (Bool) -> Void = { _ in }
     var secondaryActionTitle: String? = nil
     var onSecondaryAction: (() -> Void)? = nil
     var isEditable: Bool = true
@@ -12,7 +13,7 @@ struct SessionQuestionForm: View {
     @State private var answers: [String: [String]] = [:]
     @State private var otherAnswers: [String: String] = [:]
     @State private var measuredQuestionContentHeight: CGFloat = 0
-    @FocusState private var focusedCustomQuestionID: String?
+    @FocusState private var focusedQuestionID: String?
 
     private var displayQuestions: [SessionInterventionQuestion] {
         intervention.resolvedQuestions
@@ -109,6 +110,38 @@ struct SessionQuestionForm: View {
         return laterQuestions.first?.id
     }
 
+    nonisolated static func finalAnswers(
+        for question: SessionInterventionQuestion,
+        answers: [String: [String]],
+        otherAnswers: [String: String]
+    ) -> [String] {
+        var current = answers[question.id, default: []]
+        let other = otherAnswers[question.id]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !other.isEmpty {
+            if question.allowsMultiple {
+                current.append(other)
+            } else {
+                current = [other]
+            }
+        }
+        return current.filter { !$0.isEmpty }
+    }
+
+    nonisolated static func protectsDraftInteraction(
+        questions: [SessionInterventionQuestion],
+        answers: [String: [String]],
+        otherAnswers: [String: String],
+        focusedQuestionID: String?
+    ) -> Bool {
+        focusedQuestionID != nil || questions.contains { question in
+            !finalAnswers(
+                for: question,
+                answers: answers,
+                otherAnswers: otherAnswers
+            ).isEmpty
+        }
+    }
+
     private var questionListMaximumHeight: CGFloat {
         Self.questionListMaximumHeight(for: settings.maxPanelHeight)
     }
@@ -136,6 +169,7 @@ struct SessionQuestionForm: View {
         submitLabel: String? = nil,
         initialAnswers: [String: [String]] = [:],
         onSubmit: @escaping ([String: [String]]) -> Void,
+        onInteractionStateChanged: @escaping (Bool) -> Void = { _ in },
         secondaryActionTitle: String? = nil,
         onSecondaryAction: (() -> Void)? = nil,
         isEditable: Bool = true
@@ -143,6 +177,7 @@ struct SessionQuestionForm: View {
         self.intervention = intervention
         self.submitLabel = submitLabel
         self.onSubmit = onSubmit
+        self.onInteractionStateChanged = onInteractionStateChanged
         self.secondaryActionTitle = secondaryActionTitle
         self.onSecondaryAction = onSecondaryAction
         self.isEditable = isEditable
@@ -168,7 +203,7 @@ struct SessionQuestionForm: View {
             HStack(spacing: 8) {
                 if let submitLabel {
                     Button {
-                        onSubmit(submissionPayload())
+                        submitCurrentAnswers()
                     }
                     label: {
                         Text(appLocalized: submitLabel)
@@ -189,6 +224,13 @@ struct SessionQuestionForm: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .onAppear(perform: notifyInteractionState)
+        .onChange(of: answers) { _, _ in notifyInteractionState() }
+        .onChange(of: otherAnswers) { _, _ in notifyInteractionState() }
+        .onChange(of: focusedQuestionID) { _, _ in notifyInteractionState() }
+        .onDisappear {
+            onInteractionStateChanged(false)
+        }
     }
 
     @ViewBuilder
@@ -338,6 +380,11 @@ struct SessionQuestionForm: View {
                 set: { answers[question.id] = normalizedAnswers(from: $0) }
             ))
             .textFieldStyle(.plain)
+            .focused($focusedQuestionID, equals: question.id)
+            .submitLabel(.send)
+            .onSubmit {
+                submitCurrentAnswers()
+            }
             .padding(10)
             .disabled(!isEditable)
             .overlay(
@@ -350,6 +397,11 @@ struct SessionQuestionForm: View {
                 set: { answers[question.id] = normalizedAnswers(from: $0) }
             ))
             .textFieldStyle(.plain)
+            .focused($focusedQuestionID, equals: question.id)
+            .submitLabel(.send)
+            .onSubmit {
+                submitCurrentAnswers()
+            }
             .padding(10)
             .disabled(!isEditable)
             .overlay(
@@ -360,7 +412,7 @@ struct SessionQuestionForm: View {
     }
 
     private func customAnswerField(for question: SessionInterventionQuestion) -> some View {
-        let isFocused = focusedCustomQuestionID == question.id
+        let isFocused = focusedQuestionID == question.id
 
         return HStack(spacing: 8) {
             Image(systemName: "text.cursor")
@@ -373,7 +425,11 @@ struct SessionQuestionForm: View {
                 set: { setCustomAnswer($0, for: question) }
             ), prompt: Text(appLocalized: "Type Something ..."))
             .textFieldStyle(.plain)
-            .focused($focusedCustomQuestionID, equals: question.id)
+            .focused($focusedQuestionID, equals: question.id)
+            .submitLabel(.send)
+            .onSubmit {
+                submitCurrentAnswers()
+            }
         }
         .padding(10)
         .disabled(!isEditable)
@@ -398,6 +454,15 @@ struct SessionQuestionForm: View {
 
     private var canSubmit: Bool {
         !displayQuestions.contains { finalAnswers(for: $0).isEmpty }
+    }
+
+    private var protectsDraftInteraction: Bool {
+        Self.protectsDraftInteraction(
+            questions: displayQuestions,
+            answers: answers,
+            otherAnswers: otherAnswers,
+            focusedQuestionID: focusedQuestionID
+        )
     }
 
     private func isSelected(_ title: String, for question: SessionInterventionQuestion) -> Bool {
@@ -456,16 +521,11 @@ struct SessionQuestionForm: View {
     }
 
     private func finalAnswers(for question: SessionInterventionQuestion) -> [String] {
-        var current = answers[question.id, default: []]
-        let other = otherAnswers[question.id]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        if !other.isEmpty {
-            if question.allowsMultiple {
-                current.append(other)
-            } else {
-                current = [other]
-            }
-        }
-        return current.filter { !$0.isEmpty }
+        Self.finalAnswers(
+            for: question,
+            answers: answers,
+            otherAnswers: otherAnswers
+        )
     }
 
     private func submissionPayload() -> [String: [String]] {
@@ -475,6 +535,16 @@ struct SessionQuestionForm: View {
                 partial[question.id] = resolved
             }
         }
+    }
+
+    private func submitCurrentAnswers() {
+        guard canSubmit && isEditable else { return }
+        onInteractionStateChanged(false)
+        onSubmit(submissionPayload())
+    }
+
+    private func notifyInteractionState() {
+        onInteractionStateChanged(protectsDraftInteraction && isEditable)
     }
 
     private func normalizedAnswers(from value: String) -> [String] {

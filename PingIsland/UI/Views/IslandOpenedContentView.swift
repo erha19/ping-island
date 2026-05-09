@@ -49,13 +49,15 @@ struct IslandOpenedContentView: View {
             SessionHoverDashboardView(
                 sessions: hoverPreviewSessions,
                 sessionMonitor: sessionMonitor,
-                density: surface == .floating ? .detachedCompact : .regular
+                density: surface == .floating ? .detachedCompact : .regular,
+                onQuestionInteractionStateChanged: { viewModel.setInlineTextInputActive($0) }
             )
         case .attentionNotification(let session):
             SessionAttentionNotificationView(
                 session: liveSession(for: session),
                 sessionMonitor: sessionMonitor,
                 density: surface == .floating ? .detachedCompact : .regular,
+                onQuestionInteractionStateChanged: { viewModel.setInlineTextInputActive($0) },
                 onActionCompleted: onAttentionActionCompleted
             )
         case .completionNotification(let notification):

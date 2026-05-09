@@ -100,6 +100,7 @@ struct SessionHoverDashboardView: View {
     let sessions: [SessionState]
     let sessionMonitor: SessionMonitor
     var density: HoverPreviewDensity = .regular
+    var onQuestionInteractionStateChanged: (Bool) -> Void = { _ in }
 
     private var displayedSessions: [SessionState] {
         Array(sessions.prefix(3))
@@ -120,7 +121,8 @@ struct SessionHoverDashboardView: View {
                             sessionMonitor: sessionMonitor,
                             opensOnTap: false,
                             isHighlighted: isHighlighted,
-                            density: density
+                            density: density,
+                            onQuestionInteractionStateChanged: onQuestionInteractionStateChanged
                         )
                     } else {
                         SessionHoverCompactRow(
@@ -157,6 +159,7 @@ struct SessionAttentionNotificationView: View {
     let sessionMonitor: SessionMonitor
     var density: HoverPreviewDensity = .regular
     var onHoverChanged: (Bool) -> Void = { _ in }
+    var onQuestionInteractionStateChanged: (Bool) -> Void = { _ in }
     var onActionCompleted: () -> Void = {}
 
     var body: some View {
@@ -168,6 +171,7 @@ struct SessionAttentionNotificationView: View {
                     opensOnTap: false,
                     isHighlighted: session.needsApprovalResponse,
                     density: density,
+                    onQuestionInteractionStateChanged: onQuestionInteractionStateChanged,
                     onActionCompleted: onActionCompleted
                 )
             }
@@ -305,6 +309,7 @@ struct HoverSessionCard: View {
     var opensOnTap: Bool = true
     var isHighlighted = false
     var density: HoverPreviewDensity = .regular
+    var onQuestionInteractionStateChanged: (Bool) -> Void = { _ in }
     var onActionCompleted: () -> Void = {}
     @State private var isHovered = false
 
@@ -329,6 +334,7 @@ struct HoverSessionCard: View {
                     session: session,
                     intervention: intervention,
                     sessionMonitor: sessionMonitor,
+                    onQuestionInteractionStateChanged: onQuestionInteractionStateChanged,
                     onActionCompleted: onActionCompleted
                 )
             } else {
@@ -509,6 +515,7 @@ private struct HoverQuestionInterventionCard: View {
     let session: SessionState
     let intervention: SessionIntervention
     let sessionMonitor: SessionMonitor
+    var onQuestionInteractionStateChanged: (Bool) -> Void = { _ in }
     let onActionCompleted: () -> Void
 
     var body: some View {
@@ -533,6 +540,7 @@ private struct HoverQuestionInterventionCard: View {
                         intervention: intervention,
                         initialAnswers: intervention.submittedAnswers,
                         onSubmit: { _ in },
+                        onInteractionStateChanged: onQuestionInteractionStateChanged,
                         secondaryActionTitle: AppLocalization.format("打开 %@", session.interactionDisplayName),
                         onSecondaryAction: {
                             Task {
@@ -573,6 +581,7 @@ private struct HoverQuestionInterventionCard: View {
                         sessionMonitor.answerIntervention(sessionId: session.sessionId, answers: payload)
                         onActionCompleted()
                     },
+                    onInteractionStateChanged: onQuestionInteractionStateChanged,
                     secondaryActionTitle: secondaryActionTitle,
                     onSecondaryAction: secondaryActionTitle == nil ? nil : {
                         Task {

@@ -574,6 +574,7 @@ struct ChatView: View {
                         intervention: intervention,
                         initialAnswers: intervention.submittedAnswers,
                         onSubmit: { _ in },
+                        onInteractionStateChanged: { viewModel.setInlineTextInputActive($0) },
                         secondaryActionTitle: AppLocalization.format("打开 %@", session.interactionDisplayName),
                         onSecondaryAction: { openClientApplication() },
                         isEditable: false
@@ -626,6 +627,7 @@ struct ChatView: View {
                     onSubmit: { payload in
                         sessionMonitor.answerIntervention(sessionId: sessionId, answers: payload)
                     },
+                    onInteractionStateChanged: { viewModel.setInlineTextInputActive($0) },
                     secondaryActionTitle: secondaryActionTitle,
                     onSecondaryAction: onSecondaryAction
                 )
