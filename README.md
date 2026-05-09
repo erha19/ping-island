@@ -10,6 +10,7 @@
   <a href="#buddy-detach">Buddy Detach</a> •
   <a href="#supported-tools">Supported Tools</a> •
   <a href="#build-from-source">Build</a> •
+  <a href="#contributors">Contributors</a> •
   <a href="docs/privacy-policy.md">Privacy</a><br>
   English | <a href="README.zh-CN.md">简体中文</a>
 </p>
@@ -306,6 +307,12 @@ Implementation details worth knowing:
 - macOS 14.0 or later
 - Best experience on MacBooks with a notch, but external displays are supported too
 - Install whichever CLI or desktop clients you want Ping Island to monitor
+
+## Contributors
+
+Thanks to everyone who has helped shape Ping Island through code, issues, ideas, testing, docs, design feedback, and release validation.
+
+See the full contributor history on the [GitHub contributors graph](https://github.com/erha19/ping-island/graphs/contributors).
 
 ## Acknowledgments
 
