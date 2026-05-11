@@ -4,7 +4,7 @@ This file is a routing layer for coding agents working in this repo. Keep it sho
 
 ## Mission
 
-- `PingIsland` is a macOS menu bar app that surfaces Dynamic Island-style status for Claude Code, Codex, Gemini CLI, Hermes Agent, Qwen Code, and compatible hook-driven agent sessions.
+- `PingIsland` is a macOS menu bar app that surfaces Dynamic Island-style status for Claude Code, Codex, Gemini CLI, Hermes Agent, Qwen Code, Kimi CLI, and compatible hook-driven agent sessions.
 - The main runtime path is:
   - hook or app-server events
   - monitoring and service layers
@@ -85,6 +85,7 @@ This file is a routing layer for coding agents working in this repo. Keep it sho
   - Qoder-family hook installs currently cover Qoder IDE and Qoder CLI as separate profiles that share `~/.qoder/settings.json`, plus QoderWork under `~/.qoderwork/settings.json`. Keep Qoder IDE and Qoder CLI hook semantics independent even though they share a file; app launch should refresh only the Qoder CLI managed entries when `qodercli -v` is newer than 0.2.5 while preserving Qoder IDE hooks and unrelated JSON settings. New Qoder CLI uses Claude Code-compatible blocking hooks and response payloads; Qoder IDE and QoderWork remain notify-only and must not create Island-side blocking question or approval responses.
   - CodeBuddy-family hook installs currently cover CodeBuddy IDE and CodeBuddy CLI as separate profiles that share `~/.codebuddy/settings.json`, plus WorkBuddy under `~/.workbuddy/settings.json`. Keep CodeBuddy IDE and CodeBuddy CLI hook semantics independent even though they share a file; CodeBuddy CLI uses its Claude-compatible hook response shape and must preserve CodeBuddy IDE hooks plus unrelated JSON settings.
   - OpenCode is managed as a generated plugin file under `~/.config/opencode/plugins/ping-island.js`; treat it as a plugin-based integration, not a JSON hooks file.
+  - Kimi CLI hooks are managed through `~/.kimi/config.toml`; use `[[hooks]]` array-of-tables syntax. The installer preserves all non-Island TOML content (providers, models, loop_control, etc.) and only manipulates the `[[hooks]]` sections. Event names follow the Claude Code convention (`SessionStart`, `SessionEnd`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PermissionRequest`, `Notification`, `Stop`).
   - `QoderWork` should not be added to `ideExtensionProfiles` unless it actually ships VS Code-compatible extension support in the future.
 - If you change how sessions are associated across relaunches or between hook/app-server ingress paths, inspect both `SessionStore` and `SessionAssociationStore` so cached client metadata stays compatible.
 - If you change the new native runtime rollout path, keep it isolated from the legacy hook/app-server flow. Reuse shared `SessionState`-driven views, but keep runtime orchestration, persistence, and feature gating under `PingIsland/Services/Runtime/` and `PingIsland/Core/FeatureFlags.swift`.

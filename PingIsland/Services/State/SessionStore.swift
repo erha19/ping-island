@@ -229,6 +229,15 @@ actor SessionStore {
                 sessionFilePath: handle.sessionFilePath,
                 processName: "codex"
             )
+        case .kimi:
+            runtimeClientInfo = SessionClientInfo(
+                kind: .custom,
+                profileID: "kimi",
+                name: "Kimi Native",
+                origin: "native-runtime",
+                sessionFilePath: handle.sessionFilePath,
+                processName: "kimi"
+            )
         case .copilot:
             runtimeClientInfo = SessionClientInfo.default(for: .copilot)
         }
@@ -3803,6 +3812,8 @@ actor SessionStore {
         case .codex:
             return clientInfo.normalizedForCodexRouting(sessionId: sessionId)
         case .copilot:
+            return clientInfo
+        case .kimi:
             return clientInfo
         }
     }

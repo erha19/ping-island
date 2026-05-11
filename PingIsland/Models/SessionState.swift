@@ -1012,6 +1012,8 @@ struct SessionState: Equatable, Identifiable, Sendable {
             return clientInfo.kind == .codexCLI
         case .copilot:
             return false
+        case .kimi:
+            return false
         }
     }
 

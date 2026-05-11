@@ -103,7 +103,7 @@ public enum HookPayloadMapper {
         }
 
         switch provider {
-        case .claude:
+        case .claude, .kimi:
             let clientKind = normalizedClientKind(from: metadata)
             if clientKind == "qoder-cli",
                isQoderCLIPlanExitApproval(
@@ -1666,6 +1666,8 @@ private extension AgentProvider {
             return "Codex"
         case .copilot:
             return "Copilot"
+        case .kimi:
+            return "Kimi"
         }
     }
 }

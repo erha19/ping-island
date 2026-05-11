@@ -4,6 +4,7 @@ enum SessionProvider: String, Codable, Equatable, Sendable {
     case claude
     case codex
     case copilot
+    case kimi
 
     nonisolated var displayName: String {
         switch self {
@@ -13,6 +14,8 @@ enum SessionProvider: String, Codable, Equatable, Sendable {
             return "Codex"
         case .copilot:
             return "Copilot"
+        case .kimi:
+            return "Kimi"
         }
     }
 }
@@ -111,6 +114,8 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
             return SessionClientInfo(kind: .codexApp, name: "Codex App", bundleIdentifier: "com.openai.codex")
         case .copilot:
             return SessionClientInfo(kind: .custom, profileID: "copilot-cli", name: "GitHub Copilot", origin: "cli")
+        case .kimi:
+            return SessionClientInfo(kind: .custom, profileID: "kimi", name: "Kimi CLI", origin: "cli")
         }
     }
 
@@ -176,6 +181,15 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
             || name?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "qwen-code"
             || originator?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "qwen code"
             || originator?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "qwen-code"
+    }
+
+    nonisolated var isKimiClient: Bool {
+        profileID == "kimi"
+            || threadSource?.lowercased() == "kimi-hooks"
+            || name?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "kimi cli"
+            || name?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "kimi-cli"
+            || originator?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "kimi cli"
+            || originator?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "kimi-cli"
     }
 
     nonisolated var isCodeBuddyCLIClient: Bool {

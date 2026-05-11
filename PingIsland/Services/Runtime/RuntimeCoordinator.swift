@@ -92,6 +92,8 @@ actor RuntimeCoordinator {
             return FeatureFlags.nativeCodexRuntime
         case .copilot:
             return false
+        case .kimi:
+            return false
         }
     }
 

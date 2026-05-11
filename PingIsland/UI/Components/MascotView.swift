@@ -14,6 +14,7 @@ enum MascotClient: String, CaseIterable, Identifiable, Sendable {
     case codebuddy
     case trae
     case copilot
+    case kimi
 
     static let allCases: [MascotClient] = [
         .claude,
@@ -27,6 +28,7 @@ enum MascotClient: String, CaseIterable, Identifiable, Sendable {
         .qoder,
         .codebuddy,
         .copilot,
+        .kimi,
     ]
 
     var id: String { rawValue }
@@ -57,6 +59,8 @@ enum MascotClient: String, CaseIterable, Identifiable, Sendable {
             return "Trae"
         case .copilot:
             return "Copilot"
+        case .kimi:
+            return "Kimi CLI"
         }
     }
 
@@ -86,6 +90,8 @@ enum MascotClient: String, CaseIterable, Identifiable, Sendable {
             return "Trae IDE 中的 Claude 会话"
         case .copilot:
             return "GitHub Copilot Hooks 客户端"
+        case .kimi:
+            return "Kimi CLI 官方 hooks 与默认 Kimi 形象"
         }
     }
 
@@ -115,6 +121,8 @@ enum MascotClient: String, CaseIterable, Identifiable, Sendable {
             return .claude
         case .copilot:
             return .copilot
+        case .kimi:
+            return .kimi
         }
     }
 
@@ -126,6 +134,8 @@ enum MascotClient: String, CaseIterable, Identifiable, Sendable {
             self = .claude
         case .copilot:
             self = .copilot
+        case .kimi:
+            self = .kimi
         }
     }
 
@@ -152,6 +162,8 @@ enum MascotClient: String, CaseIterable, Identifiable, Sendable {
                 .trae
             case "codex-app", "codex-cli":
                 .codex
+            case "kimi":
+                .kimi
             default:
                 nil
             }
@@ -193,6 +205,8 @@ enum MascotClient: String, CaseIterable, Identifiable, Sendable {
                 self = .copilot
             case .claude:
                 self = .claude
+            case .kimi:
+                self = .kimi
             }
         case .opencode:
             self = .opencode
@@ -200,6 +214,8 @@ enum MascotClient: String, CaseIterable, Identifiable, Sendable {
             self = .qoder
         case .copilot:
             self = .copilot
+        case .kimi:
+            self = .kimi
         case .claude:
             switch provider {
             case .codex:
@@ -208,6 +224,8 @@ enum MascotClient: String, CaseIterable, Identifiable, Sendable {
                 self = .copilot
             case .claude:
                 self = .claude
+            case .kimi:
+                self = .kimi
             }
         }
     }
@@ -225,6 +243,7 @@ enum MascotKind: String, CaseIterable, Identifiable, Sendable {
     case qoder
     case codebuddy
     case copilot
+    case kimi
 
     var id: String { rawValue }
 
@@ -252,6 +271,8 @@ enum MascotKind: String, CaseIterable, Identifiable, Sendable {
             return "CodeBuddy"
         case .copilot:
             return "Copilot"
+        case .kimi:
+            return "Kimi CLI"
         }
     }
 
@@ -279,6 +300,8 @@ enum MascotKind: String, CaseIterable, Identifiable, Sendable {
             return "宇航员猫"
         case .copilot:
             return "黑框眼镜机器人"
+        case .kimi:
+            return " Kimi 月亮兔"
         }
     }
 
@@ -306,6 +329,8 @@ enum MascotKind: String, CaseIterable, Identifiable, Sendable {
             return Color(red: 1.0, green: 0.45, blue: 0.34)
         case .copilot:
             return Color(red: 1.0, green: 0.56, blue: 0.28)
+        case .kimi:
+            return Color(red: 0.96, green: 0.30, blue: 0.42)
         }
     }
 
@@ -520,6 +545,8 @@ struct MascotView: View {
             drawCodeBuddy(in: context, canvasSize: canvasSize, time: time, mode: mode)
         case .copilot:
             drawCopilot(in: context, canvasSize: canvasSize, time: time, mode: mode)
+        case .kimi:
+            drawKimi(in: context, canvasSize: canvasSize, time: time, mode: mode)
         }
     }
 
@@ -1678,6 +1705,67 @@ struct MascotView: View {
 
         if mode == .warning {
             drawAlertGlyph(in: context, space: space, x: 11.6 + motion.shake, y: 2.0, color: kind.alertColor)
+        }
+    }
+
+    private func drawKimi(
+        in context: GraphicsContext,
+        canvasSize: CGSize,
+        time: TimeInterval,
+        mode: MascotRenderMode
+    ) {
+        let space = PixelSpace(canvasSize, logicalWidth: 16, logicalHeight: 14, yOffset: 2)
+        let motion = motionValues(for: mode, time: time)
+        let body = Color(red: 0.96, green: 0.30, blue: 0.42)
+        let face = Color(red: 1.0, green: 0.92, blue: 0.94)
+        let eye = Color(red: 0.2, green: 0.1, blue: 0.1)
+        let accent = Color(red: 1.0, green: 0.75, blue: 0.35)
+
+        drawShadow(in: context, space: space, centerX: 8, y: 15.5, width: 6.5 - abs(motion.bounce) * 0.2, opacity: 0.18)
+
+        if mode == .working {
+            drawKeyboard(
+                in: context,
+                space: space,
+                y: 13.0,
+                base: Color(red: 0.18, green: 0.12, blue: 0.14),
+                key: Color(red: 0.45, green: 0.30, blue: 0.35),
+                highlight: accent,
+                flashIndex: keyboardFlashIndex(time: time)
+            )
+        }
+
+        // Body
+        context.fill(Path(space.rect(2.5 + motion.shake, 2.5 + motion.vertical, 11.0 * motion.squashX, 10.0 * motion.squashY)), with: .color(body))
+        // Face
+        context.fill(Path(space.rect(3.8 + motion.shake, 3.4 + motion.vertical, 8.4, 7.6)), with: .color(face))
+        // Ears
+        context.fill(Path(space.rect(4.1 + motion.shake, 2.5 + motion.vertical, 2.8, 4.0)), with: .color(body))
+        context.fill(Path(space.rect(9.1 + motion.shake, 2.5 + motion.vertical, 2.8, 4.0)), with: .color(body))
+        // Inner ears
+        context.fill(Path(space.rect(4.8 + motion.shake, 3.8 + motion.vertical, 1.4, 2.0)), with: .color(face.opacity(0.6)))
+        context.fill(Path(space.rect(9.8 + motion.shake, 3.8 + motion.vertical, 1.4, 2.0)), with: .color(face.opacity(0.6)))
+
+        let eyeHeight: CGFloat
+        switch mode {
+        case .idle:
+            eyeHeight = 0.35
+        case .warning:
+            eyeHeight = 1.0
+        case .working:
+            eyeHeight = blinkHeight(time: time, closedHeight: 0.15, openHeight: 1.0)
+        case .dragging:
+            eyeHeight = 0.7
+        }
+        context.fill(Path(space.rect(6.5 + motion.shake, 6.8 + motion.vertical, 0.9, eyeHeight)), with: .color(eye))
+        context.fill(Path(space.rect(8.6 + motion.shake, 6.8 + motion.vertical, 0.9, eyeHeight)), with: .color(eye))
+
+        if mode == .working {
+            context.fill(Path(space.rect(6.0 + motion.shake, 9.5 + motion.vertical, 4.0, 0.5)), with: .color(accent.opacity(0.85)))
+        }
+
+        if mode == .warning {
+            drawAlertGlyph(in: context, space: space, x: 12.0 + motion.shake, y: 2.0, color: kind.alertColor)
         }
     }
 

@@ -753,6 +753,41 @@ final class RemoteConnectorManager: ObservableObject {
                         password: password
                     )
                 }
+            case .tomlHooks:
+                let remoteConfigPath = Self.remoteConfigurationPath(
+                    relativePath: profile.configurationRelativePaths[0],
+                    homeDirectory: probe.homeDirectory
+                )
+                let existingConfig = try? await RemoteSSHCommandRunner.readRemoteFile(
+                    target: endpoint.sshTarget,
+                    port: endpoint.sshPort,
+                    remotePath: remoteConfigPath,
+                    password: password
+                )
+                let existingContent = String(data: existingConfig ?? Data(), encoding: .utf8) ?? ""
+                let segments = TOMLHookConfigParser.parse(existingContent)
+                let newHooks = profile.events.map { event -> TOMLHookConfigParser.TOMLHookEntry in
+                    let matcher = event.templates.first.map { template -> String in
+                        switch template {
+                        case .plain: return ""
+                        case .matcher(let value): return value
+                        }
+                    } ?? ""
+                    return TOMLHookConfigParser.TOMLHookEntry(
+                        event: event.name,
+                        command: remoteCommand,
+                        matcher: matcher,
+                        timeout: event.timeout
+                    )
+                }
+                let updatedContent = TOMLHookConfigParser.rebuild(segments: segments, newHooks: newHooks)
+                try await RemoteSSHCommandRunner.writeRemoteFile(
+                    target: endpoint.sshTarget,
+                    port: endpoint.sshPort,
+                    remotePath: remoteConfigPath,
+                    contents: Data(updatedContent.utf8),
+                    password: password
+                )
             case .pluginFile:
                 continue
             }
@@ -880,6 +915,39 @@ final class RemoteConnectorManager: ObservableObject {
                     allowFailure: true
                 )
 
+            case .tomlHooks:
+                let remoteConfigPath = Self.remoteConfigurationPath(
+                    relativePath: profile.configurationRelativePaths[0],
+                    homeDirectory: probe.homeDirectory
+                )
+                let configExists = try await RemoteSSHCommandRunner.remoteFileExists(
+                    target: endpoint.sshTarget,
+                    port: endpoint.sshPort,
+                    remotePath: remoteConfigPath,
+                    password: password
+                )
+                guard configExists else {
+                    logger.debug(
+                        "Remote uninstall skipped missing TOML config endpoint=\(endpoint.id.uuidString, privacy: .public) profile=\(profile.id, privacy: .public) remotePath=\(remoteConfigPath, privacy: .public)"
+                    )
+                    continue
+                }
+                let existingConfig = try await RemoteSSHCommandRunner.readRemoteFile(
+                    target: endpoint.sshTarget,
+                    port: endpoint.sshPort,
+                    remotePath: remoteConfigPath,
+                    password: password
+                )
+                let existingContent = String(data: existingConfig, encoding: .utf8) ?? ""
+                let segments = TOMLHookConfigParser.parse(existingContent)
+                let updatedContent = TOMLHookConfigParser.rebuild(segments: segments, newHooks: [])
+                try await RemoteSSHCommandRunner.writeRemoteFile(
+                    target: endpoint.sshTarget,
+                    port: endpoint.sshPort,
+                    remotePath: remoteConfigPath,
+                    contents: Data(updatedContent.utf8),
+                    password: password
+                )
             case .pluginFile:
                 continue
             }
@@ -1395,7 +1463,7 @@ final class RemoteConnectorManager: ObservableObject {
         switch profile.installationKind {
         case .hookDirectory:
             paths = [configurationPath, NSString(string: configurationPath).deletingLastPathComponent]
-        case .jsonHooks, .pluginFile:
+        case .jsonHooks, .pluginFile, .tomlHooks:
             paths = [NSString(string: configurationPath).deletingLastPathComponent]
         case .pluginDirectory:
             paths = [
