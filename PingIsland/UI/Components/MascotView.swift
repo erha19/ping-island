@@ -1716,53 +1716,102 @@ struct MascotView: View {
     ) {
         let space = PixelSpace(canvasSize, logicalWidth: 16, logicalHeight: 14, yOffset: 2)
         let motion = motionValues(for: mode, time: time)
-        let body = Color(red: 0.96, green: 0.30, blue: 0.42)
-        let face = Color(red: 1.0, green: 0.92, blue: 0.94)
-        let eye = Color(red: 0.2, green: 0.1, blue: 0.1)
-        let accent = Color(red: 1.0, green: 0.75, blue: 0.35)
+        
+        let outerBlue = Color(red: 0.55, green: 0.82, blue: 1.0)
+        let midBlue = Color(red: 0.33, green: 0.63, blue: 0.98)
+        let innerBlue = Color(red: 0.15, green: 0.40, blue: 0.85)
+        let coreBlue = Color(red: 0.08, green: 0.25, blue: 0.65)
+        let eye = Color.white
+        let keyboardBase = Color(red: 0.12, green: 0.25, blue: 0.45)
+        let keyboardKey = Color(red: 0.33, green: 0.50, blue: 0.75)
+        let accent = outerBlue
 
-        drawShadow(in: context, space: space, centerX: 8, y: 15.5, width: 6.5 - abs(motion.bounce) * 0.2, opacity: 0.18)
+        drawShadow(in: context, space: space, centerX: 8, y: 15.5, width: 7.5 - abs(motion.bounce) * 0.2, opacity: 0.2)
 
         if mode == .working {
             drawKeyboard(
                 in: context,
                 space: space,
                 y: 13.0,
-                base: Color(red: 0.18, green: 0.12, blue: 0.14),
-                key: Color(red: 0.45, green: 0.30, blue: 0.35),
+                base: keyboardBase,
+                key: keyboardKey,
                 highlight: accent,
                 flashIndex: keyboardFlashIndex(time: time)
             )
         }
 
-        // Body
-        context.fill(Path(space.rect(2.5 + motion.shake, 2.5 + motion.vertical, 11.0 * motion.squashX, 10.0 * motion.squashY)), with: .color(body))
-        // Face
-        context.fill(Path(space.rect(3.8 + motion.shake, 3.4 + motion.vertical, 8.4, 7.6)), with: .color(face))
-        // Ears
-        context.fill(Path(space.rect(4.1 + motion.shake, 2.5 + motion.vertical, 2.8, 4.0)), with: .color(body))
-        context.fill(Path(space.rect(9.1 + motion.shake, 2.5 + motion.vertical, 2.8, 4.0)), with: .color(body))
-        // Inner ears
-        context.fill(Path(space.rect(4.8 + motion.shake, 3.8 + motion.vertical, 1.4, 2.0)), with: .color(face.opacity(0.6)))
-        context.fill(Path(space.rect(9.8 + motion.shake, 3.8 + motion.vertical, 1.4, 2.0)), with: .color(face.opacity(0.6)))
+        // Draw the concentric circles for the sphere effect (pixelated)
+        let outerRows: [(CGFloat, CGFloat, CGFloat)] = [
+            (12.5, 4.0, 8.0),
+            (11.5, 3.0, 10.0),
+            (10.5, 2.0, 12.0),
+            (9.5, 2.0, 12.0),
+            (8.5, 2.0, 12.0),
+            (7.5, 2.0, 12.0),
+            (6.5, 3.0, 10.0),
+            (5.5, 4.0, 8.0)
+        ]
+        for row in outerRows {
+            context.fill(Path(space.rect(row.1 + motion.shake, row.0 + motion.vertical, row.2 * motion.squashX, 1.0 * motion.squashY)), with: .color(outerBlue))
+        }
 
+        let midRows: [(CGFloat, CGFloat, CGFloat)] = [
+            (11.5, 4.5, 7.0),
+            (10.5, 3.5, 9.0),
+            (9.5, 3.0, 10.0),
+            (8.5, 3.0, 10.0),
+            (7.5, 3.5, 9.0),
+            (6.5, 4.5, 7.0)
+        ]
+        for row in midRows {
+            context.fill(Path(space.rect(row.1 + motion.shake, row.0 + motion.vertical, row.2 * motion.squashX, 1.0 * motion.squashY)), with: .color(midBlue))
+        }
+
+        let innerRows: [(CGFloat, CGFloat, CGFloat)] = [
+            (10.5, 5.0, 6.0),
+            (9.5, 4.0, 8.0),
+            (8.5, 4.0, 8.0),
+            (7.5, 5.0, 6.0)
+        ]
+        for row in innerRows {
+            context.fill(Path(space.rect(row.1 + motion.shake, row.0 + motion.vertical, row.2 * motion.squashX, 1.0 * motion.squashY)), with: .color(innerBlue))
+        }
+        
+        let coreRows: [(CGFloat, CGFloat, CGFloat)] = [
+            (9.5, 5.5, 5.0),
+            (8.5, 5.5, 5.0)
+        ]
+        for row in coreRows {
+            context.fill(Path(space.rect(row.1 + motion.shake, row.0 + motion.vertical, row.2 * motion.squashX, 1.0 * motion.squashY)), with: .color(coreBlue))
+        }
+
+        // Eyes (white pills)
         let eyeHeight: CGFloat
         switch mode {
         case .idle:
-            eyeHeight = 0.35
+            eyeHeight = 0.5
         case .warning:
-            eyeHeight = 1.0
+            eyeHeight = 1.6
         case .working:
-            eyeHeight = blinkHeight(time: time, closedHeight: 0.15, openHeight: 1.0)
+            eyeHeight = blinkHeight(time: time, closedHeight: 0.2, openHeight: 1.6)
         case .dragging:
-            eyeHeight = 0.7
+            eyeHeight = 1.0
         }
-        context.fill(Path(space.rect(6.5 + motion.shake, 6.8 + motion.vertical, 0.9, eyeHeight)), with: .color(eye))
-        context.fill(Path(space.rect(8.6 + motion.shake, 6.8 + motion.vertical, 0.9, eyeHeight)), with: .color(eye))
-
-        if mode == .working {
-            context.fill(Path(space.rect(6.0 + motion.shake, 9.5 + motion.vertical, 4.0, 0.5)), with: .color(accent.opacity(0.85)))
-        }
+        
+        // Drawing pill shapes for eyes, centered roughly on the core
+        let eyeY = 8.2 + motion.vertical
+        let eyeWidth: CGFloat = 1.2 * motion.squashX
+        
+        // Left eye
+        context.fill(
+            Path(roundedRect: space.rect(5.5 + motion.shake, eyeY, eyeWidth, eyeHeight * motion.squashY), cornerRadius: space.pixel * 0.6),
+            with: .color(eye)
+        )
+        // Right eye
+        context.fill(
+            Path(roundedRect: space.rect(9.3 + motion.shake, eyeY, eyeWidth, eyeHeight * motion.squashY), cornerRadius: space.pixel * 0.6),
+            with: .color(eye)
+        )
 
         if mode == .warning {
             drawAlertGlyph(in: context, space: space, x: 12.0 + motion.shake, y: 2.0, color: kind.alertColor)
