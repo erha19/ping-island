@@ -4,6 +4,7 @@ enum HookProtocolFamily: String, Sendable {
     case claudeHooks
     case codexHooks
     case codexAppServer
+    case geminiHooks
 }
 
 enum SessionClientBrand: String, Codable, Equatable, Sendable {
@@ -554,7 +555,7 @@ enum ClientProfileRegistry {
             prefersBundledLogoOverAppIcon: true,
             iconSymbolName: "sparkles.rectangle.stack.fill",
             configurationRelativePath: ".gemini/settings.json",
-            bridgeSource: "claude",
+            bridgeSource: "gemini",
             bridgeExtraArguments: [
                 "--client-kind", "gemini",
                 "--client-name", "Gemini CLI",
@@ -1126,8 +1127,8 @@ enum ClientProfileRegistry {
         ),
         SessionClientProfile(
             id: "gemini",
-            provider: .claude,
-            family: .claudeHooks,
+            provider: .gemini,
+            family: .geminiHooks,
             kind: .custom,
             displayName: "Gemini CLI",
             assistantLabelMode: .badgeLabel,
@@ -1361,6 +1362,8 @@ enum ClientProfileRegistry {
             return runtimeProfile(id: kind == .codexCLI ? "codex-cli" : "codex-app")
         case .copilot:
             return runtimeProfile(id: "copilot-cli")
+        case .gemini:
+            return runtimeProfile(id: "gemini-cli")
         }
     }
 

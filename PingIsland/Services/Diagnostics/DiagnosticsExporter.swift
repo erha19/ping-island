@@ -536,6 +536,16 @@ actor DiagnosticsExporter {
 
         do {
             try copyRecentDirectoryContentsIfPresent(
+                from: preferredGeminiHookDebugDirectory(),
+                toRelativeDirectory: "debug/gemini-hooks",
+                under: exportRoot
+            )
+        } catch {
+            warnings.append("Failed to copy Gemini hook debug logs: \(error.localizedDescription)")
+        }
+
+        do {
+            try copyRecentDirectoryContentsIfPresent(
                 from: preferredHermesHookDebugDirectory(),
                 toRelativeDirectory: "debug/hermes-hooks",
                 under: exportRoot
@@ -866,6 +876,10 @@ actor DiagnosticsExporter {
 
     private func preferredQoderCLIHookDebugDirectory() -> URL {
         fileManager.homeDirectoryForCurrentUser.appendingPathComponent(".ping-island-debug/qoder-cli-hooks", isDirectory: true)
+    }
+
+    private func preferredGeminiHookDebugDirectory() -> URL {
+        fileManager.homeDirectoryForCurrentUser.appendingPathComponent(".ping-island-debug/gemini-hooks", isDirectory: true)
     }
 
     private func preferredHermesHookDebugDirectory() -> URL {

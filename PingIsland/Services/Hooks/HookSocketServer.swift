@@ -280,6 +280,7 @@ private enum BridgeProvider: String, Codable, Sendable {
     case claude
     case codex
     case copilot
+    case gemini
 }
 
 private enum BridgeStatusKind: String, Codable, Sendable {
@@ -793,6 +794,12 @@ private extension BridgeEnvelope {
             } else {
                 kind = .custom
             }
+        case .gemini:
+            if let matchedProfile {
+                kind = matchedProfile.kind
+            } else {
+                kind = .custom
+            }
         }
 
         let resolvedProfile: SessionClientProfile?
@@ -894,6 +901,8 @@ private extension BridgeProvider {
             return .codex
         case .copilot:
             return .copilot
+        case .gemini:
+            return .gemini
         }
     }
 }
@@ -1147,6 +1156,7 @@ class HookSocketServer {
             return firstNonEmpty(
                 metadata["last_assistant_message"],
                 metadata["message"],
+                metadata["prompt_response"],
                 preview
             )
         }
@@ -1154,6 +1164,7 @@ class HookSocketServer {
         return firstNonEmpty(
             metadata["message"],
             metadata["last_assistant_message"],
+            metadata["prompt_response"],
             preview
         )
     }
@@ -1560,6 +1571,11 @@ class HookSocketServer {
                     "terminal_bundle_id": event.clientInfo.terminalBundleIdentifier ?? "",
                 ])
             }
+        }
+        if event.clientInfo.isGeminiClient {
+            logger.info(
+                "Gemini bridge envelope event=\(envelope.eventType, privacy: .public) session=\(event.sessionId, privacy: .public) status=\(event.status, privacy: .public) message=\((event.message ?? "").prefix(120), privacy: .public)"
+            )
         }
 
         if event.event == "PreToolUse" && event.toolUseId == nil {

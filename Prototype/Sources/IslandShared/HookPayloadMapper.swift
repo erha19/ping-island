@@ -103,7 +103,7 @@ public enum HookPayloadMapper {
         }
 
         switch provider {
-        case .claude:
+        case .claude, .gemini:
             let clientKind = normalizedClientKind(from: metadata)
             if clientKind == "qoder-cli",
                isQoderCLIPlanExitApproval(
@@ -485,6 +485,7 @@ public enum HookPayloadMapper {
             payload["prompt"] as? String,
             payload["message"] as? String,
             payload["last_assistant_message"] as? String,
+            payload["prompt_response"] as? String,
             payload["command"] as? String,
             summarizeValue(payload["tool_result"]),
             summarizeValue(payload["tool_input"])
@@ -1666,6 +1667,8 @@ private extension AgentProvider {
             return "Codex"
         case .copilot:
             return "Copilot"
+        case .gemini:
+            return "Gemini"
         }
     }
 }

@@ -231,6 +231,8 @@ actor SessionStore {
             )
         case .copilot:
             runtimeClientInfo = SessionClientInfo.default(for: .copilot)
+        case .gemini:
+            runtimeClientInfo = SessionClientInfo.default(for: .gemini)
         }
 
         let resolvedClientInfo = normalizedClientInfo(
@@ -364,10 +366,13 @@ actor SessionStore {
             }
         }
 
-        // For hook-only clients without JSONL (e.g. Hermes), build chat history
+        // For hook-only clients without JSONL (e.g. Hermes, Gemini), build chat history
         // directly from hook events so users can see conversation content.
         if session.clientInfo.isHermesClient {
             appendHermesHookChatItem(event: event, session: &session)
+        }
+        if session.clientInfo.isGeminiClient {
+            appendGeminiHookChatItem(event: event, session: &session)
         }
 
         let shouldPreserveEndedStopForAnsweredQuestion =
@@ -395,6 +400,11 @@ actor SessionStore {
             if session.clientInfo.isHermesClient {
                 Self.logger.info(
                     "Hermes session ended session=\(sessionId, privacy: .public) phase=\(session.phase.description, privacy: .public) message=\((session.latestHookMessage ?? "").prefix(120), privacy: .public)"
+                )
+            }
+            if session.clientInfo.isGeminiClient {
+                Self.logger.info(
+                    "Gemini session ended session=\(sessionId, privacy: .public) phase=\(session.phase.description, privacy: .public) message=\((session.latestHookMessage ?? "").prefix(120), privacy: .public)"
                 )
             }
             cancelPendingCodexPlaceholderPrune(sessionId: sessionId)
@@ -542,6 +552,11 @@ actor SessionStore {
         if session.clientInfo.isHermesClient {
             Self.logger.info(
                 "Hermes session updated session=\(sessionId, privacy: .public) event=\(event.event, privacy: .public) phase=\(session.phase.description, privacy: .public) message=\((session.latestHookMessage ?? "").prefix(120), privacy: .public)"
+            )
+        }
+        if session.clientInfo.isGeminiClient {
+            Self.logger.info(
+                "Gemini session updated session=\(sessionId, privacy: .public) event=\(event.event, privacy: .public) phase=\(session.phase.description, privacy: .public) message=\((session.latestHookMessage ?? "").prefix(120), privacy: .public)"
             )
         }
         updateCodexPlaceholderPrune(for: session)
@@ -768,6 +783,60 @@ actor SessionStore {
 
         default:
             break  // Tool events are handled by processToolTracking.
+        }
+    }
+
+    /// Build chat history items from Gemini hook events so the conversation is
+    /// visible in the session detail view even without a JSONL file.
+    private func appendGeminiHookChatItem(event: HookEvent, session: inout SessionState) {
+        switch event.event {
+        case "BeforeAgent", "BeforeToolSelection":
+            guard let message = Self.normalizedHookMessage(event.message), !message.isEmpty else { return }
+            let id = "gemini-user-\(session.chatItems.count)-\(Int(Date().timeIntervalSince1970 * 1000))"
+            session.chatItems.append(ChatHistoryItem(
+                id: id,
+                type: .user(message),
+                timestamp: Date()
+            ))
+            // Capture as first user message for session display title.
+            if session.conversationInfo.firstUserMessage == nil {
+                session.conversationInfo = ConversationInfo(
+                    summary: session.conversationInfo.summary,
+                    lastMessage: session.conversationInfo.lastMessage,
+                    lastMessageRole: session.conversationInfo.lastMessageRole,
+                    lastToolName: session.conversationInfo.lastToolName,
+                    firstUserMessage: message,
+                    lastUserMessageDate: Date()
+                )
+            }
+            Self.logger.debug(
+                "Gemini chat item appended type=user session=\(event.sessionId.prefix(8), privacy: .public) length=\(message.count)"
+            )
+
+        case "AfterAgent", "AfterModel":
+            guard let message = Self.normalizedHookMessage(event.message), !message.isEmpty else { return }
+            let id = "gemini-assistant-\(session.chatItems.count)-\(Int(Date().timeIntervalSince1970 * 1000))"
+            session.chatItems.append(ChatHistoryItem(
+                id: id,
+                type: .assistant(message),
+                timestamp: Date()
+            ))
+            // Keep conversationInfo.lastMessage in sync so the UI
+            // can show the latest assistant reply everywhere.
+            session.conversationInfo = ConversationInfo(
+                summary: session.conversationInfo.summary,
+                lastMessage: message,
+                lastMessageRole: "assistant",
+                lastToolName: session.conversationInfo.lastToolName,
+                firstUserMessage: session.conversationInfo.firstUserMessage,
+                lastUserMessageDate: session.conversationInfo.lastUserMessageDate
+            )
+            Self.logger.debug(
+                "Gemini chat item appended type=assistant session=\(event.sessionId.prefix(8), privacy: .public) length=\(message.count)"
+            )
+
+        default:
+            break
         }
     }
 
@@ -3802,7 +3871,7 @@ actor SessionStore {
             return clientInfo.normalizedForClaudeRouting()
         case .codex:
             return clientInfo.normalizedForCodexRouting(sessionId: sessionId)
-        case .copilot:
+        case .copilot, .gemini:
             return clientInfo
         }
     }

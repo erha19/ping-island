@@ -90,7 +90,7 @@ actor RuntimeCoordinator {
             return FeatureFlags.nativeClaudeRuntime
         case .codex:
             return FeatureFlags.nativeCodexRuntime
-        case .copilot:
+        case .copilot, .gemini:
             return false
         }
     }

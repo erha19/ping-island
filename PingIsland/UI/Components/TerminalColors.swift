@@ -36,6 +36,8 @@ extension SessionProvider {
             return TerminalColors.blue
         case .copilot:
             return TerminalColors.green
+        case .gemini:
+            return TerminalColors.blue
         }
     }
 }

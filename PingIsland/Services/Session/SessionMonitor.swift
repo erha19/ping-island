@@ -1085,7 +1085,7 @@ class SessionMonitor: ObservableObject {
     nonisolated static func shouldStopWatchingTranscript(for event: HookEvent) -> Bool {
         guard event.ingress != .remoteBridge else { return true }
         switch event.provider {
-        case .claude:
+        case .claude, .gemini:
             return event.status == "ended"
         case .codex:
             return event.status == "ended" || event.event == "Stop"

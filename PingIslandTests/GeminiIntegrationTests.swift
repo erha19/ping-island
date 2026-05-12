@@ -15,7 +15,7 @@ final class GeminiIntegrationTests: XCTestCase {
 
     func testGeminiRuntimeProfileResolvesBrandAndMascot() {
         let profile = ClientProfileRegistry.matchRuntimeProfile(
-            provider: .claude,
+            provider: .gemini,
             explicitKind: "gemini",
             explicitName: "Gemini CLI",
             explicitBundleIdentifier: nil,
@@ -39,8 +39,8 @@ final class GeminiIntegrationTests: XCTestCase {
         )
 
         XCTAssertEqual(clientInfo.brand, .gemini)
-        XCTAssertEqual(MascotClient(clientInfo: clientInfo, provider: .claude), .gemini)
-        XCTAssertEqual(MascotKind(clientInfo: clientInfo, provider: .claude), .gemini)
-        XCTAssertEqual(clientInfo.badgeLabel(for: .claude), "Gemini CLI")
+        XCTAssertEqual(MascotClient(clientInfo: clientInfo, provider: .gemini), .gemini)
+        XCTAssertEqual(MascotKind(clientInfo: clientInfo, provider: .gemini), .gemini)
+        XCTAssertEqual(clientInfo.badgeLabel(for: .gemini), "Gemini CLI")
     }
 }

@@ -104,6 +104,7 @@ actor SessionStore {
         case .claude: "Claude Session"
         case .codex: "Codex Session"
         case .copilot: "Copilot Session"
+        case .gemini: "Gemini Session"
         }
     }
 }

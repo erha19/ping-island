@@ -1010,7 +1010,7 @@ struct SessionState: Equatable, Identifiable, Sendable {
                 && !normalizedClientInfo.prefersAnsweredQuestionFollowupAction
         case .codex:
             return clientInfo.kind == .codexCLI
-        case .copilot:
+        case .copilot, .gemini:
             return false
         }
     }

@@ -435,6 +435,8 @@ private enum BridgeDebugLogger {
             return "hermes-hooks"
         case "openclaw":
             return "openclaw-hooks"
+        case "gemini":
+            return "gemini-hooks"
         case "qoder", "qoderwork":
             return "qoder-hooks"
         case "qoder-cli":
@@ -445,6 +447,10 @@ private enum BridgeDebugLogger {
 
         if envelope.provider == .codex {
             return "codex-hooks"
+        }
+
+        if envelope.provider == .gemini {
+            return "gemini-hooks"
         }
 
         let normalizedEvent = envelope.eventType.lowercased()
@@ -1145,6 +1151,8 @@ private enum RemoteBridgeMessageBuilder {
             return "codexApp"
         case .copilot:
             return "custom"
+        case .gemini:
+            return "gemini"
         }
     }
 

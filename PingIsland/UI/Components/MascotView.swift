@@ -126,6 +126,8 @@ enum MascotClient: String, CaseIterable, Identifiable, Sendable {
             self = .claude
         case .copilot:
             self = .copilot
+        case .gemini:
+            self = .gemini
         }
     }
 
@@ -193,6 +195,8 @@ enum MascotClient: String, CaseIterable, Identifiable, Sendable {
                 self = .copilot
             case .claude:
                 self = .claude
+            case .gemini:
+                self = .gemini
             }
         case .opencode:
             self = .opencode
@@ -208,6 +212,8 @@ enum MascotClient: String, CaseIterable, Identifiable, Sendable {
                 self = .copilot
             case .claude:
                 self = .claude
+            case .gemini:
+                self = .gemini
             }
         }
     }
