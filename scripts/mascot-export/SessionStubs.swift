@@ -4,6 +4,7 @@ enum SessionProvider {
     case codex
     case claude
     case copilot
+    case kimi
 }
 
 enum SessionClientBrand {
@@ -15,6 +16,7 @@ enum SessionClientBrand {
     case opencode
     case qoder
     case copilot
+    case kimi
     case claude
     case neutral
 }
