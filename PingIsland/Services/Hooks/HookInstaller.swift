@@ -148,6 +148,194 @@ private enum HookConfigParser {
     }
 }
 
+struct TOMLHookConfigParser {
+    struct TOMLHookEntry: Equatable {
+        let event: String
+        let command: String
+        let matcher: String?
+        let timeout: Int?
+    }
+
+    enum TOMLSegment: Equatable {
+        case text(String)
+        case hook(TOMLHookEntry)
+    }
+
+    static func parse(_ content: String) -> [TOMLSegment] {
+        var segments: [TOMLSegment] = []
+        let lines = content.components(separatedBy: .newlines)
+        var textBuffer: [String] = []
+        var currentHookFields: [String: String] = [:]
+        var isInHooksBlock = false
+
+        func flushText() {
+            if !textBuffer.isEmpty {
+                segments.append(.text(textBuffer.joined(separator: "\n")))
+                textBuffer = []
+            }
+        }
+
+        func flushHook() {
+            if let entry = makeEntry(from: currentHookFields) {
+                segments.append(.hook(entry))
+            }
+            currentHookFields = [:]
+            isInHooksBlock = false
+        }
+
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+
+            if trimmed.hasPrefix("[[hooks]]") {
+                if isInHooksBlock {
+                    flushHook()
+                }
+                flushText()
+                isInHooksBlock = true
+                currentHookFields = [:]
+                continue
+            }
+
+            if isInHooksBlock,
+               (trimmed.hasPrefix("[[") && !trimmed.hasPrefix("[[hooks]]"))
+                || (trimmed.hasPrefix("[") && !trimmed.hasPrefix("[[")) {
+                flushHook()
+                textBuffer.append(line)
+                continue
+            }
+
+            if isInHooksBlock {
+                if let (key, value) = parseKeyValue(line) {
+                    currentHookFields[key] = value
+                }
+                // Blank lines inside hooks are ignored; they don't terminate the block
+            } else {
+                textBuffer.append(line)
+            }
+        }
+
+        if isInHooksBlock {
+            flushHook()
+        }
+        flushText()
+
+        return segments
+    }
+
+    static func rebuild(segments: [TOMLSegment], newHooks: [TOMLHookEntry]) -> String {
+        var output = ""
+        var hasTrailingNewline = false
+
+        for segment in segments {
+            switch segment {
+            case .text(let text):
+                if !output.isEmpty, !hasTrailingNewline {
+                    output += "\n"
+                }
+                output += text
+                hasTrailingNewline = text.hasSuffix("\n") || text.isEmpty
+            case .hook(let entry):
+                if !islandManaged(entry) {
+                    if !output.isEmpty, !hasTrailingNewline {
+                        output += "\n"
+                    }
+                    output += renderHook(entry)
+                    hasTrailingNewline = true
+                }
+            }
+        }
+
+        for entry in newHooks {
+            if !output.isEmpty, !hasTrailingNewline {
+                output += "\n"
+            }
+            output += renderHook(entry)
+            hasTrailingNewline = true
+        }
+
+        return output
+    }
+
+    static func containsManagedHooks(_ content: String) -> Bool {
+        parse(content).contains { segment in
+            if case .hook(let entry) = segment {
+                return islandManaged(entry)
+            }
+            return false
+        }
+    }
+
+    static func islandManaged(_ entry: TOMLHookEntry) -> Bool {
+        entry.command.contains("ping-island-bridge")
+    }
+
+    static func makeEntry(from fields: [String: String]) -> TOMLHookEntry? {
+        guard let event = fields["event"] else { return nil }
+        let command = fields["command"] ?? ""
+        let matcher = fields["matcher"]
+        let timeout = fields["timeout"].flatMap(Int.init)
+        return TOMLHookEntry(event: event, command: command, matcher: matcher, timeout: timeout)
+    }
+
+    static func parseKeyValue(_ line: String) -> (key: String, value: String)? {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        guard let eqIndex = trimmed.firstIndex(of: "=") else { return nil }
+        let key = trimmed[..<eqIndex].trimmingCharacters(in: .whitespaces)
+        guard !key.isEmpty else { return nil }
+        var rawValue = trimmed[trimmed.index(after: eqIndex)...].trimmingCharacters(in: .whitespaces)
+        // Strip inline TOML comments (simple heuristic: unquoted #)
+        rawValue = stripInlineComment(rawValue)
+        let value = stripTOMLQuotes(rawValue)
+        return (key, value)
+    }
+
+    static func stripInlineComment(_ value: String) -> String {
+        var inString = false
+        var stringChar: Character? = nil
+        for (index, char) in value.enumerated() {
+            if inString {
+                if char == stringChar {
+                    inString = false
+                    stringChar = nil
+                }
+                continue
+            }
+            if char == "\"" || char == "'" {
+                inString = true
+                stringChar = char
+                continue
+            }
+            if char == "#" {
+                return value[..<value.index(value.startIndex, offsetBy: index)].trimmingCharacters(in: .whitespaces)
+            }
+        }
+        return value
+    }
+
+    static func stripTOMLQuotes(_ value: String) -> String {
+        var result = value
+        if result.hasPrefix("\""), result.hasSuffix("\"") {
+            result = String(result.dropFirst().dropLast())
+        } else if result.hasPrefix("'"), result.hasSuffix("'") {
+            result = String(result.dropFirst().dropLast())
+        }
+        return result
+    }
+
+    static func renderHook(_ entry: TOMLHookEntry) -> String {
+        var lines = ["[[hooks]]"]
+        lines.append("event = \"\(entry.event)\"")
+        lines.append("command = \"\(entry.command.replacingOccurrences(of: "\"", with: "\\\""))\"")
+        if let matcher = entry.matcher {
+            lines.append("matcher = \"\(matcher.replacingOccurrences(of: "\"", with: "\\\""))\"")
+        }
+        if let timeout = entry.timeout {
+            lines.append("timeout = \(timeout)")
+        }
+        return lines.joined(separator: "\n") + "\n"
+    }
+}
+
 struct HookInstaller {
     struct QoderCLIHookRefreshStatus: Equatable, Sendable {
         let version: String
@@ -450,6 +638,8 @@ struct HookInstaller {
         case .hookDirectory:
             return profile.configurationURLs.contains { containsManagedHookDirectory(at: $0, profile: profile) }
                 && isInternalHookEnabled(profile)
+        case .tomlHooks:
+            return profile.configurationURLs.contains { containsManagedTOMLHooks(at: $0) }
         }
     }
 
@@ -496,6 +686,10 @@ struct HookInstaller {
                 writeManagedHookDirectory(at: url, profile: profile)
             }
             setInternalHookEnabled(true, for: profile)
+        case .tomlHooks:
+            for url in installationTargets(for: profile) {
+                updateTOMLHooks(at: url, profile: profile)
+            }
         }
 
         if profile.id == "qwen-code-hooks" {
@@ -531,6 +725,10 @@ struct HookInstaller {
                 removeManagedHookDirectory(at: url, profile: profile)
             }
             setInternalHookEnabled(false, for: profile)
+        case .tomlHooks:
+            for url in profile.configurationURLs {
+                removeManagedTOMLHooks(at: url)
+            }
         }
     }
 
@@ -836,6 +1034,45 @@ struct HookInstaller {
             json.removeValue(forKey: "statusLine")
         }
         writeJSONObject(json, to: url)
+    }
+
+    private static func containsManagedTOMLHooks(at url: URL) -> Bool {
+        guard let content = try? String(contentsOf: url, encoding: .utf8) else {
+            return false
+        }
+        return TOMLHookConfigParser.containsManagedHooks(content)
+    }
+
+    private static func updateTOMLHooks(at url: URL, profile: ManagedHookClientProfile) {
+        let command = bridgeCommand(source: profile.bridgeSource, extraArguments: profile.bridgeExtraArguments)
+        let existingContent = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+        let segments = TOMLHookConfigParser.parse(existingContent)
+        let newHooks = effectiveEvents(for: profile).map { event -> TOMLHookConfigParser.TOMLHookEntry in
+            let matcher = event.templates.first.map { template -> String in
+                switch template {
+                case .plain: return ""
+                case .matcher(let value): return value
+                }
+            } ?? ""
+            let timeout = event.timeout
+            return TOMLHookConfigParser.TOMLHookEntry(
+                event: event.name,
+                command: command,
+                matcher: matcher,
+                timeout: timeout
+            )
+        }
+        let updatedContent = TOMLHookConfigParser.rebuild(segments: segments, newHooks: newHooks)
+        try? updatedContent.write(to: url, atomically: true, encoding: .utf8)
+    }
+
+    private static func removeManagedTOMLHooks(at url: URL) {
+        guard let existingContent = try? String(contentsOf: url, encoding: .utf8) else {
+            return
+        }
+        let segments = TOMLHookConfigParser.parse(existingContent)
+        let updatedContent = TOMLHookConfigParser.rebuild(segments: segments, newHooks: [])
+        try? updatedContent.write(to: url, atomically: true, encoding: .utf8)
     }
 
     private static func installBridgeLauncherIfNeeded() {
@@ -2777,6 +3014,8 @@ struct HookInstaller {
         case .hookDirectory:
             writeManagedHookDirectory(at: url, profile: profile)
             setInternalHookEnabled(true, for: profile, customConfigURL: activationConfigURL)
+        case .tomlHooks:
+            updateTOMLHooks(at: url, profile: profile)
         }
 
         let installation = CustomHookInstallation(
@@ -2812,6 +3051,8 @@ struct HookInstaller {
             case .hookDirectory:
                 removeManagedHookDirectory(at: url, profile: profile)
                 setInternalHookEnabled(false, for: profile, customConfigURL: activationConfigURL)
+            case .tomlHooks:
+                removeManagedTOMLHooks(at: url)
             }
         }
 
@@ -2835,6 +3076,8 @@ struct HookInstaller {
             let activationConfigURL = customActivationConfigurationURL(for: profile, installedURL: url)
             return containsManagedHookDirectory(at: url, profile: profile)
                 && isInternalHookEnabled(at: activationConfigURL, for: profile)
+        case .tomlHooks:
+            return containsManagedTOMLHooks(at: url)
         }
     }
 
@@ -2989,6 +3232,8 @@ struct HookInstaller {
             }
         case .pluginDirectory, .hookDirectory:
             break
+        case .tomlHooks:
+            break
         }
 
         let data = (try? JSONSerialization.data(
@@ -3052,6 +3297,8 @@ struct HookInstaller {
         switch profile.installationKind {
         case .jsonHooks, .pluginFile:
             return baseDirectory.appendingPathComponent(profile.primaryConfigurationURL.lastPathComponent)
+        case .tomlHooks:
+            return baseDirectory.appendingPathComponent(profile.primaryConfigurationURL.lastPathComponent)
         case .pluginDirectory:
             if baseDirectory.lastPathComponent == ".hermes" {
                 return baseDirectory
@@ -3083,7 +3330,7 @@ struct HookInstaller {
                 return baseDirectory.deletingLastPathComponent().appendingPathComponent("opencode.json")
             }
             return baseDirectory.appendingPathComponent("opencode.json")
-        case .jsonHooks, .pluginDirectory:
+        case .jsonHooks, .pluginDirectory, .tomlHooks:
             return nil
         case .hookDirectory:
             break
@@ -3103,7 +3350,7 @@ struct HookInstaller {
         switch profile.installationKind {
         case .pluginFile:
             return installedURL.deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("opencode.json")
-        case .jsonHooks, .pluginDirectory:
+        case .jsonHooks, .pluginDirectory, .tomlHooks:
             return nil
         case .hookDirectory:
             break

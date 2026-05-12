@@ -395,6 +395,8 @@ struct SessionListView: View {
             return Color(red: 0.34, green: 0.72, blue: 0.96)
         case .copilot:
             return Color.white.opacity(0.5)
+        case .kimi:
+            return Color(red: 0.96, green: 0.30, blue: 0.42)
         }
     }
 }

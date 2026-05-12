@@ -127,7 +127,10 @@ enum SessionCompletionStateEvaluator {
     static func allowsEndedNotificationAfterWaitingForInput(_ session: SessionState) -> Bool {
         guard session.phase == .ended else { return false }
         guard session.intervention == nil else { return false }
+        // Qoder CLI and Kimi both use "Stop" for turn-end (goes to .waitingForInput)
+        // and "SessionEnd" for actual session closure.
         return session.clientInfo.normalizedForClaudeRouting().profileID == "qoder-cli"
+            || session.clientInfo.isKimiClient
     }
 
     /// Treat tool-only or commentary-only updates as in-progress. A completion notification

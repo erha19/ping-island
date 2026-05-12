@@ -168,6 +168,19 @@ public enum HookPayloadMapper {
                 {"hookSpecificOutput":{"hookEventName":"\(eventType)","decision":{"behavior":"allow","updatedInput":\(payloadJson)}}}
                 """
             }
+        case .kimi:
+            // See: https://www.kimi.com/code/docs/en/kimi-code-cli/customization/hooks.html
+            switch decision {
+            case .approve, .approveForSession:
+                return "{}"
+            case .deny, .cancel:
+                return #"""
+                {"hookSpecificOutput":{"permissionDecision":"deny","permissionDecisionReason":"Denied from Island"}}
+                """#
+            case .answer:
+                // Kimi does not have a documented answer/updatedInput format for hooks.
+                return "{}"
+            }
         case .codex:
             switch decision {
             case .approve:
@@ -385,6 +398,12 @@ public enum HookPayloadMapper {
             return SessionStatus(kind: .active)
         }
         if lowered.contains("stop") || lowered.contains("end") {
+            // Kimi's "Stop" means "agent turn ended" (finished responding), not "session closed".
+            // Map it to .waitingForInput so completion notifications and sounds fire correctly.
+            // Only "SessionEnd" actually terminates a Kimi session.
+            if clientKind == "kimi", lowered == "stop" {
+                return SessionStatus(kind: .waitingForInput)
+            }
             return SessionStatus(kind: .completed)
         }
         if lowered.contains("compact") {
@@ -1666,6 +1685,8 @@ private extension AgentProvider {
             return "Codex"
         case .copilot:
             return "Copilot"
+        case .kimi:
+            return "Kimi"
         }
     }
 }

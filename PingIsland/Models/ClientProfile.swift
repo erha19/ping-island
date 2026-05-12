@@ -17,6 +17,7 @@ enum SessionClientBrand: String, Codable, Equatable, Sendable {
     case qoder
     case copilot
     case neutral
+    case kimi
 }
 
 enum SessionAssistantLabelMode: String, Sendable {
@@ -34,6 +35,7 @@ enum ManagedHookInstallationKind: Sendable, Equatable {
     case pluginFile
     case pluginDirectory
     case hookDirectory
+    case tomlHooks
 }
 
 struct HookInstallEventDescriptor: Sendable {
@@ -259,6 +261,8 @@ struct ManagedHookClientProfile: Identifiable, Sendable {
             return "这会重新生成 %@ 的 Island 插件目录，并覆盖旧的 Island 托管版本。"
         case .hookDirectory:
             return "这会重新生成 %@ 的 Island hook 目录，并刷新 OpenClaw 的启用状态。"
+        case .tomlHooks:
+            return "这会重新写入 %@ 的 Island hooks TOML 配置，并保留其他非 Island 设置。"
         }
     }
 
@@ -911,6 +915,36 @@ enum ClientProfileRegistry {
             brand: .opencode,
             events: []
         ),
+        ManagedHookClientProfile(
+            id: "kimi-hooks",
+            title: "Kimi CLI",
+            subtitle: "管理 ~/.kimi/config.toml，按 Kimi CLI 官方 hooks 协议接入 Island",
+            installationKind: .tomlHooks,
+            alwaysVisibleInSettings: true,
+            logoAssetName: "KimiLogo",
+            prefersBundledLogoOverAppIcon: true,
+            iconSymbolName: "moon.stars.fill",
+            configurationRelativePath: ".kimi/config.toml",
+            bridgeSource: "kimi",
+            bridgeExtraArguments: [
+                "--client-kind", "kimi",
+                "--client-name", "Kimi CLI",
+                "--client-origin", "cli",
+                "--client-originator", "Kimi CLI",
+                "--thread-source", "kimi-hooks"
+            ],
+            defaultEnabled: false,
+            brand: .kimi,
+            events: [
+                HookInstallEventDescriptor(name: "UserPromptSubmit", templates: [.plain]),
+                HookInstallEventDescriptor(name: "PreToolUse", templates: [.matcher("*")]),
+                HookInstallEventDescriptor(name: "PostToolUse", templates: [.matcher("*")]),
+                HookInstallEventDescriptor(name: "Notification", templates: [.matcher("*")]),
+                HookInstallEventDescriptor(name: "Stop", templates: [.plain]),
+                HookInstallEventDescriptor(name: "SessionStart", templates: [.plain]),
+                HookInstallEventDescriptor(name: "SessionEnd", templates: [.plain]),
+            ]
+        ),
     ]
 
     nonisolated static let runtimeProfiles: [SessionClientProfile] = [
@@ -1140,6 +1174,21 @@ enum ClientProfileRegistry {
             bundleIdentifiers: []
         ),
         SessionClientProfile(
+            id: "kimi",
+            provider: .kimi,
+            family: .claudeHooks,
+            kind: .custom,
+            displayName: "Kimi CLI",
+            assistantLabelMode: .badgeLabel,
+            brand: .kimi,
+            defaultBundleIdentifier: nil,
+            defaultOrigin: "cli",
+            recognizedKinds: ["kimi", "kimi-cli", "kimi_cli", "kimi cli"],
+            exactAliases: ["kimi", "kimi-cli", "kimi cli"],
+            keywordAliases: ["kimi", "kimi cli"],
+            bundleIdentifiers: []
+        ),
+        SessionClientProfile(
             id: "codex-app",
             provider: .codex,
             family: .codexHooks,
@@ -1361,6 +1410,8 @@ enum ClientProfileRegistry {
             return runtimeProfile(id: kind == .codexCLI ? "codex-cli" : "codex-app")
         case .copilot:
             return runtimeProfile(id: "copilot-cli")
+        case .kimi:
+            return runtimeProfile(id: "kimi")
         }
     }
 

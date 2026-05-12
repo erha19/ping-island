@@ -229,6 +229,15 @@ actor SessionStore {
                 sessionFilePath: handle.sessionFilePath,
                 processName: "codex"
             )
+        case .kimi:
+            runtimeClientInfo = SessionClientInfo(
+                kind: .custom,
+                profileID: "kimi",
+                name: "Kimi Native",
+                origin: "native-runtime",
+                sessionFilePath: handle.sessionFilePath,
+                processName: "kimi"
+            )
         case .copilot:
             runtimeClientInfo = SessionClientInfo.default(for: .copilot)
         }
@@ -368,6 +377,12 @@ actor SessionStore {
         // directly from hook events so users can see conversation content.
         if session.clientInfo.isHermesClient {
             appendHermesHookChatItem(event: event, session: &session)
+        }
+
+        // Kimi hooks don't carry message content, but Stop means the agent finished
+        // its turn. Set lastMessageRole so completion notifications/sounds fire.
+        if session.clientInfo.isKimiClient {
+            processKimiHookCompletion(event: event, session: &session)
         }
 
         let shouldPreserveEndedStopForAnsweredQuestion =
@@ -714,6 +729,22 @@ actor SessionStore {
         }
 
         return true
+    }
+
+    /// Kimi Stop means the agent turn ended (assistant finished responding).
+    /// Since Kimi hooks don't carry message text, we mark lastMessageRole as
+    /// "assistant" implicitly so completion notifications and sounds work.
+    private func processKimiHookCompletion(event: HookEvent, session: inout SessionState) {
+        guard event.event == "Stop" else { return }
+        guard session.lastMessageRole != "assistant" else { return }
+        session.conversationInfo = ConversationInfo(
+            summary: session.conversationInfo.summary,
+            lastMessage: session.conversationInfo.lastMessage,
+            lastMessageRole: "assistant",
+            lastToolName: session.conversationInfo.lastToolName,
+            firstUserMessage: session.conversationInfo.firstUserMessage,
+            lastUserMessageDate: session.conversationInfo.lastUserMessageDate
+        )
     }
 
     /// Build chat history items from Hermes hook events so the conversation is
@@ -3803,6 +3834,8 @@ actor SessionStore {
         case .codex:
             return clientInfo.normalizedForCodexRouting(sessionId: sessionId)
         case .copilot:
+            return clientInfo
+        case .kimi:
             return clientInfo
         }
     }

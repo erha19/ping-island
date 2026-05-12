@@ -2522,7 +2522,7 @@ private struct CustomHookInstallSheet: View {
         }
 
         switch profile.installationKind {
-        case .jsonHooks:
+        case .jsonHooks, .tomlHooks:
             return "例如 /path/to/.claude"
         case .pluginFile:
             return "例如 /path/to/plugins"
@@ -2542,7 +2542,7 @@ private struct CustomHookInstallSheet: View {
             return AppLocalization.string("OpenClaw 可选择 ~/.openclaw 根目录，或已配置到 extraDirs 的 hooks 目录。")
         case .pluginDirectory:
             return AppLocalization.string("Hermes 可选择 ~/.hermes 根目录，或 plugins 目录。")
-        case .jsonHooks, .pluginFile:
+        case .jsonHooks, .pluginFile, .tomlHooks:
             return nil
         }
     }
@@ -2555,7 +2555,7 @@ private struct CustomHookInstallSheet: View {
         let baseURL = URL(fileURLWithPath: customPath)
         let targetURL: URL
         switch profile.installationKind {
-        case .jsonHooks, .pluginFile:
+        case .jsonHooks, .pluginFile, .tomlHooks:
             targetURL = baseURL.appendingPathComponent(resolvedFileName)
         case .pluginDirectory:
             if baseURL.lastPathComponent == ".hermes" {

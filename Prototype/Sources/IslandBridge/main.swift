@@ -370,6 +370,7 @@ private enum BridgeDebugLogger {
         "CLAUDE_SESSION_ID",
         "CODEX_THREAD_ID",
         "CODEBUDDY_SESSION_ID",
+        "KIMI_SESSION_ID",
     ]
 
     static func logIfNeeded(
@@ -439,6 +440,8 @@ private enum BridgeDebugLogger {
             return "qoder-hooks"
         case "qoder-cli":
             return "qoder-cli-hooks"
+        case "kimi":
+            return "kimi-hooks"
         default:
             break
         }
@@ -1145,6 +1148,8 @@ private enum RemoteBridgeMessageBuilder {
             return "codexApp"
         case .copilot:
             return "custom"
+        case .kimi:
+            return "kimi"
         }
     }
 
