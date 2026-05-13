@@ -760,12 +760,12 @@ enum ClientProfileRegistry {
         ManagedHookClientProfile(
             id: "cursor-hooks",
             title: "Cursor",
-            subtitle: "管理 ~/Library/Application Support/Cursor/User/settings.json，按 Claude Hooks 协议接入 Island",
+            subtitle: "管理 ~/.cursor/hooks.json，按 Claude Hooks 协议接入 Island",
             logoAssetName: "CursorLogo",
             prefersBundledLogoOverAppIcon: true,
             localAppBundleIdentifiers: ["com.todesktop.230313mzl4w4u92"],
             iconSymbolName: "cursorarrow.rays",
-            configurationRelativePath: "Library/Application Support/Cursor/User/settings.json",
+            configurationRelativePath: ".cursor/hooks.json",
             bridgeSource: "claude",
             bridgeExtraArguments: [
                 "--client-kind", "cursor",
