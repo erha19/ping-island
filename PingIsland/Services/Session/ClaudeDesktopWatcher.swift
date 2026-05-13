@@ -12,12 +12,16 @@ import os.log
 
 private let logger = Logger(subsystem: "com.wudanwu.pingisland", category: "ClaudeDesktop")
 
+/// Sessions idle for longer than this threshold are skipped on startup.
+private let activeWindowSeconds: TimeInterval = 4 * 60 * 60  // 4 hours
+
 actor ClaudeDesktopWatcher {
     static let shared = ClaudeDesktopWatcher()
 
     private var discoveryTask: Task<Void, Never>?
     private var sessionTasks: [String: Task<Void, Never>] = [:]
     private var knownLocalSessionIds: Set<String> = []
+    private var sessionFileSizes: [String: UInt64] = [:]  // localSessionId → last known file size
 
     private init() {}
 
@@ -26,8 +30,8 @@ actor ClaudeDesktopWatcher {
     func start() {
         guard discoveryTask == nil else { return }
         logger.info("Starting Claude Desktop watcher")
-        discoveryTask = Task { [weak self] in
-            await self?.runDiscoveryLoop()
+        discoveryTask = Task {
+            await self.runDiscoveryLoop()
         }
     }
 
@@ -37,6 +41,7 @@ actor ClaudeDesktopWatcher {
         for task in sessionTasks.values { task.cancel() }
         sessionTasks.removeAll()
         knownLocalSessionIds.removeAll()
+        sessionFileSizes.removeAll()
         logger.info("Stopped Claude Desktop watcher")
     }
 
@@ -86,7 +91,7 @@ actor ClaudeDesktopWatcher {
         for entry in entries {
             let name = entry.lastPathComponent
             guard name.hasPrefix("local_"), name.hasSuffix(".json") else { continue }
-            let localSessionId = name.dropLast(5).description // strip .json
+            let localSessionId = String(name.dropLast(5)) // strip .json
 
             guard !knownLocalSessionIds.contains(localSessionId) else { continue }
 
@@ -100,12 +105,25 @@ actor ClaudeDesktopWatcher {
         guard let metadata = Self.readMetadata(at: metadataURL) else { return }
         guard !metadata.isArchived else { return }
 
+        // Skip sessions that have been idle longer than the active window.
+        // This prevents loading dozens of historical sessions on startup.
+        let idleSeconds = Date().timeIntervalSince(metadata.lastActivityAt)
+        guard idleSeconds < activeWindowSeconds else {
+            logger.debug(
+                "Skipping stale Claude Desktop session \(metadata.cliSessionId.prefix(8), privacy: .public) idle=\(Int(idleSeconds))s"
+            )
+            knownLocalSessionIds.insert(localSessionId)
+            return
+        }
+
         let sessionDir = metadataURL.deletingPathExtension()
         let auditPath = sessionDir.appendingPathComponent("audit.jsonl").path
         guard FileManager.default.fileExists(atPath: auditPath) else { return }
 
         knownLocalSessionIds.insert(localSessionId)
-        logger.info("Discovered Claude Desktop session \(metadata.cliSessionId.prefix(8), privacy: .public)")
+        logger.info(
+            "Registering Claude Desktop session \(metadata.cliSessionId.prefix(8), privacy: .public) idle=\(Int(idleSeconds))s"
+        )
 
         let info = ClaudeDesktopSessionInfo(
             sessionId: metadata.cliSessionId,
@@ -115,7 +133,18 @@ actor ClaudeDesktopWatcher {
             auditFilePath: auditPath
         )
         await SessionStore.shared.process(.desktopSessionDiscovered(info))
+
+        // Advance ConversationParser's internal offset to end-of-file without emitting
+        // events, so we only pick up content written after Ping Island started watching.
         await ConversationParser.shared.resetState(for: metadata.cliSessionId)
+        _ = await ConversationParser.shared.parseIncremental(
+            sessionId: metadata.cliSessionId,
+            cwd: metadata.cwd,
+            explicitFilePath: auditPath
+        )
+
+        // Record current file size so the polling loop can skip unchanged files.
+        sessionFileSizes[localSessionId] = Self.fileSize(at: auditPath)
 
         let sessionId = metadata.cliSessionId
         let cwd = metadata.cwd
@@ -141,30 +170,37 @@ actor ClaudeDesktopWatcher {
         localSessionId: String
     ) async {
         while !Task.isCancelled {
-            let result = await ConversationParser.shared.parseIncremental(
-                sessionId: sessionId,
-                cwd: cwd,
-                explicitFilePath: auditFilePath
-            )
+            let currentSize = Self.fileSize(at: auditFilePath)
+            let lastSize = sessionFileSizes[localSessionId] ?? 0
 
-            if result.clearDetected {
-                await SessionStore.shared.process(.clearDetected(sessionId: sessionId))
-            }
+            if currentSize > lastSize {
+                sessionFileSizes[localSessionId] = currentSize
 
-            if !result.newMessages.isEmpty || result.clearDetected {
-                let payload = FileUpdatePayload(
+                let result = await ConversationParser.shared.parseIncremental(
                     sessionId: sessionId,
                     cwd: cwd,
-                    messages: result.newMessages,
-                    isIncremental: !result.clearDetected,
-                    completedToolIds: result.completedToolIds,
-                    toolResults: result.toolResults,
-                    structuredResults: result.structuredResults
+                    explicitFilePath: auditFilePath
                 )
-                await SessionStore.shared.process(.fileUpdated(payload))
+
+                if result.clearDetected {
+                    await SessionStore.shared.process(.clearDetected(sessionId: sessionId))
+                }
+
+                if !result.newMessages.isEmpty || result.clearDetected {
+                    let payload = FileUpdatePayload(
+                        sessionId: sessionId,
+                        cwd: cwd,
+                        messages: result.newMessages,
+                        isIncremental: !result.clearDetected,
+                        completedToolIds: result.completedToolIds,
+                        toolResults: result.toolResults,
+                        structuredResults: result.structuredResults
+                    )
+                    await SessionStore.shared.process(.fileUpdated(payload))
+                }
             }
 
-            // Check if session was archived so we can end it and stop polling
+            // End the session when Claude Desktop archives it
             if let metadata = Self.readMetadata(at: metadataURL), metadata.isArchived {
                 logger.info("Claude Desktop session archived \(sessionId.prefix(8), privacy: .public)")
                 await SessionStore.shared.process(.sessionEnded(sessionId: sessionId))
@@ -180,6 +216,11 @@ actor ClaudeDesktopWatcher {
     }
 
     // MARK: - Helpers
+
+    nonisolated static func fileSize(at path: String) -> UInt64 {
+        let attrs = try? FileManager.default.attributesOfItem(atPath: path)
+        return (attrs?[.size] as? UInt64) ?? 0
+    }
 
     nonisolated static func sessionsRootURL() -> URL {
         FileManager.default.homeDirectoryForCurrentUser
@@ -200,6 +241,8 @@ actor ClaudeDesktopWatcher {
         let isArchived = json["isArchived"] as? Bool ?? false
         let createdAtMs = json["createdAt"] as? TimeInterval ?? 0
         let createdAt = Date(timeIntervalSince1970: createdAtMs / 1000)
+        let lastActivityAtMs = json["lastActivityAt"] as? TimeInterval ?? createdAtMs
+        let lastActivityAt = Date(timeIntervalSince1970: lastActivityAtMs / 1000)
 
         return ClaudeDesktopSessionMetadata(
             localSessionId: localSessionId,
@@ -207,7 +250,8 @@ actor ClaudeDesktopWatcher {
             cwd: cwd,
             title: title,
             isArchived: isArchived,
-            createdAt: createdAt
+            createdAt: createdAt,
+            lastActivityAt: lastActivityAt
         )
     }
 }
@@ -221,4 +265,5 @@ struct ClaudeDesktopSessionMetadata: Sendable {
     let title: String?
     let isArchived: Bool
     let createdAt: Date
+    let lastActivityAt: Date
 }
