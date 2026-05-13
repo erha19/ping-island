@@ -28,6 +28,10 @@ enum SessionAssistantLabelMode: String, Sendable {
 enum HookInstallEntryTemplate: Sendable {
     case plain
     case matcher(String)
+    /// Writes a flat {"command": "...", "type": "command"} entry without the
+    /// Claude Code-style {"hooks": [...]} wrapper. Required for Cursor which
+    /// does not support the nested hooks format.
+    case direct
 }
 
 enum ManagedHookInstallationKind: Sendable, Equatable {
@@ -775,14 +779,14 @@ enum ClientProfileRegistry {
             defaultEnabled: false,
             brand: .claude,
             events: [
-                HookInstallEventDescriptor(name: "beforeSubmitPrompt", templates: [.plain]),
-                HookInstallEventDescriptor(name: "preToolUse", templates: [.matcher("*")]),
-                HookInstallEventDescriptor(name: "postToolUse", templates: [.matcher("*")]),
-                HookInstallEventDescriptor(name: "stop", templates: [.plain]),
-                HookInstallEventDescriptor(name: "subagentStop", templates: [.plain]),
-                HookInstallEventDescriptor(name: "sessionStart", templates: [.plain]),
-                HookInstallEventDescriptor(name: "sessionEnd", templates: [.plain]),
-                HookInstallEventDescriptor(name: "preCompact", templates: [.matcher("auto"), .matcher("manual")]),
+                HookInstallEventDescriptor(name: "beforeSubmitPrompt", templates: [.direct]),
+                HookInstallEventDescriptor(name: "preToolUse", templates: [.direct]),
+                HookInstallEventDescriptor(name: "postToolUse", templates: [.direct]),
+                HookInstallEventDescriptor(name: "stop", templates: [.direct]),
+                HookInstallEventDescriptor(name: "subagentStop", templates: [.direct]),
+                HookInstallEventDescriptor(name: "sessionStart", templates: [.direct]),
+                HookInstallEventDescriptor(name: "sessionEnd", templates: [.direct]),
+                HookInstallEventDescriptor(name: "preCompact", templates: [.direct]),
             ]
         ),
         ManagedHookClientProfile(
@@ -1200,6 +1204,21 @@ enum ClientProfileRegistry {
             exactAliases: ["codex-app", "codex app", "codex desktop", "desktop"],
             keywordAliases: ["codex app", "codex desktop"],
             bundleIdentifiers: ["com.openai.codex"]
+        ),
+        SessionClientProfile(
+            id: "claude-desktop",
+            provider: .claude,
+            family: .claudeHooks,
+            kind: .custom,
+            displayName: "Claude Desktop",
+            assistantLabelMode: .badgeLabel,
+            brand: .claude,
+            defaultBundleIdentifier: "com.anthropic.claudefordesktop",
+            defaultOrigin: "desktop",
+            recognizedKinds: ["claude-desktop", "claude_desktop", "claude desktop"],
+            exactAliases: ["claude-desktop", "claude desktop"],
+            keywordAliases: ["claude desktop"],
+            bundleIdentifiers: ["com.anthropic.claudefordesktop"]
         ),
         SessionClientProfile(
             id: "codex-cli",

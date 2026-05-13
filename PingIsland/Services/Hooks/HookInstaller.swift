@@ -1050,7 +1050,7 @@ struct HookInstaller {
         let newHooks = effectiveEvents(for: profile).map { event -> TOMLHookConfigParser.TOMLHookEntry in
             let matcher = event.templates.first.map { template -> String in
                 switch template {
-                case .plain: return ""
+                case .plain, .direct: return ""
                 case .matcher(let value): return value
                 }
             } ?? ""
@@ -1597,6 +1597,8 @@ struct HookInstaller {
                     "matcher": matcher,
                     "hooks": [hookCommand]
                 ]
+            case .direct:
+                return hookCommand
             }
         }
     }
