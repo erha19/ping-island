@@ -3971,6 +3971,13 @@ actor SessionStore {
 
     private func shouldIgnoreCodexHookEvent(_ event: HookEvent, existingSession: SessionState?) -> Bool {
         guard event.provider == .codex else { return false }
+
+        // Background Codex agents (ambient suggestions, state queries, safety filters)
+        // run with cwd="/". They are internal system processes, not user coding sessions.
+        if event.cwd == "/" {
+            return true
+        }
+
         guard event.clientInfo.sessionFilePath?.isEmpty != false else { return false }
         guard !event.expectsResponse else { return false }
         guard case .none = event.intervention else { return false }
