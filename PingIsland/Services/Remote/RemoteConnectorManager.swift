@@ -594,6 +594,23 @@ final class RemoteConnectorManager: ObservableObject {
             throw RemoteConnectorError.missingClaudeHookProfile
         }
 
+        // Check if bridge binary already exists and is executable on remote
+        let bridgeBinaryPath = "\(endpoint.remoteInstallRoot)/bin/PingIslandBridge"
+        let launcherPath = "\(endpoint.remoteInstallRoot)/bin/ping-island-bridge"
+        let bridgeExists = (try? await RemoteSSHCommandRunner.remoteFileExists(
+            target: endpoint.sshTarget,
+            port: endpoint.sshPort,
+            remotePath: bridgeBinaryPath,
+            password: password
+        )) ?? false
+        let launcherExists = (try? await RemoteSSHCommandRunner.remoteFileExists(
+            target: endpoint.sshTarget,
+            port: endpoint.sshPort,
+            remotePath: launcherPath,
+            password: password
+        )) ?? false
+        let bridgeAlreadyInstalled = bridgeExists && launcherExists
+
         _ = try await RemoteSSHCommandRunner.runSSH(
             target: endpoint.sshTarget,
             port: endpoint.sshPort,
@@ -613,36 +630,58 @@ final class RemoteConnectorManager: ObservableObject {
             "Remote bootstrap prepared directories and stopped stale agent endpoint=\(endpoint.id.uuidString, privacy: .public) target=\(endpoint.sshTarget, privacy: .public)"
         )
 
-        try await RemoteSSHCommandRunner.copyFile(
-            localURL: bridgeBinaryURL,
-            remoteTarget: endpoint.sshTarget,
-            port: endpoint.sshPort,
-            remotePath: stagedBridgePath,
-            password: password
-        )
-        logger.debug(
-            "Remote bootstrap copied staged bridge endpoint=\(endpoint.id.uuidString, privacy: .public) remotePath=\(stagedBridgePath, privacy: .public)"
-        )
+        if bridgeAlreadyInstalled {
+            logger.notice(
+                "Remote bootstrap skipped SCP — bridge binary already exists at \(bridgeBinaryPath, privacy: .public)"
+            )
+        } else {
+            do {
+                try await RemoteSSHCommandRunner.copyFile(
+                    localURL: bridgeBinaryURL,
+                    remoteTarget: endpoint.sshTarget,
+                    port: endpoint.sshPort,
+                    remotePath: stagedBridgePath,
+                    password: password
+                )
+            } catch {
+                let arch = RemoteConnectorManager.normalizedLinuxBridgeArchitecture(probe.architecture) ?? probe.architecture
+                let manualHint = """
+                SCP 传输失败，请在远程主机上手动安装 PingIslandBridge：
+                
+                  mkdir -p \(endpoint.remoteInstallRoot)/bin
+                  curl -L -o /tmp/bridge.zip https://github.com/erha19/ping-island/releases/latest/download/PingIslandBridge-linux-musl-\(arch).zip
+                  unzip -o /tmp/bridge.zip -d \(endpoint.remoteInstallRoot)/bin/
+                  chmod 755 \(endpoint.remoteInstallRoot)/bin/PingIslandBridge
+                
+                安装完成后重新连接即可。
+                """
+                logger.error("Remote bootstrap SCP failed: \(error.localizedDescription, privacy: .public)")
+                throw RemoteConnectorError.sshFailure(manualHint)
+            }
+            logger.debug(
+                "Remote bootstrap copied staged bridge endpoint=\(endpoint.id.uuidString, privacy: .public) remotePath=\(stagedBridgePath, privacy: .public)"
+            )
 
-        try await RemoteSSHCommandRunner.writeRemoteFile(
-            target: endpoint.sshTarget,
-            port: endpoint.sshPort,
-            remotePath: "\(endpoint.remoteInstallRoot)/bin/ping-island-bridge",
-            contents: Self.remoteBridgeLauncherScript().data(using: .utf8) ?? Data(),
-            password: password
-        )
-        _ = try await RemoteSSHCommandRunner.runSSH(
-            target: endpoint.sshTarget,
-            port: endpoint.sshPort,
-            password: password,
-            remoteCommand: Self.remoteBootstrapInstallCommand(
-                installRoot: endpoint.remoteInstallRoot,
-                stagedBridgePath: stagedBridgePath
-            ),
-            acceptNewHostKey: true
-        )
+            try await RemoteSSHCommandRunner.writeRemoteFileViaSSH(
+                target: endpoint.sshTarget,
+                port: endpoint.sshPort,
+                remotePath: launcherPath,
+                contents: Self.remoteBridgeLauncherScript().data(using: .utf8) ?? Data(),
+                password: password
+            )
+            _ = try await RemoteSSHCommandRunner.runSSH(
+                target: endpoint.sshTarget,
+                port: endpoint.sshPort,
+                password: password,
+                remoteCommand: Self.remoteBootstrapInstallCommand(
+                    installRoot: endpoint.remoteInstallRoot,
+                    stagedBridgePath: stagedBridgePath
+                ),
+                acceptNewHostKey: true
+            )
+        }
         logger.debug(
-            "Remote bootstrap wrote launcher endpoint=\(endpoint.id.uuidString, privacy: .public)"
+            "Remote bootstrap binary ready endpoint=\(endpoint.id.uuidString, privacy: .public)"
         )
 
         for profile in remoteHookProfiles {
@@ -674,7 +713,7 @@ final class RemoteConnectorManager: ObservableObject {
                 logger.debug(
                     "Remote bootstrap preparing hook config endpoint=\(endpoint.id.uuidString, privacy: .public) profile=\(profile.id, privacy: .public) remotePath=\(remoteConfigPath, privacy: .public) hasExistingConfig=\(existingConfig?.isEmpty == false, privacy: .public) updatedConfigBytes=\(updatedData.count, privacy: .public)"
                 )
-                try await RemoteSSHCommandRunner.writeRemoteFile(
+                try await RemoteSSHCommandRunner.writeRemoteFileViaSSH(
                     target: endpoint.sshTarget,
                     port: endpoint.sshPort,
                     remotePath: remoteConfigPath,
@@ -701,7 +740,7 @@ final class RemoteConnectorManager: ObservableObject {
                     "Remote bootstrap preparing hook directory endpoint=\(endpoint.id.uuidString, privacy: .public) profile=\(profile.id, privacy: .public) remotePath=\(remoteDirectoryPath, privacy: .public) fileCount=\(remoteFiles.count, privacy: .public)"
                 )
                 for (name, content) in remoteFiles {
-                    try await RemoteSSHCommandRunner.writeRemoteFile(
+                    try await RemoteSSHCommandRunner.writeRemoteFileViaSSH(
                         target: endpoint.sshTarget,
                         port: endpoint.sshPort,
                         remotePath: "\(remoteDirectoryPath)/\(name)",
@@ -727,7 +766,7 @@ final class RemoteConnectorManager: ObservableObject {
                         entryName: entryName,
                         installing: true
                     )
-                    try await RemoteSSHCommandRunner.writeRemoteFile(
+                    try await RemoteSSHCommandRunner.writeRemoteFileViaSSH(
                         target: endpoint.sshTarget,
                         port: endpoint.sshPort,
                         remotePath: remoteActivationPath,
@@ -745,7 +784,7 @@ final class RemoteConnectorManager: ObservableObject {
                     "Remote bootstrap preparing plugin directory endpoint=\(endpoint.id.uuidString, privacy: .public) profile=\(profile.id, privacy: .public) remotePath=\(remoteDirectoryPath, privacy: .public) fileCount=\(remoteFiles.count, privacy: .public)"
                 )
                 for (name, content) in remoteFiles {
-                    try await RemoteSSHCommandRunner.writeRemoteFile(
+                    try await RemoteSSHCommandRunner.writeRemoteFileViaSSH(
                         target: endpoint.sshTarget,
                         port: endpoint.sshPort,
                         remotePath: "\(remoteDirectoryPath)/\(name)",
@@ -781,7 +820,7 @@ final class RemoteConnectorManager: ObservableObject {
                     )
                 }
                 let updatedContent = TOMLHookConfigParser.rebuild(segments: segments, newHooks: newHooks)
-                try await RemoteSSHCommandRunner.writeRemoteFile(
+                try await RemoteSSHCommandRunner.writeRemoteFileViaSSH(
                     target: endpoint.sshTarget,
                     port: endpoint.sshPort,
                     remotePath: remoteConfigPath,
@@ -1910,6 +1949,25 @@ private enum RemoteSSHCommandRunner {
         defer { try? FileManager.default.removeItem(at: tempURL) }
 
         try await copyFile(localURL: tempURL, remoteTarget: target, port: port, remotePath: remotePath, password: password)
+    }
+
+    /// Write a small file to the remote host via SSH (base64 pipe), bypassing SCP.
+    /// Suitable for config files and scripts, not for large binaries.
+    static func writeRemoteFileViaSSH(target: String, port: Int, remotePath: String, contents: Data, password: String?) async throws {
+        let b64 = contents.base64EncodedString()
+        let dirPath = (remotePath as NSString).deletingLastPathComponent
+        let command = "mkdir -p \(shellQuote(dirPath)) && echo \(shellQuote(b64)) | base64 -d > \(shellQuote(remotePath))"
+        let result = try await runSSH(
+            target: target,
+            port: port,
+            password: password,
+            remoteCommand: command,
+            acceptNewHostKey: true
+        )
+        guard result.exitCode == 0 else {
+            let detail = result.stderr.isEmpty ? result.stdout : result.stderr
+            throw RemoteConnectorError.sshFailure("写入远程文件失败 \(remotePath): \(detail)")
+        }
     }
 
     static func copyFile(localURL: URL, remoteTarget: String, port: Int, remotePath: String, password: String?) async throws {
