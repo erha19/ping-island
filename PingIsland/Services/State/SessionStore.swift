@@ -375,6 +375,7 @@ actor SessionStore {
         session.clientInfo = session.clientInfo.merged(with: event.clientInfo)
         session.clientInfo = normalizedClientInfo(session.clientInfo, provider: event.provider, sessionId: sessionId)
         session.ingress = event.ingress
+        applyHookWorkspace(event.cwd, to: &session)
         session.pid = event.pid
         if let pid = event.pid {
             session.isInTmux = ProcessTreeBuilder.shared.isInTmux(pid: pid, tree: tree)
@@ -412,6 +413,7 @@ actor SessionStore {
             // Re-apply enrichment
             session.clientInfo = session.clientInfo.merged(with: event.clientInfo)
             session.clientInfo = normalizedClientInfo(session.clientInfo, provider: event.provider, sessionId: sessionId)
+            applyHookWorkspace(event.cwd, to: &session)
         }
 
         let previousLastActivity = session.lastActivity
@@ -724,7 +726,9 @@ actor SessionStore {
     private func createSession(from event: HookEvent) -> SessionState {
         let restoredAssociation = persistedAssociation(for: event.provider, sessionId: event.sessionId)
         let resolvedCwd = event.cwd.isEmpty ? (restoredAssociation?.cwd ?? "") : event.cwd
-        let projectName = restoredAssociation?.projectName
+        let restoredCwdMatches = Self.normalizedPath(restoredAssociation?.cwd ?? "")
+            == Self.normalizedPath(resolvedCwd)
+        let projectName = (restoredCwdMatches ? restoredAssociation?.projectName : nil)
             ?? Self.projectName(for: resolvedCwd, fallback: event.provider.displayName)
         let restoredClientInfo = restoredAssociation?.clientInfo ?? SessionClientInfo.default(for: event.provider)
         let resolvedClientInfo = normalizedClientInfo(
@@ -740,12 +744,27 @@ actor SessionStore {
             provider: event.provider,
             clientInfo: resolvedClientInfo,
             ingress: event.ingress,
-            sessionName: restoredAssociation?.sessionName,
+            sessionName: restoredCwdMatches ? restoredAssociation?.sessionName : nil,
             pid: event.pid,
             tty: event.tty?.replacingOccurrences(of: "/dev/", with: ""),
             isInTmux: false,  // Will be updated
             phase: .idle
         )
+    }
+
+    private nonisolated func applyHookWorkspace(_ incomingCwd: String, to session: inout SessionState) {
+        guard Self.shouldAdoptHookWorkspace(current: session.cwd, incoming: incomingCwd) else {
+            return
+        }
+
+        let previousProjectName = session.projectName
+        let previousCwd = session.cwd
+        session.cwd = incomingCwd
+        session.projectName = Self.projectName(for: incomingCwd, fallback: session.provider.displayName)
+        if session.sessionName == previousProjectName
+            || session.sessionName == Self.projectName(for: previousCwd, fallback: previousProjectName) {
+            session.sessionName = nil
+        }
     }
 
     private func processToolTracking(event: HookEvent, session: inout SessionState) {
@@ -3229,6 +3248,57 @@ actor SessionStore {
     private nonisolated static func projectName(for cwd: String, fallback: String) -> String {
         let name = URL(fileURLWithPath: cwd).lastPathComponent
         return name.isEmpty ? fallback : name
+    }
+
+    private nonisolated static func shouldAdoptHookWorkspace(current: String, incoming: String) -> Bool {
+        let normalizedIncoming = normalizedPath(incoming)
+        guard !normalizedIncoming.isEmpty, normalizedIncoming != "/" else {
+            return false
+        }
+
+        let normalizedCurrent = normalizedPath(current)
+        guard normalizedCurrent != normalizedIncoming else {
+            return false
+        }
+
+        if isTopLevelClientConfigDirectory(normalizedIncoming),
+           !normalizedCurrent.isEmpty,
+           !isTopLevelClientConfigDirectory(normalizedCurrent) {
+            return false
+        }
+
+        return true
+    }
+
+    private nonisolated static func normalizedPath(_ path: String) -> String {
+        let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return ""
+        }
+
+        return URL(fileURLWithPath: trimmed).standardizedFileURL.path
+    }
+
+    private nonisolated static func isTopLevelClientConfigDirectory(_ path: String) -> Bool {
+        let url = URL(fileURLWithPath: path).standardizedFileURL
+        let knownClientDirectories: Set<String> = [
+            ".claude",
+            ".codebuddy",
+            ".codex",
+            ".cursor",
+            ".gemini",
+            ".kimi",
+            ".openclaw",
+            ".qoder",
+            ".qwen",
+            ".workbuddy"
+        ]
+        guard knownClientDirectories.contains(url.lastPathComponent) else {
+            return false
+        }
+
+        return url.deletingLastPathComponent().path
+            == FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL.path
     }
 
     private nonisolated static func normalizedHookMessage(_ message: String?) -> String? {

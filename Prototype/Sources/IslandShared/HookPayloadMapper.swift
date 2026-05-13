@@ -511,11 +511,22 @@ public enum HookPayloadMapper {
     }
 
     private static func detectCWD(payload: [String: Any], environment: [String: String]) -> String? {
-        [
+        let candidateCWD = [
             payload["cwd"] as? String,
             payload["workspace"] as? String,
             environment["PWD"]
-        ].compactMap { $0 }.first
+        ].compactMap { nonEmpty($0) }.first
+        let sessionFileWorkspace = workspacePathFromSessionFilePath(firstNonEmptyString(
+            payload["session_file_path"],
+            payload["rollout_path"],
+            payload["transcript_path"]
+        ))
+
+        if shouldPreferSessionFileWorkspace(sessionFileWorkspace, over: candidateCWD) {
+            return sessionFileWorkspace
+        }
+
+        return candidateCWD ?? sessionFileWorkspace
     }
 
     private static func makeTerminalContext(environment: [String: String], payload: [String: Any]) -> TerminalContext {
@@ -862,6 +873,9 @@ public enum HookPayloadMapper {
         if let processName = detectedSourceProcessName(), metadata["source_process_name"] == nil {
             metadata["source_process_name"] = processName
         }
+        if let resolvedCWD = nonEmpty(terminalContext.currentDirectory) {
+            metadata["cwd"] = resolvedCWD
+        }
         return metadata
     }
 
@@ -1041,6 +1055,112 @@ public enum HookPayloadMapper {
             return nil
         }
         return value
+    }
+
+    private static func workspacePathFromSessionFilePath(_ sessionFilePath: String?) -> String? {
+        guard let sessionFilePath = nonEmpty(sessionFilePath) else { return nil }
+        let components = URL(fileURLWithPath: sessionFilePath)
+            .standardizedFileURL
+            .pathComponents
+        guard let projectsIndex = components.lastIndex(of: "projects"),
+              components.indices.contains(projectsIndex + 1),
+              projectsIndex > 0,
+              components[projectsIndex - 1].hasPrefix(".") else {
+            return nil
+        }
+
+        let slug = components[projectsIndex + 1]
+        return candidateWorkspacePaths(fromProjectSlug: slug).first { path in
+            var isDirectory: ObjCBool = false
+            return FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory)
+                && isDirectory.boolValue
+        }
+    }
+
+    private static func shouldPreferSessionFileWorkspace(
+        _ sessionFileWorkspace: String?,
+        over candidateCWD: String?
+    ) -> Bool {
+        guard let sessionFileWorkspace else { return false }
+        guard let candidateCWD = nonEmpty(candidateCWD) else { return true }
+
+        let normalizedCandidate = URL(fileURLWithPath: candidateCWD).standardizedFileURL.path
+        let normalizedWorkspace = URL(fileURLWithPath: sessionFileWorkspace).standardizedFileURL.path
+        guard normalizedCandidate != normalizedWorkspace else { return false }
+
+        var candidateIsDirectory: ObjCBool = false
+        let candidateExists = FileManager.default.fileExists(
+            atPath: normalizedCandidate,
+            isDirectory: &candidateIsDirectory
+        ) && candidateIsDirectory.boolValue
+
+        if !candidateExists {
+            return true
+        }
+
+        return isTopLevelClientConfigDirectory(normalizedCandidate)
+    }
+
+    private static func isTopLevelClientConfigDirectory(_ path: String) -> Bool {
+        let url = URL(fileURLWithPath: path).standardizedFileURL
+        let knownClientDirectories: Set<String> = [
+            ".claude",
+            ".codebuddy",
+            ".codex",
+            ".cursor",
+            ".gemini",
+            ".kimi",
+            ".openclaw",
+            ".qoder",
+            ".qwen",
+            ".workbuddy"
+        ]
+        guard knownClientDirectories.contains(url.lastPathComponent) else {
+            return false
+        }
+
+        return url.deletingLastPathComponent().path
+            == FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL.path
+    }
+
+    private static func candidateWorkspacePaths(fromProjectSlug slug: String) -> [String] {
+        let trimmedSlug = slug.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedSlug = trimmedSlug.hasPrefix("-")
+            ? String(trimmedSlug.dropFirst())
+            : trimmedSlug
+        let parts = normalizedSlug
+            .split(separator: "-", omittingEmptySubsequences: true)
+            .map(String.init)
+        guard parts.count >= 2, parts.count <= 12 else {
+            return []
+        }
+
+        var candidates: [String] = []
+        var seen: Set<String> = []
+
+        func appendCandidates(startIndex: Int, pathComponents: [String]) {
+            if startIndex == parts.count {
+                let path = "/" + pathComponents.joined(separator: "/")
+                if seen.insert(path).inserted {
+                    candidates.append(path)
+                }
+                return
+            }
+
+            var component = ""
+            for index in startIndex..<parts.count {
+                component = component.isEmpty ? parts[index] : component + "-" + parts[index]
+                appendCandidates(
+                    startIndex: index + 1,
+                    pathComponents: pathComponents + [component]
+                )
+            }
+        }
+
+        appendCandidates(startIndex: 0, pathComponents: [])
+        return candidates.sorted { lhs, rhs in
+            lhs.split(separator: "/").count > rhs.split(separator: "/").count
+        }
     }
 
     private static func normalizedClientKind(from metadata: [String: String]) -> String? {

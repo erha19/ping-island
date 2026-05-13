@@ -1651,6 +1651,44 @@ final class SessionStateTests: XCTestCase {
         )
     }
 
+    func testIDEWorkspaceWindowMatchingUsesHookWorkingDirectory() {
+        XCTAssertGreaterThan(
+            SessionLauncher.ideWorkspaceWindowMatchScore(
+                title: "Editor.swift - Island - Cursor",
+                document: nil,
+                workspacePath: "/Users/example/Island",
+                appName: "Cursor"
+            ),
+            0
+        )
+        XCTAssertEqual(
+            SessionLauncher.ideWorkspaceWindowMatchScore(
+                title: "Editor.swift - OtherProject - Cursor",
+                document: nil,
+                workspacePath: "/Users/example/Island",
+                appName: "Cursor"
+            ),
+            0
+        )
+    }
+
+    func testIDEWorkspaceWindowMatchingPrefersDocumentPathOverTitle() {
+        XCTAssertGreaterThan(
+            SessionLauncher.ideWorkspaceWindowMatchScore(
+                title: "Unrelated - Cursor",
+                document: "file:///Users/example/Island/README.md",
+                workspacePath: "/Users/example/Island",
+                appName: "Cursor"
+            ),
+            SessionLauncher.ideWorkspaceWindowMatchScore(
+                title: "Island - Cursor",
+                document: nil,
+                workspacePath: "/Users/example/Island",
+                appName: "Cursor"
+            )
+        )
+    }
+
     func testClientFallbackActivationKeepsTerminalWindowsScoped() {
         XCTAssertFalse(
             SessionLauncher.shouldActivateAllWindowsForClientFallback(

@@ -572,10 +572,15 @@ private extension BridgeEnvelope {
         let metadata = self.metadata
         let toolInput = Self.decodeToolInput(from: metadata["tool_input_json"])
         let sessionId = resolvedSessionID
+        let resolvedCWD = Self.resolvedCWD(
+            envelopeCWD: cwd,
+            terminalContext: terminalContext,
+            metadata: metadata
+        )
 
         return HookEvent(
             sessionId: sessionId,
-            cwd: cwd ?? terminalContext.currentDirectory ?? metadata["cwd"] ?? "",
+            cwd: resolvedCWD,
             event: eventType,
             status: Self.mapStatus(eventType: eventType, status: status?.kind, notificationType: metadata["notification_type"]),
             provider: provider.sessionProvider,
@@ -583,7 +588,8 @@ private extension BridgeEnvelope {
                 provider: provider,
                 sessionId: sessionId,
                 terminalContext: terminalContext,
-                metadata: metadata
+                metadata: metadata,
+                workspacePath: resolvedCWD
             ),
             pid: Int(metadata["pid"] ?? ""),
             tty: terminalContext.tty,
@@ -678,7 +684,8 @@ private extension BridgeEnvelope {
         provider: BridgeProvider,
         sessionId: String,
         terminalContext: BridgeTerminalContext,
-        metadata: [String: String]
+        metadata: [String: String],
+        workspacePath: String
     ) -> SessionClientInfo {
         let explicitKind = (
             metadata["client_kind"]
@@ -836,12 +843,12 @@ private extension BridgeEnvelope {
             resolvedLaunchURL = SessionClientInfo.appLaunchURL(
                 bundleIdentifier: resolvedBundleID ?? "com.openai.codex",
                 sessionId: sessionId,
-                workspacePath: terminalContext.currentDirectory
+                workspacePath: workspacePath
             )
         } else if let workspaceLaunchURL = terminalBundleID.flatMap({
             SessionClientInfo.appLaunchURL(
                 bundleIdentifier: $0,
-                workspacePath: terminalContext.currentDirectory
+                workspacePath: workspacePath
             )
         }) {
             resolvedLaunchURL = workspaceLaunchURL
@@ -880,6 +887,135 @@ private extension BridgeEnvelope {
             tmuxPaneIdentifier: terminalContext.tmuxPane,
             processName: processName
         )
+    }
+
+    private static func resolvedCWD(
+        envelopeCWD: String?,
+        terminalContext: BridgeTerminalContext,
+        metadata: [String: String]
+    ) -> String {
+        let candidateCWD = firstNonEmpty(
+            envelopeCWD,
+            terminalContext.currentDirectory,
+            metadata["cwd"]
+        )
+        let sessionFileWorkspace = workspacePathFromSessionFilePath(firstNonEmpty(
+            metadata["session_file_path"],
+            metadata["rollout_path"],
+            metadata["transcript_path"]
+        ))
+
+        if shouldPreferSessionFileWorkspace(sessionFileWorkspace, over: candidateCWD) {
+            return sessionFileWorkspace ?? ""
+        }
+
+        return candidateCWD ?? sessionFileWorkspace ?? ""
+    }
+
+    private static func workspacePathFromSessionFilePath(_ sessionFilePath: String?) -> String? {
+        guard let sessionFilePath = firstNonEmpty(sessionFilePath) else { return nil }
+        let components = URL(fileURLWithPath: sessionFilePath)
+            .standardizedFileURL
+            .pathComponents
+        guard let projectsIndex = components.lastIndex(of: "projects"),
+              components.indices.contains(projectsIndex + 1),
+              projectsIndex > 0,
+              components[projectsIndex - 1].hasPrefix(".") else {
+            return nil
+        }
+
+        let slug = components[projectsIndex + 1]
+        return candidateWorkspacePaths(fromProjectSlug: slug).first { path in
+            var isDirectory: ObjCBool = false
+            return FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory)
+                && isDirectory.boolValue
+        }
+    }
+
+    private static func shouldPreferSessionFileWorkspace(
+        _ sessionFileWorkspace: String?,
+        over candidateCWD: String?
+    ) -> Bool {
+        guard let sessionFileWorkspace else { return false }
+        guard let candidateCWD = firstNonEmpty(candidateCWD) else { return true }
+
+        let normalizedCandidate = URL(fileURLWithPath: candidateCWD).standardizedFileURL.path
+        let normalizedWorkspace = URL(fileURLWithPath: sessionFileWorkspace).standardizedFileURL.path
+        guard normalizedCandidate != normalizedWorkspace else { return false }
+
+        var candidateIsDirectory: ObjCBool = false
+        let candidateExists = FileManager.default.fileExists(
+            atPath: normalizedCandidate,
+            isDirectory: &candidateIsDirectory
+        ) && candidateIsDirectory.boolValue
+
+        if !candidateExists {
+            return true
+        }
+
+        return isTopLevelClientConfigDirectory(normalizedCandidate)
+    }
+
+    private static func isTopLevelClientConfigDirectory(_ path: String) -> Bool {
+        let url = URL(fileURLWithPath: path).standardizedFileURL
+        let knownClientDirectories: Set<String> = [
+            ".claude",
+            ".codebuddy",
+            ".codex",
+            ".cursor",
+            ".gemini",
+            ".kimi",
+            ".openclaw",
+            ".qoder",
+            ".qwen",
+            ".workbuddy"
+        ]
+        guard knownClientDirectories.contains(url.lastPathComponent) else {
+            return false
+        }
+
+        return url.deletingLastPathComponent().path
+            == FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL.path
+    }
+
+    private static func candidateWorkspacePaths(fromProjectSlug slug: String) -> [String] {
+        let trimmedSlug = slug.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedSlug = trimmedSlug.hasPrefix("-")
+            ? String(trimmedSlug.dropFirst())
+            : trimmedSlug
+        let parts = normalizedSlug
+            .split(separator: "-", omittingEmptySubsequences: true)
+            .map(String.init)
+        guard parts.count >= 2, parts.count <= 12 else {
+            return []
+        }
+
+        var candidates: [String] = []
+        var seen: Set<String> = []
+
+        func appendCandidates(startIndex: Int, pathComponents: [String]) {
+            if startIndex == parts.count {
+                let path = "/" + pathComponents.joined(separator: "/")
+                if seen.insert(path).inserted {
+                    candidates.append(path)
+                }
+                return
+            }
+
+            var component = ""
+            for index in startIndex..<parts.count {
+                component = component.isEmpty ? parts[index] : component + "-" + parts[index]
+                appendCandidates(
+                    startIndex: index + 1,
+                    pathComponents: pathComponents + [component]
+                )
+            }
+        }
+
+        appendCandidates(startIndex: 0, pathComponents: [])
+        return candidates.sorted { lhs, rhs in
+            lhs.split(separator: "/").count > rhs.split(separator: "/").count
+        }
     }
 
     private static func firstNonEmpty(_ values: String?...) -> String? {
