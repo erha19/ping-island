@@ -22,6 +22,7 @@ actor ClaudeDesktopWatcher {
     private var sessionTasks: [String: Task<Void, Never>] = [:]
     private var knownLocalSessionIds: Set<String> = []
     private var sessionFileSizes: [String: UInt64] = [:]  // localSessionId → last known file size
+    private var resultScanOffsets: [String: UInt64] = [:]  // localSessionId → byte offset up to which result entries have been scanned
 
     private init() {}
 
@@ -42,6 +43,7 @@ actor ClaudeDesktopWatcher {
         sessionTasks.removeAll()
         knownLocalSessionIds.removeAll()
         sessionFileSizes.removeAll()
+        resultScanOffsets.removeAll()
         logger.info("Stopped Claude Desktop watcher")
     }
 
@@ -144,7 +146,10 @@ actor ClaudeDesktopWatcher {
         )
 
         // Record current file size so the polling loop can skip unchanged files.
-        sessionFileSizes[localSessionId] = Self.fileSize(at: auditPath)
+        let currentSize = Self.fileSize(at: auditPath)
+        sessionFileSizes[localSessionId] = currentSize
+        // Start result scanning from EOF — don't treat historical result entries as new completions.
+        resultScanOffsets[localSessionId] = currentSize
 
         let sessionId = metadata.cliSessionId
         let cwd = metadata.cwd
@@ -175,6 +180,22 @@ actor ClaudeDesktopWatcher {
 
             if currentSize > lastSize {
                 sessionFileSizes[localSessionId] = currentSize
+
+                // Scan new bytes for type:"result" entries (signals AI turn completion).
+                let scanFrom = resultScanOffsets[localSessionId] ?? lastSize
+                if currentSize > scanFrom,
+                   let turnCompleted = Self.scanForResultEntry(
+                       filePath: auditFilePath, from: scanFrom, to: currentSize
+                   )
+                {
+                    resultScanOffsets[localSessionId] = currentSize
+                    logger.info(
+                        "Turn completed session=\(sessionId.prefix(8), privacy: .public) isError=\(turnCompleted.isError) turns=\(turnCompleted.numTurns)"
+                    )
+                    await SessionStore.shared.process(.desktopTurnCompleted(sessionId: sessionId))
+                } else {
+                    resultScanOffsets[localSessionId] = currentSize
+                }
 
                 let result = await ConversationParser.shared.parseIncremental(
                     sessionId: sessionId,
@@ -216,6 +237,38 @@ actor ClaudeDesktopWatcher {
     }
 
     // MARK: - Helpers
+
+    struct ResultEntry {
+        let isError: Bool
+        let numTurns: Int
+    }
+
+    /// Reads bytes [from, to) from the file and scans for the first `type:"result"` JSONL entry.
+    nonisolated static func scanForResultEntry(filePath: String, from: UInt64, to: UInt64) -> ResultEntry? {
+        guard to > from,
+              let fh = FileHandle(forReadingAtPath: filePath)
+        else { return nil }
+        defer { try? fh.close() }
+        do {
+            try fh.seek(toOffset: from)
+            let length = Int(to - from)
+            guard let data = try fh.read(upToCount: length),
+                  let text = String(data: data, encoding: .utf8)
+            else { return nil }
+            for line in text.components(separatedBy: "\n") {
+                let trimmed = line.trimmingCharacters(in: .whitespaces)
+                guard !trimmed.isEmpty,
+                      let lineData = trimmed.data(using: .utf8),
+                      let json = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
+                      json["type"] as? String == "result"
+                else { continue }
+                let isError = json["is_error"] as? Bool ?? false
+                let numTurns = json["num_turns"] as? Int ?? 1
+                return ResultEntry(isError: isError, numTurns: numTurns)
+            }
+        } catch {}
+        return nil
+    }
 
     nonisolated static func fileSize(at path: String) -> UInt64 {
         let attrs = try? FileManager.default.attributesOfItem(atPath: path)

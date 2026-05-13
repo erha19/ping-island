@@ -158,6 +158,9 @@ actor SessionStore {
         case .desktopSessionDiscovered(let info):
             processDesktopSessionDiscovered(info)
 
+        case .desktopTurnCompleted(let sessionId):
+            processDesktopTurnCompleted(sessionId: sessionId)
+
         case .sessionEnded(let sessionId):
             await processSessionEnd(sessionId: sessionId)
 
@@ -316,6 +319,18 @@ actor SessionStore {
             createdAt: info.createdAt
         )
         sessions[info.sessionId] = session
+    }
+
+    private func processDesktopTurnCompleted(sessionId: String) {
+        guard var session = sessions[sessionId] else { return }
+        let oldPhase = session.phase
+        if session.phase.canTransition(to: .waitingForInput) {
+            session.phase = .waitingForInput
+            sessions[sessionId] = session
+            Self.logger.info(
+                "Desktop turn completed session=\(sessionId.prefix(8), privacy: .public) phase=\(oldPhase.description, privacy: .public)→waitingForInput"
+            )
+        }
     }
 
     private func processHookEvent(_ event: HookEvent) async {

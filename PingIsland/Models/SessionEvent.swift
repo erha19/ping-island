@@ -87,6 +87,9 @@ enum SessionEvent: Sendable {
     /// A new Claude Desktop local-agent session was discovered via file monitoring
     case desktopSessionDiscovered(ClaudeDesktopSessionInfo)
 
+    /// A Claude Desktop AI turn completed (detected via `type:"result"` in audit.jsonl)
+    case desktopTurnCompleted(sessionId: String)
+
     // MARK: - Session Lifecycle
 
     /// Session has ended
@@ -719,6 +722,8 @@ extension SessionEvent: CustomStringConvertible {
             return "agentFileUpdated(session: \(sessionId.prefix(8)), task: \(taskToolId.prefix(12)), tools: \(tools.count))"
         case .desktopSessionDiscovered(let info):
             return "desktopSessionDiscovered(session: \(info.sessionId.prefix(8)))"
+        case .desktopTurnCompleted(let sessionId):
+            return "desktopTurnCompleted(session: \(sessionId.prefix(8)))"
         }
     }
 }
@@ -774,6 +779,8 @@ extension SessionEvent {
             return "toolCompleted"
         case .desktopSessionDiscovered:
             return "desktopSessionDiscovered"
+        case .desktopTurnCompleted:
+            return "desktopTurnCompleted"
         }
     }
 
@@ -806,6 +813,8 @@ extension SessionEvent {
             return String(payload.sessionId.prefix(8))
         case .desktopSessionDiscovered(let info):
             return String(info.sessionId.prefix(8))
+        case .desktopTurnCompleted(let sessionId):
+            return String(sessionId.prefix(8))
         case .pruneTimedOutExternalContinuations:
             return nil
         }
