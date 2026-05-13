@@ -122,6 +122,10 @@ class SessionMonitor: ObservableObject {
         }
 
         Task {
+            await ClaudeDesktopWatcher.shared.start()
+        }
+
+        Task {
             await runtimeCoordinator.start()
         }
         RemoteConnectorManager.shared.start(
@@ -244,6 +248,9 @@ class SessionMonitor: ObservableObject {
         RemoteConnectorManager.shared.stop()
         Task {
             await CodexAppServerMonitor.shared.stop()
+        }
+        Task {
+            await ClaudeDesktopWatcher.shared.stop()
         }
         Task {
             await runtimeCoordinator.stop()

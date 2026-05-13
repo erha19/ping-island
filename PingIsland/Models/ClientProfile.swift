@@ -1204,6 +1204,21 @@ enum ClientProfileRegistry {
             bundleIdentifiers: ["com.openai.codex"]
         ),
         SessionClientProfile(
+            id: "claude-desktop",
+            provider: .claude,
+            family: .claudeHooks,
+            kind: .custom,
+            displayName: "Claude Desktop",
+            assistantLabelMode: .badgeLabel,
+            brand: .claude,
+            defaultBundleIdentifier: "com.anthropic.claudefordesktop",
+            defaultOrigin: "desktop",
+            recognizedKinds: ["claude-desktop", "claude_desktop", "claude desktop"],
+            exactAliases: ["claude-desktop", "claude desktop"],
+            keywordAliases: ["claude desktop"],
+            bundleIdentifiers: ["com.anthropic.claudefordesktop"]
+        ),
+        SessionClientProfile(
             id: "codex-cli",
             provider: .codex,
             family: .codexHooks,

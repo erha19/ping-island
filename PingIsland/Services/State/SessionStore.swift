@@ -155,6 +155,9 @@ actor SessionStore {
         case .clearDetected(let sessionId):
             await processClearDetected(sessionId: sessionId)
 
+        case .desktopSessionDiscovered(let info):
+            processDesktopSessionDiscovered(info)
+
         case .sessionEnded(let sessionId):
             await processSessionEnd(sessionId: sessionId)
 
@@ -283,6 +286,36 @@ actor SessionStore {
         )
 
         sessions[handle.sessionID] = session
+    }
+
+    private func processDesktopSessionDiscovered(_ info: ClaudeDesktopSessionInfo) {
+        guard sessions[info.sessionId] == nil else { return }
+
+        let clientInfo = SessionClientInfo(
+            kind: .custom,
+            profileID: "claude-desktop",
+            name: "Claude Desktop",
+            bundleIdentifier: "com.anthropic.claudefordesktop",
+            origin: "desktop",
+            sessionFilePath: info.auditFilePath
+        )
+        let projectName = info.title
+            ?? Self.projectName(for: info.cwd, fallback: "Claude Desktop")
+        let session = SessionState(
+            sessionId: info.sessionId,
+            cwd: info.cwd,
+            projectName: projectName,
+            provider: .claude,
+            clientInfo: clientInfo,
+            ingress: .desktopAppMonitor,
+            sessionName: nil,
+            pid: nil,
+            tty: nil,
+            isInTmux: false,
+            phase: .idle,
+            createdAt: info.createdAt
+        )
+        sessions[info.sessionId] = session
     }
 
     private func processHookEvent(_ event: HookEvent) async {
@@ -976,7 +1009,7 @@ actor SessionStore {
                 )
             case .hookBridge:
                 HookSocketServer.shared.cancelPendingPermission(toolUseId: toolUseId)
-            case .codexAppServer, .nativeRuntime:
+            case .codexAppServer, .nativeRuntime, .desktopAppMonitor:
                 break
             }
         }
@@ -4111,7 +4144,7 @@ actor SessionStore {
             return codexHookPlaceholderPruneDelayNs
         case .codexAppServer:
             return codexAppServerPlaceholderPruneDelayNs
-        case .nativeRuntime:
+        case .nativeRuntime, .desktopAppMonitor:
             return codexAppServerPlaceholderPruneDelayNs
         }
     }
