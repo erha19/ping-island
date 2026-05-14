@@ -2046,8 +2046,8 @@ func geminiBeforeToolMapsToRunningToolWithoutIntervention() throws {
     let payload = """
     {
       "hook_event_name": "BeforeTool",
-      "tool_name": "write_file",
-      "tool_input": {"path": "/tmp/demo.swift"},
+      "tool_name": "list_files",
+      "tool_input": {"dir_path": "/tmp/demo"},
       "session_id": "gemini-1"
     }
     """.data(using: .utf8)!
@@ -2072,13 +2072,43 @@ func geminiBeforeToolMapsToRunningToolWithoutIntervention() throws {
 }
 
 @Test
-func geminiNotificationStaysObservabilityOnly() throws {
+func geminiBeforeToolWithAskUserDoesNotCreateIntervention() throws {
+    let payload = """
+    {
+      "hook_event_name": "BeforeTool",
+      "tool_name": "ask_user",
+      "tool_input": {
+        "questions": [{"type": "text", "question": "What approach?"}]
+      },
+      "session_id": "gemini-1"
+    }
+    """.data(using: .utf8)!
+
+    let envelope = HookPayloadMapper.makeEnvelope(
+        source: .claude,
+        arguments: [
+            "island-bridge",
+            "--source", "claude",
+            "--client-kind", "gemini",
+            "--client-name", "Gemini CLI"
+        ],
+        environment: ["PWD": "/tmp/demo"],
+        stdinData: payload
+    )
+
+    #expect(envelope.eventType == "BeforeTool")
+    #expect(envelope.status?.kind == .runningTool)
+    #expect(envelope.intervention == nil)
+    #expect(envelope.expectsResponse == false)
+}
+
+@Test
+func geminiNotificationToolPermissionMapsToWaitingForApprovalWithoutIntervention() throws {
     let payload = """
     {
       "hook_event_name": "Notification",
-      "notification_type": "ToolPermission",
+      "notification_type": "toolpermission",
       "message": "Gemini CLI is asking for tool permission",
-      "details": {"tool_name": "write_file"},
       "session_id": "gemini-2"
     }
     """.data(using: .utf8)!
@@ -2099,6 +2129,74 @@ func geminiNotificationStaysObservabilityOnly() throws {
     #expect(envelope.status?.kind == .notification)
     #expect(envelope.intervention == nil)
     #expect(envelope.expectsResponse == false)
+}
+
+@Test
+func geminiReadsCleanResponseFromTranscriptInsteadOfCorruptedPromptResponse() throws {
+    let tempDir = FileManager.default.temporaryDirectory
+        .appendingPathComponent("pingisland-gemini-test-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: tempDir) }
+
+    let transcriptPath = tempDir.appendingPathComponent("session-test.jsonl").path
+    let cleanResponse = "Hello! I'm ready to help you with your project."
+    let transcriptContent = """
+        {"role":"user","content":"Can you help me?"}
+        {"role":"model","content":"\(cleanResponse)"}
+        """
+    try transcriptContent.write(toFile: transcriptPath, atomically: true, encoding: .utf8)
+
+    let corruptedResponse = "Hello! I'm ready to help you with your project. I'm ready to help you with your project."
+    let payload = """
+    {
+      "hook_event_name": "AfterAgent",
+      "session_id": "gemini-transcript-1",
+      "prompt_response": "\(corruptedResponse)",
+      "transcript_path": "\(transcriptPath)"
+    }
+    """.data(using: .utf8)!
+
+    let envelope = HookPayloadMapper.makeEnvelope(
+        source: .gemini,
+        arguments: [
+            "island-bridge",
+            "--source", "gemini",
+            "--client-kind", "gemini",
+            "--client-name", "Gemini CLI"
+        ],
+        environment: ["PWD": "/tmp/demo"],
+        stdinData: payload
+    )
+
+    #expect(envelope.provider == .gemini)
+    #expect(envelope.metadata["prompt_response"] == cleanResponse)
+    #expect(envelope.preview == cleanResponse)
+}
+
+@Test
+func geminiFallsBackToPromptResponseWhenTranscriptIsMissing() throws {
+    let payload = """
+    {
+      "hook_event_name": "AfterAgent",
+      "session_id": "gemini-fallback-1",
+      "prompt_response": "Fallback response text."
+    }
+    """.data(using: .utf8)!
+
+    let envelope = HookPayloadMapper.makeEnvelope(
+        source: .gemini,
+        arguments: [
+            "island-bridge",
+            "--source", "gemini",
+            "--client-kind", "gemini",
+            "--client-name", "Gemini CLI"
+        ],
+        environment: ["PWD": "/tmp/demo"],
+        stdinData: payload
+    )
+
+    #expect(envelope.metadata["prompt_response"] == "Fallback response text.")
+    #expect(envelope.preview == "Fallback response text.")
 }
 
 @Test

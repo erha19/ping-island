@@ -499,7 +499,9 @@ public enum HookPayloadMapper {
             return SessionStatus(kind: .thinking, detail: string)
         case let text where text.contains("compact"):
             return SessionStatus(kind: .compacting, detail: string)
-        case let text where text.contains("done") || text.contains("idle"):
+        case let text
+        where text.contains("done") || text.contains("idle") || text.contains("ended")
+            || text.contains("end"):
             return SessionStatus(kind: .completed, detail: string)
         case let text where text.contains("error") || text.contains("fail"):
             return SessionStatus(kind: .error, detail: string)
@@ -1008,9 +1010,42 @@ public enum HookPayloadMapper {
         _ payload: [String: Any],
         source: AgentProvider
     ) -> [String: Any] {
-        guard source == .copilot else { return payload }
+        guard source == .copilot || source == .gemini else { return payload }
 
         var normalized = payload
+
+        if source == .gemini {
+            // TODO: Remove this workaround once Gemini CLI fixes trailing text duplication.
+            // Tracking issue: https://github.com/google-gemini/gemini-cli/issues/27030
+            //
+            // Gemini CLI occasionally duplicates trailing text in the hook payload's
+            // `prompt_response` field, but the JSONL transcript file remains correct.
+            // We read the clean response directly from the transcript for events that carry a model response.
+            if let corruptedResponse = payload["prompt_response"] as? String,
+                !corruptedResponse.isEmpty,
+                let transcriptPath = payload["transcript_path"] as? String,
+                let cleanResponse = lastModelResponseFromTranscript(at: transcriptPath)
+            {
+                normalized["prompt_response"] = cleanResponse
+
+                // Other fields like `message` and `last_assistant_message` may also contain
+                // the corrupted text. We carefully overwrite them only if they match the corrupted
+                // response to avoid overwriting genuine user prompts in events like `BeforeAgent`.
+                let isCorrupted = { (text: Any?) -> Bool in
+                    guard let stringText = text as? String else { return false }
+                    return stringText.contains(corruptedResponse)
+                        || corruptedResponse.contains(stringText)
+                }
+
+                if isCorrupted(payload["message"]) {
+                    normalized["message"] = cleanResponse
+                }
+
+                if isCorrupted(payload["last_assistant_message"]) {
+                    normalized["last_assistant_message"] = cleanResponse
+                }
+            }
+        }
 
         if normalized["session_id"] == nil,
             let sessionId = payload["sessionId"] as? String
@@ -1055,6 +1090,44 @@ public enum HookPayloadMapper {
         }
 
         return normalized
+    }
+
+    /// Reads the last model response from a Gemini JSONL transcript file.
+    /// Gemini transcripts contain mixed lines: session metadata, user messages
+    /// (type="user", content is an array), model responses (type="gemini",
+    /// content is a string), and MongoDB-style "$set" updates. We search
+    /// backwards from the end for the latest entry with type="gemini" and
+    /// a string content field.
+    private static func lastModelResponseFromTranscript(at path: String) -> String? {
+        let expandedPath = (path as NSString).expandingTildeInPath
+        guard FileManager.default.fileExists(atPath: expandedPath) else { return nil }
+
+        guard let data = FileManager.default.contents(atPath: expandedPath),
+            let content = String(data: data, encoding: .utf8)
+        else {
+            return nil
+        }
+
+        let lines = content.split(separator: "\n", omittingEmptySubsequences: false)
+        for line in lines.reversed() {
+            guard !line.isEmpty,
+                !line.hasPrefix("{\"$set\""),
+                let lineData = String(line).data(using: .utf8),
+                let json = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any]
+            else {
+                continue
+            }
+
+            let entryType = (json["type"] as? String)?.lowercased()
+            let entryRole = (json["role"] as? String)?.lowercased()
+            guard entryType == "gemini" || entryRole == "model" else { continue }
+
+            if let content = json["content"] as? String, !content.isEmpty {
+                return content
+            }
+        }
+
+        return nil
     }
 
     private static func bridgedEnvironment(
@@ -1507,6 +1580,9 @@ public enum HookPayloadMapper {
                 .lowercased()
             if notificationType == "error" {
                 return SessionStatus(kind: .error)
+            }
+            if notificationType == "toolpermission" {
+                return SessionStatus(kind: .notification)
             }
             return SessionStatus(kind: .notification)
         case "precompress":

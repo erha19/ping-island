@@ -527,15 +527,13 @@ enum ClientProfileRegistry {
                 HookInstallEventDescriptor(name: "UserPromptSubmit", templates: [.plain]),
                 HookInstallEventDescriptor(name: "PreToolUse", templates: [.matcher("*")]),
                 HookInstallEventDescriptor(name: "PostToolUse", templates: [.matcher("*")]),
-                HookInstallEventDescriptor(
-                    name: "PermissionRequest", templates: [.matcher("*")], timeout: 86_400),
+                HookInstallEventDescriptor(name: "PermissionRequest", templates: [.matcher("*")], timeout: 86_400),
                 HookInstallEventDescriptor(name: "Notification", templates: [.matcher("*")]),
                 HookInstallEventDescriptor(name: "Stop", templates: [.plain]),
                 HookInstallEventDescriptor(name: "SubagentStop", templates: [.plain]),
                 HookInstallEventDescriptor(name: "SessionStart", templates: [.plain]),
                 HookInstallEventDescriptor(name: "SessionEnd", templates: [.plain]),
-                HookInstallEventDescriptor(
-                    name: "PreCompact", templates: [.matcher("auto"), .matcher("manual")]),
+                HookInstallEventDescriptor(name: "PreCompact", templates: [.matcher("auto"), .matcher("manual")]),
             ]
         ),
         ManagedHookClientProfile(
@@ -557,8 +555,7 @@ enum ClientProfileRegistry {
                 HookInstallEventDescriptor(name: "UserPromptSubmit", templates: [.matcher("*")]),
                 HookInstallEventDescriptor(name: "PreToolUse", templates: [.matcher("*")]),
                 HookInstallEventDescriptor(name: "PostToolUse", templates: [.matcher("*")]),
-                HookInstallEventDescriptor(
-                    name: "PermissionRequest", templates: [.matcher("*")], timeout: 86_400),
+                HookInstallEventDescriptor(name: "PermissionRequest", templates: [.matcher("*")], timeout: 86_400),
                 HookInstallEventDescriptor(name: "Stop", templates: [.matcher("*")]),
             ]
         ),
@@ -586,7 +583,6 @@ enum ClientProfileRegistry {
                 HookInstallEventDescriptor(name: "SessionEnd", templates: [.plain]),
                 HookInstallEventDescriptor(name: "BeforeAgent", templates: [.plain]),
                 HookInstallEventDescriptor(name: "AfterAgent", templates: [.plain]),
-                HookInstallEventDescriptor(name: "BeforeTool", templates: [.matcher(".*")]),
                 HookInstallEventDescriptor(name: "AfterTool", templates: [.matcher(".*")]),
                 HookInstallEventDescriptor(name: "Notification", templates: [.plain]),
                 HookInstallEventDescriptor(name: "PreCompress", templates: [.plain]),
@@ -644,10 +640,8 @@ enum ClientProfileRegistry {
                 HookInstallEventDescriptor(name: "Stop", templates: [.plain]),
                 HookInstallEventDescriptor(name: "SubagentStart", templates: [.matcher("*")]),
                 HookInstallEventDescriptor(name: "SubagentStop", templates: [.matcher("*")]),
-                HookInstallEventDescriptor(
-                    name: "PreCompact", templates: [.matcher("manual"), .matcher("auto")]),
-                HookInstallEventDescriptor(
-                    name: "PermissionRequest", templates: [.matcher("*")], timeout: 86_400),
+                HookInstallEventDescriptor(name: "PreCompact", templates: [.matcher("manual"), .matcher("auto")]),
+                HookInstallEventDescriptor(name: "PermissionRequest", templates: [.matcher("*")], timeout: 86_400),
             ]
         ),
         ManagedHookClientProfile(
@@ -709,8 +703,7 @@ enum ClientProfileRegistry {
                 HookInstallEventDescriptor(name: "SubagentStop", templates: [.plain]),
                 HookInstallEventDescriptor(name: "SessionStart", templates: [.plain]),
                 HookInstallEventDescriptor(name: "SessionEnd", templates: [.plain]),
-                HookInstallEventDescriptor(
-                    name: "PreCompact", templates: [.matcher("auto"), .matcher("manual")]),
+                HookInstallEventDescriptor(name: "PreCompact", templates: [.matcher("auto"), .matcher("manual")]),
             ]
         ),
         ManagedHookClientProfile(
@@ -784,8 +777,7 @@ enum ClientProfileRegistry {
                 HookInstallEventDescriptor(name: "SubagentStop", templates: [.plain]),
                 HookInstallEventDescriptor(name: "SessionStart", templates: [.plain]),
                 HookInstallEventDescriptor(name: "SessionEnd", templates: [.plain]),
-                HookInstallEventDescriptor(
-                    name: "PreCompact", templates: [.matcher("auto"), .matcher("manual")]),
+                HookInstallEventDescriptor(name: "PreCompact", templates: [.matcher("auto"), .matcher("manual")]),
             ]
         ),
         ManagedHookClientProfile(
@@ -858,18 +850,15 @@ enum ClientProfileRegistry {
             brand: .qoder,
             events: [
                 HookInstallEventDescriptor(name: "UserPromptSubmit", templates: [.plain]),
-                HookInstallEventDescriptor(
-                    name: "PreToolUse", templates: [.matcher("*")], timeout: 86_400),
+                HookInstallEventDescriptor(name: "PreToolUse", templates: [.matcher("*")], timeout: 86_400),
                 HookInstallEventDescriptor(name: "PostToolUse", templates: [.matcher("*")]),
-                HookInstallEventDescriptor(
-                    name: "PermissionRequest", templates: [.matcher("*")], timeout: 86_400),
+                HookInstallEventDescriptor(name: "PermissionRequest", templates: [.matcher("*")], timeout: 86_400),
                 HookInstallEventDescriptor(name: "Notification", templates: [.matcher("*")]),
                 HookInstallEventDescriptor(name: "Stop", templates: [.plain]),
                 HookInstallEventDescriptor(name: "SubagentStop", templates: [.plain]),
                 HookInstallEventDescriptor(name: "SessionStart", templates: [.plain]),
                 HookInstallEventDescriptor(name: "SessionEnd", templates: [.plain]),
-                HookInstallEventDescriptor(
-                    name: "PreCompact", templates: [.matcher("auto"), .matcher("manual")]),
+                HookInstallEventDescriptor(name: "PreCompact", templates: [.matcher("auto"), .matcher("manual")]),
             ]
         ),
         ManagedHookClientProfile(
@@ -1051,10 +1040,7 @@ enum ClientProfileRegistry {
             brand: .codebuddy,
             defaultBundleIdentifier: nil,
             defaultOrigin: nil,
-            recognizedKinds: [
-                "codebuddy-cli", "codebuddy_cli", "codebuddy cli", "code-buddy-cli",
-                "code buddy cli",
-            ],
+            recognizedKinds: ["codebuddy-cli", "codebuddy_cli", "codebuddy cli", "code-buddy-cli","code buddy cli"],
             exactAliases: ["codebuddy-cli", "codebuddy cli", "code-buddy-cli", "code buddy cli"],
             keywordAliases: ["codebuddy cli", "code buddy cli"],
             bundleIdentifiers: []
@@ -1114,9 +1100,7 @@ enum ClientProfileRegistry {
             brand: .claude,
             defaultBundleIdentifier: nil,
             defaultOrigin: nil,
-            recognizedKinds: [
-                "cursor", "cursor-ide", "cursor ide", "cursor-client", "cursor client",
-            ],
+            recognizedKinds: ["cursor", "cursor-ide", "cursor ide", "cursor-client", "cursor client"],
             exactAliases: ["cursor", "cursor-ide", "cursor ide", "cursor-client", "cursor client"],
             keywordAliases: ["cursor"],
             bundleIdentifiers: ["com.todesktop.230313mzl4w4u92"]
@@ -1132,9 +1116,7 @@ enum ClientProfileRegistry {
             defaultBundleIdentifier: nil,
             defaultOrigin: nil,
             recognizedKinds: ["jetbrains", "jetbrains-plugin", "jb", "jb-plugin", "jb plugin"],
-            exactAliases: [
-                "jetbrains", "jetbrains-plugin", "jetbrains plugin", "jb", "jb-plugin", "jb plugin",
-            ],
+            exactAliases: ["jetbrains", "jetbrains-plugin", "jetbrains plugin", "jb", "jb-plugin", "jb plugin"],
             keywordAliases: ["jetbrains", "jb plugin"],
             bundleIdentifiers: []
         ),
