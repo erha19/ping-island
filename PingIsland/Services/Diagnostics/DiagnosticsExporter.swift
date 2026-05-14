@@ -486,6 +486,16 @@ actor DiagnosticsExporter {
 
         do {
             try copyRecentDirectoryContentsIfPresent(
+                from: preferredGeminiHookDebugDirectory(),
+                toRelativeDirectory: "debug/gemini-hooks",
+                under: exportRoot
+            )
+        } catch {
+            warnings.append("Failed to export Gemini CLI hook debug summaries: \(error.localizedDescription)")
+        }
+
+        do {
+            try copyRecentDirectoryContentsIfPresent(
                 from: preferredCodexHookDebugDirectory(),
                 toRelativeDirectory: "debug/codex-hooks",
                 under: exportRoot
@@ -870,6 +880,10 @@ actor DiagnosticsExporter {
 
     private func preferredHermesHookDebugDirectory() -> URL {
         fileManager.homeDirectoryForCurrentUser.appendingPathComponent(".ping-island-debug/hermes-hooks", isDirectory: true)
+    }
+
+    private func preferredGeminiHookDebugDirectory() -> URL {
+        fileManager.homeDirectoryForCurrentUser.appendingPathComponent(".ping-island-debug/gemini-hooks", isDirectory: true)
     }
 
     private func writeCommandOutput(

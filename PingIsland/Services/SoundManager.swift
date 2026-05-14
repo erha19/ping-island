@@ -19,6 +19,7 @@ class SoundManager {
     static let eventSounds: [SoundEvent] = [
         SoundEvent(event: "SessionStart", sound: "8bit_start", key: "soundSessionStart"),
         SoundEvent(event: "Stop", sound: "8bit_complete", key: "soundTaskComplete"),
+        SoundEvent(event: "AfterAgent", sound: "8bit_complete", key: "soundTaskComplete"),
         SoundEvent(event: "PostToolUseFailure", sound: "8bit_error", key: "soundTaskError"),
         SoundEvent(event: "PermissionRequest", sound: "8bit_approval", key: "soundApprovalNeeded"),
         SoundEvent(event: "UserPromptSubmit", sound: "8bit_submit", key: "soundPromptSubmit"),

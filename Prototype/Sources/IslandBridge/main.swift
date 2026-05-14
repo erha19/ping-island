@@ -442,12 +442,18 @@ private enum BridgeDebugLogger {
             return "qoder-cli-hooks"
         case "kimi":
             return "kimi-hooks"
+        case "gemini":
+            return "gemini-hooks"
         default:
             break
         }
 
         if envelope.provider == .codex {
             return "codex-hooks"
+        }
+
+        if envelope.provider == .gemini {
+            return "gemini-hooks"
         }
 
         let normalizedEvent = envelope.eventType.lowercased()
@@ -1150,6 +1156,8 @@ private enum RemoteBridgeMessageBuilder {
             return "custom"
         case .kimi:
             return "kimi"
+        case .gemini:
+            return "gemini"
         }
     }
 

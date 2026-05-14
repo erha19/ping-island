@@ -103,7 +103,7 @@ public enum HookPayloadMapper {
         }
 
         switch provider {
-        case .claude:
+        case .claude, .gemini:
             let clientKind = normalizedClientKind(from: metadata)
             if clientKind == "qoder-cli",
                isQoderCLIPlanExitApproval(
@@ -168,6 +168,19 @@ public enum HookPayloadMapper {
                 {"hookSpecificOutput":{"hookEventName":"\(eventType)","decision":{"behavior":"allow","updatedInput":\(payloadJson)}}}
                 """
             }
+        // case .gemini:
+        //     switch decision {
+        //     case .approve, .approveForSession:
+        //         return #"{"decision":{"behavior":"allow"}}"#
+        //     case .deny, .cancel:
+        //         return #"{"decision":{"behavior":"deny","message":"Denied from Island"}}"#
+        //     case .answer:
+        //         guard let message = response.updatedInput else { return "{}" }
+        //         let escaped = BridgeCodec.jsonString(for: message) ?? "{}"
+        //         return """
+        //         {"decision":{"behavior":"allow","updatedInput":\(escaped)}}
+        //         """
+        //     }
         case .kimi:
             // See: https://www.kimi.com/code/docs/en/kimi-code-cli/customization/hooks.html
             switch decision {
@@ -938,9 +951,23 @@ public enum HookPayloadMapper {
         _ payload: [String: Any],
         source: AgentProvider
     ) -> [String: Any] {
-        guard source == .copilot else { return payload }
+        guard source == .copilot || source == .gemini else { return payload }
 
         var normalized = payload
+
+        if source == .gemini {
+            if normalized["message"] == nil {
+                if let promptResponse = payload["prompt_response"] as? String {
+                    normalized["message"] = promptResponse
+                } else if let prompt = payload["prompt"] as? String {
+                    normalized["message"] = prompt
+                }
+            }
+            if normalized["last_assistant_message"] == nil, let promptResponse = payload["prompt_response"] as? String {
+                normalized["last_assistant_message"] = promptResponse
+            }
+            return normalized
+        }
 
         if normalized["session_id"] == nil,
            let sessionId = payload["sessionId"] as? String {
@@ -1807,6 +1834,8 @@ private extension AgentProvider {
             return "Copilot"
         case .kimi:
             return "Kimi"
+        case .gemini:
+            return "Gemini"
         }
     }
 }

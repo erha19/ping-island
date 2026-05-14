@@ -5,6 +5,7 @@ enum SessionProvider: String, Codable, Equatable, Sendable {
     case codex
     case copilot
     case kimi
+    case gemini
 
     nonisolated var displayName: String {
         switch self {
@@ -16,6 +17,8 @@ enum SessionProvider: String, Codable, Equatable, Sendable {
             return "Copilot"
         case .kimi:
             return "Kimi"
+        case .gemini:
+            return "Gemini"
         }
     }
 }
@@ -117,6 +120,8 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
             return SessionClientInfo(kind: .custom, profileID: "copilot-cli", name: "GitHub Copilot", origin: "cli")
         case .kimi:
             return SessionClientInfo(kind: .custom, profileID: "kimi", name: "Kimi CLI", origin: "cli")
+        case .gemini:
+            return SessionClientInfo(kind: .custom, profileID: "gemini", name: "Gemini CLI", origin: "cli")
         }
     }
 
@@ -256,8 +261,15 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
             || originator?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "hermes agent"
     }
 
+    nonisolated var isGeminiClient: Bool {
+        profileID == "gemini"
+            || threadSource?.lowercased() == "gemini-hooks"
+            || name?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "gemini cli"
+            || originator?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "gemini cli"
+    }
+
     nonisolated var prefersHookMessageAsLastMessageFallback: Bool {
-        isOpenClawGatewayClient || isQwenCodeClient || isHermesClient
+        isOpenClawGatewayClient || isQwenCodeClient || isHermesClient || isGeminiClient
     }
 
     nonisolated var suppressesActivationNavigation: Bool {

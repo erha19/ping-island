@@ -94,6 +94,8 @@ actor RuntimeCoordinator {
             return false
         case .kimi:
             return false
+        case .gemini:
+            return false
         }
     }
 

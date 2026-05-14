@@ -1017,6 +1017,8 @@ struct SessionState: Equatable, Identifiable, Sendable {
             return false
         case .kimi:
             return false
+        case .gemini:
+            return false
         }
     }
 

@@ -39,6 +39,8 @@ extension SessionProvider {
             return TerminalColors.green
         case .kimi:
             return TerminalColors.kimi
+        case .gemini:
+            return TerminalColors.blue // Using blue as placeholder
         }
     }
 }

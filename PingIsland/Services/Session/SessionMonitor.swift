@@ -1127,6 +1127,8 @@ class SessionMonitor: ObservableObject {
             return event.status == "ended"
         case .codex:
             return event.status == "ended" || event.event == "Stop"
+        case .gemini:
+            return event.status == "ended"
         default:
             return false
         }
