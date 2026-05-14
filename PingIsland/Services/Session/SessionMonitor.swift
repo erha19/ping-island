@@ -150,10 +150,6 @@ class SessionMonitor: ObservableObject {
 
         let shouldAutoApprovePermission = await Self.shouldAutoApproveClaudePermission(for: effectiveEvent)
 
-        if !shouldAutoApprovePermission {
-            SoundManager.shared.handleEvent(effectiveEvent.event)
-        }
-
         await SessionStore.shared.process(.hookReceived(effectiveEvent))
 
         if shouldAutoApprovePermission,

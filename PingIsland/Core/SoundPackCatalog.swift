@@ -71,20 +71,6 @@ enum NotificationEvent: String, CaseIterable, Identifiable {
         }
     }
 
-    var island8BitSound: Island8BitSound {
-        switch self {
-        case .processingStarted:
-            return .processingStarted
-        case .attentionRequired:
-            return .attentionRequired
-        case .taskCompleted:
-            return .taskCompleted
-        case .taskError:
-            return .taskError
-        case .resourceLimit:
-            return .resourceLimit
-        }
-    }
 }
 
 enum SoundThemeMode: String, CaseIterable, Identifiable {
@@ -117,33 +103,55 @@ enum SoundThemeMode: String, CaseIterable, Identifiable {
     }
 }
 
-enum Island8BitSound: String {
-    case clientStartup = "island8bit_client_startup"
-    case releaseNotesSuccess = "island8bit_release_notes_success"
-    case processingStarted = "island8bit_processing_started"
-    case attentionRequired = "island8bit_attention_required"
-    case taskCompleted = "island8bit_task_completed"
-    case taskError = "island8bit_task_error"
-    case resourceLimit = "island8bit_resource_limit"
+enum Island8BitSound: String, CaseIterable, Identifiable {
+    case approvalAlert = "8bit_approval_alert"
+    case bootJingle = "8bit_boot_jingle"
+    case bubblePop = "bubbles_pop"
+    case completeDing = "8bit_complete_ding"
+    case errorBuzz = "8bit_error_buzz"
+    case hurt = "8bit_hurt"
+    case itemPickup = "8bit_item_pickup"
+    case menuHighlight = "8bit_menu_highlight"
+    case menuSelect = "8bit_menu_select"
+    case powerUp = "8bit_power_up"
+    case startChime = "8bit_start_chime"
+    case submitBlip = "8bit_submit_blip"
+    case winJingle = "8bit_win_jingle"
+
+    var id: String { rawValue }
 
     var label: String {
         switch self {
-        case .clientStartup:
-            return "Power Up"
-        case .releaseNotesSuccess:
-            return "Win Jingle"
-        case .processingStarted:
-            return "Menu Select"
-        case .attentionRequired:
+        case .approvalAlert:
+            return "Approval Alert"
+        case .bootJingle:
+            return "Boot Jingle"
+        case .bubblePop:
+            return "Bubble Pop"
+        case .completeDing:
+            return "Complete Ding"
+        case .errorBuzz:
+            return "Error Buzz"
+        case .hurt:
+            return "Hurt"
+        case .itemPickup:
             return "Item Pickup"
-        case .taskCompleted:
+        case .menuHighlight:
             return "Menu Highlight"
-        case .taskError:
-            return "Hurt"
-        case .resourceLimit:
-            return "Hurt"
+        case .menuSelect:
+            return "Menu Select"
+        case .powerUp:
+            return "Power Up"
+        case .startChime:
+            return "Start Chime"
+        case .submitBlip:
+            return "Submit Blip"
+        case .winJingle:
+            return "Win Jingle"
         }
     }
+
+    static let allOrdered: [Island8BitSound] = Island8BitSound.allCases.sorted { $0.label < $1.label }
 }
 
 struct OpenPeonSoundEntry: Decodable, Equatable {

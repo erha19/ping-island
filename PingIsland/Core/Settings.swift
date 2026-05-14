@@ -339,6 +339,11 @@ final class AppSettingsStore: ObservableObject {
         static let taskCompletedSoundEnabled = "taskCompletedSoundEnabled"
         static let taskErrorSoundEnabled = "taskErrorSoundEnabled"
         static let resourceLimitSoundEnabled = "resourceLimitSoundEnabled"
+        static let island8BitProcessingStartSound = "island8BitProcessingStartSound"
+        static let island8BitAttentionRequiredSound = "island8BitAttentionRequiredSound"
+        static let island8BitTaskCompletedSound = "island8BitTaskCompletedSound"
+        static let island8BitTaskErrorSound = "island8BitTaskErrorSound"
+        static let island8BitResourceLimitSound = "island8BitResourceLimitSound"
         static let soundThemeMode = "soundThemeMode"
         static let island8BitStartSoundMigrated = "island8BitStartSoundMigrated"
         static let selectedSoundPackPath = "selectedSoundPackPath"
@@ -497,6 +502,41 @@ final class AppSettingsStore: ObservableObject {
         didSet {
             guard !isBootstrapping else { return }
             defaults.set(resourceLimitSoundEnabled, forKey: Keys.resourceLimitSoundEnabled)
+        }
+    }
+
+    @Published var island8BitProcessingStartSound: Island8BitSound {
+        didSet {
+            guard !isBootstrapping else { return }
+            defaults.set(island8BitProcessingStartSound.rawValue, forKey: Keys.island8BitProcessingStartSound)
+        }
+    }
+
+    @Published var island8BitAttentionRequiredSound: Island8BitSound {
+        didSet {
+            guard !isBootstrapping else { return }
+            defaults.set(island8BitAttentionRequiredSound.rawValue, forKey: Keys.island8BitAttentionRequiredSound)
+        }
+    }
+
+    @Published var island8BitTaskCompletedSound: Island8BitSound {
+        didSet {
+            guard !isBootstrapping else { return }
+            defaults.set(island8BitTaskCompletedSound.rawValue, forKey: Keys.island8BitTaskCompletedSound)
+        }
+    }
+
+    @Published var island8BitTaskErrorSound: Island8BitSound {
+        didSet {
+            guard !isBootstrapping else { return }
+            defaults.set(island8BitTaskErrorSound.rawValue, forKey: Keys.island8BitTaskErrorSound)
+        }
+    }
+
+    @Published var island8BitResourceLimitSound: Island8BitSound {
+        didSet {
+            guard !isBootstrapping else { return }
+            defaults.set(island8BitResourceLimitSound.rawValue, forKey: Keys.island8BitResourceLimitSound)
         }
     }
 
@@ -1098,6 +1138,21 @@ final class AppSettingsStore: ObservableObject {
             exists: persistedKeys.contains(Keys.resourceLimitSoundEnabled),
             default: true
         ))
+        _island8BitProcessingStartSound = Published(initialValue: Island8BitSound(
+            rawValue: defaults.string(forKey: Keys.island8BitProcessingStartSound) ?? ""
+        ) ?? .menuSelect)
+        _island8BitAttentionRequiredSound = Published(initialValue: Island8BitSound(
+            rawValue: defaults.string(forKey: Keys.island8BitAttentionRequiredSound) ?? ""
+        ) ?? .itemPickup)
+        _island8BitTaskCompletedSound = Published(initialValue: Island8BitSound(
+            rawValue: defaults.string(forKey: Keys.island8BitTaskCompletedSound) ?? ""
+        ) ?? .winJingle)
+        _island8BitTaskErrorSound = Published(initialValue: Island8BitSound(
+            rawValue: defaults.string(forKey: Keys.island8BitTaskErrorSound) ?? ""
+        ) ?? .hurt)
+        _island8BitResourceLimitSound = Published(initialValue: Island8BitSound(
+            rawValue: defaults.string(forKey: Keys.island8BitResourceLimitSound) ?? ""
+        ) ?? .hurt)
         _soundThemeMode = Published(initialValue: resolvedSoundThemeMode)
         _selectedSoundPackPath = Published(initialValue: defaults.string(forKey: Keys.selectedSoundPackPath) ?? "")
         _hideInFullscreen = Published(initialValue: Self.boolValue(
@@ -1491,6 +1546,36 @@ enum AppSettings {
         }
     }
 
+    static func bundledSound(for event: NotificationEvent) -> Island8BitSound {
+        switch event {
+        case .processingStarted:
+            return shared.island8BitProcessingStartSound
+        case .attentionRequired:
+            return shared.island8BitAttentionRequiredSound
+        case .taskCompleted:
+            return shared.island8BitTaskCompletedSound
+        case .taskError:
+            return shared.island8BitTaskErrorSound
+        case .resourceLimit:
+            return shared.island8BitResourceLimitSound
+        }
+    }
+
+    static func setBundledSound(_ sound: Island8BitSound, for event: NotificationEvent) {
+        switch event {
+        case .processingStarted:
+            shared.island8BitProcessingStartSound = sound
+        case .attentionRequired:
+            shared.island8BitAttentionRequiredSound = sound
+        case .taskCompleted:
+            shared.island8BitTaskCompletedSound = sound
+        case .taskError:
+            shared.island8BitTaskErrorSound = sound
+        case .resourceLimit:
+            shared.island8BitResourceLimitSound = sound
+        }
+    }
+
     static func playSound(named soundName: String?) {
         guard soundEnabled, let soundName else { return }
         guard let sound = NSSound(named: NSSound.Name(soundName)) else { return }
@@ -1500,12 +1585,12 @@ enum AppSettings {
 
     static func playClientStartupSound() {
         guard soundEnabled else { return }
-        playBundledSound(named: Island8BitSound.clientStartup.rawValue)
+        playBundledSound(named: Island8BitSound.powerUp.rawValue)
     }
 
     static func playReleaseNotesSuccessSound() {
         guard soundEnabled else { return }
-        playBundledSound(named: Island8BitSound.releaseNotesSuccess.rawValue)
+        playBundledSound(named: Island8BitSound.winJingle.rawValue)
     }
 
     static func playDetachedCapsuleSound() {
@@ -1521,7 +1606,7 @@ enum AppSettings {
         case .builtIn:
             playSound(named: sound(for: event).soundName)
         case .island8Bit:
-            playBundledSound(named: event.island8BitSound.rawValue)
+            playBundledSound(named: Self.bundledSound(for: event).rawValue)
         case .soundPack:
             if SoundPackCatalog.shared.play(
                 event: event,

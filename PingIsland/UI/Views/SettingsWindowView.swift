@@ -641,15 +641,12 @@ private struct SoundSettingsContent: View {
                     }
                 }
 
-                SettingsSectionCard(title: "固定映射") {
+                SettingsSectionCard(title: "阶段音效") {
                     ForEach(NotificationEvent.allCases) { event in
-                        BundledThemeEventLine(
+                        BundledSoundEventLine(
                             event: event,
-                            soundLabel: AppLocalization.string(event.island8BitSound.label),
-                            isEnabled: Binding(
-                                get: { AppSettings.isSoundEnabled(for: event) },
-                                set: { AppSettings.setSoundEnabled($0, for: event) }
-                            )
+                            isEnabled: soundEnabledBinding(for: event),
+                            selectedSound: bundledSoundBinding(for: event)
                         ) {
                             AppSettings.playSound(for: event)
                         }
@@ -755,6 +752,21 @@ private struct SoundSettingsContent: View {
             return $settings.taskErrorSound
         case .resourceLimit:
             return $settings.resourceLimitSound
+        }
+    }
+
+    private func bundledSoundBinding(for event: NotificationEvent) -> Binding<Island8BitSound> {
+        switch event {
+        case .processingStarted:
+            return $settings.island8BitProcessingStartSound
+        case .attentionRequired:
+            return $settings.island8BitAttentionRequiredSound
+        case .taskCompleted:
+            return $settings.island8BitTaskCompletedSound
+        case .taskError:
+            return $settings.island8BitTaskErrorSound
+        case .resourceLimit:
+            return $settings.island8BitResourceLimitSound
         }
     }
 
@@ -5055,10 +5067,10 @@ private struct SoundPackEventLine: View {
     }
 }
 
-private struct BundledThemeEventLine: View {
+private struct BundledSoundEventLine: View {
     let event: NotificationEvent
-    let soundLabel: String
     @Binding var isEnabled: Bool
+    @Binding var selectedSound: Island8BitSound
     let preview: () -> Void
 
     var body: some View {
@@ -5073,10 +5085,20 @@ private struct BundledThemeEventLine: View {
 
                 Spacer(minLength: 12)
 
-                HStack(spacing: 8) {
+                HStack(alignment: .center, spacing: 8) {
                     Toggle("", isOn: $isEnabled)
                         .labelsHidden()
                         .settingsCompactSwitch()
+
+                    Picker(event.title, selection: $selectedSound) {
+                        ForEach(Island8BitSound.allOrdered) { sound in
+                            Text(sound.label).tag(sound)
+                        }
+                    }
+                    .id(selectedSound)
+                    .labelsHidden()
+                    .settingsMenuPicker(width: 148)
+                    .disabled(!isEnabled)
 
                     Button(action: preview) {
                         Image(systemName: "play.fill")
@@ -5098,10 +5120,6 @@ private struct BundledThemeEventLine: View {
                 .foregroundColor(.white.opacity(0.58))
                 .fixedSize(horizontal: false, vertical: true)
                 .layoutPriority(1)
-
-            Text(AppLocalization.format("固定音效：%@", soundLabel))
-                .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                .foregroundColor(.white.opacity(0.42))
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 16)
