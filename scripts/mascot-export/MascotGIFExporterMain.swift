@@ -207,7 +207,7 @@ private struct Options {
         }
 
         switch status {
-        case .idle:
+        case .idle, .dragging:
             return 16
         case .working, .warning:
             return 24
@@ -220,7 +220,7 @@ private struct Options {
         }
 
         switch status {
-        case .idle:
+        case .idle, .dragging:
             return 3.0
         case .working:
             return 1.8

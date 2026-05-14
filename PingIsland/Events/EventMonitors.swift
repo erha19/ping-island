@@ -25,6 +25,7 @@ final class EventMonitors {
     private let workspaceNotificationCenter: NotificationCenter
     private let currentMouseLocation: () -> CGPoint
     private let monitorFactory: (NSEvent.EventTypeMask, @escaping (NSEvent) -> Void) -> EventMonitoring
+    private var monitoringLevel: EnergyEventMonitoringLevel = .full
     private var cancellables = Set<AnyCancellable>()
 
     convenience private init() {
@@ -34,7 +35,8 @@ final class EventMonitors {
             currentMouseLocation: { NSEvent.mouseLocation },
             monitorFactory: { mask, handler in
                 EventMonitor(mask: mask, handler: handler)
-            }
+            },
+            energyPolicyPublisher: EnergyGovernor.shared.$policy.eraseToAnyPublisher()
         )
     }
 
@@ -42,7 +44,8 @@ final class EventMonitors {
         notificationCenter: NotificationCenter,
         workspaceNotificationCenter: NotificationCenter,
         currentMouseLocation: @escaping () -> CGPoint,
-        monitorFactory: @escaping (NSEvent.EventTypeMask, @escaping (NSEvent) -> Void) -> EventMonitoring
+        monitorFactory: @escaping (NSEvent.EventTypeMask, @escaping (NSEvent) -> Void) -> EventMonitoring,
+        energyPolicyPublisher: AnyPublisher<EnergyPolicy, Never>? = nil
     ) {
         self.notificationCenter = notificationCenter
         self.workspaceNotificationCenter = workspaceNotificationCenter
@@ -50,6 +53,7 @@ final class EventMonitors {
         self.monitorFactory = monitorFactory
 
         observeLifecycle()
+        observeEnergyPolicy(energyPolicyPublisher)
         restartMonitoring()
     }
 
@@ -79,18 +83,34 @@ final class EventMonitors {
             .store(in: &cancellables)
     }
 
+    private func observeEnergyPolicy(_ publisher: AnyPublisher<EnergyPolicy, Never>?) {
+        publisher?
+            .map(\.eventMonitoringLevel)
+            .removeDuplicates()
+            .sink { [weak self] level in
+                guard let self, self.monitoringLevel != level else { return }
+                self.monitoringLevel = level
+                self.restartMonitoring()
+            }
+            .store(in: &cancellables)
+    }
+
     func restartMonitoring() {
         stopMonitoring()
-        setupMonitors()
+        setupMonitors(level: monitoringLevel)
         mouseLocation.send(currentMouseLocation())
     }
 
-    private func setupMonitors() {
-        mouseMoveMonitor = monitorFactory(.mouseMoved) { [weak self] _ in
-            guard let self else { return }
-            self.mouseLocation.send(self.currentMouseLocation())
+    private func setupMonitors(level: EnergyEventMonitoringLevel) {
+        guard level != .disabled else { return }
+
+        if level == .full {
+            mouseMoveMonitor = monitorFactory(.mouseMoved) { [weak self] _ in
+                guard let self else { return }
+                self.mouseLocation.send(self.currentMouseLocation())
+            }
+            mouseMoveMonitor?.start()
         }
-        mouseMoveMonitor?.start()
 
         mouseDownMonitor = monitorFactory(.leftMouseDown) { [weak self] event in
             self?.mouseDown.send(event)

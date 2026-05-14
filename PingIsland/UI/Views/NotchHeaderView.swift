@@ -145,6 +145,8 @@ enum NotchPetActivity: Equatable {
 }
 
 struct NotchPetIcon: View {
+    @ObservedObject private var energyGovernor = EnergyGovernor.shared
+
     let style: NotchPetStyle
     let size: CGFloat
     let tone: NotchIndicatorTone
@@ -221,15 +223,30 @@ struct NotchPetIcon: View {
         .onChange(of: tone) { _, _ in
             phase = 0
         }
-        // Use TimelineView for synchronized, battery-efficient animation
-        .background(
-            TimelineView(.periodic(from: .now, by: Self.frameInterval)) { _ in
+        .background(animationTicker(frameCount: frames.count))
+    }
+
+    @ViewBuilder
+    private func animationTicker(frameCount: Int) -> some View {
+        if energyGovernor.policy.animationLevel != .staticFrames {
+            TimelineView(.periodic(from: .now, by: effectiveFrameInterval)) { _ in
                 Color.clear
-                    .onAppear { phase = (phase + 1) % max(1, frames.count) }
+                    .onAppear { phase = (phase + 1) % max(1, frameCount) }
             }
             .opacity(0)
             .frame(width: 0, height: 0)
-        )
+        }
+    }
+
+    private var effectiveFrameInterval: TimeInterval {
+        switch energyGovernor.policy.animationLevel {
+        case .full:
+            return Self.frameInterval
+        case .reduced:
+            return Self.frameInterval * 2.5
+        case .staticFrames:
+            return Self.frameInterval
+        }
     }
 
     private var sleepOffsetY: CGFloat {

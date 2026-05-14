@@ -282,7 +282,7 @@ private struct MascotPosterView: View {
                     .font(.system(size: 138, weight: .black, design: .rounded))
                     .foregroundStyle(Color(red: 0.16, green: 0.12, blue: 0.08))
 
-                Text("Dynamic Island-style AI coding monitor")
+                Text("AI coding session monitor")
                     .font(.system(size: 54, weight: .semibold, design: .rounded))
                     .foregroundStyle(Color(red: 0.45, green: 0.35, blue: 0.24))
 

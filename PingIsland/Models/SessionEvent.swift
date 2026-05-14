@@ -82,6 +82,14 @@ enum SessionEvent: Sendable {
     /// User issued /clear command - reset UI state while keeping session alive
     case clearDetected(sessionId: String)
 
+    // MARK: - Desktop App Monitor Events
+
+    /// A new Claude Desktop local-agent session was discovered via file monitoring
+    case desktopSessionDiscovered(ClaudeDesktopSessionInfo)
+
+    /// A Claude Desktop AI turn completed (detected via `type:"result"` in audit.jsonl)
+    case desktopTurnCompleted(sessionId: String)
+
     // MARK: - Session Lifecycle
 
     /// Session has ended
@@ -109,6 +117,15 @@ struct FileUpdatePayload: Sendable {
     let completedToolIds: Set<String>
     let toolResults: [String: ConversationParser.ToolResult]
     let structuredResults: [String: ToolResultData]
+}
+
+/// Info about a Claude Desktop local-agent session discovered via file monitoring
+struct ClaudeDesktopSessionInfo: Sendable {
+    let sessionId: String
+    let cwd: String
+    let title: String?
+    let createdAt: Date
+    let auditFilePath: String
 }
 
 /// Result of a tool completion detected from JSONL
@@ -703,6 +720,10 @@ extension SessionEvent: CustomStringConvertible {
             return "subagentStopped(session: \(sessionId.prefix(8)), task: \(taskToolId.prefix(12)))"
         case .agentFileUpdated(let sessionId, let taskToolId, let tools):
             return "agentFileUpdated(session: \(sessionId.prefix(8)), task: \(taskToolId.prefix(12)), tools: \(tools.count))"
+        case .desktopSessionDiscovered(let info):
+            return "desktopSessionDiscovered(session: \(info.sessionId.prefix(8)))"
+        case .desktopTurnCompleted(let sessionId):
+            return "desktopTurnCompleted(session: \(sessionId.prefix(8)))"
         }
     }
 }
@@ -756,6 +777,10 @@ extension SessionEvent {
             return "historyLoaded"
         case .toolCompleted:
             return "toolCompleted"
+        case .desktopSessionDiscovered:
+            return "desktopSessionDiscovered"
+        case .desktopTurnCompleted:
+            return "desktopTurnCompleted"
         }
     }
 
@@ -786,6 +811,10 @@ extension SessionEvent {
             return String(sessionId.prefix(8))
         case .fileUpdated(let payload):
             return String(payload.sessionId.prefix(8))
+        case .desktopSessionDiscovered(let info):
+            return String(info.sessionId.prefix(8))
+        case .desktopTurnCompleted(let sessionId):
+            return String(sessionId.prefix(8))
         case .pruneTimedOutExternalContinuations:
             return nil
         }

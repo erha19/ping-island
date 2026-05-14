@@ -141,6 +141,15 @@ struct ClosedNotchUsageAvailability: Equatable {
 }
 
 enum AccessibilityPermissionStatus {
+#if APP_STORE
+    static let isAvailable = false
+
+    static func isTrusted(prompt: Bool = false) -> Bool {
+        false
+    }
+#else
+    static let isAvailable = true
+
     static func isTrusted(prompt: Bool = false) -> Bool {
         let options = [
             kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: prompt
@@ -148,6 +157,7 @@ enum AccessibilityPermissionStatus {
 
         return AXIsProcessTrustedWithOptions(options)
     }
+#endif
 }
 
 @MainActor
@@ -224,20 +234,39 @@ final class SettingsPanelViewModel: ObservableObject {
         }
     }
 
-    func refresh() {
+    func refreshInitialState() {
         launchAtLogin = SMAppService.mainApp.status == .enabled
-        refreshHookInstallationStates()
-        refreshIDEExtensionInstallationStates()
-        refreshCustomHookInstallations()
-        refreshQoderCLIHookRefreshStatus()
-        refreshClosedNotchUsageAvailability()
         refreshAccessibilityStatus()
-        ScreenSelector.shared.refreshScreens()
-        SoundPackCatalog.shared.refresh()
         refreshLocalizedState()
     }
 
+    func refresh(for category: SettingsCategory) {
+        launchAtLogin = SMAppService.mainApp.status == .enabled
+        refreshAccessibilityStatus()
+        refreshLocalizedState()
+
+        switch category {
+        case .display:
+            ScreenSelector.shared.refreshScreens()
+            refreshClosedNotchUsageAvailability()
+        case .sound:
+            SoundPackCatalog.shared.refresh()
+        case .integration:
+            refreshHookInstallationStates()
+            refreshIDEExtensionInstallationStates()
+            refreshCustomHookInstallations()
+            refreshQoderCLIHookRefreshStatus()
+        case .general, .shortcuts, .mascot, .remote, .labs, .about:
+            break
+        }
+    }
+
     func refreshAccessibilityStatus() {
+        guard AccessibilityPermissionStatus.isAvailable else {
+            accessibilityEnabled = false
+            return
+        }
+
         accessibilityEnabled = accessibilityStatusProvider(false)
     }
 
@@ -452,6 +481,11 @@ final class SettingsPanelViewModel: ObservableObject {
     }
 
     func openAccessibilitySettings() {
+        guard AccessibilityPermissionStatus.isAvailable else {
+            accessibilityEnabled = false
+            return
+        }
+
         accessibilityEnabled = accessibilityStatusProvider(true)
         if !accessibilityEnabled {
             accessibilitySettingsOpener()
@@ -525,8 +559,13 @@ final class SettingsPanelViewModel: ObservableObject {
     private func hookConfigurationDirectoryURL(for profile: ManagedHookClientProfile) -> URL? {
         let fileManager = FileManager.default
 
-        if let existingConfiguration = profile.configurationURLs.first(where: { fileManager.fileExists(atPath: $0.path) }) {
-            return existingConfiguration.deletingLastPathComponent()
+        for configurationURL in profile.configurationURLs {
+            var isDirectory = ObjCBool(false)
+            guard fileManager.fileExists(atPath: configurationURL.path, isDirectory: &isDirectory) else {
+                continue
+            }
+
+            return isDirectory.boolValue ? configurationURL : configurationURL.deletingLastPathComponent()
         }
 
         if let existingDirectory = profile.configurationURLs
@@ -542,6 +581,235 @@ final class SettingsPanelViewModel: ObservableObject {
 private enum SettingsPanelPresentation {
     case window
     case popover
+}
+
+private struct SoundSettingsContent: View {
+    @ObservedObject private var settings = AppSettings.shared
+    @ObservedObject private var soundPacks = SoundPackCatalog.shared
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            SettingsSectionCard(title: "通知") {
+                SettingsToggleLine(
+                    title: "启用提示音",
+                    subtitle: "不同阶段可分别播放不同音效，适用于 Claude、Codex 等会话。",
+                    isOn: $settings.soundEnabled
+                )
+                SettingsLineDivider()
+
+                SettingsInfoLine(
+                    title: "声音模式",
+                    subtitle: "系统音适合快速配置；主题包兼容 OpenPeon / CESP 格式。"
+                ) {
+                    soundThemeModePicker
+                }
+                SettingsLineDivider()
+
+                SettingsSliderLine(
+                    title: "音量",
+                    subtitle: "控制 Island 播放提示音时的音量大小",
+                    value: $settings.soundVolume,
+                    range: 0...1,
+                    step: 0.05,
+                    format: { "\(Int(($0 * 100).rounded()))%" }
+                )
+            }
+
+            if settings.soundThemeMode == .builtIn {
+                SettingsSectionCard(title: "阶段音效") {
+                    ForEach(NotificationEvent.allCases) { event in
+                        SoundEventSettingsLine(
+                            event: event,
+                            isEnabled: soundEnabledBinding(for: event),
+                            selectedSound: soundBinding(for: event)
+                        ) {
+                            AppSettings.playSound(for: event)
+                        }
+                    }
+                }
+            } else if settings.soundThemeMode == .island8Bit {
+                SettingsSectionCard(title: "客户端启动音") {
+                    SettingsActionLine(
+                        title: "固定启动音",
+                        subtitle: "使用内置 8-bit 启动旋律。应用启动时会自动播放，也可以在这里试听。"
+                    ) {
+                        AppSettings.playClientStartupSound()
+                    } accessory: {
+                        Image(systemName: "play.fill")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(.white.opacity(0.72))
+                    }
+                }
+
+                SettingsSectionCard(title: "固定映射") {
+                    ForEach(NotificationEvent.allCases) { event in
+                        BundledThemeEventLine(
+                            event: event,
+                            soundLabel: AppLocalization.string(event.island8BitSound.label),
+                            isEnabled: Binding(
+                                get: { AppSettings.isSoundEnabled(for: event) },
+                                set: { AppSettings.setSoundEnabled($0, for: event) }
+                            )
+                        ) {
+                            AppSettings.playSound(for: event)
+                        }
+                    }
+                }
+            } else {
+                SettingsSectionCard(title: "主题音效包") {
+                    SoundPackSourceInfoLine {
+                        soundPackPicker
+                    }
+
+                    SoundPackImportActionLine {
+                        if soundPacks.importPack(), soundPacks.pack(for: settings.selectedSoundPackPath) == nil {
+                            settings.selectedSoundPackPath = soundPacks.availablePacks.first?.rootURL.path ?? ""
+                        }
+                    } accessory: {
+                        Image(systemName: "square.and.arrow.down")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(.white.opacity(0.72))
+                    }
+
+                    if soundPacks.availablePacks.isEmpty {
+                        SettingsValueLine(title: "可用主题包", value: "未发现")
+                    } else {
+                        SettingsValueLine(title: "可用主题包", value: "\(soundPacks.availablePacks.count)")
+                    }
+                }
+
+                SettingsSectionCard(title: "阶段映射") {
+                    ForEach(NotificationEvent.allCases) { event in
+                        SoundPackEventLine(
+                            event: event,
+                            isEnabled: Binding(
+                                get: { AppSettings.isSoundEnabled(for: event) },
+                                set: { AppSettings.setSoundEnabled($0, for: event) }
+                            )
+                        ) {
+                            AppSettings.playSound(for: event)
+                        }
+                    }
+                }
+            }
+        }
+        .onAppear {
+            ensureValidSelectedSoundPack()
+        }
+        .onChange(of: soundPacks.availablePacks) { _, _ in
+            ensureValidSelectedSoundPack()
+        }
+        .onChange(of: settings.soundThemeMode) { _, _ in
+            ensureValidSelectedSoundPack()
+        }
+    }
+
+    private var soundThemeModePicker: some View {
+        Picker("声音模式", selection: $settings.soundThemeMode) {
+            ForEach(SoundThemeMode.allCases) { mode in
+                Text(appLocalized: mode.title).tag(mode)
+            }
+        }
+        .labelsHidden()
+        .settingsMenuPicker(width: 168)
+    }
+
+    private var soundPackPicker: some View {
+        Picker("主题包", selection: $settings.selectedSoundPackPath) {
+            if soundPacks.availablePacks.isEmpty {
+                Text(appLocalized: "未发现").tag("")
+            } else {
+                ForEach(soundPacks.availablePacks) { pack in
+                    Text(pack.displayName).tag(pack.rootURL.path)
+                }
+            }
+        }
+        .labelsHidden()
+        .settingsMenuPicker(width: 204)
+    }
+
+    private func soundEnabledBinding(for event: NotificationEvent) -> Binding<Bool> {
+        switch event {
+        case .processingStarted:
+            return $settings.processingStartSoundEnabled
+        case .attentionRequired:
+            return $settings.attentionRequiredSoundEnabled
+        case .taskCompleted:
+            return $settings.taskCompletedSoundEnabled
+        case .taskError:
+            return $settings.taskErrorSoundEnabled
+        case .resourceLimit:
+            return $settings.resourceLimitSoundEnabled
+        }
+    }
+
+    private func soundBinding(for event: NotificationEvent) -> Binding<NotificationSound> {
+        switch event {
+        case .processingStarted:
+            return $settings.processingStartSound
+        case .attentionRequired:
+            return $settings.attentionRequiredSound
+        case .taskCompleted:
+            return $settings.taskCompletedSound
+        case .taskError:
+            return $settings.taskErrorSound
+        case .resourceLimit:
+            return $settings.resourceLimitSound
+        }
+    }
+
+    private func ensureValidSelectedSoundPack() {
+        guard settings.soundThemeMode == .soundPack else { return }
+        if soundPacks.availablePacks.isEmpty {
+            settings.selectedSoundPackPath = ""
+        } else if soundPacks.pack(for: settings.selectedSoundPackPath) == nil {
+            settings.selectedSoundPackPath = soundPacks.availablePacks.first?.rootURL.path ?? ""
+        }
+    }
+}
+
+private struct SettingsCategoryLoadingView: View {
+    let category: SettingsCategory
+
+    var body: some View {
+        SettingsSectionCard(title: category.title) {
+            VStack(spacing: 12) {
+                ProgressView()
+                    .controlSize(.regular)
+                    .tint(.white.opacity(0.82))
+
+                Text(verbatim: loadingTitle)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.88))
+
+                Text(verbatim: loadingSubtitle)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.white.opacity(0.54))
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, minHeight: 180)
+            .padding(.horizontal, 24)
+            .padding(.vertical, 24)
+        }
+    }
+
+    private var loadingTitle: String {
+        AppLocalization.format("正在加载%@设置…", AppLocalization.string(category.title))
+    }
+
+    private var loadingSubtitle: String {
+        switch category {
+        case .display:
+            return AppLocalization.string("正在刷新显示器与用量展示状态")
+        case .sound:
+            return AppLocalization.string("正在扫描可用声音主题包")
+        case .integration:
+            return AppLocalization.string("正在检查 Hooks、IDE 扩展与客户端安装状态")
+        case .general, .shortcuts, .mascot, .remote, .labs, .about:
+            return AppLocalization.string("马上就好")
+        }
+    }
 }
 
 private struct SettingsSidebarSection: Identifiable {
@@ -591,7 +859,6 @@ private struct SettingsPanelContentView: View {
     @StateObject private var viewModel = SettingsPanelViewModel()
     @ObservedObject private var settings = AppSettings.shared
     @ObservedObject private var screenSelector = ScreenSelector.shared
-    @ObservedObject private var soundPacks = SoundPackCatalog.shared
     @ObservedObject private var updateManager = UpdateManager.shared
     @ObservedObject private var remoteManager = RemoteConnectorManager.shared
     @State private var selectedCategory: SettingsCategory? = .general
@@ -603,6 +870,9 @@ private struct SettingsPanelContentView: View {
     @State private var remotePasswordPromptRequest: RemotePasswordPromptRequest?
     @State private var consecutiveGeneralTapCount = 0
     @State private var isAccessibilityPollingActive = false
+    @State private var arePreviewAnimationsActive = false
+    @State private var loadingCategory: SettingsCategory?
+    @State private var categoryRefreshTask: Task<Void, Never>?
 
     var body: some View {
         ZStack {
@@ -632,13 +902,21 @@ private struct SettingsPanelContentView: View {
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .shadow(color: Color.black.opacity(0.22), radius: 30, y: 18)
         .preferredColorScheme(.dark)
+        .environment(\.mascotAnimationsEnabled, arePreviewAnimationsActive)
         .onAppear {
-            viewModel.refresh()
-            ensureValidSelectedSoundPack()
-            isAccessibilityPollingActive = true
+            viewModel.refreshInitialState()
+            let isVisible = presentation == .popover || currentWindow?.isVisible == true
+            isAccessibilityPollingActive = isVisible
+            arePreviewAnimationsActive = isVisible
+
+            scheduleCategoryRefresh(for: currentCategory, showLoading: false)
         }
         .onDisappear {
             isAccessibilityPollingActive = false
+            arePreviewAnimationsActive = false
+            categoryRefreshTask?.cancel()
+            categoryRefreshTask = nil
+            loadingCategory = nil
         }
         .task(id: isAccessibilityPollingActive) {
             guard isAccessibilityPollingActive else { return }
@@ -655,16 +933,13 @@ private struct SettingsPanelContentView: View {
             }
 
             isAccessibilityPollingActive = isVisible
+            arePreviewAnimationsActive = isVisible
             if isVisible {
-                viewModel.refreshAccessibilityStatus()
+                scheduleCategoryRefresh(for: currentCategory, showLoading: false)
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-            viewModel.refresh()
-            ensureValidSelectedSoundPack()
-        }
-        .onChange(of: soundPacks.availablePacks) { _, _ in
-            ensureValidSelectedSoundPack()
+            scheduleCategoryRefresh(for: currentCategory, showLoading: false)
         }
         .onChange(of: settings.appLanguage) { _, _ in
             viewModel.refreshLocalizedState()
@@ -959,25 +1234,29 @@ private struct SettingsPanelContentView: View {
     private var detail: some View {
         ScrollView(.vertical, showsIndicators: false) {
             VStack(alignment: .leading, spacing: 22) {
-                switch currentCategory {
-                case .general:
-                    generalContent
-                case .shortcuts:
-                    shortcutsContent
-                case .display:
-                    displayContent
-                case .mascot:
-                    mascotContent
-                case .sound:
-                    soundContent
-                case .integration:
-                    integrationContent
-                case .remote:
-                    remoteContent
-                case .labs:
-                    labsContent
-                case .about:
-                    aboutContent
+                if loadingCategory == currentCategory {
+                    SettingsCategoryLoadingView(category: currentCategory)
+                } else {
+                    switch currentCategory {
+                    case .general:
+                        generalContent
+                    case .shortcuts:
+                        shortcutsContent
+                    case .display:
+                        displayContent
+                    case .mascot:
+                        mascotContent
+                    case .sound:
+                        soundContent
+                    case .integration:
+                        integrationContent
+                    case .remote:
+                        remoteContent
+                    case .labs:
+                        labsContent
+                    case .about:
+                        aboutContent
+                    }
                 }
             }
             .padding(.horizontal, 22)
@@ -1058,19 +1337,57 @@ private struct SettingsPanelContentView: View {
     private func selectSidebarCategory(_ category: SettingsCategory) {
         selectedCategory = category
 
-        guard !settings.labsSettingsUnlocked else {
-            return
-        }
-
-        guard category == .general else {
+        if !settings.labsSettingsUnlocked, category != .general {
             consecutiveGeneralTapCount = 0
-            return
+        } else if !settings.labsSettingsUnlocked, category == .general {
+            consecutiveGeneralTapCount += 1
         }
 
-        consecutiveGeneralTapCount += 1
-        if consecutiveGeneralTapCount >= 6 {
+        if !settings.labsSettingsUnlocked, consecutiveGeneralTapCount >= 6 {
             settings.labsSettingsUnlocked = true
             selectedCategory = .labs
+        }
+
+        let categoryToRefresh = currentCategory
+        scheduleCategoryRefresh(
+            for: categoryToRefresh,
+            showLoading: shouldShowLoading(for: categoryToRefresh)
+        )
+    }
+
+    private func shouldShowLoading(for category: SettingsCategory) -> Bool {
+        switch category {
+        case .display, .sound, .integration:
+            return true
+        case .general, .shortcuts, .mascot, .remote, .labs, .about:
+            return false
+        }
+    }
+
+    private func scheduleCategoryRefresh(for category: SettingsCategory, showLoading: Bool) {
+        categoryRefreshTask?.cancel()
+        categoryRefreshTask = nil
+
+        if showLoading {
+            loadingCategory = category
+        } else if loadingCategory == category {
+            loadingCategory = nil
+        }
+
+        categoryRefreshTask = Task { @MainActor in
+            if showLoading {
+                try? await Task.sleep(nanoseconds: 80_000_000)
+            } else {
+                await Task.yield()
+            }
+
+            guard !Task.isCancelled else { return }
+            viewModel.refresh(for: category)
+
+            guard !Task.isCancelled else { return }
+            if loadingCategory == category {
+                loadingCategory = nil
+            }
         }
     }
 
@@ -1218,6 +1535,13 @@ private struct SettingsPanelContentView: View {
                 } else {
                     SettingsLineDivider()
                     FloatingPetPlacementInfoCard()
+                    SettingsLineDivider()
+                    SettingsInfoLine(
+                        title: "宠物大小",
+                        subtitle: "自动模式会根据当前显示器分辨率调整；也可以固定为标准尺寸或始终放大。"
+                    ) {
+                        FloatingPetSizeModePicker(mode: $settings.floatingPetSizeMode)
+                    }
                 }
                 SettingsLineDivider()
 
@@ -1340,111 +1664,7 @@ private struct SettingsPanelContentView: View {
     }
 
     private var soundContent: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            SettingsSectionCard(title: "通知") {
-                SettingsToggleLine(
-                    title: "启用提示音",
-                    subtitle: "不同阶段可分别播放不同音效，适用于 Claude、Codex 等会话。",
-                    isOn: $settings.soundEnabled
-                )
-                SettingsLineDivider()
-
-                SettingsInfoLine(
-                    title: "声音模式",
-                    subtitle: "系统音适合快速配置；主题包兼容 OpenPeon / CESP 格式。"
-                ) {
-                    soundThemeModePicker
-                }
-                SettingsLineDivider()
-
-                SettingsSliderLine(
-                    title: "音量",
-                    subtitle: "控制 Island 播放提示音时的音量大小",
-                    value: $settings.soundVolume,
-                    range: 0...1,
-                    step: 0.05,
-                    format: { "\(Int(($0 * 100).rounded()))%" }
-                )
-            }
-
-            if settings.soundThemeMode == .builtIn {
-                SettingsSectionCard(title: "阶段音效") {
-                    ForEach(NotificationEvent.allCases) { event in
-                        SoundEventSettingsLine(
-                            event: event,
-                            isEnabled: soundEnabledBinding(for: event),
-                            selectedSound: soundBinding(for: event)
-                        ) {
-                            AppSettings.playSound(for: event)
-                        }
-                    }
-                }
-            } else if settings.soundThemeMode == .island8Bit {
-                SettingsSectionCard(title: "客户端启动音") {
-                    SettingsActionLine(
-                        title: "固定启动音",
-                        subtitle: "使用内置 8-bit 启动旋律。应用启动时会自动播放，也可以在这里试听。"
-                    ) {
-                        AppSettings.playClientStartupSound()
-                    } accessory: {
-                        Image(systemName: "play.fill")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundColor(.white.opacity(0.72))
-                    }
-                }
-
-                SettingsSectionCard(title: "固定映射") {
-                    ForEach(NotificationEvent.allCases) { event in
-                        BundledThemeEventLine(
-                            event: event,
-                            soundLabel: AppLocalization.string(event.island8BitSound.label),
-                            isEnabled: Binding(
-                                get: { AppSettings.isSoundEnabled(for: event) },
-                                set: { AppSettings.setSoundEnabled($0, for: event) }
-                            )
-                        ) {
-                            AppSettings.playSound(for: event)
-                        }
-                    }
-                }
-            } else {
-                SettingsSectionCard(title: "主题音效包") {
-                    SoundPackSourceInfoLine {
-                        soundPackPicker
-                    }
-
-                    SoundPackImportActionLine {
-                        if soundPacks.importPack(), soundPacks.pack(for: settings.selectedSoundPackPath) == nil {
-                            settings.selectedSoundPackPath = soundPacks.availablePacks.first?.rootURL.path ?? ""
-                        }
-                    } accessory: {
-                        Image(systemName: "square.and.arrow.down")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundColor(.white.opacity(0.72))
-                    }
-
-                    if soundPacks.availablePacks.isEmpty {
-                        SettingsValueLine(title: "可用主题包", value: "未发现")
-                    } else {
-                        SettingsValueLine(title: "可用主题包", value: "\(soundPacks.availablePacks.count)")
-                    }
-                }
-
-                SettingsSectionCard(title: "阶段映射") {
-                    ForEach(NotificationEvent.allCases) { event in
-                        SoundPackEventLine(
-                            event: event,
-                            isEnabled: Binding(
-                                get: { AppSettings.isSoundEnabled(for: event) },
-                                set: { AppSettings.setSoundEnabled($0, for: event) }
-                            )
-                        ) {
-                            AppSettings.playSound(for: event)
-                        }
-                    }
-                }
-            }
-        }
+        SoundSettingsContent()
     }
 
     private var integrationContent: some View {
@@ -1553,6 +1773,7 @@ private struct SettingsPanelContentView: View {
                 )
             }
 
+#if !APP_STORE
             SettingsSectionCard(title: "系统权限") {
                 SettingsStatusLine(
                     title: "辅助功能",
@@ -1565,6 +1786,7 @@ private struct SettingsPanelContentView: View {
                     }
                 }
             }
+#endif
 
             Button(action: { showingUninstallAllHooksConfirmation = true }) {
                 HStack(spacing: 7) {
@@ -1769,16 +1991,6 @@ private struct SettingsPanelContentView: View {
         .settingsMenuPicker(width: 168)
     }
 
-    private var soundThemeModePicker: some View {
-        Picker("声音模式", selection: $settings.soundThemeMode) {
-            ForEach(SoundThemeMode.allCases) { mode in
-                Text(appLocalized: mode.title).tag(mode)
-            }
-        }
-        .labelsHidden()
-        .settingsMenuPicker(width: 168)
-    }
-
     private var appLanguagePicker: some View {
         Picker("语言", selection: $settings.appLanguage) {
             ForEach(AppLanguage.allCases) { language in
@@ -1787,20 +1999,6 @@ private struct SettingsPanelContentView: View {
         }
         .labelsHidden()
         .settingsMenuPicker(width: 168)
-    }
-
-    private var soundPackPicker: some View {
-        Picker("主题包", selection: $settings.selectedSoundPackPath) {
-            if soundPacks.availablePacks.isEmpty {
-                Text(appLocalized: "未发现").tag("")
-            } else {
-                ForEach(soundPacks.availablePacks) { pack in
-                    Text(pack.displayName).tag(pack.rootURL.path)
-                }
-            }
-        }
-        .labelsHidden()
-        .settingsMenuPicker(width: 204)
     }
 
     private var screenSelectionBinding: Binding<String> {
@@ -1828,41 +2026,11 @@ private struct SettingsPanelContentView: View {
         )
     }
 
-    private func soundEnabledBinding(for event: NotificationEvent) -> Binding<Bool> {
-        switch event {
-        case .processingStarted:
-            return $settings.processingStartSoundEnabled
-        case .attentionRequired:
-            return $settings.attentionRequiredSoundEnabled
-        case .taskCompleted:
-            return $settings.taskCompletedSoundEnabled
-        case .taskError:
-            return $settings.taskErrorSoundEnabled
-        case .resourceLimit:
-            return $settings.resourceLimitSoundEnabled
-        }
-    }
-
     private func shortcutBinding(for action: GlobalShortcutAction) -> Binding<GlobalShortcut?> {
         Binding(
             get: { settings.shortcut(for: action) },
             set: { settings.setShortcut($0, for: action) }
         )
-    }
-
-    private func soundBinding(for event: NotificationEvent) -> Binding<NotificationSound> {
-        switch event {
-        case .processingStarted:
-            return $settings.processingStartSound
-        case .attentionRequired:
-            return $settings.attentionRequiredSound
-        case .taskCompleted:
-            return $settings.taskCompletedSound
-        case .taskError:
-            return $settings.taskErrorSound
-        case .resourceLimit:
-            return $settings.resourceLimitSound
-        }
     }
 
     private func screenToken(for screen: NSScreen) -> String {
@@ -1974,15 +2142,6 @@ private struct SettingsPanelContentView: View {
             updateManager.checkForUpdates()
         case .checking, .found, .downloading, .extracting, .readyToInstall, .installing:
             break
-        }
-    }
-
-    private func ensureValidSelectedSoundPack() {
-        guard settings.soundThemeMode == .soundPack else { return }
-        if soundPacks.availablePacks.isEmpty {
-            settings.selectedSoundPackPath = ""
-        } else if soundPacks.pack(for: settings.selectedSoundPackPath) == nil {
-            settings.selectedSoundPackPath = soundPacks.availablePacks.first?.rootURL.path ?? ""
         }
     }
 }
@@ -2522,7 +2681,7 @@ private struct CustomHookInstallSheet: View {
         }
 
         switch profile.installationKind {
-        case .jsonHooks:
+        case .jsonHooks, .tomlHooks:
             return "例如 /path/to/.claude"
         case .pluginFile:
             return "例如 /path/to/plugins"
@@ -2542,7 +2701,7 @@ private struct CustomHookInstallSheet: View {
             return AppLocalization.string("OpenClaw 可选择 ~/.openclaw 根目录，或已配置到 extraDirs 的 hooks 目录。")
         case .pluginDirectory:
             return AppLocalization.string("Hermes 可选择 ~/.hermes 根目录，或 plugins 目录。")
-        case .jsonHooks, .pluginFile:
+        case .jsonHooks, .pluginFile, .tomlHooks:
             return nil
         }
     }
@@ -2555,7 +2714,7 @@ private struct CustomHookInstallSheet: View {
         let baseURL = URL(fileURLWithPath: customPath)
         let targetURL: URL
         switch profile.installationKind {
-        case .jsonHooks, .pluginFile:
+        case .jsonHooks, .pluginFile, .tomlHooks:
             targetURL = baseURL.appendingPathComponent(resolvedFileName)
         case .pluginDirectory:
             if baseURL.lastPathComponent == ".hermes" {
@@ -4204,6 +4363,22 @@ private struct ClosedNotchTrailingContentPicker: View {
     }
 }
 
+private struct FloatingPetSizeModePicker: View {
+    @Binding var mode: FloatingPetSizeMode
+
+    var body: some View {
+        Picker("", selection: $mode) {
+            ForEach(FloatingPetSizeMode.allCases) { candidate in
+                Text(appLocalized: candidate.title).tag(candidate)
+            }
+        }
+        .labelsHidden()
+        .accessibilityLabel(Text(appLocalized: "宠物大小"))
+        .settingsMenuPicker(width: 132)
+        .help(AppLocalization.string(mode.subtitle))
+    }
+}
+
 struct IslandSurfaceModeSelector: View {
     @Binding var mode: IslandSurfaceMode
     var title: String? = "展示模式"
@@ -4260,7 +4435,8 @@ struct IslandSurfaceModeCard: View {
                         .overlay {
                             IslandSurfaceModePreviewScene(
                                 surfaceMode: mode,
-                                notchDisplayMode: settings.notchDisplayMode
+                                notchDisplayMode: settings.notchDisplayMode,
+                                floatingPetSizeMode: settings.floatingPetSizeMode
                             )
                             .padding(12)
                         }
@@ -4341,7 +4517,9 @@ struct IslandSurfaceModeCard: View {
 private struct IslandSurfaceModePreviewScene: View {
     let surfaceMode: IslandSurfaceMode
     let notchDisplayMode: NotchDisplayMode
+    let floatingPetSizeMode: FloatingPetSizeMode
     @ObservedObject private var settings = AppSettings.shared
+    @State private var isHovered = false
 
     var body: some View {
         GeometryReader { proxy in
@@ -4356,6 +4534,10 @@ private struct IslandSurfaceModePreviewScene: View {
                     floatingPreview(in: proxy.size)
                 }
             }
+        }
+        .environment(\.mascotAnimationsEnabled, isHovered)
+        .onHover { hovering in
+            isHovered = hovering
         }
     }
 
@@ -4386,7 +4568,10 @@ private struct IslandSurfaceModePreviewScene: View {
     }
 
     private func floatingPreview(in size: CGSize) -> some View {
-        ZStack(alignment: .bottomTrailing) {
+        let mascotSize = 34 * previewScale
+        let numberSize = 12 * min(previewScale, 1.14)
+
+        return ZStack(alignment: .bottomTrailing) {
             VStack {
                 HStack {
                     Text(appLocalized: "右下角悬浮")
@@ -4413,17 +4598,28 @@ private struct IslandSurfaceModePreviewScene: View {
                     MascotView(
                         kind: settings.previewMascotKind,
                         status: .idle,
-                        size: 34
+                        size: mascotSize
                     )
 
                     Text("2")
-                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                        .font(.system(size: numberSize, weight: .bold, design: .rounded))
                         .foregroundColor(Color(red: 1.0, green: 0.55, blue: 0.26))
                         .offset(y: -1)
                 }
             }
             .padding(.trailing, 16)
             .padding(.bottom, 12)
+        }
+    }
+
+    private var previewScale: CGFloat {
+        switch floatingPetSizeMode {
+        case .automatic:
+            return 1.08
+        case .standard:
+            return 1
+        case .large:
+            return 1.16
         }
     }
 }

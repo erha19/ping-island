@@ -1,22 +1,23 @@
 import Foundation
 import IslandShared
+
 #if canImport(Darwin)
-import Darwin
+    import Darwin
 #elseif canImport(Musl)
-import Musl
+    import Musl
 #elseif canImport(Glibc)
-import Glibc
+    import Glibc
 #endif
 
 #if canImport(Darwin)
-private let islandStreamSocketType: Int32 = SOCK_STREAM
-private let islandShutdownWrite: Int32 = SHUT_WR
+    private let islandStreamSocketType: Int32 = SOCK_STREAM
+    private let islandShutdownWrite: Int32 = SHUT_WR
 #elseif canImport(Musl)
-private let islandStreamSocketType: Int32 = Int32(SOCK_STREAM)
-private let islandShutdownWrite: Int32 = Int32(SHUT_WR)
+    private let islandStreamSocketType: Int32 = Int32(SOCK_STREAM)
+    private let islandShutdownWrite: Int32 = Int32(SHUT_WR)
 #elseif canImport(Glibc)
-private let islandStreamSocketType: Int32 = Int32(SOCK_STREAM.rawValue)
-private let islandShutdownWrite: Int32 = Int32(SHUT_WR)
+    private let islandStreamSocketType: Int32 = Int32(SOCK_STREAM.rawValue)
+    private let islandShutdownWrite: Int32 = Int32(SHUT_WR)
 #endif
 
 @main
@@ -93,28 +94,34 @@ struct IslandBridgeMain {
                     FileHandle.standardOutput.write(Data(payload.utf8))
                 }
             case .remoteAgentService:
-                let hookSocket = try requiredArgument("--hook-socket", arguments: CommandLine.arguments)
-                let controlSocket = try requiredArgument("--control-socket", arguments: CommandLine.arguments)
-                let service = try RemoteAgentService(hookSocketPath: hookSocket, controlSocketPath: controlSocket)
+                let hookSocket = try requiredArgument(
+                    "--hook-socket", arguments: CommandLine.arguments)
+                let controlSocket = try requiredArgument(
+                    "--control-socket", arguments: CommandLine.arguments)
+                let service = try RemoteAgentService(
+                    hookSocketPath: hookSocket, controlSocketPath: controlSocket)
                 service.run()
             case .remoteAgentAttach:
-                let controlSocket = try requiredArgument("--control-socket", arguments: CommandLine.arguments)
+                let controlSocket = try requiredArgument(
+                    "--control-socket", arguments: CommandLine.arguments)
                 try RemoteAgentAttach.run(controlSocketPath: controlSocket)
             }
         } catch {
-            FileHandle.standardError.write(Data("PingIslandBridge error: \(error.localizedDescription)\n".utf8))
+            FileHandle.standardError.write(
+                Data("PingIslandBridge error: \(error.localizedDescription)\n".utf8))
             Foundation.exit(1)
         }
     }
 
     private static func configureProcessSignalHandling() {
         #if canImport(Glibc) || canImport(Musl)
-        _ = signal(SIGPIPE, SIG_IGN)
+            _ = signal(SIGPIPE, SIG_IGN)
         #endif
     }
 
     private static func parseMode(arguments: [String]) throws -> BridgeRuntimeMode {
-        guard let index = arguments.firstIndex(of: "--mode"), arguments.indices.contains(index + 1) else {
+        guard let index = arguments.firstIndex(of: "--mode"), arguments.indices.contains(index + 1)
+        else {
             return .hook
         }
         guard let mode = BridgeRuntimeMode(rawValue: arguments[index + 1]) else {
@@ -124,7 +131,9 @@ struct IslandBridgeMain {
     }
 
     private static func parseSource(arguments: [String]) throws -> AgentProvider {
-        guard let index = arguments.firstIndex(of: "--source"), arguments.indices.contains(index + 1) else {
+        guard let index = arguments.firstIndex(of: "--source"),
+            arguments.indices.contains(index + 1)
+        else {
             throw BridgeError.invalidArguments
         }
         guard let source = AgentProvider(rawValue: arguments[index + 1]) else {
@@ -149,8 +158,9 @@ struct IslandBridgeMain {
             try process.run()
             process.waitUntilExit()
             let data = output.fileHandleForReading.readDataToEndOfFile()
-            guard let tty = String(data: data, encoding: .utf8)?
-                .trimmingCharacters(in: .whitespacesAndNewlines),
+            guard
+                let tty = String(data: data, encoding: .utf8)?
+                    .trimmingCharacters(in: .whitespacesAndNewlines),
                 !tty.isEmpty,
                 tty != "??",
                 tty != "-"
@@ -197,12 +207,14 @@ struct IslandBridgeMain {
 
         while true {
             if completionState.isCompleteTopLevelObject,
-               BridgeCodec.readJSONObject(from: data) != nil {
+                BridgeCodec.readJSONObject(from: data) != nil
+            {
                 return data
             }
 
             var descriptor = pollfd(fd: stdinFD, events: Int16(POLLIN | POLLHUP), revents: 0)
-            let timeout = Int32(sawFirstChunk ? stdinFollowUpPollTimeoutMs : stdinInitialPollTimeoutMs)
+            let timeout = Int32(
+                sawFirstChunk ? stdinFollowUpPollTimeoutMs : stdinInitialPollTimeoutMs)
             let pollResult = poll(&descriptor, 1, timeout)
 
             if pollResult == 0 {
@@ -232,7 +244,9 @@ struct IslandBridgeMain {
         }
     }
 
-    private static func drainAvailableStandardInput(from fd: Int32, into data: inout Data) -> StdinDrainResult {
+    private static func drainAvailableStandardInput(from fd: Int32, into data: inout Data)
+        -> StdinDrainResult
+    {
         var didReadAnyBytes = false
         var buffer = [UInt8](repeating: 0, count: 4096)
 
@@ -273,7 +287,8 @@ struct IslandBridgeMain {
     }
 
     private static func requiredArgument(_ name: String, arguments: [String]) throws -> String {
-        guard let index = arguments.firstIndex(of: name), arguments.indices.contains(index + 1) else {
+        guard let index = arguments.firstIndex(of: name), arguments.indices.contains(index + 1)
+        else {
             throw BridgeError.invalidArguments
         }
         return arguments[index + 1]
@@ -370,6 +385,7 @@ private enum BridgeDebugLogger {
         "CLAUDE_SESSION_ID",
         "CODEX_THREAD_ID",
         "CODEBUDDY_SESSION_ID",
+        "KIMI_SESSION_ID",
     ]
 
     static func logIfNeeded(
@@ -441,6 +457,8 @@ private enum BridgeDebugLogger {
             return "qoder-hooks"
         case "qoder-cli":
             return "qoder-cli-hooks"
+        case "kimi":
+            return "kimi-hooks"
         default:
             break
         }
@@ -457,7 +475,8 @@ private enum BridgeDebugLogger {
         if envelope.expectsResponse
             || normalizedEvent.contains("permission")
             || normalizedEvent.contains("question")
-            || normalizedEvent.contains("tool") {
+            || normalizedEvent.contains("tool")
+        {
             return "claude-hooks"
         }
 
@@ -466,9 +485,12 @@ private enum BridgeDebugLogger {
 
     private static func debugDirectory(for target: String, environment: [String: String]) -> URL {
         if target == "codex-hooks",
-           let customPath = environment["PING_ISLAND_CODEX_HOOK_DEBUG_DIR"],
-           !customPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return URL(fileURLWithPath: NSString(string: customPath).expandingTildeInPath, isDirectory: true)
+            let customPath = environment["PING_ISLAND_CODEX_HOOK_DEBUG_DIR"],
+            !customPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        {
+            return URL(
+                fileURLWithPath: NSString(string: customPath).expandingTildeInPath,
+                isDirectory: true)
         }
 
         return FileManager.default.homeDirectoryForCurrentUser
@@ -482,7 +504,8 @@ private enum BridgeDebugLogger {
                 || pair.key.hasPrefix("CODEBUDDY_")
                 || pair.key.hasPrefix("CODEX_")
                 || pair.key.hasPrefix("ISLAND_")
-                || pair.key.hasPrefix("PING_ISLAND_") {
+                || pair.key.hasPrefix("PING_ISLAND_")
+            {
                 partial[pair.key] = pair.value
             }
         }
@@ -620,7 +643,8 @@ private enum SocketClient {
 private final class RemoteAgentService: @unchecked Sendable {
     private let hookSocketPath: String
     private let controlSocketPath: String
-    private let queue = DispatchQueue(label: "com.wudanwu.pingisland.remote-agent", qos: .userInitiated)
+    private let queue = DispatchQueue(
+        label: "com.wudanwu.pingisland.remote-agent", qos: .userInitiated)
 
     private var hookServerSocket: Int32 = -1
     private var controlServerSocket: Int32 = -1
@@ -644,7 +668,8 @@ private final class RemoteAgentService: @unchecked Sendable {
             try startServers()
             dispatchMain()
         } catch {
-            FileHandle.standardError.write(Data("Remote agent failed: \(error.localizedDescription)\n".utf8))
+            FileHandle.standardError.write(
+                Data("Remote agent failed: \(error.localizedDescription)\n".utf8))
             Foundation.exit(1)
         }
     }
@@ -653,13 +678,15 @@ private final class RemoteAgentService: @unchecked Sendable {
         hookServerSocket = try makeListeningSocket(path: hookSocketPath)
         controlServerSocket = try makeListeningSocket(path: controlSocketPath)
 
-        hookAcceptSource = DispatchSource.makeReadSource(fileDescriptor: hookServerSocket, queue: queue)
+        hookAcceptSource = DispatchSource.makeReadSource(
+            fileDescriptor: hookServerSocket, queue: queue)
         hookAcceptSource?.setEventHandler { [weak self] in
             self?.acceptHookConnection()
         }
         hookAcceptSource?.resume()
 
-        controlAcceptSource = DispatchSource.makeReadSource(fileDescriptor: controlServerSocket, queue: queue)
+        controlAcceptSource = DispatchSource.makeReadSource(
+            fileDescriptor: controlServerSocket, queue: queue)
         controlAcceptSource?.setEventHandler { [weak self] in
             self?.acceptControlConnection()
         }
@@ -712,7 +739,8 @@ private final class RemoteAgentService: @unchecked Sendable {
 
     private func handleHookClient(_ clientSocket: Int32) {
         defer {
-            if pendingRequests.values.contains(where: { $0.clientSocket == clientSocket }) == false {
+            if pendingRequests.values.contains(where: { $0.clientSocket == clientSocket }) == false
+            {
                 close(clientSocket)
             }
         }
@@ -768,7 +796,8 @@ private final class RemoteAgentService: @unchecked Sendable {
         sendHello()
         flushQueuedMessages()
 
-        controlClientReadSource = DispatchSource.makeReadSource(fileDescriptor: clientSocket, queue: queue)
+        controlClientReadSource = DispatchSource.makeReadSource(
+            fileDescriptor: clientSocket, queue: queue)
         controlClientReadSource?.setEventHandler { [weak self] in
             self?.readControlMessages()
         }
@@ -798,7 +827,8 @@ private final class RemoteAgentService: @unchecked Sendable {
             let lineData = controlReadBuffer.subdata(in: 0..<newlineRange.lowerBound)
             controlReadBuffer.removeSubrange(0...newlineRange.lowerBound)
             guard !lineData.isEmpty,
-                  let message = try? decoder.decode(RemoteDecisionEnvelope.self, from: lineData) else {
+                let message = try? decoder.decode(RemoteDecisionEnvelope.self, from: lineData)
+            else {
                 continue
             }
             handleDecision(message)
@@ -1004,7 +1034,9 @@ private enum RemoteBridgeMessageBuilder {
             sessionID: sessionID,
             cwd: envelope.cwd ?? terminalContext.currentDirectory ?? metadata["cwd"] ?? "",
             event: envelope.eventType,
-            status: mapStatus(eventType: envelope.eventType, status: envelope.status?.kind, notificationType: metadata["notification_type"]),
+            status: mapStatus(
+                eventType: envelope.eventType, status: envelope.status?.kind,
+                notificationType: metadata["notification_type"]),
             provider: envelope.provider.rawValue,
             pid: Int(metadata["pid"] ?? "") ?? Int(getppid()) ?? Int(getppid()),
             tty: terminalContext.tty,
@@ -1017,15 +1049,24 @@ private enum RemoteBridgeMessageBuilder {
             clientInfo: RemoteHookClientInfoPayload(
                 kind: clientKind(for: envelope),
                 profileID: metadata["client_kind"],
-                name: firstNonEmpty(metadata["client_name"], metadata["client_title"], metadata["client"]),
-                bundleIdentifier: firstNonEmpty(metadata["client_bundle_id"], metadata["source_bundle_id"]),
-                launchURL: firstNonEmpty(metadata["launch_url"], metadata["deeplink"], metadata["deep_link"]),
+                name: firstNonEmpty(
+                    metadata["client_name"], metadata["client_title"], metadata["client"]),
+                bundleIdentifier: firstNonEmpty(
+                    metadata["client_bundle_id"], metadata["source_bundle_id"]),
+                launchURL: firstNonEmpty(
+                    metadata["launch_url"], metadata["deeplink"], metadata["deep_link"]),
                 origin: metadata["client_origin"],
-                originator: firstNonEmpty(metadata["client_originator"], metadata["originator"], metadata["source_title"], terminalContext.ideName),
-                threadSource: firstNonEmpty(metadata["thread_source"], metadata["session_start_source"], metadata["codex_session_start_source"]),
+                originator: firstNonEmpty(
+                    metadata["client_originator"], metadata["originator"], metadata["source_title"],
+                    terminalContext.ideName),
+                threadSource: firstNonEmpty(
+                    metadata["thread_source"], metadata["session_start_source"],
+                    metadata["codex_session_start_source"]),
                 transport: transport,
                 remoteHost: remoteHost,
-                sessionFilePath: firstNonEmpty(metadata["session_file_path"], metadata["rollout_path"], metadata["transcript_path"]),
+                sessionFilePath: firstNonEmpty(
+                    metadata["session_file_path"], metadata["rollout_path"],
+                    metadata["transcript_path"]),
                 terminalBundleIdentifier: resolvedTerminalHostBundleIdentifier(
                     terminalBundleID: terminalContext.terminalBundleID,
                     ideBundleID: terminalContext.ideBundleID
@@ -1035,12 +1076,15 @@ private enum RemoteBridgeMessageBuilder {
                 iTermSessionIdentifier: terminalContext.iTermSessionID,
                 tmuxSessionIdentifier: terminalContext.tmuxSession,
                 tmuxPaneIdentifier: terminalContext.tmuxPane,
-                processName: firstNonEmpty(metadata["source_process_name"], metadata["process_name"])
+                processName: firstNonEmpty(
+                    metadata["source_process_name"], metadata["process_name"])
             )
         )
     }
 
-    static func bridgeDecision(for value: String, updatedInput: [String: JSONValue]?) -> InterventionDecision? {
+    static func bridgeDecision(for value: String, updatedInput: [String: JSONValue]?)
+        -> InterventionDecision?
+    {
         switch value {
         case "allow", "approve":
             return .approve
@@ -1058,7 +1102,8 @@ private enum RemoteBridgeMessageBuilder {
     }
 
     private static func resolvedSessionID(for envelope: BridgeEnvelope) -> String {
-        let sessionId = envelope.metadata["session_id"]
+        let sessionId =
+            envelope.metadata["session_id"]
             ?? envelope.metadata["thread_id"]
             ?? envelope.metadata["threadId"]
             ?? envelope.sessionKey.components(separatedBy: ":").dropFirst().joined(separator: ":")
@@ -1132,11 +1177,10 @@ private enum RemoteBridgeMessageBuilder {
 
     private static func clientKind(for envelope: BridgeEnvelope) -> String {
         let metadata = envelope.metadata
-        let explicitKind = (
-            metadata["client_kind"]
-                ?? metadata["client_type"]
-                ?? metadata["client"]
-        )?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let explicitKind =
+            (metadata["client_kind"]
+            ?? metadata["client_type"]
+            ?? metadata["client"])?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
 
         switch envelope.provider {
         case .claude:
@@ -1145,12 +1189,15 @@ private enum RemoteBridgeMessageBuilder {
             if explicitKind?.contains("cli") == true
                 || envelope.terminalContext.tty != nil
                 || envelope.terminalContext.terminalProgram != nil
-                || envelope.terminalContext.terminalBundleID != nil {
+                || envelope.terminalContext.terminalBundleID != nil
+            {
                 return "codexCLI"
             }
             return "codexApp"
         case .copilot:
             return "custom"
+        case .kimi:
+            return "kimi"
         case .gemini:
             return "gemini"
         }
@@ -1172,9 +1219,10 @@ private enum RemoteBridgeMessageBuilder {
         let ideBundleID = firstNonEmpty(ideBundleID)
 
         if let terminalBundleID,
-           let ideBundleID,
-           terminalBundleID.caseInsensitiveCompare(ideBundleID) != .orderedSame,
-           isStandaloneTerminalBundleIdentifier(terminalBundleID) {
+            let ideBundleID,
+            terminalBundleID.caseInsensitiveCompare(ideBundleID) != .orderedSame,
+            isStandaloneTerminalBundleIdentifier(terminalBundleID)
+        {
             return terminalBundleID
         }
 
@@ -1184,15 +1232,15 @@ private enum RemoteBridgeMessageBuilder {
     private static func isStandaloneTerminalBundleIdentifier(_ bundleIdentifier: String) -> Bool {
         switch bundleIdentifier.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
         case "com.apple.terminal",
-             "com.googlecode.iterm2",
-             "com.mitchellh.ghostty",
-             "com.cmuxterm.app",
-             "io.alacritty",
-             "org.alacritty",
-             "net.kovidgoyal.kitty",
-             "co.zeit.hyper",
-             "dev.warp.warp-stable",
-             "com.github.wez.wezterm":
+            "com.googlecode.iterm2",
+            "com.mitchellh.ghostty",
+            "com.cmuxterm.app",
+            "io.alacritty",
+            "org.alacritty",
+            "net.kovidgoyal.kitty",
+            "co.zeit.hyper",
+            "dev.warp.warp-stable",
+            "com.github.wez.wezterm":
             return true
         default:
             return false

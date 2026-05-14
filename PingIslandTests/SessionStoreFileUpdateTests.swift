@@ -2,6 +2,55 @@ import XCTest
 @testable import Ping_Island
 
 final class SessionStoreFileUpdateTests: XCTestCase {
+    func testHookWorkspaceRefreshUpdatesDisplayedProjectName() async throws {
+        let store = SessionStore.shared
+        let sessionId = "cursor-workspace-refresh-\(UUID().uuidString)"
+
+        await store.process(.hookReceived(
+            HookEvent(
+                sessionId: sessionId,
+                cwd: "/tmp/.cursor",
+                event: "Notification",
+                status: "idle",
+                provider: .claude,
+                clientInfo: SessionClientInfo(kind: .custom, name: "Cursor"),
+                pid: nil,
+                tty: nil,
+                tool: nil,
+                toolInput: nil,
+                toolUseId: nil,
+                notificationType: "idle_prompt",
+                message: "Waiting"
+            )
+        ))
+
+        await store.process(.hookReceived(
+            HookEvent(
+                sessionId: sessionId,
+                cwd: "/tmp/project",
+                event: "UserPromptSubmit",
+                status: "processing",
+                provider: .claude,
+                clientInfo: SessionClientInfo(kind: .custom, name: "Cursor"),
+                pid: nil,
+                tty: nil,
+                tool: nil,
+                toolInput: nil,
+                toolUseId: nil,
+                notificationType: nil,
+                message: "Continue"
+            )
+        ))
+
+        let updatedSession = await store.session(for: sessionId)
+        let session = try XCTUnwrap(updatedSession)
+        XCTAssertEqual(session.cwd, "/tmp/project")
+        XCTAssertEqual(session.projectName, "project")
+        XCTAssertEqual(session.displayTitle, "project")
+
+        await store.process(.sessionArchived(sessionId: sessionId))
+    }
+
     func testFileUpdatePromotesIdleSessionToProcessingAndRefreshesActivityTime() async throws {
         let store = SessionStore.shared
         let sessionId = "file-update-idle-\(UUID().uuidString)"

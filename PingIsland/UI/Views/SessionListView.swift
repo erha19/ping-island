@@ -395,6 +395,8 @@ struct SessionListView: View {
             return Color(red: 0.34, green: 0.72, blue: 0.96)
         case .copilot, .gemini:
             return Color.white.opacity(0.5)
+        case .kimi:
+            return Color(red: 0.96, green: 0.30, blue: 0.42)
         }
     }
 }
@@ -653,11 +655,10 @@ struct InstanceRow: View {
     let onReject: () -> Void
 
     @State private var isHovered = false
-    @State private var spinnerPhase = 0
     @ObservedObject private var settings = AppSettings.shared
+    @ObservedObject private var energyGovernor = EnergyGovernor.shared
 
     private let spinnerSymbols = ["·", "✢", "✳", "∗", "✻", "✽"]
-    private let spinnerTimer = Timer.publish(every: 0.15, on: .main, in: .common).autoconnect()
 
     /// Whether we're showing the approval UI
     private var isWaitingForApproval: Bool {
@@ -894,19 +895,7 @@ struct InstanceRow: View {
     private var avatarStatusBadge: some View {
         switch session.phase {
         case .processing, .compacting, .waitingForApproval:
-            Text(spinnerSymbols[spinnerPhase % spinnerSymbols.count])
-                .font(.system(size: 8, weight: .black))
-                .foregroundColor(statusAccentColor)
-                .frame(width: 14, height: 14)
-                .background(Color.black.opacity(0.92))
-                .clipShape(Circle())
-                .overlay(
-                    Circle()
-                        .strokeBorder(statusAccentColor.opacity(0.35), lineWidth: 1)
-                )
-                .onReceive(spinnerTimer) { _ in
-                    spinnerPhase = (spinnerPhase + 1) % spinnerSymbols.count
-                }
+            animatedStatusBadge
         case .waitingForInput:
             Circle()
                 .fill(statusAccentColor)
@@ -917,6 +906,42 @@ struct InstanceRow: View {
                 )
         case .idle, .ended:
             EmptyView()
+        }
+    }
+
+    @ViewBuilder
+    private var animatedStatusBadge: some View {
+        if energyGovernor.policy.animationLevel == .staticFrames {
+            statusBadge(symbol: spinnerSymbols[0])
+        } else {
+            TimelineView(.periodic(from: .now, by: statusBadgeInterval)) { context in
+                let phase = Int(context.date.timeIntervalSinceReferenceDate / statusBadgeInterval)
+                statusBadge(symbol: spinnerSymbols[phase % spinnerSymbols.count])
+            }
+        }
+    }
+
+    private func statusBadge(symbol: String) -> some View {
+        Text(symbol)
+            .font(.system(size: 8, weight: .black))
+            .foregroundColor(statusAccentColor)
+            .frame(width: 14, height: 14)
+            .background(Color.black.opacity(0.92))
+            .clipShape(Circle())
+            .overlay(
+                Circle()
+                    .strokeBorder(statusAccentColor.opacity(0.35), lineWidth: 1)
+            )
+    }
+
+    private var statusBadgeInterval: TimeInterval {
+        switch energyGovernor.policy.animationLevel {
+        case .full:
+            0.15
+        case .reduced:
+            0.375
+        case .staticFrames:
+            0.15
         }
     }
 

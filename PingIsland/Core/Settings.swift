@@ -12,6 +12,7 @@ import Foundation
 enum AppSettingsDefaultKeys {
     static let surfaceMode = "surfaceMode"
     static let floatingPetAnchor = "floatingPetAnchor"
+    static let floatingPetSizeMode = "floatingPetSizeMode"
     static let presentationModeOnboardingPending = "presentationModeOnboardingPending"
     static let notchDetachmentHintPending = "notchDetachmentHintPending"
     static let floatingPetSettingsHintPending = "floatingPetSettingsHintPending"
@@ -181,6 +182,36 @@ struct FloatingPetAnchor: Codable, Equatable {
     let yRatio: Double
 }
 
+enum FloatingPetSizeMode: String, CaseIterable, Identifiable {
+    case automatic
+    case standard
+    case large
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .automatic:
+            return "自动"
+        case .standard:
+            return "标准"
+        case .large:
+            return "较大"
+        }
+    }
+
+    var subtitle: String {
+        switch self {
+        case .automatic:
+            return "按显示器分辨率调整，高分屏会更醒目"
+        case .standard:
+            return "固定为旧版悬浮宠物尺寸"
+        case .large:
+            return "在所有显示器上放大宠物形象"
+        }
+    }
+}
+
 enum SubagentVisibilityMode: String, CaseIterable, Identifiable {
     case hidden
     case visible
@@ -330,6 +361,7 @@ final class AppSettingsStore: ObservableObject {
         static let previewMascotKind = "previewMascotKind"
         static let surfaceMode = AppSettingsDefaultKeys.surfaceMode
         static let floatingPetAnchor = AppSettingsDefaultKeys.floatingPetAnchor
+        static let floatingPetSizeMode = AppSettingsDefaultKeys.floatingPetSizeMode
         static let presentationModeOnboardingPending = AppSettingsDefaultKeys.presentationModeOnboardingPending
         static let notchDetachmentHintPending = AppSettingsDefaultKeys.notchDetachmentHintPending
         static let floatingPetSettingsHintPending = AppSettingsDefaultKeys.floatingPetSettingsHintPending
@@ -632,6 +664,13 @@ final class AppSettingsStore: ObservableObject {
         didSet {
             guard !isBootstrapping else { return }
             Self.persistValue(floatingPetAnchor, defaults: defaults, key: Keys.floatingPetAnchor)
+        }
+    }
+
+    @Published var floatingPetSizeMode: FloatingPetSizeMode {
+        didSet {
+            guard !isBootstrapping else { return }
+            defaults.set(floatingPetSizeMode.rawValue, forKey: Keys.floatingPetSizeMode)
         }
     }
 
@@ -977,6 +1016,7 @@ final class AppSettingsStore: ObservableObject {
         let previewMascotKindRaw = defaults.string(forKey: Keys.previewMascotKind)
         let surfaceModeRaw = defaults.string(forKey: Keys.surfaceMode)
         let floatingPetAnchor = Self.decodeValue(FloatingPetAnchor.self, from: defaults, key: Keys.floatingPetAnchor)
+        let floatingPetSizeModeRaw = defaults.string(forKey: Keys.floatingPetSizeMode)
         let mascotOverrideRaw = Self.mascotOverrides(from: defaults, key: Keys.mascotOverrides)
         let openActiveSessionShortcut = Self.resolvedShortcut(
             from: defaults,
@@ -1135,6 +1175,9 @@ final class AppSettingsStore: ObservableObject {
         _previewMascotKind = Published(initialValue: MascotKind(rawValue: previewMascotKindRaw ?? "") ?? .claude)
         _surfaceMode = Published(initialValue: IslandSurfaceMode(rawValue: surfaceModeRaw ?? "") ?? .notch)
         _floatingPetAnchor = Published(initialValue: floatingPetAnchor)
+        _floatingPetSizeMode = Published(
+            initialValue: FloatingPetSizeMode(rawValue: floatingPetSizeModeRaw ?? "") ?? .automatic
+        )
         _presentationModeOnboardingPending = Published(initialValue: Self.boolValue(
             from: defaults,
             key: Keys.presentationModeOnboardingPending,
@@ -1341,6 +1384,11 @@ enum AppSettings {
     static var floatingPetAnchor: FloatingPetAnchor? {
         get { shared.floatingPetAnchor }
         set { shared.floatingPetAnchor = newValue }
+    }
+
+    static var floatingPetSizeMode: FloatingPetSizeMode {
+        get { shared.floatingPetSizeMode }
+        set { shared.floatingPetSizeMode = newValue }
     }
 
     static var presentationModeOnboardingPending: Bool {

@@ -4,7 +4,7 @@ This file is a routing layer for coding agents working in this repo. Keep it sho
 
 ## Mission
 
-- `PingIsland` is a macOS menu bar app that surfaces Dynamic Island-style status for Claude Code, Codex, Gemini CLI, Hermes Agent, Qwen Code, and compatible hook-driven agent sessions.
+- `PingIsland` is a macOS menu bar app that surfaces Dynamic Island-style status for Claude Code, Codex, Gemini CLI, Hermes Agent, Qwen Code, Kimi CLI, and compatible hook-driven agent sessions.
 - The main runtime path is:
   - hook or app-server events
   - monitoring and service layers
@@ -27,6 +27,7 @@ This file is a routing layer for coding agents working in this repo. Keep it sho
 - Native runtime rollout scaffold: `PingIsland/Services/Runtime/`, `PingIsland/Core/FeatureFlags.swift`
 - Session bridge for UI: `PingIsland/Services/Session/SessionMonitor.swift`
 - Notch state and layout: `PingIsland/Core/NotchViewModel.swift`, `PingIsland/UI/Views/NotchView.swift`
+- App-wide low-power policy for background polling, event monitoring, UI animation tiers, and silent update gating: `PingIsland/Core/EnergyGovernor.swift`
 - Detached floating capsule: `PingIsland/UI/Window/DetachedIslandWindowController.swift`, `PingIsland/UI/Views/DetachedIslandPanelView.swift`, `PingIsland/UI/Views/IslandOpenedContentView.swift`
   - Detached pet interactions now keep the pet anchored in place while hover/click previews expand sideways as message-bubble lists; trace both the panel layout and window-anchor math together when changing this flow
   - Expanded content routing is shared with the docked notch through `IslandOpenedContentView` + `IslandExpandedRouteResolver`; keep hover/click/notification semantics aligned instead of reintroducing detached-only content priorities
@@ -85,6 +86,7 @@ This file is a routing layer for coding agents working in this repo. Keep it sho
   - Qoder-family hook installs currently cover Qoder IDE and Qoder CLI as separate profiles that share `~/.qoder/settings.json`, plus QoderWork under `~/.qoderwork/settings.json`. Keep Qoder IDE and Qoder CLI hook semantics independent even though they share a file; app launch should refresh only the Qoder CLI managed entries when `qodercli -v` is newer than 0.2.5 while preserving Qoder IDE hooks and unrelated JSON settings. New Qoder CLI uses Claude Code-compatible blocking hooks and response payloads; Qoder IDE and QoderWork remain notify-only and must not create Island-side blocking question or approval responses.
   - CodeBuddy-family hook installs currently cover CodeBuddy IDE and CodeBuddy CLI as separate profiles that share `~/.codebuddy/settings.json`, plus WorkBuddy under `~/.workbuddy/settings.json`. Keep CodeBuddy IDE and CodeBuddy CLI hook semantics independent even though they share a file; CodeBuddy CLI uses its Claude-compatible hook response shape and must preserve CodeBuddy IDE hooks plus unrelated JSON settings.
   - OpenCode is managed as a generated plugin file under `~/.config/opencode/plugins/ping-island.js`; treat it as a plugin-based integration, not a JSON hooks file.
+  - Kimi CLI hooks are managed through `~/.kimi/config.toml`; use `[[hooks]]` array-of-tables syntax. The installer preserves all non-Island TOML content (providers, models, loop_control, etc.) and only manipulates the `[[hooks]]` sections. Event names follow the Claude Code convention (`SessionStart`, `SessionEnd`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PermissionRequest`, `Notification`, `Stop`).
   - `QoderWork` should not be added to `ideExtensionProfiles` unless it actually ships VS Code-compatible extension support in the future.
 - If you change how sessions are associated across relaunches or between hook/app-server ingress paths, inspect both `SessionStore` and `SessionAssociationStore` so cached client metadata stays compatible.
 - If you change the new native runtime rollout path, keep it isolated from the legacy hook/app-server flow. Reuse shared `SessionState`-driven views, but keep runtime orchestration, persistence, and feature gating under `PingIsland/Services/Runtime/` and `PingIsland/Core/FeatureFlags.swift`.
@@ -95,6 +97,7 @@ This file is a routing layer for coding agents working in this repo. Keep it sho
 - If you change docked/detached Island transitions or drag-to-detach behavior, trace through `IslandPresentationCoordinator`, `WindowManager`, `NotchViewModel`, `NotchWindowController`, and `DetachedIslandWindowController` together so gesture gating, content resolution, and re-docking stay aligned.
 - If you change the persisted surface mode or first-run onboarding, trace through `AppDelegate`, `WindowManager`, `IslandPresentationCoordinator`, `SettingsWindowController`, `SettingsWindowView`, and `Settings.swift` together so launch-time routing and in-app switching stay aligned.
 - If you change global shortcuts, shortcut persistence, or shortcut hints, trace through `PingIsland/Services/Shared/GlobalShortcutManager.swift`, `PingIsland/Utilities/GlobalShortcut.swift`, `PingIsland/Core/Settings.swift`, `PingIsland/UI/Views/SettingsWindowView.swift`, `PingIsland/UI/Components/GlobalShortcutHintView.swift`, and the relevant notch/chat/session-list views together so registration, customization, and visible hints stay aligned.
+- If you change background polling, global event monitors, silent update scheduling, or idle animation behavior, inspect `PingIsland/Core/EnergyGovernor.swift` plus the affected service/view so active sessions stay responsive while quiet, locked, or sleeping periods remain low-power.
 - If you change built-in notification sounds or startup audio, inspect `PingIsland/Core/Settings.swift`, `PingIsland/Core/SoundPackCatalog.swift`, `PingIsland/UI/Views/SettingsWindowView.swift`, `PingIsland/App/AppDelegate.swift`, and `PingIsland/Resources/Sounds/` together so mode selection, fixed mappings, previews, and bundled assets stay aligned.
 - If you change client mascot selection or mascot animations, trace through `PingIsland/Models/ClientProfile.swift`, `PingIsland/Core/Settings.swift`, `PingIsland/UI/Components/MascotView.swift`, and the mascot callsites in `NotchView`, `SessionListView`, `SessionHoverPreviewView`, and `MascotSettingsView` so runtime overrides and previews stay aligned.
 - If you change completion-result popup behavior, trace through `SessionStore`, `SessionMonitor`, `PingIsland/UI/Views/NotchView.swift`, and `PingIsland/UI/Views/SessionCompletionNotificationView.swift` so completion detection, queueing, and auto-dismiss timing stay aligned.

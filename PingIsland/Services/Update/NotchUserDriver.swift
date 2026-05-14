@@ -128,6 +128,7 @@ final class UpdateManager: NSObject, ObservableObject {
     private var releaseNotesTask: Task<Void, Never>?
     private var sessionActivityObserver: AnyCancellable?
     private var updatePreferenceObserver: AnyCancellable?
+    private var energyPolicyObserver: AnyCancellable?
     private var inactiveCheckTimer: Timer?
     private var pendingSilentInstall: (() -> Void)?
     private var hasActiveSessions = false
@@ -187,6 +188,7 @@ final class UpdateManager: NSObject, ObservableObject {
 
         beginObservingUpdatePreferenceIfNeeded()
         beginObservingSessionActivityIfNeeded()
+        beginObservingEnergyPolicyIfNeeded()
         refreshSilentUpdateSchedule(hasActiveSessions: Self.hasActiveSessions(in: []))
         performUpdateCheck(trigger: .automatic)
     }
@@ -274,10 +276,23 @@ final class UpdateManager: NSObject, ObservableObject {
             }
     }
 
+    private func beginObservingEnergyPolicyIfNeeded() {
+        guard energyPolicyObserver == nil else { return }
+
+        energyPolicyObserver = EnergyGovernor.shared.$policy
+            .map(\.allowsSilentUpdates)
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self else { return }
+                self.refreshSilentUpdateSchedule(hasActiveSessions: self.hasActiveSessions)
+            }
+    }
+
     private func refreshSilentUpdateSchedule(hasActiveSessions: Bool) {
         self.hasActiveSessions = hasActiveSessions
 
-        if hasActiveSessions || !automaticUpdateChecksEnabled {
+        if hasActiveSessions || !automaticUpdateChecksEnabled || !EnergyGovernor.shared.policy.allowsSilentUpdates {
             inactiveCheckTimer?.invalidate()
             inactiveCheckTimer = nil
             return
@@ -327,7 +342,12 @@ final class UpdateManager: NSObject, ObservableObject {
 
     private func installPendingUpdateIfPossible(userInitiated: Bool) {
         guard let pendingSilentInstall else { return }
-        guard userInitiated || (automaticUpdateChecksEnabled && !hasActiveSessions) else { return }
+        guard userInitiated
+            || (
+                automaticUpdateChecksEnabled
+                    && !hasActiveSessions
+                    && EnergyGovernor.shared.policy.allowsSilentUpdates
+            ) else { return }
 
         self.pendingSilentInstall = nil
         hasUnseenUpdate = false

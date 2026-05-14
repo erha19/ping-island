@@ -710,6 +710,55 @@ final class NotchViewModelTests: XCTestCase {
         }
     }
 
+    func testEventMonitorsDropMouseMoveInQuietEnergyPolicy() async {
+        await MainActor.run {
+            let notificationCenter = NotificationCenter()
+            let workspaceNotificationCenter = NotificationCenter()
+            let recorder = MonitorRecorder()
+            let policySubject = PassthroughSubject<EnergyPolicy, Never>()
+
+            let monitors = EventMonitors(
+                notificationCenter: notificationCenter,
+                workspaceNotificationCenter: workspaceNotificationCenter,
+                currentMouseLocation: { .zero },
+                monitorFactory: recorder.makeMonitor(mask:handler:),
+                energyPolicyPublisher: policySubject.eraseToAnyPublisher()
+            )
+
+            policySubject.send(EnergyPolicy.policy(for: .quietBackground))
+
+            XCTAssertEqual(recorder.stopCallCount, 4)
+            XCTAssertEqual(
+                Array(recorder.startedMasks.suffix(3)),
+                [.leftMouseDown, .leftMouseDragged, .leftMouseUp]
+            )
+            XCTAssertEqual(monitors.mouseLocation.value, .zero)
+        }
+    }
+
+    func testEventMonitorsStopAllMonitorsWhenSuspended() async {
+        await MainActor.run {
+            let notificationCenter = NotificationCenter()
+            let workspaceNotificationCenter = NotificationCenter()
+            let recorder = MonitorRecorder()
+            let policySubject = PassthroughSubject<EnergyPolicy, Never>()
+
+            let monitors = EventMonitors(
+                notificationCenter: notificationCenter,
+                workspaceNotificationCenter: workspaceNotificationCenter,
+                currentMouseLocation: { .zero },
+                monitorFactory: recorder.makeMonitor(mask:handler:),
+                energyPolicyPublisher: policySubject.eraseToAnyPublisher()
+            )
+
+            policySubject.send(EnergyPolicy.policy(for: .systemSuspended))
+
+            XCTAssertEqual(recorder.stopCallCount, 4)
+            XCTAssertEqual(recorder.startedMasks, [.mouseMoved, .leftMouseDown, .leftMouseDragged, .leftMouseUp])
+            XCTAssertEqual(monitors.mouseLocation.value, .zero)
+        }
+    }
+
     @MainActor
     private func makeViewModel() -> NotchViewModel {
         NotchViewModel(

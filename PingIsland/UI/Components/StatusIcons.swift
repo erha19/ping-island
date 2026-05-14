@@ -115,7 +115,7 @@ struct WaitingForApprovalIcon: View {
 struct RunningIcon: View {
     let size: CGFloat
     let color: Color
-    @State private var rotation: Double = 0
+    @ObservedObject private var energyGovernor = EnergyGovernor.shared
 
     init(size: CGFloat = 12, color: Color = TerminalColors.cyan) {
         self.size = size
@@ -123,6 +123,16 @@ struct RunningIcon: View {
     }
 
     var body: some View {
+        if energyGovernor.policy.animationLevel == .staticFrames {
+            iconBody(rotation: 0)
+        } else {
+            TimelineView(.periodic(from: .now, by: rotationInterval)) { context in
+                iconBody(rotation: rotation(for: context.date))
+            }
+        }
+    }
+
+    private func iconBody(rotation: Double) -> some View {
         Canvas { context, canvasSize in
             let scale = size / 30.0
             let dotSize = 4 * scale
@@ -170,14 +180,33 @@ struct RunningIcon: View {
         }
         .frame(width: size, height: size)
         .rotationEffect(.degrees(rotation))
-        .onAppear {
-            withAnimation(
-                .linear(duration: 2.0)
-                .repeatForever(autoreverses: false)
-            ) {
-                rotation = 360
-            }
+    }
+
+    private var rotationInterval: TimeInterval {
+        switch energyGovernor.policy.animationLevel {
+        case .full:
+            1.0 / 12.0
+        case .reduced:
+            1.0 / 4.0
+        case .staticFrames:
+            1.0 / 12.0
         }
+    }
+
+    private var rotationDuration: TimeInterval {
+        switch energyGovernor.policy.animationLevel {
+        case .full:
+            2.0
+        case .reduced:
+            4.0
+        case .staticFrames:
+            2.0
+        }
+    }
+
+    private func rotation(for date: Date) -> Double {
+        let progress = date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: rotationDuration) / rotationDuration
+        return progress * 360
     }
 }
 

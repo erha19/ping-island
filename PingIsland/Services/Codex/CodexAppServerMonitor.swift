@@ -40,7 +40,6 @@ actor CodexAppServerMonitor {
 
     private let logger = Logger(subsystem: "com.wudanwu.pingisland", category: "Codex")
     private let port = 41241
-    private let threadListRefreshInterval: Duration = .seconds(15)
     static let maximumWebSocketMessageSize = 32 * 1024 * 1024
 
     private var process: Process?
@@ -453,10 +452,21 @@ actor CodexAppServerMonitor {
         }
 
         while !Task.isCancelled {
-            try? await Task.sleep(for: threadListRefreshInterval)
+            guard let interval = await currentThreadListRefreshInterval() else {
+                try? await Task.sleep(for: .seconds(30))
+                continue
+            }
+
+            try? await Task.sleep(for: interval)
             guard !Task.isCancelled else { break }
             guard websocket != nil else { break }
             await refreshThreadList(reason: "poll")
+        }
+    }
+
+    private func currentThreadListRefreshInterval() async -> Duration? {
+        await MainActor.run {
+            EnergyGovernor.shared.policy.codexThreadListRefreshInterval
         }
     }
 

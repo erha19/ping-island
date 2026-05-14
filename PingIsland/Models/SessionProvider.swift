@@ -4,6 +4,7 @@ enum SessionProvider: String, Codable, Equatable, Sendable {
     case claude
     case codex
     case copilot
+    case kimi
     case gemini
 
     nonisolated var displayName: String {
@@ -14,6 +15,8 @@ enum SessionProvider: String, Codable, Equatable, Sendable {
             return "Codex"
         case .copilot:
             return "Copilot"
+        case .kimi:
+            return "Kimi"
         case .gemini:
             return "Gemini"
         }
@@ -25,6 +28,7 @@ enum SessionIngress: String, Equatable, Sendable {
     case remoteBridge
     case codexAppServer
     case nativeRuntime
+    case desktopAppMonitor
 }
 
 enum SessionClientKind: String, Codable, Equatable, Sendable {
@@ -111,11 +115,17 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
         case .claude:
             return SessionClientInfo(kind: .claudeCode, name: "Claude Code")
         case .codex:
-            return SessionClientInfo(kind: .codexApp, name: "Codex App", bundleIdentifier: "com.openai.codex")
+            return SessionClientInfo(
+                kind: .codexApp, name: "Codex App", bundleIdentifier: "com.openai.codex")
         case .copilot:
-            return SessionClientInfo(kind: .custom, profileID: "copilot-cli", name: "GitHub Copilot", origin: "cli")
+            return SessionClientInfo(
+                kind: .custom, profileID: "copilot-cli", name: "GitHub Copilot", origin: "cli")
+        case .kimi:
+            return SessionClientInfo(
+                kind: .custom, profileID: "kimi", name: "Kimi CLI", origin: "cli")
         case .gemini:
-            return SessionClientInfo(kind: .custom, profileID: "gemini-cli", name: "Gemini CLI", origin: "cli")
+            return SessionClientInfo(
+                kind: .custom, profileID: "gemini-cli", name: "Gemini CLI", origin: "cli")
         }
     }
 
@@ -150,7 +160,8 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
 
     nonisolated var brand: SessionClientBrand {
         if let inferredProfileID,
-           let profile = ClientProfileRegistry.runtimeProfile(id: inferredProfileID) {
+            let profile = ClientProfileRegistry.runtimeProfile(id: inferredProfileID)
+        {
             return profile.brand
         }
 
@@ -179,8 +190,21 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
             || threadSource?.lowercased() == "qwen-code-hooks"
             || name?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "qwen code"
             || name?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "qwen-code"
-            || originator?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "qwen code"
-            || originator?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "qwen-code"
+            || originator?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                == "qwen code"
+            || originator?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                == "qwen-code"
+    }
+
+    nonisolated var isKimiClient: Bool {
+        profileID == "kimi"
+            || threadSource?.lowercased() == "kimi-hooks"
+            || name?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "kimi cli"
+            || name?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "kimi-cli"
+            || originator?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                == "kimi cli"
+            || originator?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                == "kimi-cli"
     }
 
     nonisolated var isCodeBuddyCLIClient: Bool {
@@ -215,13 +239,15 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
         if kind == .codexCLI
             || kind == .codexApp
             || normalized.kind == .codexCLI
-            || normalized.kind == .codexApp {
+            || normalized.kind == .codexApp
+        {
             return true
         }
 
         if profileIDs.contains("qoder-cli")
             || profileIDs.contains("codebuddy-cli")
-            || profileIDs.contains("codebuddy-cli-hooks") {
+            || profileIDs.contains("codebuddy-cli-hooks")
+        {
             return true
         }
 
@@ -229,7 +255,8 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
             || profileIDs.contains("qoderwork")
             || profileIDs.contains("codebuddy")
             || profileIDs.contains("workbuddy")
-            || profileIDs.contains("qwen-code") {
+            || profileIDs.contains("qwen-code")
+        {
             return false
         }
 
@@ -243,7 +270,8 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
             || name?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "hermes"
             || name?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "hermes agent"
             || originator?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "hermes"
-            || originator?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "hermes agent"
+            || originator?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                == "hermes agent"
     }
 
     nonisolated var isGeminiClient: Bool {
@@ -252,7 +280,8 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
             || name?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "gemini"
             || name?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "gemini cli"
             || originator?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "gemini"
-            || originator?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "gemini cli"
+            || originator?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                == "gemini cli"
     }
 
     nonisolated var prefersHookMessageAsLastMessageFallback: Bool {
@@ -266,29 +295,33 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
     nonisolated func badgeLabel(for provider: SessionProvider) -> String {
         let profile = resolvedProfile(for: provider)
         if let inferredProfileID,
-           let inferredProfile = ClientProfileRegistry.runtimeProfile(id: inferredProfileID) {
+            let inferredProfile = ClientProfileRegistry.runtimeProfile(id: inferredProfileID)
+        {
             return inferredProfile.displayName
         }
         if provider == .codex,
-           kind == .codexCLI,
-           originator == nil,
-           terminalSessionIdentifier == nil,
-           iTermSessionIdentifier == nil,
-           let terminalSourceDisplayName {
+            kind == .codexCLI,
+            originator == nil,
+            terminalSessionIdentifier == nil,
+            iTermSessionIdentifier == nil,
+            let terminalSourceDisplayName
+        {
             return terminalSourceDisplayName
         }
         if let name {
             return Self.normalizedBadgeLabel(name, provider: provider, kind: kind) ?? name
         }
         if let originator {
-            return Self.normalizedBadgeLabel(originator, provider: provider, kind: kind) ?? originator
+            return Self.normalizedBadgeLabel(originator, provider: provider, kind: kind)
+                ?? originator
         }
         return profile?.displayName ?? provider.displayName
     }
 
     nonisolated func subagentClientTypeLabel(for provider: SessionProvider) -> String {
         if let inferredProfileID,
-           let inferredProfile = ClientProfileRegistry.runtimeProfile(id: inferredProfileID) {
+            let inferredProfile = ClientProfileRegistry.runtimeProfile(id: inferredProfileID)
+        {
             return inferredProfile.displayName
         }
 
@@ -305,7 +338,8 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
         }
 
         if let originator {
-            return Self.normalizedBadgeLabel(originator, provider: provider, kind: kind) ?? originator
+            return Self.normalizedBadgeLabel(originator, provider: provider, kind: kind)
+                ?? originator
         }
 
         return provider.displayName
@@ -337,15 +371,17 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
         }
 
         if isQwenCodeClient,
-           let terminalSourceDisplayName {
+            let terminalSourceDisplayName
+        {
             return terminalSourceDisplayName
         }
 
         // Codex CLI follow-up actions reopen the owning terminal surface rather than
         // a separate client app, so label those actions with the terminal host.
         if provider == .codex,
-           kind == .codexCLI,
-           let terminalSourceDisplayName {
+            kind == .codexCLI,
+            let terminalSourceDisplayName
+        {
             return terminalSourceDisplayName
         }
 
@@ -363,7 +399,8 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
         if normalizedProfileID == "qoder"
             || normalizedProfileID == "qoderwork"
             || normalizedProfileID == "codebuddy"
-            || normalizedProfileID == "workbuddy" {
+            || normalizedProfileID == "workbuddy"
+        {
             return true
         }
 
@@ -371,7 +408,8 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
         switch normalizedHostBundleIdentifier {
-        case "com.qoder.ide", "com.qoder.work", "com.tencent.codebuddy", "com.codebuddy.app", "com.workbuddy.workbuddy":
+        case "com.qoder.ide", "com.qoder.work", "com.tencent.codebuddy", "com.codebuddy.app",
+            "com.workbuddy.workbuddy":
             return true
         default:
             return false
@@ -384,7 +422,8 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
             .lowercased()
         if normalizedProfileID == "codebuddy"
             || normalizedProfileID == "codebuddy-cli"
-            || normalizedProfileID == "workbuddy" {
+            || normalizedProfileID == "workbuddy"
+        {
             return false
         }
 
@@ -407,8 +446,9 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
         let detectedBundleIdentifier = terminalBundleIdentifier ?? bundleIdentifier
         let appName: String?
         if let detectedBundleIdentifier,
-           TerminalAppRegistry.isTerminalBundle(detectedBundleIdentifier),
-           !TerminalAppRegistry.isIDEBundle(detectedBundleIdentifier) {
+            TerminalAppRegistry.isTerminalBundle(detectedBundleIdentifier),
+            !TerminalAppRegistry.isIDEBundle(detectedBundleIdentifier)
+        {
             appName = nil
         } else {
             appName = originator ?? name
@@ -425,7 +465,8 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
             return true
         }
         if let threadSource = threadSource?.lowercased(),
-           threadSource.contains("ide") {
+            threadSource.contains("ide")
+        {
             return true
         }
         return ideHostProfile.prefersWorkspaceWindowRouting
@@ -435,12 +476,14 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
         if profileID == "qoderwork"
             || (terminalBundleIdentifier ?? bundleIdentifier)?
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-                .lowercased() == "com.qoder.work" {
+                .lowercased() == "com.qoder.work"
+        {
             return nil
         }
 
         guard isHostedInIDE,
-              let ideTitle = ideHostProfile?.title else {
+            let ideTitle = ideHostProfile?.title
+        else {
             return nil
         }
 
@@ -488,7 +531,8 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
             }
 
             if let launchURL = normalized.launchURL?.lowercased(),
-               launchURL.hasPrefix("codex://") {
+                launchURL.hasPrefix("codex://")
+            {
                 normalized.launchURL = nil
             }
 
@@ -505,14 +549,16 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
             }
 
             if let sessionId,
-               Self.isLegacyCodexThreadURL(normalized.launchURL) {
+                Self.isLegacyCodexThreadURL(normalized.launchURL)
+            {
                 normalized.launchURL = Self.appLaunchURL(
                     bundleIdentifier: normalized.bundleIdentifier ?? "com.openai.codex",
                     sessionId: sessionId
                 )
             } else if normalized.launchURL == nil,
-               let sessionId,
-               let bundleIdentifier = normalized.bundleIdentifier {
+                let sessionId,
+                let bundleIdentifier = normalized.bundleIdentifier
+            {
                 normalized.launchURL = Self.appLaunchURL(
                     bundleIdentifier: bundleIdentifier,
                     sessionId: sessionId
@@ -543,7 +589,8 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
         if normalizedThreadSource == "openclaw-hooks"
             || normalizedName == "openclaw"
             || normalizedOriginator == "openclaw"
-            || normalizedSessionFilePath?.contains("/.openclaw/") == true {
+            || normalizedSessionFilePath?.contains("/.openclaw/") == true
+        {
             return "openclaw"
         }
 
@@ -557,10 +604,10 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
             return normalized
         }
 
-        let hostBundleIdentifier = (
-            normalized.terminalBundleIdentifier
-                ?? normalized.bundleIdentifier
-        )?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let hostBundleIdentifier =
+            (normalized.terminalBundleIdentifier
+            ?? normalized.bundleIdentifier)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
         let normalizedProfileID = normalized.profileID?
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
@@ -575,16 +622,12 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
             || normalizedProfileID == "codebuddy-cli-hooks"
             || normalizedName == "codebuddy cli"
             || normalizedName == "codebuddy-cli"
-            || (
-                normalizedOrigin == "cli"
-                    && (
-                        normalizedName?.contains("codebuddy") == true
-                            || normalized.originator?
-                                .trimmingCharacters(in: .whitespacesAndNewlines)
-                                .lowercased()
-                                .contains("codebuddy") == true
-                    )
-            )
+            || (normalizedOrigin == "cli"
+                && (normalizedName?.contains("codebuddy") == true
+                    || normalized.originator?
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                        .lowercased()
+                        .contains("codebuddy") == true))
         let isQoderWorkHosted =
             hostBundleIdentifier == "com.qoder.work"
             || normalizedProfileID == "qoderwork"
@@ -606,16 +649,12 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
             || normalized.threadSource?.lowercased().contains("ide") == true
         let isQoderIDEHosted =
             hostBundleIdentifier == "com.qoder.ide"
-            || (
-                normalized.ideHostProfile?.id == "qoder-extension"
-                    && !isQoderWorkHosted
-                    && hasQoderIDEHostEvidence
-            )
+            || (normalized.ideHostProfile?.id == "qoder-extension"
+                && !isQoderWorkHosted
+                && hasQoderIDEHostEvidence)
             || normalized.profileID == "qoder"
-                && (
-                    normalized.terminalBundleIdentifier?.lowercased() == "com.qoder.ide"
-                        || normalized.bundleIdentifier?.lowercased() == "com.qoder.ide"
-                )
+                && (normalized.terminalBundleIdentifier?.lowercased() == "com.qoder.ide"
+                    || normalized.bundleIdentifier?.lowercased() == "com.qoder.ide")
 
         if isCodeBuddyCLI {
             normalized.profileID = "codebuddy-cli"
@@ -657,11 +696,12 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
             originator,
             threadSource,
             transportLabel,
-            terminalSourceDisplayName ?? Self.canonicalTerminalDisplayName(
-                bundleIdentifier: terminalBundleIdentifier,
-                program: terminalProgram
-            ),
-            tmuxPaneIdentifier
+            terminalSourceDisplayName
+                ?? Self.canonicalTerminalDisplayName(
+                    bundleIdentifier: terminalBundleIdentifier,
+                    program: terminalProgram
+                ),
+            tmuxPaneIdentifier,
         ])
 
         guard !parts.isEmpty else { return nil }
@@ -738,11 +778,14 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
         let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
 
-        if let canonical = ClientProfileRegistry.canonicalDisplayName(for: trimmed, provider: provider, kind: kind) {
+        if let canonical = ClientProfileRegistry.canonicalDisplayName(
+            for: trimmed, provider: provider, kind: kind)
+        {
             return canonical
         }
 
-        let normalized = trimmed
+        let normalized =
+            trimmed
             .replacingOccurrences(of: "_", with: "-")
             .lowercased()
         if provider == .codex, kind == .codexCLI, normalized.hasPrefix("codex-") {
@@ -821,12 +864,14 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
     }
 
     private nonisolated static func codexThreadURL(threadId: String) -> String {
-        let encodedThreadId = threadId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? threadId
+        let encodedThreadId =
+            threadId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? threadId
         return "codex://threads/\(encodedThreadId)"
     }
 
     private nonisolated static func isLegacyCodexThreadURL(_ url: String?) -> Bool {
-        guard let normalizedURL = url?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() else {
+        guard let normalizedURL = url?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        else {
             return false
         }
         return normalizedURL.hasPrefix("codex://local/")
@@ -835,7 +880,8 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
     private nonisolated static func workspaceURL(scheme: String, path: String) -> String? {
         let trimmedPath = path.nonEmpty ?? ""
         guard !trimmedPath.isEmpty else { return nil }
-        let encodedPath = trimmedPath.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? trimmedPath
+        let encodedPath =
+            trimmedPath.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? trimmedPath
         return "\(scheme)://file\(encodedPath)"
     }
 }
@@ -875,7 +921,7 @@ struct SessionInterventionQuestion: Equatable, Identifiable, Sendable {
             allowsMultiple ? "1" : "0",
             allowsOther ? "1" : "0",
             isSecret ? "1" : "0",
-            optionSignature
+            optionSignature,
         ].joined(separator: "|")
     }
 }
@@ -942,15 +988,17 @@ struct SessionIntervention: Equatable, Identifiable, Sendable {
     }
 
     nonisolated var offersSessionScopedApproval: Bool {
-        supportsSessionScope || options.contains { option in
-            let normalizedId = Self.normalizedApprovalOptionIdentifier(option.id)
-            if normalizedId == "approveforsession" || normalizedId == "allowforsession" {
-                return true
-            }
+        supportsSessionScope
+            || options.contains { option in
+                let normalizedId = Self.normalizedApprovalOptionIdentifier(option.id)
+                if normalizedId == "approveforsession" || normalizedId == "allowforsession" {
+                    return true
+                }
 
-            let normalizedTitle = Self.normalizedApprovalOptionIdentifier(option.title)
-            return normalizedTitle == "approveforsession" || normalizedTitle == "allowforsession"
-        }
+                let normalizedTitle = Self.normalizedApprovalOptionIdentifier(option.title)
+                return normalizedTitle == "approveforsession"
+                    || normalizedTitle == "allowforsession"
+            }
     }
 
     nonisolated var resolvedQuestions: [SessionInterventionQuestion] {
@@ -959,21 +1007,24 @@ struct SessionIntervention: Equatable, Identifiable, Sendable {
         }
 
         guard let rawJSON = metadata["toolInputJSON"] ?? metadata["tool_input_json"],
-              let data = rawJSON.data(using: .utf8),
-              let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let rawQuestions = payload["questions"] as? [[String: Any]] else {
+            let data = rawJSON.data(using: .utf8),
+            let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let rawQuestions = payload["questions"] as? [[String: Any]]
+        else {
             return []
         }
 
         return rawQuestions.indices.compactMap { index -> SessionInterventionQuestion? in
             let question = rawQuestions[index]
-            let prompt = (question["question"] as? String)
+            let prompt =
+                (question["question"] as? String)
                 ?? (question["prompt"] as? String)
                 ?? (question["label"] as? String)
             guard let prompt, !prompt.isEmpty else { return nil }
 
             let rawOptionObjects = question["options"] as? [[String: Any]] ?? []
-            let objectOptions = rawOptionObjects.indices.compactMap { optionIndex -> SessionInterventionOption? in
+            let objectOptions = rawOptionObjects.indices.compactMap {
+                optionIndex -> SessionInterventionOption? in
                 let option = rawOptionObjects[optionIndex]
                 guard let label = option["label"] as? String, !label.isEmpty else { return nil }
                 return SessionInterventionOption(
@@ -1025,7 +1076,8 @@ struct SessionIntervention: Equatable, Identifiable, Sendable {
 
     nonisolated var externalContinuationAnsweredAt: Date? {
         guard let rawValue = metadata["continuationAnsweredAt"],
-              let timestamp = TimeInterval(rawValue) else {
+            let timestamp = TimeInterval(rawValue)
+        else {
             return nil
         }
         return Date(timeIntervalSince1970: timestamp)
@@ -1044,8 +1096,8 @@ struct SessionIntervention: Equatable, Identifiable, Sendable {
 
     nonisolated var submittedAnswers: [String: [String]] {
         guard let rawJSON = metadata[Self.submittedAnswersMetadataKey],
-              let data = rawJSON.data(using: .utf8),
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            let data = rawJSON.data(using: .utf8),
+            let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else {
             return [:]
         }
@@ -1087,8 +1139,10 @@ struct SessionIntervention: Equatable, Identifiable, Sendable {
         updatedMetadata["continuationAnsweredAt"] = String(answeredAt.timeIntervalSince1970)
         updatedMetadata["continuationActorName"] = actorName
         if let selectedAnswers = selectedAnswers,
-           let data = try? JSONSerialization.data(withJSONObject: selectedAnswers, options: [.sortedKeys]),
-           let json = String(data: data, encoding: .utf8) {
+            let data = try? JSONSerialization.data(
+                withJSONObject: selectedAnswers, options: [.sortedKeys]),
+            let json = String(data: data, encoding: .utf8)
+        {
             updatedMetadata[Self.submittedAnswersMetadataKey] = json
         }
 
@@ -1130,8 +1184,8 @@ struct SessionIntervention: Equatable, Identifiable, Sendable {
     }
 }
 
-private extension String {
-    nonisolated var nonEmpty: String? {
+extension String {
+    fileprivate nonisolated var nonEmpty: String? {
         let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
     }

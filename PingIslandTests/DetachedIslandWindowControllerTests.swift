@@ -335,6 +335,70 @@ final class DetachedIslandWindowControllerTests: XCTestCase {
         XCTAssertEqual(restoredAnchor.y, 46, accuracy: 0.5)
     }
 
+    func testFloatingPetUsesStandardSizeOnBaselineResolution() {
+        let originalSizeMode = AppSettings.floatingPetSizeMode
+        AppSettings.floatingPetSizeMode = .automatic
+        defer { AppSettings.floatingPetSizeMode = originalSizeMode }
+        let viewModel = makeViewModel(screenRect: CGRect(x: 0, y: 0, width: 1440, height: 900))
+
+        let layout = DetachedIslandContentModel.layout(
+            for: [],
+            viewModel: viewModel,
+            bubbleState: .hidden,
+            bubblePlacement: .topLeft
+        )
+
+        XCTAssertEqual(layout.containerSize.width, 92, accuracy: 0.5)
+        XCTAssertEqual(layout.containerSize.height, 92, accuracy: 0.5)
+        XCTAssertEqual(layout.petFrame.width, 92, accuracy: 0.5)
+        XCTAssertEqual(layout.petFrame.height, 92, accuracy: 0.5)
+    }
+
+    func testFloatingPetScalesUpOnHighResolutionDisplays() {
+        let originalSizeMode = AppSettings.floatingPetSizeMode
+        AppSettings.floatingPetSizeMode = .automatic
+        defer { AppSettings.floatingPetSizeMode = originalSizeMode }
+        let highResolutionFrame = CGRect(x: 0, y: 0, width: 2560, height: 1440)
+        let viewModel = makeViewModel(screenRect: highResolutionFrame)
+        let petMetrics = DetachedIslandPanelMetrics.petMetrics(for: highResolutionFrame)
+
+        let layout = DetachedIslandContentModel.layout(
+            for: [],
+            viewModel: viewModel,
+            bubbleState: .hidden,
+            bubblePlacement: .topLeft
+        )
+
+        XCTAssertGreaterThan(petMetrics.scale, 1)
+        XCTAssertLessThanOrEqual(petMetrics.scale, 1.22)
+        XCTAssertEqual(layout.containerSize.width, 92 * petMetrics.scale, accuracy: 0.5)
+        XCTAssertEqual(layout.containerSize.height, 92 * petMetrics.scale, accuracy: 0.5)
+        XCTAssertEqual(layout.petAnchorInWindow.x, layout.containerSize.width / 2, accuracy: 0.5)
+        XCTAssertEqual(layout.petAnchorInWindow.y, layout.containerSize.height / 2, accuracy: 0.5)
+    }
+
+    func testFloatingPetSizeModeCanForceStandardSizeOnHighResolutionDisplays() {
+        let highResolutionFrame = CGRect(x: 0, y: 0, width: 2560, height: 1440)
+        let petMetrics = DetachedIslandPanelMetrics.petMetrics(
+            for: highResolutionFrame,
+            sizeMode: .standard
+        )
+
+        XCTAssertEqual(petMetrics.scale, 1, accuracy: 0.001)
+        XCTAssertEqual(petMetrics.petHitFrame, 92, accuracy: 0.5)
+    }
+
+    func testFloatingPetSizeModeCanForceLargerSizeOnBaselineResolution() {
+        let baselineFrame = CGRect(x: 0, y: 0, width: 1440, height: 900)
+        let petMetrics = DetachedIslandPanelMetrics.petMetrics(
+            for: baselineFrame,
+            sizeMode: .large
+        )
+
+        XCTAssertEqual(petMetrics.scale, 1.16, accuracy: 0.001)
+        XCTAssertEqual(petMetrics.petHitFrame, 106.72, accuracy: 0.5)
+    }
+
     func testActiveCountOnlyTracksActiveSessions() {
         let sessions = [
             makeSession(id: "processing", phase: .processing),
@@ -1258,10 +1322,12 @@ final class DetachedIslandWindowControllerTests: XCTestCase {
         wait(for: [bubbleDismissed], timeout: timeout + 0.25)
     }
 
-    private func makeViewModel() -> NotchViewModel {
+    private func makeViewModel(
+        screenRect: CGRect = CGRect(x: 0, y: 0, width: 1440, height: 900)
+    ) -> NotchViewModel {
         NotchViewModel(
             deviceNotchRect: .zero,
-            screenRect: CGRect(x: 0, y: 0, width: 1440, height: 900),
+            screenRect: screenRect,
             windowHeight: 320,
             hasPhysicalNotch: false,
             enableEventMonitoring: false,

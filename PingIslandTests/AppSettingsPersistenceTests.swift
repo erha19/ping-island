@@ -223,6 +223,22 @@ final class AppSettingsPersistenceTests: XCTestCase {
         XCTAssertEqual(defaults.string(forKey: AppSettingsDefaultKeys.surfaceMode), IslandSurfaceMode.floatingPet.rawValue)
     }
 
+    func testFloatingPetSizeModePersists() {
+        let defaults = makeDefaults()
+        let store = makeStore(defaults: defaults)
+
+        XCTAssertEqual(store.floatingPetSizeMode, .automatic)
+
+        store.floatingPetSizeMode = .large
+
+        let reloadedStore = makeStore(defaults: defaults)
+        XCTAssertEqual(reloadedStore.floatingPetSizeMode, .large)
+        XCTAssertEqual(
+            defaults.string(forKey: AppSettingsDefaultKeys.floatingPetSizeMode),
+            FloatingPetSizeMode.large.rawValue
+        )
+    }
+
     func testPreviewMascotKindPersists() {
         let defaults = makeDefaults()
         let store = makeStore(defaults: defaults)

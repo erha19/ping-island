@@ -18,6 +18,7 @@ enum SessionClientBrand: String, Codable, Equatable, Sendable {
     case qoder
     case copilot
     case neutral
+    case kimi
 }
 
 enum SessionAssistantLabelMode: String, Sendable {
@@ -28,6 +29,10 @@ enum SessionAssistantLabelMode: String, Sendable {
 enum HookInstallEntryTemplate: Sendable {
     case plain
     case matcher(String)
+    /// Writes a flat {"command": "...", "type": "command"} entry without the
+    /// Claude Code-style {"hooks": [...]} wrapper. Required for Cursor which
+    /// does not support the nested hooks format.
+    case direct
 }
 
 enum ManagedHookInstallationKind: Sendable, Equatable {
@@ -35,6 +40,7 @@ enum ManagedHookInstallationKind: Sendable, Equatable {
     case pluginFile
     case pluginDirectory
     case hookDirectory
+    case tomlHooks
 }
 
 struct HookInstallEventDescriptor: Sendable {
@@ -95,15 +101,15 @@ enum HookInstallEventCategory: String, CaseIterable, Sendable, Identifiable {
         case "Notification", "UserPromptSubmit", "userPromptSubmitted":
             return .notifications
         case "SessionStart", "SessionEnd", "Stop", "SubagentStart", "SubagentStop",
-             "BeforeAgent", "AfterAgent",
-             "sessionStart", "sessionEnd", "agentStop", "subagentStop",
-             "command:new", "command:reset", "command:stop":
+            "BeforeAgent", "AfterAgent",
+            "sessionStart", "sessionEnd", "agentStop", "subagentStop",
+            "command:new", "command:reset", "command:stop":
             return .lifecycle
         case "PostToolUse", "PostToolUseFailure", "PreCompact", "PreCompress",
-             "BeforeTool", "AfterTool",
-             "preToolUse", "postToolUse", "errorOccurred",
-             "message:received", "message:sent",
-             "session:compact:before", "session:compact:after", "session:patch":
+            "BeforeTool", "AfterTool",
+            "preToolUse", "postToolUse", "errorOccurred",
+            "message:received", "message:sent",
+            "session:compact:before", "session:compact:after", "session:patch":
             return .activity
         default:
             return .activity
@@ -260,12 +266,15 @@ struct ManagedHookClientProfile: Identifiable, Sendable {
             return "这会重新生成 %@ 的 Island 插件目录，并覆盖旧的 Island 托管版本。"
         case .hookDirectory:
             return "这会重新生成 %@ 的 Island hook 目录，并刷新 OpenClaw 的启用状态。"
+        case .tomlHooks:
+            return "这会重新写入 %@ 的 Island hooks TOML 配置，并保留其他非 Island 设置。"
         }
     }
 
     nonisolated private static func resolveConfigurationURL(relativePath: String) -> URL {
         let home = FileManager.default.homeDirectoryForCurrentUser
-        return relativePath
+        return
+            relativePath
             .split(separator: "/")
             .reduce(home) { partialURL, component in
                 partialURL.appendingPathComponent(String(component))
@@ -300,7 +309,9 @@ struct SessionClientProfile: Identifiable, Sendable {
     ) -> Int {
         var score = 0
 
-        if let normalizedKind = Self.normalize(explicitKind), recognizedKinds.contains(normalizedKind) {
+        if let normalizedKind = Self.normalize(explicitKind),
+            recognizedKinds.contains(normalizedKind)
+        {
             score += 100
         }
 
@@ -351,7 +362,8 @@ struct SessionClientProfile: Identifiable, Sendable {
 
     nonisolated private static func normalize(_ value: String?) -> String? {
         guard let value else { return nil }
-        let normalized = value
+        let normalized =
+            value
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .replacingOccurrences(of: "_", with: "-")
             .lowercased()
@@ -482,7 +494,8 @@ struct ManagedIDEExtensionProfile: Identifiable, Sendable {
 
     nonisolated private static func resolveRootURL(relativePath: String) -> URL {
         let home = FileManager.default.homeDirectoryForCurrentUser
-        return relativePath
+        return
+            relativePath
             .split(separator: "/")
             .reduce(home) { partialURL, component in
                 partialURL.appendingPathComponent(String(component))
@@ -514,13 +527,15 @@ enum ClientProfileRegistry {
                 HookInstallEventDescriptor(name: "UserPromptSubmit", templates: [.plain]),
                 HookInstallEventDescriptor(name: "PreToolUse", templates: [.matcher("*")]),
                 HookInstallEventDescriptor(name: "PostToolUse", templates: [.matcher("*")]),
-                HookInstallEventDescriptor(name: "PermissionRequest", templates: [.matcher("*")], timeout: 86_400),
+                HookInstallEventDescriptor(
+                    name: "PermissionRequest", templates: [.matcher("*")], timeout: 86_400),
                 HookInstallEventDescriptor(name: "Notification", templates: [.matcher("*")]),
                 HookInstallEventDescriptor(name: "Stop", templates: [.plain]),
                 HookInstallEventDescriptor(name: "SubagentStop", templates: [.plain]),
                 HookInstallEventDescriptor(name: "SessionStart", templates: [.plain]),
                 HookInstallEventDescriptor(name: "SessionEnd", templates: [.plain]),
-                HookInstallEventDescriptor(name: "PreCompact", templates: [.matcher("auto"), .matcher("manual")]),
+                HookInstallEventDescriptor(
+                    name: "PreCompact", templates: [.matcher("auto"), .matcher("manual")]),
             ]
         ),
         ManagedHookClientProfile(
@@ -542,7 +557,8 @@ enum ClientProfileRegistry {
                 HookInstallEventDescriptor(name: "UserPromptSubmit", templates: [.matcher("*")]),
                 HookInstallEventDescriptor(name: "PreToolUse", templates: [.matcher("*")]),
                 HookInstallEventDescriptor(name: "PostToolUse", templates: [.matcher("*")]),
-                HookInstallEventDescriptor(name: "PermissionRequest", templates: [.matcher("*")], timeout: 86_400),
+                HookInstallEventDescriptor(
+                    name: "PermissionRequest", templates: [.matcher("*")], timeout: 86_400),
                 HookInstallEventDescriptor(name: "Stop", templates: [.matcher("*")]),
             ]
         ),
@@ -561,7 +577,7 @@ enum ClientProfileRegistry {
                 "--client-name", "Gemini CLI",
                 "--client-origin", "cli",
                 "--client-originator", "Gemini CLI",
-                "--thread-source", "gemini-hooks"
+                "--thread-source", "gemini-hooks",
             ],
             defaultEnabled: false,
             brand: .gemini,
@@ -592,7 +608,7 @@ enum ClientProfileRegistry {
                 "--client-name", "Hermes",
                 "--client-origin", "cli",
                 "--client-originator", "Hermes",
-                "--thread-source", "hermes-plugin"
+                "--thread-source", "hermes-plugin",
             ],
             defaultEnabled: false,
             brand: .hermes,
@@ -613,7 +629,7 @@ enum ClientProfileRegistry {
                 "--client-name", "Qwen Code",
                 "--client-origin", "cli",
                 "--client-originator", "Qwen Code",
-                "--thread-source", "qwen-code-hooks"
+                "--thread-source", "qwen-code-hooks",
             ],
             defaultEnabled: false,
             brand: .qwen,
@@ -628,8 +644,10 @@ enum ClientProfileRegistry {
                 HookInstallEventDescriptor(name: "Stop", templates: [.plain]),
                 HookInstallEventDescriptor(name: "SubagentStart", templates: [.matcher("*")]),
                 HookInstallEventDescriptor(name: "SubagentStop", templates: [.matcher("*")]),
-                HookInstallEventDescriptor(name: "PreCompact", templates: [.matcher("manual"), .matcher("auto")]),
-                HookInstallEventDescriptor(name: "PermissionRequest", templates: [.matcher("*")], timeout: 86_400),
+                HookInstallEventDescriptor(
+                    name: "PreCompact", templates: [.matcher("manual"), .matcher("auto")]),
+                HookInstallEventDescriptor(
+                    name: "PermissionRequest", templates: [.matcher("*")], timeout: 86_400),
             ]
         ),
         ManagedHookClientProfile(
@@ -650,7 +668,7 @@ enum ClientProfileRegistry {
                 "--client-name", "OpenClaw",
                 "--client-origin", "gateway",
                 "--client-originator", "OpenClaw",
-                "--thread-source", "openclaw-hooks"
+                "--thread-source", "openclaw-hooks",
             ],
             defaultEnabled: false,
             brand: .neutral,
@@ -678,7 +696,7 @@ enum ClientProfileRegistry {
             bridgeExtraArguments: [
                 "--client-kind", "codebuddy",
                 "--client-name", "CodeBuddy",
-                "--client-originator", "CodeBuddy"
+                "--client-originator", "CodeBuddy",
             ],
             defaultEnabled: false,
             brand: .codebuddy,
@@ -691,13 +709,15 @@ enum ClientProfileRegistry {
                 HookInstallEventDescriptor(name: "SubagentStop", templates: [.plain]),
                 HookInstallEventDescriptor(name: "SessionStart", templates: [.plain]),
                 HookInstallEventDescriptor(name: "SessionEnd", templates: [.plain]),
-                HookInstallEventDescriptor(name: "PreCompact", templates: [.matcher("auto"), .matcher("manual")]),
+                HookInstallEventDescriptor(
+                    name: "PreCompact", templates: [.matcher("auto"), .matcher("manual")]),
             ]
         ),
         ManagedHookClientProfile(
             id: "codebuddy-cli-hooks",
             title: "CodeBuddy CLI",
-            subtitle: "管理 ~/.codebuddy/settings.json，按 CodeBuddy CLI Claude-compatible hooks 协议接入 Island",
+            subtitle:
+                "管理 ~/.codebuddy/settings.json，按 CodeBuddy CLI Claude-compatible hooks 协议接入 Island",
             alwaysVisibleInSettings: true,
             logoAssetName: "CodeBuddyLogo",
             prefersBundledLogoOverAppIcon: true,
@@ -708,21 +728,34 @@ enum ClientProfileRegistry {
                 "--client-kind", "codebuddy-cli",
                 "--client-name", "CodeBuddy CLI",
                 "--client-origin", "cli",
-                "--client-originator", "CodeBuddy"
+                "--client-originator", "CodeBuddy",
             ],
             defaultEnabled: false,
             brand: .codebuddy,
             events: [
                 HookInstallEventDescriptor(name: "UserPromptSubmit", templates: [.plain]),
-                HookInstallEventDescriptor(name: "PreToolUse", templates: [.matcher("*")], timeout: 86_400),
+                HookInstallEventDescriptor(
+                    name: "PreToolUse", templates: [.matcher("*")], timeout: 86_400),
                 HookInstallEventDescriptor(name: "PostToolUse", templates: [.matcher("*")]),
-                HookInstallEventDescriptor(name: "PermissionRequest", templates: [.matcher("*")], timeout: 86_400),
+                HookInstallEventDescriptor(
+                    name: "PermissionRequest", templates: [.matcher("*")], timeout: 86_400),
                 HookInstallEventDescriptor(name: "Notification", templates: [.matcher("*")]),
                 HookInstallEventDescriptor(name: "Stop", templates: [.plain]),
                 HookInstallEventDescriptor(name: "SubagentStop", templates: [.plain]),
-                HookInstallEventDescriptor(name: "SessionStart", templates: [.matcher("startup"), .matcher("resume"), .matcher("clear"), .matcher("compact")]),
-                HookInstallEventDescriptor(name: "SessionEnd", templates: [.matcher("clear"), .matcher("logout"), .matcher("prompt_input_exit"), .matcher("other")]),
-                HookInstallEventDescriptor(name: "PreCompact", templates: [.matcher("auto"), .matcher("manual")]),
+                HookInstallEventDescriptor(
+                    name: "SessionStart",
+                    templates: [
+                        .matcher("startup"), .matcher("resume"), .matcher("clear"),
+                        .matcher("compact"),
+                    ]),
+                HookInstallEventDescriptor(
+                    name: "SessionEnd",
+                    templates: [
+                        .matcher("clear"), .matcher("logout"), .matcher("prompt_input_exit"),
+                        .matcher("other"),
+                    ]),
+                HookInstallEventDescriptor(
+                    name: "PreCompact", templates: [.matcher("auto"), .matcher("manual")]),
             ]
         ),
         ManagedHookClientProfile(
@@ -738,7 +771,7 @@ enum ClientProfileRegistry {
             bridgeExtraArguments: [
                 "--client-kind", "workbuddy",
                 "--client-name", "WorkBuddy",
-                "--client-originator", "WorkBuddy"
+                "--client-originator", "WorkBuddy",
             ],
             defaultEnabled: false,
             brand: .codebuddy,
@@ -751,37 +784,36 @@ enum ClientProfileRegistry {
                 HookInstallEventDescriptor(name: "SubagentStop", templates: [.plain]),
                 HookInstallEventDescriptor(name: "SessionStart", templates: [.plain]),
                 HookInstallEventDescriptor(name: "SessionEnd", templates: [.plain]),
-                HookInstallEventDescriptor(name: "PreCompact", templates: [.matcher("auto"), .matcher("manual")]),
+                HookInstallEventDescriptor(
+                    name: "PreCompact", templates: [.matcher("auto"), .matcher("manual")]),
             ]
         ),
         ManagedHookClientProfile(
             id: "cursor-hooks",
             title: "Cursor",
-            subtitle: "管理 ~/Library/Application Support/Cursor/User/settings.json，按 Claude Hooks 协议接入 Island",
+            subtitle: "管理 ~/.cursor/hooks.json，按 Claude Hooks 协议接入 Island",
             logoAssetName: "CursorLogo",
             prefersBundledLogoOverAppIcon: true,
             localAppBundleIdentifiers: ["com.todesktop.230313mzl4w4u92"],
             iconSymbolName: "cursorarrow.rays",
-            configurationRelativePath: "Library/Application Support/Cursor/User/settings.json",
+            configurationRelativePath: ".cursor/hooks.json",
             bridgeSource: "claude",
             bridgeExtraArguments: [
                 "--client-kind", "cursor",
                 "--client-name", "Cursor",
-                "--client-originator", "Cursor"
+                "--client-originator", "Cursor",
             ],
             defaultEnabled: false,
             brand: .claude,
             events: [
-                HookInstallEventDescriptor(name: "UserPromptSubmit", templates: [.plain]),
-                HookInstallEventDescriptor(name: "PreToolUse", templates: [.matcher("*")]),
-                HookInstallEventDescriptor(name: "PostToolUse", templates: [.matcher("*")]),
-                HookInstallEventDescriptor(name: "PermissionRequest", templates: [.matcher("*")], timeout: 86_400),
-                HookInstallEventDescriptor(name: "Notification", templates: [.matcher("*")]),
-                HookInstallEventDescriptor(name: "Stop", templates: [.plain]),
-                HookInstallEventDescriptor(name: "SubagentStop", templates: [.plain]),
-                HookInstallEventDescriptor(name: "SessionStart", templates: [.plain]),
-                HookInstallEventDescriptor(name: "SessionEnd", templates: [.plain]),
-                HookInstallEventDescriptor(name: "PreCompact", templates: [.matcher("auto"), .matcher("manual")]),
+                HookInstallEventDescriptor(name: "beforeSubmitPrompt", templates: [.direct]),
+                HookInstallEventDescriptor(name: "preToolUse", templates: [.direct]),
+                HookInstallEventDescriptor(name: "postToolUse", templates: [.direct]),
+                HookInstallEventDescriptor(name: "stop", templates: [.direct]),
+                HookInstallEventDescriptor(name: "subagentStop", templates: [.direct]),
+                HookInstallEventDescriptor(name: "sessionStart", templates: [.direct]),
+                HookInstallEventDescriptor(name: "sessionEnd", templates: [.direct]),
+                HookInstallEventDescriptor(name: "preCompact", templates: [.direct]),
             ]
         ),
         ManagedHookClientProfile(
@@ -820,21 +852,24 @@ enum ClientProfileRegistry {
                 "--client-kind", "qoder-cli",
                 "--client-name", "Qoder CLI",
                 "--client-origin", "cli",
-                "--client-originator", "Qoder"
+                "--client-originator", "Qoder",
             ],
             defaultEnabled: false,
             brand: .qoder,
             events: [
                 HookInstallEventDescriptor(name: "UserPromptSubmit", templates: [.plain]),
-                HookInstallEventDescriptor(name: "PreToolUse", templates: [.matcher("*")], timeout: 86_400),
+                HookInstallEventDescriptor(
+                    name: "PreToolUse", templates: [.matcher("*")], timeout: 86_400),
                 HookInstallEventDescriptor(name: "PostToolUse", templates: [.matcher("*")]),
-                HookInstallEventDescriptor(name: "PermissionRequest", templates: [.matcher("*")], timeout: 86_400),
+                HookInstallEventDescriptor(
+                    name: "PermissionRequest", templates: [.matcher("*")], timeout: 86_400),
                 HookInstallEventDescriptor(name: "Notification", templates: [.matcher("*")]),
                 HookInstallEventDescriptor(name: "Stop", templates: [.plain]),
                 HookInstallEventDescriptor(name: "SubagentStop", templates: [.plain]),
                 HookInstallEventDescriptor(name: "SessionStart", templates: [.plain]),
                 HookInstallEventDescriptor(name: "SessionEnd", templates: [.plain]),
-                HookInstallEventDescriptor(name: "PreCompact", templates: [.matcher("auto"), .matcher("manual")]),
+                HookInstallEventDescriptor(
+                    name: "PreCompact", templates: [.matcher("auto"), .matcher("manual")]),
             ]
         ),
         ManagedHookClientProfile(
@@ -849,7 +884,7 @@ enum ClientProfileRegistry {
             bridgeSource: "claude",
             bridgeExtraArguments: [
                 "--client-kind", "qoderwork",
-                "--client-name", "QoderWork"
+                "--client-name", "QoderWork",
             ],
             defaultEnabled: true,
             brand: .qoder,
@@ -891,7 +926,8 @@ enum ClientProfileRegistry {
         ManagedHookClientProfile(
             id: "opencode-hooks",
             title: "OpenCode",
-            subtitle: "管理 ~/.config/opencode/plugins/ping-island.js，按 OpenCode 官方插件 hooks 接入 Island",
+            subtitle:
+                "管理 ~/.config/opencode/plugins/ping-island.js，按 OpenCode 官方插件 hooks 接入 Island",
             installationKind: .pluginFile,
             alwaysVisibleInSettings: true,
             logoAssetName: "OpenCodeLogo",
@@ -906,11 +942,41 @@ enum ClientProfileRegistry {
                 "--client-name", "OpenCode",
                 "--client-origin", "cli",
                 "--client-originator", "OpenCode",
-                "--thread-source", "opencode-plugin"
+                "--thread-source", "opencode-plugin",
             ],
             defaultEnabled: false,
             brand: .opencode,
             events: []
+        ),
+        ManagedHookClientProfile(
+            id: "kimi-hooks",
+            title: "Kimi CLI",
+            subtitle: "管理 ~/.kimi/config.toml，按 Kimi CLI 官方 hooks 协议接入 Island",
+            installationKind: .tomlHooks,
+            alwaysVisibleInSettings: true,
+            logoAssetName: "KimiLogo",
+            prefersBundledLogoOverAppIcon: true,
+            iconSymbolName: "moon.stars.fill",
+            configurationRelativePath: ".kimi/config.toml",
+            bridgeSource: "kimi",
+            bridgeExtraArguments: [
+                "--client-kind", "kimi",
+                "--client-name", "Kimi CLI",
+                "--client-origin", "cli",
+                "--client-originator", "Kimi CLI",
+                "--thread-source", "kimi-hooks",
+            ],
+            defaultEnabled: false,
+            brand: .kimi,
+            events: [
+                HookInstallEventDescriptor(name: "UserPromptSubmit", templates: [.plain]),
+                HookInstallEventDescriptor(name: "PreToolUse", templates: [.matcher("*")]),
+                HookInstallEventDescriptor(name: "PostToolUse", templates: [.matcher("*")]),
+                HookInstallEventDescriptor(name: "Notification", templates: [.matcher("*")]),
+                HookInstallEventDescriptor(name: "Stop", templates: [.plain]),
+                HookInstallEventDescriptor(name: "SessionStart", templates: [.plain]),
+                HookInstallEventDescriptor(name: "SessionEnd", templates: [.plain]),
+            ]
         ),
     ]
 
@@ -985,7 +1051,10 @@ enum ClientProfileRegistry {
             brand: .codebuddy,
             defaultBundleIdentifier: nil,
             defaultOrigin: nil,
-            recognizedKinds: ["codebuddy-cli", "codebuddy_cli", "codebuddy cli", "code-buddy-cli", "code buddy cli"],
+            recognizedKinds: [
+                "codebuddy-cli", "codebuddy_cli", "codebuddy cli", "code-buddy-cli",
+                "code buddy cli",
+            ],
             exactAliases: ["codebuddy-cli", "codebuddy cli", "code-buddy-cli", "code buddy cli"],
             keywordAliases: ["codebuddy cli", "code buddy cli"],
             bundleIdentifiers: []
@@ -1045,7 +1114,9 @@ enum ClientProfileRegistry {
             brand: .claude,
             defaultBundleIdentifier: nil,
             defaultOrigin: nil,
-            recognizedKinds: ["cursor", "cursor-ide", "cursor ide", "cursor-client", "cursor client"],
+            recognizedKinds: [
+                "cursor", "cursor-ide", "cursor ide", "cursor-client", "cursor client",
+            ],
             exactAliases: ["cursor", "cursor-ide", "cursor ide", "cursor-client", "cursor client"],
             keywordAliases: ["cursor"],
             bundleIdentifiers: ["com.todesktop.230313mzl4w4u92"]
@@ -1061,7 +1132,9 @@ enum ClientProfileRegistry {
             defaultBundleIdentifier: nil,
             defaultOrigin: nil,
             recognizedKinds: ["jetbrains", "jetbrains-plugin", "jb", "jb-plugin", "jb plugin"],
-            exactAliases: ["jetbrains", "jetbrains-plugin", "jetbrains plugin", "jb", "jb-plugin", "jb plugin"],
+            exactAliases: [
+                "jetbrains", "jetbrains-plugin", "jetbrains plugin", "jb", "jb-plugin", "jb plugin",
+            ],
             keywordAliases: ["jetbrains", "jb plugin"],
             bundleIdentifiers: []
         ),
@@ -1141,6 +1214,21 @@ enum ClientProfileRegistry {
             bundleIdentifiers: []
         ),
         SessionClientProfile(
+            id: "kimi",
+            provider: .kimi,
+            family: .claudeHooks,
+            kind: .custom,
+            displayName: "Kimi CLI",
+            assistantLabelMode: .badgeLabel,
+            brand: .kimi,
+            defaultBundleIdentifier: nil,
+            defaultOrigin: "cli",
+            recognizedKinds: ["kimi", "kimi-cli", "kimi_cli", "kimi cli"],
+            exactAliases: ["kimi", "kimi-cli", "kimi cli"],
+            keywordAliases: ["kimi", "kimi cli"],
+            bundleIdentifiers: []
+        ),
+        SessionClientProfile(
             id: "codex-app",
             provider: .codex,
             family: .codexHooks,
@@ -1156,6 +1244,21 @@ enum ClientProfileRegistry {
             bundleIdentifiers: ["com.openai.codex"]
         ),
         SessionClientProfile(
+            id: "claude-desktop",
+            provider: .claude,
+            family: .claudeHooks,
+            kind: .custom,
+            displayName: "Claude Desktop",
+            assistantLabelMode: .badgeLabel,
+            brand: .claude,
+            defaultBundleIdentifier: "com.anthropic.claudefordesktop",
+            defaultOrigin: "desktop",
+            recognizedKinds: ["claude-desktop", "claude_desktop", "claude desktop"],
+            exactAliases: ["claude-desktop", "claude desktop"],
+            keywordAliases: ["claude desktop"],
+            bundleIdentifiers: ["com.anthropic.claudefordesktop"]
+        ),
+        SessionClientProfile(
             id: "codex-cli",
             provider: .codex,
             family: .codexHooks,
@@ -1165,8 +1268,13 @@ enum ClientProfileRegistry {
             brand: .codex,
             defaultBundleIdentifier: nil,
             defaultOrigin: "cli",
-            recognizedKinds: ["codex-cli", "codex_cli", "codex cli", "codex-tui", "codex_tui", "codex tui", "cli", "tui"],
-            exactAliases: ["codex", "codex-cli", "codex cli", "codex-tui", "codex tui", "cli", "tui"],
+            recognizedKinds: [
+                "codex-cli", "codex_cli", "codex cli", "codex-tui", "codex_tui", "codex tui", "cli",
+                "tui",
+            ],
+            exactAliases: [
+                "codex", "codex-cli", "codex cli", "codex-tui", "codex tui", "cli", "tui",
+            ],
             keywordAliases: ["codex cli", "codex tui"],
             bundleIdentifiers: []
         ),
@@ -1180,7 +1288,9 @@ enum ClientProfileRegistry {
             brand: .copilot,
             defaultBundleIdentifier: nil,
             defaultOrigin: "cli",
-            recognizedKinds: ["copilot", "copilot-cli", "copilot cli", "github-copilot", "github copilot"],
+            recognizedKinds: [
+                "copilot", "copilot-cli", "copilot cli", "github-copilot", "github copilot",
+            ],
             exactAliases: ["copilot", "copilot-cli", "copilot cli", "github copilot"],
             keywordAliases: ["copilot", "github copilot"],
             bundleIdentifiers: ["com.github.copilot", "com.github.copilotforxcode"]
@@ -1214,7 +1324,9 @@ enum ClientProfileRegistry {
             extensionRootRelativePath: ".cursor/extensions",
             extensionRegistryRelativePath: ".cursor/extensions/extensions.json",
             uriScheme: "cursor",
-            exactBundleIdentifiers: ["com.todesktop.230313mzl4w4u92", "com.todesktop.230313mzl4w4u92.helper"],
+            exactBundleIdentifiers: [
+                "com.todesktop.230313mzl4w4u92", "com.todesktop.230313mzl4w4u92.helper",
+            ],
             bundleIdentifierKeywords: ["todesktop", "cursor"],
             appNameKeywords: ["cursor"]
         ),
@@ -1228,11 +1340,11 @@ enum ClientProfileRegistry {
             iconSymbolName: "bubble.left.and.bubble.right.fill",
             extensionRootRelativePaths: [
                 ".codebuddy/extensions",
-                ".codebuddycn/extensions"
+                ".codebuddycn/extensions",
             ],
             extensionRegistryRelativePaths: [
                 ".codebuddy/extensions/extensions.json",
-                ".codebuddycn/extensions/extensions.json"
+                ".codebuddycn/extensions/extensions.json",
             ],
             uriScheme: "codebuddy",
             exactBundleIdentifiers: ["com.tencent.codebuddy", "com.codebuddy.app"],
@@ -1316,7 +1428,8 @@ enum ClientProfileRegistry {
                 return exactBundleMatch
             }
 
-            let bundleKeywordMatch = ideExtensionProfiles
+            let bundleKeywordMatch =
+                ideExtensionProfiles
                 .compactMap { profile -> (ManagedIDEExtensionProfile, Int)? in
                     let longestMatchLength = profile.bundleIdentifierKeywords
                         .filter { normalizedBundle.contains($0) }
@@ -1336,7 +1449,8 @@ enum ClientProfileRegistry {
 
         guard let normalizedName else { return nil }
 
-        return ideExtensionProfiles
+        return
+            ideExtensionProfiles
             .compactMap { profile -> (ManagedIDEExtensionProfile, Int)? in
                 let longestMatchLength = profile.appNameKeywords
                     .filter { normalizedName.contains($0) }
@@ -1351,7 +1465,9 @@ enum ClientProfileRegistry {
             .map(\.0)
     }
 
-    nonisolated static func defaultRuntimeProfile(for provider: SessionProvider, kind: SessionClientKind? = nil) -> SessionClientProfile? {
+    nonisolated static func defaultRuntimeProfile(
+        for provider: SessionProvider, kind: SessionClientKind? = nil
+    ) -> SessionClientProfile? {
         switch provider {
         case .claude:
             if kind == .qoder {
@@ -1362,6 +1478,8 @@ enum ClientProfileRegistry {
             return runtimeProfile(id: kind == .codexCLI ? "codex-cli" : "codex-app")
         case .copilot:
             return runtimeProfile(id: "copilot-cli")
+        case .kimi:
+            return runtimeProfile(id: "kimi")
         case .gemini:
             return runtimeProfile(id: "gemini-cli")
         }
@@ -1378,8 +1496,7 @@ enum ClientProfileRegistry {
         threadSource: String?,
         processName: String?
     ) -> SessionClientProfile? {
-        (
-            runtimeProfiles
+        (runtimeProfiles
             .filter { $0.provider == provider }
             .map { profile in
                 (
@@ -1397,8 +1514,7 @@ enum ClientProfileRegistry {
                 )
             }
             .filter { $0.score > 0 }
-            .max { lhs, rhs in lhs.score < rhs.score }
-        )?.profile
+            .max { lhs, rhs in lhs.score < rhs.score })?.profile
     }
 
     nonisolated static func canonicalDisplayName(
@@ -1407,7 +1523,8 @@ enum ClientProfileRegistry {
         kind: SessionClientKind
     ) -> String? {
         let profiles = runtimeProfiles.filter { $0.provider == provider || $0.kind == kind }
-        return profiles
+        return
+            profiles
             .map { profile in
                 (profile: profile, score: profile.labelAliasScore(rawValue))
             }

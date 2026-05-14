@@ -421,10 +421,13 @@ struct SessionState: Equatable, Identifiable, Sendable {
         guard provider == .codex else { return false }
         guard intervention == nil else { return false }
         guard !hasSpecificCodexSessionName else { return false }
-        guard codexParentThreadId?.isEmpty != false else { return false }
-        guard codexSubagentDepth == nil else { return false }
-        guard codexSubagentNickname?.isEmpty != false else { return false }
-        guard codexSubagentRole?.isEmpty != false else { return false }
+        // Real subagent threads have parent ID AND subagent metadata.
+        // Suggestions threads have parent ID but no subagent metadata.
+        let isRealSubagent = codexParentThreadId?.isEmpty == false
+            && (codexSubagentDepth != nil
+                || codexSubagentNickname?.isEmpty == false
+                || codexSubagentRole?.isEmpty == false)
+        if isRealSubagent { return false }
         guard !chatItems.contains(where: Self.isToolCallItem(_:)) else { return false }
 
         let visibleTexts = codexAuxiliaryCandidateTexts
@@ -1011,6 +1014,8 @@ struct SessionState: Equatable, Identifiable, Sendable {
         case .codex:
             return clientInfo.kind == .codexCLI
         case .copilot, .gemini:
+            return false
+        case .kimi:
             return false
         }
     }

@@ -4,6 +4,7 @@ public enum AgentProvider: String, Codable, CaseIterable, Sendable {
     case claude
     case codex
     case copilot
+    case kimi
     case gemini
 }
 
@@ -246,7 +247,8 @@ public indirect enum JSONValue: Codable, Equatable, Sendable {
         } else if let object = try? container.decode([String: JSONValue].self) {
             self = .object(object)
         } else {
-            throw DecodingError.dataCorruptedError(in: container, debugDescription: "Unsupported JSON value")
+            throw DecodingError.dataCorruptedError(
+                in: container, debugDescription: "Unsupported JSON value")
         }
     }
 

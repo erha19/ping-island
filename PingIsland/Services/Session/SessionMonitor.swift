@@ -27,6 +27,8 @@ class SessionMonitor: ObservableObject {
     private var hasStarted = false
     private var allSessions: [SessionState] = []
     private var usageRefreshTask: Task<Void, Never>?
+    private var maintenanceTask: Task<Void, Never>?
+    private let shouldRefreshUsage: Bool
     private var questionDraftCache = SessionQuestionDraftCache()
 
     init(
@@ -34,8 +36,8 @@ class SessionMonitor: ObservableObject {
         observeSharedState: Bool = true
     ) {
         self.runtimeCoordinator = runtimeCoordinator
+        self.shouldRefreshUsage = !Self.isRunningUnderXCTest
         guard observeSharedState else { return }
-        let shouldRefreshUsage = !Self.isRunningUnderXCTest
         if shouldRefreshUsage {
             claudeUsageSnapshot = UsageSnapshotCacheStore.loadClaude()
             codexUsageSnapshot = UsageSnapshotCacheStore.loadCodex()
@@ -48,21 +50,7 @@ class SessionMonitor: ObservableObject {
             }
             .store(in: &cancellables)
 
-        Timer.publish(every: 60, on: .main, in: .common)
-            .autoconnect()
-            .sink { [weak self] _ in
-                self?.refreshVisibleSessions()
-                if shouldRefreshUsage {
-                    self?.refreshUsageState()
-                }
-                Task {
-                    await SessionStore.shared.process(
-                        .pruneTimedOutExternalContinuations(now: Date())
-                    )
-                    await SessionStore.shared.pruneOrphanedSessions()
-                }
-            }
-            .store(in: &cancellables)
+        startEnergyAwareMaintenanceLoop()
 
         InterruptWatcherManager.shared.delegate = self
 
@@ -76,6 +64,11 @@ class SessionMonitor: ObservableObject {
         if shouldRefreshUsage {
             refreshUsageState()
         }
+    }
+
+    deinit {
+        maintenanceTask?.cancel()
+        usageRefreshTask?.cancel()
     }
 
     // MARK: - Monitoring Lifecycle
@@ -103,6 +96,9 @@ class SessionMonitor: ObservableObject {
     func startMonitoring() {
         guard !hasStarted else { return }
         hasStarted = true
+        if maintenanceTask == nil {
+            startEnergyAwareMaintenanceLoop()
+        }
 
         let handleHookEvent: @Sendable (HookEvent) -> Void = { [self] event in
             Task { @MainActor in
@@ -123,6 +119,10 @@ class SessionMonitor: ObservableObject {
 
         Task {
             await CodexAppServerMonitor.shared.start()
+        }
+
+        Task {
+            await ClaudeDesktopWatcher.shared.start()
         }
 
         Task {
@@ -240,6 +240,8 @@ class SessionMonitor: ObservableObject {
 
     func stopMonitoring() {
         hasStarted = false
+        maintenanceTask?.cancel()
+        maintenanceTask = nil
         usageRefreshTask?.cancel()
         usageRefreshTask = nil
         HookSocketServer.shared.stop()
@@ -248,7 +250,43 @@ class SessionMonitor: ObservableObject {
             await CodexAppServerMonitor.shared.stop()
         }
         Task {
+            await ClaudeDesktopWatcher.shared.stop()
+        }
+        Task {
             await runtimeCoordinator.stop()
+        }
+    }
+
+    private func startEnergyAwareMaintenanceLoop() {
+        maintenanceTask?.cancel()
+        maintenanceTask = Task { [weak self] in
+            while !Task.isCancelled {
+                let policy = await MainActor.run {
+                    EnergyGovernor.shared.policy
+                }
+
+                guard let interval = policy.sessionMaintenanceInterval else {
+                    try? await Task.sleep(for: .seconds(30))
+                    continue
+                }
+
+                try? await Task.sleep(for: interval)
+                guard !Task.isCancelled else { break }
+
+                await MainActor.run {
+                    guard let self else { return }
+                    self.refreshVisibleSessions()
+                    if self.shouldRefreshUsage,
+                       EnergyGovernor.shared.policy.usageRefreshInterval != nil {
+                        self.refreshUsageState()
+                    }
+                }
+
+                await SessionStore.shared.process(
+                    .pruneTimedOutExternalContinuations(now: Date())
+                )
+                await SessionStore.shared.pruneOrphanedSessions()
+            }
         }
     }
 

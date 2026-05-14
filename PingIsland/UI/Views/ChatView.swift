@@ -861,8 +861,7 @@ struct ProcessingIndicatorView: View {
     private let color: Color
     private let baseText: String
 
-    @State private var dotCount: Int = 1
-    private let timer = Timer.publish(every: 0.4, on: .main, in: .common).autoconnect()
+    @ObservedObject private var energyGovernor = EnergyGovernor.shared
 
     /// Use a turnId to select text consistently per user turn
     init(turnId: String = "", color: Color = Color(red: 0.85, green: 0.47, blue: 0.34)) {
@@ -872,24 +871,42 @@ struct ProcessingIndicatorView: View {
         self.color = color
     }
 
-    private var dots: String {
-        String(repeating: ".", count: dotCount)
+    var body: some View {
+        if energyGovernor.policy.animationLevel == .staticFrames {
+            processingBody(dotCount: 1)
+        } else {
+            TimelineView(.periodic(from: .now, by: dotInterval)) { context in
+                processingBody(dotCount: dotPhase(for: context.date))
+            }
+        }
     }
 
-    var body: some View {
+    private func processingBody(dotCount: Int) -> some View {
         HStack(alignment: .center, spacing: 6) {
             ProcessingSpinner()
                 .frame(width: 6)
 
-            Text(baseText + dots)
+            Text(baseText + String(repeating: ".", count: dotCount))
                 .font(.system(size: 13))
                 .foregroundColor(color)
 
             Spacer()
         }
-        .onReceive(timer) { _ in
-            dotCount = (dotCount % 3) + 1
+    }
+
+    private var dotInterval: TimeInterval {
+        switch energyGovernor.policy.animationLevel {
+        case .full:
+            0.4
+        case .reduced:
+            1.0
+        case .staticFrames:
+            0.4
         }
+    }
+
+    private func dotPhase(for date: Date) -> Int {
+        Int(date.timeIntervalSinceReferenceDate / dotInterval) % 3 + 1
     }
 }
 
@@ -899,9 +916,9 @@ struct ToolCallView: View {
     let tool: ToolCallItem
     let sessionId: String
 
-    @State private var pulseOpacity: Double = 0.6
     @State private var isExpanded: Bool = false
     @State private var isHovering: Bool = false
+    @ObservedObject private var energyGovernor = EnergyGovernor.shared
 
     private var statusColor: Color {
         switch tool.status {
@@ -954,15 +971,7 @@ struct ToolCallView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 6) {
-                Circle()
-                    .fill(statusColor.opacity(tool.status == .running || tool.status == .waitingForApproval ? pulseOpacity : 0.6))
-                    .frame(width: 6, height: 6)
-                    .id(tool.status)  // Forces view recreation, cancelling repeatForever animation
-                    .onAppear {
-                        if tool.status == .running || tool.status == .waitingForApproval {
-                            startPulsing()
-                        }
-                    }
+                statusDot(size: 6, animated: tool.status == .running || tool.status == .waitingForApproval)
 
                 // Tool name (formatted for MCP tools)
                 Text(MCPToolFormatter.formatToolName(tool.name))
@@ -1053,13 +1062,47 @@ struct ToolCallView: View {
         .animation(.spring(response: 0.25, dampingFraction: 0.8), value: isExpanded)
     }
 
-    private func startPulsing() {
-        withAnimation(
-            .easeInOut(duration: 0.6)
-            .repeatForever(autoreverses: true)
-        ) {
-            pulseOpacity = 0.15
+    @ViewBuilder
+    private func statusDot(size: CGFloat, animated: Bool) -> some View {
+        if animated && energyGovernor.policy.animationLevel != .staticFrames {
+            TimelineView(.periodic(from: .now, by: pulseInterval)) { context in
+                Circle()
+                    .fill(statusColor.opacity(pulseOpacity(for: context.date)))
+                    .frame(width: size, height: size)
+            }
+        } else {
+            Circle()
+                .fill(statusColor.opacity(0.6))
+                .frame(width: size, height: size)
         }
+    }
+
+    private var pulseInterval: TimeInterval {
+        switch energyGovernor.policy.animationLevel {
+        case .full:
+            1.0 / 12.0
+        case .reduced:
+            1.0 / 4.0
+        case .staticFrames:
+            1.0 / 12.0
+        }
+    }
+
+    private var pulseDuration: TimeInterval {
+        switch energyGovernor.policy.animationLevel {
+        case .full:
+            1.2
+        case .reduced:
+            2.4
+        case .staticFrames:
+            1.2
+        }
+    }
+
+    private func pulseOpacity(for date: Date) -> Double {
+        let phase = date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: pulseDuration) / pulseDuration
+        let wave = (sin(phase * .pi * 2 - .pi / 2) + 1) / 2
+        return 0.15 + wave * 0.45
     }
 }
 
@@ -1100,7 +1143,7 @@ struct SubagentToolsList: View {
 struct SubagentToolRow: View {
     let tool: SubagentToolCall
 
-    @State private var dotOpacity: Double = 0.5
+    @ObservedObject private var energyGovernor = EnergyGovernor.shared
 
     private var statusColor: Color {
         switch tool.status {
@@ -1126,17 +1169,7 @@ struct SubagentToolRow: View {
     var body: some View {
         HStack(spacing: 4) {
             // Status dot
-            Circle()
-                .fill(statusColor.opacity(tool.status == .running ? dotOpacity : 0.6))
-                .frame(width: 4, height: 4)
-                .id(tool.status)  // Forces view recreation, cancelling repeatForever animation
-                .onAppear {
-                    if tool.status == .running {
-                        withAnimation(.easeInOut(duration: 0.5).repeatForever(autoreverses: true)) {
-                            dotOpacity = 0.2
-                        }
-                    }
-                }
+            statusDot
 
             // Tool name
             Text(tool.name)
@@ -1150,6 +1183,49 @@ struct SubagentToolRow: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
         }
+    }
+
+    @ViewBuilder
+    private var statusDot: some View {
+        if tool.status == .running && energyGovernor.policy.animationLevel != .staticFrames {
+            TimelineView(.periodic(from: .now, by: pulseInterval)) { context in
+                Circle()
+                    .fill(statusColor.opacity(dotOpacity(for: context.date)))
+                    .frame(width: 4, height: 4)
+            }
+        } else {
+            Circle()
+                .fill(statusColor.opacity(0.6))
+                .frame(width: 4, height: 4)
+        }
+    }
+
+    private var pulseInterval: TimeInterval {
+        switch energyGovernor.policy.animationLevel {
+        case .full:
+            1.0 / 12.0
+        case .reduced:
+            1.0 / 4.0
+        case .staticFrames:
+            1.0 / 12.0
+        }
+    }
+
+    private var pulseDuration: TimeInterval {
+        switch energyGovernor.policy.animationLevel {
+        case .full:
+            1.0
+        case .reduced:
+            2.0
+        case .staticFrames:
+            1.0
+        }
+    }
+
+    private func dotOpacity(for date: Date) -> Double {
+        let phase = date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: pulseDuration) / pulseDuration
+        let wave = (sin(phase * .pi * 2 - .pi / 2) + 1) / 2
+        return 0.2 + wave * 0.4
     }
 }
 

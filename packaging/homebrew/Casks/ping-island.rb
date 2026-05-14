@@ -5,7 +5,7 @@ cask "ping-island" do
   url "https://github.com/erha19/ping-island/releases/download/v#{version}/PingIsland-#{version}.dmg",
       verified: "github.com/erha19/ping-island/"
   name "Ping Island"
-  desc "Dynamic Island-style status for coding agent sessions"
+  desc "Menu bar status for coding agent sessions"
   homepage "https://erha19.github.io/ping-island/"
 
   livecheck do

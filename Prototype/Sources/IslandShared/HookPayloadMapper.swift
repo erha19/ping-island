@@ -1,22 +1,23 @@
 import Foundation
+
 #if canImport(Darwin)
-import Darwin
+    import Darwin
 #elseif canImport(Musl)
-import Musl
+    import Musl
 #elseif canImport(Glibc)
-import Glibc
+    import Glibc
 #endif
 
 public enum HookPayloadMapper {
     private static let questionToolNames: Set<String> = [
         "askuserquestion",
-        "askfollowupquestion"
+        "askfollowupquestion",
     ]
     private static let qoderIDEForwardedEvents: Set<String> = [
         "Notification",
         "SessionEnd",
         "Stop",
-        "SubagentStop"
+        "SubagentStop",
     ]
 
     public static func makeEnvelope(
@@ -30,9 +31,12 @@ public enum HookPayloadMapper {
         let payload = normalizedPayload(rawPayload, source: source)
         let effectiveEnvironment = bridgedEnvironment(environment: environment, payload: payload)
         let eventType = detectEventType(arguments: arguments, payload: payload)
-        let terminalContext = makeTerminalContext(environment: effectiveEnvironment, payload: payload)
-        let sessionKey = detectSessionKey(payload: payload, environment: effectiveEnvironment, provider: source)
-        var metadata = mergedMetadata(arguments: arguments, payload: payload, terminalContext: terminalContext)
+        let terminalContext = makeTerminalContext(
+            environment: effectiveEnvironment, payload: payload)
+        let sessionKey = detectSessionKey(
+            payload: payload, environment: effectiveEnvironment, provider: source)
+        var metadata = mergedMetadata(
+            arguments: arguments, payload: payload, terminalContext: terminalContext)
         if runtimeConfig.routePromptsToTerminal {
             // Marker the app side reads to skip building an in-app prompt for
             // this event. Keeps the envelope flowing for status updates only.
@@ -49,7 +53,8 @@ public enum HookPayloadMapper {
         // When the user has opted to keep prompts in the terminal, drop the
         // intervention before status/expectsResponse are computed so the bridge
         // does not block and the app does not surface a prompt UI.
-        let intervention: InterventionRequest? = runtimeConfig.routePromptsToTerminal
+        let intervention: InterventionRequest? =
+            runtimeConfig.routePromptsToTerminal
             ? nil
             : detectedIntervention
         let status = detectStatus(
@@ -58,7 +63,8 @@ public enum HookPayloadMapper {
             clientKind: clientKind,
             intervention: intervention
         )
-        let expectsResponse = runtimeConfig.routePromptsToTerminal
+        let expectsResponse =
+            runtimeConfig.routePromptsToTerminal
             ? false
             : detectExpectsResponse(
                 eventType: eventType,
@@ -106,29 +112,32 @@ public enum HookPayloadMapper {
         case .claude, .gemini:
             let clientKind = normalizedClientKind(from: metadata)
             if clientKind == "qoder-cli",
-               isQoderCLIPlanExitApproval(
-                   eventType: eventType,
-                   toolName: metadata["tool_name"]
-               ) {
-                return qoderCLIPermissionPayload(response: response, decision: decision, eventType: eventType)
+                isQoderCLIPlanExitApproval(
+                    eventType: eventType,
+                    toolName: metadata["tool_name"]
+                )
+            {
+                return qoderCLIPermissionPayload(
+                    response: response, decision: decision, eventType: eventType)
             }
             if clientKind != "codebuddy-cli",
-               isCodeBuddyFamilyHookClient(clientKind) {
+                isCodeBuddyFamilyHookClient(clientKind)
+            {
                 return codeBuddyStdoutPayload(response: response, decision: decision)
             }
             switch decision {
             case .approve:
                 return #"""
-                {"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}
-                """#
+                    {"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}
+                    """#
             case .approveForSession:
                 return #"""
-                {"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}
-                """#
+                    {"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}
+                    """#
             case .deny, .cancel:
                 return #"""
-                {"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"deny","message":"Denied from Island"}}}
-                """#
+                    {"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"deny","message":"Denied from Island"}}}
+                    """#
             case .answer(let answers):
                 if clientKind == "qoder-cli" {
                     return qoderCLIAnswerPayload(
@@ -148,25 +157,43 @@ public enum HookPayloadMapper {
                     response: response,
                     metadata: metadata
                 )
-                let payloadObject: Any = usesFullUpdatedInput
+                let payloadObject: Any =
+                    usesFullUpdatedInput
                     ? (response.updatedInput?.mapValues(\.foundationObject) ?? answers)
                     : answers
 
                 guard JSONSerialization.isValidJSONObject(payloadObject),
-                      let payloadData = try? JSONSerialization.data(withJSONObject: payloadObject, options: [.sortedKeys]),
-                      let payloadJson = String(data: payloadData, encoding: .utf8) else {
+                    let payloadData = try? JSONSerialization.data(
+                        withJSONObject: payloadObject, options: [.sortedKeys]),
+                    let payloadJson = String(data: payloadData, encoding: .utf8)
+                else {
                     return "{}"
                 }
 
-                if eventType.contains("Question") || eventType == "UserInputRequest" || eventType == "UserPromptSubmit" {
+                if eventType.contains("Question") || eventType == "UserInputRequest"
+                    || eventType == "UserPromptSubmit"
+                {
                     return """
-                    {"hookSpecificOutput":{"hookEventName":"\(eventType)","permissionDecision":"allow","updatedInput":\(payloadJson)}}
-                    """
+                        {"hookSpecificOutput":{"hookEventName":"\(eventType)","permissionDecision":"allow","updatedInput":\(payloadJson)}}
+                        """
                 }
 
                 return """
-                {"hookSpecificOutput":{"hookEventName":"\(eventType)","decision":{"behavior":"allow","updatedInput":\(payloadJson)}}}
-                """
+                    {"hookSpecificOutput":{"hookEventName":"\(eventType)","decision":{"behavior":"allow","updatedInput":\(payloadJson)}}}
+                    """
+            }
+        case .kimi:
+            // See: https://www.kimi.com/code/docs/en/kimi-code-cli/customization/hooks.html
+            switch decision {
+            case .approve, .approveForSession:
+                return "{}"
+            case .deny, .cancel:
+                return #"""
+                    {"hookSpecificOutput":{"permissionDecision":"deny","permissionDecisionReason":"Denied from Island"}}
+                    """#
+            case .answer:
+                // Kimi does not have a documented answer/updatedInput format for hooks.
+                return "{}"
             }
         case .codex:
             switch decision {
@@ -191,7 +218,10 @@ public enum HookPayloadMapper {
             case .cancel:
                 return #"{"decision":"cancel"}"#
             case .answer(let answers):
-                return String(data: (try? JSONSerialization.data(withJSONObject: ["answers": answers], options: [.sortedKeys])) ?? Data("{}".utf8), encoding: .utf8) ?? "{}"
+                return String(
+                    data: (try? JSONSerialization.data(
+                        withJSONObject: ["answers": answers], options: [.sortedKeys]))
+                        ?? Data("{}".utf8), encoding: .utf8) ?? "{}"
             }
         case .copilot:
             switch decision {
@@ -206,13 +236,16 @@ public enum HookPayloadMapper {
                 let escaped = reason.replacingOccurrences(of: "\"", with: "\\\"")
                 return #"{"permissionDecision":"deny","permissionDecisionReason":"\#(escaped)"}"#
             case .answer(let answers):
-                let modifiedArgs = response.updatedInput?.mapValues(\.foundationObject) ?? ["answers": answers]
+                let modifiedArgs =
+                    response.updatedInput?.mapValues(\.foundationObject) ?? ["answers": answers]
                 let payload: [String: Any] = [
                     "permissionDecision": "allow",
-                    "modifiedArgs": modifiedArgs
+                    "modifiedArgs": modifiedArgs,
                 ]
                 guard JSONSerialization.isValidJSONObject(payload),
-                      let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]) else {
+                    let data = try? JSONSerialization.data(
+                        withJSONObject: payload, options: [.sortedKeys])
+                else {
                     return #"{"permissionDecision":"allow"}"#
                 }
                 return String(data: data, encoding: .utf8) ?? #"{"permissionDecision":"allow"}"#
@@ -232,13 +265,14 @@ public enum HookPayloadMapper {
         let payload: [String: Any] = [
             "hookSpecificOutput": [
                 "hookEventName": "PermissionRequest",
-                "decision": decision
+                "decision": decision,
             ]
         ]
 
         guard JSONSerialization.isValidJSONObject(payload),
-              let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]),
-              let string = String(data: data, encoding: .utf8) else {
+            let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]),
+            let string = String(data: data, encoding: .utf8)
+        else {
             return "{}"
         }
 
@@ -251,7 +285,7 @@ public enum HookPayloadMapper {
         "multiedit",
         "write",
         "task",
-        "todowrite"
+        "todowrite",
     ]
 
     private static func shouldPreserveFullUpdatedInputForClaudeAnswer(
@@ -281,7 +315,7 @@ public enum HookPayloadMapper {
         "grep",
         "ls",
         "webfetch",
-        "websearch"
+        "websearch",
     ]
 
     private static func detectEventType(arguments: [String], payload: [String: Any]) -> String {
@@ -289,23 +323,23 @@ public enum HookPayloadMapper {
         if let explicit = payload["hook_event_name"] as? String { return explicit }
         if let explicit = payload["event"] as? String { return explicit }
         if let explicit = payload["type"] as? String { return explicit }
-        
+
         // Check arguments
         if let index = arguments.firstIndex(of: "--event"), arguments.indices.contains(index + 1) {
             return arguments[index + 1]
         }
-        
+
         // Check for questions/user input
         if payload["questions"] != nil { return "UserInputRequest" }
-        
+
         // Check for permission request indicators
         if let reason = payload["reason"] as? String, reason.lowercased().contains("permission") {
             return "PermissionRequest"
         }
-        
+
         // Check for tool use events
         if payload["tool_input"] != nil || payload["tool_name"] != nil { return "PreToolUse" }
-        
+
         return "UnknownEvent"
     }
 
@@ -323,7 +357,7 @@ public enum HookPayloadMapper {
             environment["CODEX_THREAD_ID"],
             environment["ITERM_SESSION_ID"],
             environment["TERM_SESSION_ID"],
-            environment["TTY"]
+            environment["TTY"],
         ]
         if let value = candidates.compactMap({ $0 }).first, !value.isEmpty {
             return "\(provider.rawValue):\(value)"
@@ -362,7 +396,8 @@ public enum HookPayloadMapper {
             return SessionStatus(kind: .waitingForInput)
         }
         if clientKind == "codebuddy-cli",
-           isCodeBuddyCLIAskUserQuestionNotification(eventType: eventType, payload: payload) {
+            isCodeBuddyCLIAskUserQuestionNotification(eventType: eventType, payload: payload)
+        {
             return SessionStatus(kind: .waitingForInput)
         }
         let lowered = eventType.lowercased()
@@ -385,6 +420,12 @@ public enum HookPayloadMapper {
             return SessionStatus(kind: .active)
         }
         if lowered.contains("stop") || lowered.contains("end") {
+            // Kimi's "Stop" means "agent turn ended" (finished responding), not "session closed".
+            // Map it to .waitingForInput so completion notifications and sounds fire correctly.
+            // Only "SessionEnd" actually terminates a Kimi session.
+            if clientKind == "kimi", lowered == "stop" {
+                return SessionStatus(kind: .waitingForInput)
+            }
             return SessionStatus(kind: .completed)
         }
         if lowered.contains("compact") {
@@ -425,17 +466,20 @@ public enum HookPayloadMapper {
 
         // Check for qoderwork specific question events
         if clientKind == "qoderwork",
-           isQoderWorkPreToolQuestionEvent(eventType: eventType, payload: payload) {
+            isQoderWorkPreToolQuestionEvent(eventType: eventType, payload: payload)
+        {
             return true
         }
 
         if clientKind == "qoderwork",
-           isQoderWorkPermissionQuestionEvent(eventType: eventType, payload: payload) {
+            isQoderWorkPermissionQuestionEvent(eventType: eventType, payload: payload)
+        {
             return true
         }
 
         if clientKind == "codebuddy-cli",
-           isCodeBuddyCLIAskUserQuestionNotification(eventType: eventType, payload: payload) {
+            isCodeBuddyCLIAskUserQuestionNotification(eventType: eventType, payload: payload)
+        {
             return true
         }
 
@@ -470,7 +514,7 @@ public enum HookPayloadMapper {
             payload["session_title"] as? String,
             payload["tool_name"] as? String,
             payload["hook_event_name"] as? String,
-            payload["event"] as? String
+            payload["event"] as? String,
         ].compactMap { $0 }.first
     }
 
@@ -488,19 +532,34 @@ public enum HookPayloadMapper {
             payload["prompt_response"] as? String,
             payload["command"] as? String,
             summarizeValue(payload["tool_result"]),
-            summarizeValue(payload["tool_input"])
+            summarizeValue(payload["tool_input"]),
         ].compactMap { sanitizedDisplayText($0) }.first
     }
 
-    private static func detectCWD(payload: [String: Any], environment: [String: String]) -> String? {
-        [
+    private static func detectCWD(payload: [String: Any], environment: [String: String]) -> String?
+    {
+        let candidateCWD = [
             payload["cwd"] as? String,
             payload["workspace"] as? String,
-            environment["PWD"]
-        ].compactMap { $0 }.first
+            environment["PWD"],
+        ].compactMap { nonEmpty($0) }.first
+        let sessionFileWorkspace = workspacePathFromSessionFilePath(
+            firstNonEmptyString(
+                payload["session_file_path"],
+                payload["rollout_path"],
+                payload["transcript_path"]
+            ))
+
+        if shouldPreferSessionFileWorkspace(sessionFileWorkspace, over: candidateCWD) {
+            return sessionFileWorkspace
+        }
+
+        return candidateCWD ?? sessionFileWorkspace
     }
 
-    private static func makeTerminalContext(environment: [String: String], payload: [String: Any]) -> TerminalContext {
+    private static func makeTerminalContext(environment: [String: String], payload: [String: Any])
+        -> TerminalContext
+    {
         let terminalProgram = environment["TERM_PROGRAM"]
         let ideContext = detectIDEContext(environment: environment)
         let remoteContext = detectRemoteContext(environment: environment)
@@ -559,7 +618,9 @@ public enum HookPayloadMapper {
         }
     }
 
-    private static func detectIDEContext(environment: [String: String]) -> (name: String?, bundleID: String?) {
+    private static func detectIDEContext(environment: [String: String]) -> (
+        name: String?, bundleID: String?
+    ) {
         let terminalProgram = (environment["TERM_PROGRAM"] ?? "").lowercased()
         let bundleIdentifier = environment["__CFBundleIdentifier"]?
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -582,26 +643,32 @@ public enum HookPayloadMapper {
             "CODEBUDDY_AGENT",
             "ZED_CHANNEL",
         ]
-        let hints = hintKeys
+        let hints =
+            hintKeys
             .compactMap { environment[$0]?.lowercased() }
             .joined(separator: " ")
 
         if bundleIdentifier == "com.qoder.work"
             || hints.contains("qoderwork.app")
             || hints.contains("com.qoder.work")
-            || environment.keys.contains(where: { $0.hasPrefix("QODERWORK_") }) {
+            || environment.keys.contains(where: { $0.hasPrefix("QODERWORK_") })
+        {
             return ("QoderWork", "com.qoder.work")
         }
         if bundleIdentifier == "com.qoder.ide"
             || hints.contains("qoder.app")
             || hints.contains("com.qoder.ide")
-            || environment.keys.contains(where: { $0.hasPrefix("QODER_") }) {
+            || environment.keys.contains(where: { $0.hasPrefix("QODER_") })
+        {
             return ("Qoder", "com.qoder.ide")
         }
-        if hints.contains("cursor") || environment.keys.contains(where: { $0.hasPrefix("CURSOR_") }) {
+        if hints.contains("cursor") || environment.keys.contains(where: { $0.hasPrefix("CURSOR_") })
+        {
             return ("Cursor", "com.todesktop.230313mzl4w4u92")
         }
-        if hints.contains("windsurf") || environment.keys.contains(where: { $0.hasPrefix("WINDSURF_") }) {
+        if hints.contains("windsurf")
+            || environment.keys.contains(where: { $0.hasPrefix("WINDSURF_") })
+        {
             return ("Windsurf", "com.exafunction.windsurf")
         }
         if hints.contains("trae") || environment.keys.contains(where: { $0.hasPrefix("TRAE_") }) {
@@ -610,34 +677,46 @@ public enum HookPayloadMapper {
         if bundleIdentifier == "com.workbuddy.workbuddy"
             || hints.contains("workbuddy.app")
             || hints.contains("com.workbuddy.workbuddy")
-            || environment.keys.contains(where: { $0.hasPrefix("WORKBUDDY_") }) {
+            || environment.keys.contains(where: { $0.hasPrefix("WORKBUDDY_") })
+        {
             return ("WorkBuddy", "com.workbuddy.workbuddy")
         }
-        if hints.contains("codebuddy") || environment.keys.contains(where: { $0.hasPrefix("CODEBUDDY_") }) {
+        if hints.contains("codebuddy")
+            || environment.keys.contains(where: { $0.hasPrefix("CODEBUDDY_") })
+        {
             return ("CodeBuddy", "com.tencent.codebuddy")
         }
         if hints.contains("zed") || environment.keys.contains(where: { $0.hasPrefix("ZED_") }) {
             return ("Zed", "dev.zed.Zed")
         }
-        if terminalProgram == "vscode" || environment.keys.contains(where: { $0.hasPrefix("VSCODE_") }) {
+        if terminalProgram == "vscode"
+            || environment.keys.contains(where: { $0.hasPrefix("VSCODE_") })
+        {
             return ("VS Code", "com.microsoft.VSCode")
         }
 
         return (nil, nil)
     }
 
-    private static func detectRemoteContext(environment: [String: String]) -> (transport: String?, remoteHost: String?) {
-        let authority = environment["VSCODE_CLI_REMOTE_AUTHORITY"]
+    private static func detectRemoteContext(environment: [String: String]) -> (
+        transport: String?, remoteHost: String?
+    ) {
+        let authority =
+            environment["VSCODE_CLI_REMOTE_AUTHORITY"]
             ?? environment["VSCODE_REMOTE_AUTHORITY"]
             ?? environment["REMOTE_CONTAINERS_IPC"]
         let sshConnection = environment["SSH_CONNECTION"] ?? environment["SSH_CLIENT"]
 
         if let authority, authority.contains("ssh-remote+") {
-            return ("ssh-remote", authority.components(separatedBy: "ssh-remote+").last.flatMap(nonEmpty))
+            return (
+                "ssh-remote",
+                authority.components(separatedBy: "ssh-remote+").last.flatMap(nonEmpty)
+            )
         }
 
         if let sshConnection {
-            let preferredHost = nonEmpty(environment["HOSTNAME"])
+            let preferredHost =
+                nonEmpty(environment["HOSTNAME"])
                 ?? nonEmpty(environment["HOST"])
                 ?? nonEmpty(ProcessInfo.processInfo.hostName)
             if let preferredHost {
@@ -670,14 +749,16 @@ public enum HookPayloadMapper {
         }
 
         if clientKind == "qoderwork",
-           eventType == "PostToolUse",
-           questionToolNames.contains(normalizedToolName(from: payload) ?? ""),
-           payload["tool_response"] != nil {
+            eventType == "PostToolUse",
+            questionToolNames.contains(normalizedToolName(from: payload) ?? ""),
+            payload["tool_response"] != nil
+        {
             return nil
         }
 
         if clientKind == "qoder-cli",
-           isQoderCLIPlanExitApproval(eventType: eventType, payload: payload) {
+            isQoderCLIPlanExitApproval(eventType: eventType, payload: payload)
+        {
             return InterventionRequest(
                 sessionID: sessionKey,
                 kind: .approval,
@@ -685,22 +766,25 @@ public enum HookPayloadMapper {
                 message: qoderCLIPlanApprovalMessage(from: payload),
                 options: [
                     InterventionOption(id: "approve", title: "Allow Once"),
-                    InterventionOption(id: "deny", title: "Deny")
+                    InterventionOption(id: "deny", title: "Deny"),
                 ],
                 rawContext: flattenMetadata(payload: payload)
             )
         }
 
         if let questions = questionPayloads(from: payload), !questions.isEmpty {
-            guard shouldSurfaceQuestionIntervention(
-                eventType: eventType,
-                payload: payload,
-                clientKind: clientKind
-            ) else {
+            guard
+                shouldSurfaceQuestionIntervention(
+                    eventType: eventType,
+                    payload: payload,
+                    clientKind: clientKind
+                )
+            else {
                 return nil
             }
             if clientKind == "qoder",
-               isQoderQuestionToolEvent(eventType: eventType, payload: payload) {
+                isQoderQuestionToolEvent(eventType: eventType, payload: payload)
+            {
                 return nil
             }
             let options = questions.flatMap { question -> [InterventionOption] in
@@ -727,7 +811,8 @@ public enum HookPayloadMapper {
                     }
                 }
 
-                if let prompt = (question["question"] as? String) ?? (question["title"] as? String) {
+                if let prompt = (question["question"] as? String) ?? (question["title"] as? String)
+                {
                     return [InterventionOption(id: baseID, title: prompt)]
                 }
                 return [InterventionOption(id: baseID, title: "Answer")]
@@ -738,7 +823,7 @@ public enum HookPayloadMapper {
                 title: "\(provider.displayName) needs input",
                 message: (questions.first?["question"] as? String)
                     ?? (questions.first?["title"] as? String)
-                    ?? "Answer required",
+                        ?? "Answer required",
                 options: options,
                 rawContext: flattenMetadata(payload: payload)
             )
@@ -750,7 +835,8 @@ public enum HookPayloadMapper {
             clientKind: clientKind
         ) {
             let toolName = (payload["tool_name"] as? String) ?? "Tool"
-            let message = summarizeValue(payload["tool_input"])
+            let message =
+                summarizeValue(payload["tool_input"])
                 .map { "\(toolName) \($0)" }
                 ?? toolName
             return InterventionRequest(
@@ -760,7 +846,7 @@ public enum HookPayloadMapper {
                 message: message,
                 options: [
                     InterventionOption(id: "approve", title: "Allow Once"),
-                    InterventionOption(id: "deny", title: "Deny")
+                    InterventionOption(id: "deny", title: "Deny"),
                 ],
                 rawContext: flattenMetadata(payload: payload)
             )
@@ -768,11 +854,13 @@ public enum HookPayloadMapper {
 
         // Qwen Code Notification + permission_prompt: upgrade to actionable approval
         if clientKind == "qwen-code",
-           eventType == "Notification",
-           (payload["notification_type"] as? String)?
-               .trimmingCharacters(in: .whitespacesAndNewlines)
-               .lowercased() == "permission_prompt" {
-            let message = (payload["message"] as? String)
+            eventType == "Notification",
+            (payload["notification_type"] as? String)?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased() == "permission_prompt"
+        {
+            let message =
+                (payload["message"] as? String)
                 ?? (payload["title"] as? String)
                 ?? "Qwen Code is waiting for permission."
             return InterventionRequest(
@@ -783,7 +871,7 @@ public enum HookPayloadMapper {
                 options: [
                     InterventionOption(id: "approve", title: "Allow Once"),
                     InterventionOption(id: "approveForSession", title: "Allow for Session"),
-                    InterventionOption(id: "deny", title: "Deny")
+                    InterventionOption(id: "deny", title: "Deny"),
                 ],
                 rawContext: flattenMetadata(payload: payload)
             )
@@ -793,7 +881,8 @@ public enum HookPayloadMapper {
         guard lowered.contains("permission") || lowered.contains("approval") else {
             return nil
         }
-        let message = (payload["reason"] as? String)
+        let message =
+            (payload["reason"] as? String)
             ?? (payload["tool_name"] as? String)
             ?? (payload["command"] as? String)
             ?? "The agent is waiting for permission."
@@ -805,7 +894,7 @@ public enum HookPayloadMapper {
             options: [
                 InterventionOption(id: "approve", title: "Allow Once"),
                 InterventionOption(id: "approveForSession", title: "Allow for Session"),
-                InterventionOption(id: "deny", title: "Deny")
+                InterventionOption(id: "deny", title: "Deny"),
             ],
             rawContext: flattenMetadata(payload: payload)
         )
@@ -821,21 +910,29 @@ public enum HookPayloadMapper {
             metadata[key] = value
         }
         if let toolInput = payload["tool_input"] as? [String: Any],
-           JSONSerialization.isValidJSONObject(toolInput),
-           let data = try? JSONSerialization.data(withJSONObject: toolInput, options: [.sortedKeys]),
-           let json = String(data: data, encoding: .utf8) {
+            JSONSerialization.isValidJSONObject(toolInput),
+            let data = try? JSONSerialization.data(
+                withJSONObject: toolInput, options: [.sortedKeys]),
+            let json = String(data: data, encoding: .utf8)
+        {
             metadata["tool_input_json"] = json.replacingOccurrences(of: "\\/", with: "/")
         }
-        if let terminalBundleID = nonEmpty(terminalContext.terminalBundleID), metadata["terminal_bundle_id"] == nil {
+        if let terminalBundleID = nonEmpty(terminalContext.terminalBundleID),
+            metadata["terminal_bundle_id"] == nil
+        {
             metadata["terminal_bundle_id"] = terminalBundleID
         }
-        if let terminalProgram = nonEmpty(terminalContext.terminalProgram), metadata["terminal_program"] == nil {
+        if let terminalProgram = nonEmpty(terminalContext.terminalProgram),
+            metadata["terminal_program"] == nil
+        {
             metadata["terminal_program"] = terminalProgram
         }
         if let ideName = nonEmpty(terminalContext.ideName), metadata["client_originator"] == nil {
             metadata["client_originator"] = ideName
         }
-        if let transport = nonEmpty(terminalContext.transport), metadata["connection_transport"] == nil {
+        if let transport = nonEmpty(terminalContext.transport),
+            metadata["connection_transport"] == nil
+        {
             metadata["connection_transport"] = transport
         }
         if let remoteHost = nonEmpty(terminalContext.remoteHost), metadata["remote_host"] == nil {
@@ -843,6 +940,9 @@ public enum HookPayloadMapper {
         }
         if let processName = detectedSourceProcessName(), metadata["source_process_name"] == nil {
             metadata["source_process_name"] = processName
+        }
+        if let resolvedCWD = nonEmpty(terminalContext.currentDirectory) {
+            metadata["cwd"] = resolvedCWD
         }
         return metadata
     }
@@ -860,8 +960,9 @@ public enum HookPayloadMapper {
             process.waitUntilExit()
             guard process.terminationStatus == 0 else { return nil }
             let data = output.fileHandleForReading.readDataToEndOfFile()
-            return nonEmpty(String(data: data, encoding: .utf8)?
-                .trimmingCharacters(in: .whitespacesAndNewlines))
+            return nonEmpty(
+                String(data: data, encoding: .utf8)?
+                    .trimmingCharacters(in: .whitespacesAndNewlines))
         } catch {
             return nil
         }
@@ -875,12 +976,13 @@ public enum HookPayloadMapper {
             "--client-origin": "client_origin",
             "--client-originator": "client_originator",
             "--thread-source": "thread_source",
-            "--launch-url": "launch_url"
+            "--launch-url": "launch_url",
         ]
 
         var metadata: [String: String] = [:]
         for (flag, key) in mappings {
-            guard let index = arguments.firstIndex(of: flag), arguments.indices.contains(index + 1) else {
+            guard let index = arguments.firstIndex(of: flag), arguments.indices.contains(index + 1)
+            else {
                 continue
             }
 
@@ -911,17 +1013,20 @@ public enum HookPayloadMapper {
         var normalized = payload
 
         if normalized["session_id"] == nil,
-           let sessionId = payload["sessionId"] as? String {
+            let sessionId = payload["sessionId"] as? String
+        {
             normalized["session_id"] = sessionId
         }
 
         if normalized["tool_name"] == nil,
-           let toolName = payload["toolName"] as? String {
+            let toolName = payload["toolName"] as? String
+        {
             normalized["tool_name"] = toolName
         }
 
         if normalized["tool_input"] == nil,
-           let toolArgs = decodedJSONObject(from: payload["toolArgs"]) {
+            let toolArgs = decodedJSONObject(from: payload["toolArgs"])
+        {
             normalized["tool_input"] = toolArgs
         }
 
@@ -938,12 +1043,14 @@ public enum HookPayloadMapper {
         }
 
         if normalized["reason"] == nil,
-           let errorMessage = payload["error"] as? String {
+            let errorMessage = payload["error"] as? String
+        {
             normalized["reason"] = errorMessage
         }
 
         if normalized["tool_result"] == nil,
-           let toolResult = payload["toolResult"] {
+            let toolResult = payload["toolResult"]
+        {
             normalized["tool_result"] = toolResult
         }
 
@@ -979,16 +1086,18 @@ public enum HookPayloadMapper {
             return number.stringValue
         case let array as [Any]:
             guard JSONSerialization.isValidJSONObject(array),
-                  let data = try? JSONSerialization.data(withJSONObject: array, options: [.sortedKeys]),
-                  let string = String(data: data, encoding: .utf8)
+                let data = try? JSONSerialization.data(
+                    withJSONObject: array, options: [.sortedKeys]),
+                let string = String(data: data, encoding: .utf8)
             else {
                 return nil
             }
             return string.replacingOccurrences(of: "\\/", with: "/")
         case let object as [String: Any]:
             guard JSONSerialization.isValidJSONObject(object),
-                  let data = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]),
-                  let string = String(data: data, encoding: .utf8)
+                let data = try? JSONSerialization.data(
+                    withJSONObject: object, options: [.sortedKeys]),
+                let string = String(data: data, encoding: .utf8)
             else {
                 return nil
             }
@@ -1006,8 +1115,9 @@ public enum HookPayloadMapper {
         }
 
         if let string = rawValue as? String,
-           let data = string.data(using: .utf8),
-           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            let data = string.data(using: .utf8),
+            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        {
             return json
         }
 
@@ -1019,19 +1129,132 @@ public enum HookPayloadMapper {
     }
 
     private static func nonEmpty(_ value: String?) -> String? {
-        guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else {
+        guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty
+        else {
             return nil
         }
         return value
     }
 
+    private static func workspacePathFromSessionFilePath(_ sessionFilePath: String?) -> String? {
+        guard let sessionFilePath = nonEmpty(sessionFilePath) else { return nil }
+        let components = URL(fileURLWithPath: sessionFilePath)
+            .standardizedFileURL
+            .pathComponents
+        guard let projectsIndex = components.lastIndex(of: "projects"),
+            components.indices.contains(projectsIndex + 1),
+            projectsIndex > 0,
+            components[projectsIndex - 1].hasPrefix(".")
+        else {
+            return nil
+        }
+
+        let slug = components[projectsIndex + 1]
+        return candidateWorkspacePaths(fromProjectSlug: slug).first { path in
+            var isDirectory: ObjCBool = false
+            return FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory)
+                && isDirectory.boolValue
+        }
+    }
+
+    private static func shouldPreferSessionFileWorkspace(
+        _ sessionFileWorkspace: String?,
+        over candidateCWD: String?
+    ) -> Bool {
+        guard let sessionFileWorkspace else { return false }
+        guard let candidateCWD = nonEmpty(candidateCWD) else { return true }
+
+        let normalizedCandidate = URL(fileURLWithPath: candidateCWD).standardizedFileURL.path
+        let normalizedWorkspace = URL(fileURLWithPath: sessionFileWorkspace).standardizedFileURL
+            .path
+        guard normalizedCandidate != normalizedWorkspace else { return false }
+
+        var candidateIsDirectory: ObjCBool = false
+        let candidateExists =
+            FileManager.default.fileExists(
+                atPath: normalizedCandidate,
+                isDirectory: &candidateIsDirectory
+            ) && candidateIsDirectory.boolValue
+
+        if !candidateExists {
+            return true
+        }
+
+        return isTopLevelClientConfigDirectory(normalizedCandidate)
+    }
+
+    private static func isTopLevelClientConfigDirectory(_ path: String) -> Bool {
+        let url = URL(fileURLWithPath: path).standardizedFileURL
+        let knownClientDirectories: Set<String> = [
+            ".claude",
+            ".codebuddy",
+            ".codex",
+            ".cursor",
+            ".gemini",
+            ".kimi",
+            ".openclaw",
+            ".qoder",
+            ".qwen",
+            ".workbuddy",
+        ]
+        guard knownClientDirectories.contains(url.lastPathComponent) else {
+            return false
+        }
+
+        return url.deletingLastPathComponent().path
+            == FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL.path
+    }
+
+    private static func candidateWorkspacePaths(fromProjectSlug slug: String) -> [String] {
+        let trimmedSlug = slug.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedSlug =
+            trimmedSlug.hasPrefix("-")
+            ? String(trimmedSlug.dropFirst())
+            : trimmedSlug
+        let parts =
+            normalizedSlug
+            .split(separator: "-", omittingEmptySubsequences: true)
+            .map(String.init)
+        guard parts.count >= 2, parts.count <= 12 else {
+            return []
+        }
+
+        var candidates: [String] = []
+        var seen: Set<String> = []
+
+        func appendCandidates(startIndex: Int, pathComponents: [String]) {
+            if startIndex == parts.count {
+                let path = "/" + pathComponents.joined(separator: "/")
+                if seen.insert(path).inserted {
+                    candidates.append(path)
+                }
+                return
+            }
+
+            var component = ""
+            for index in startIndex..<parts.count {
+                component = component.isEmpty ? parts[index] : component + "-" + parts[index]
+                appendCandidates(
+                    startIndex: index + 1,
+                    pathComponents: pathComponents + [component]
+                )
+            }
+        }
+
+        appendCandidates(startIndex: 0, pathComponents: [])
+        return candidates.sorted { lhs, rhs in
+            lhs.split(separator: "/").count > rhs.split(separator: "/").count
+        }
+    }
+
     private static func normalizedClientKind(from metadata: [String: String]) -> String? {
-        let bundleIdentifier = metadata["client_bundle_id"]?
+        let bundleIdentifier =
+            metadata["client_bundle_id"]?
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
             ?? metadata["terminal_bundle_id"]?
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-                .lowercased()
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
         switch bundleIdentifier {
         case "com.qoder.work":
             return "qoderwork"
@@ -1044,9 +1267,11 @@ public enum HookPayloadMapper {
         if let explicitClientKind = metadata["client_kind"]?
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased(),
-           !explicitClientKind.isEmpty {
+            !explicitClientKind.isEmpty
+        {
             if explicitClientKind == "qoder",
-               metadataLooksLikeQoderCLI(metadata) {
+                metadataLooksLikeQoderCLI(metadata)
+            {
                 return "qoder-cli"
             }
             return explicitClientKind
@@ -1061,12 +1286,13 @@ public enum HookPayloadMapper {
             break
         }
 
-        let nameHint = metadata["client_name"]?
+        let nameHint =
+            metadata["client_name"]?
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
             ?? metadata["client_originator"]?
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-                .lowercased()
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
         if let nameHint {
             if nameHint.contains("qoder cli") || nameHint.contains("qoder-cli") {
                 return "qoder-cli"
@@ -1080,7 +1306,8 @@ public enum HookPayloadMapper {
             if nameHint.contains("codebuddy cli")
                 || nameHint.contains("codebuddy-cli")
                 || nameHint.contains("code buddy cli")
-                || nameHint.contains("code-buddy-cli") {
+                || nameHint.contains("code-buddy-cli")
+            {
                 return "codebuddy-cli"
             }
             if nameHint.contains("workbuddy") || nameHint.contains("work buddy") {
@@ -1106,7 +1333,7 @@ public enum HookPayloadMapper {
             envelope.terminalContext.terminalBundleID,
             envelope.terminalContext.ideBundleID,
             envelope.metadata["terminal_bundle_id"],
-            envelope.metadata["client_bundle_id"]
+            envelope.metadata["client_bundle_id"],
         ].contains { value in
             value?
                 .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1139,7 +1366,8 @@ public enum HookPayloadMapper {
         }
 
         if envelope.eventType == "PostToolUse",
-           !decodedQuestionPayloads(from: envelope).isEmpty {
+            !decodedQuestionPayloads(from: envelope).isEmpty
+        {
             return true
         }
 
@@ -1157,9 +1385,10 @@ public enum HookPayloadMapper {
 
     private static func decodedQuestionPayloads(from envelope: BridgeEnvelope) -> [[String: Any]] {
         guard let toolInputJSON = envelope.metadata["tool_input_json"],
-              let data = toolInputJSON.data(using: .utf8),
-              let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let questions = payload["questions"] as? [[String: Any]] else {
+            let data = toolInputJSON.data(using: .utf8),
+            let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let questions = payload["questions"] as? [[String: Any]]
+        else {
             return []
         }
 
@@ -1168,9 +1397,12 @@ public enum HookPayloadMapper {
 
     private static func hasAnsweredQuestionPayload(in envelope: BridgeEnvelope) -> Bool {
         guard let toolInputJSON = envelope.metadata["tool_input_json"],
-              let data = toolInputJSON.data(using: .utf8),
-              let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            return envelope.metadata["tool_response"]?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+            let data = toolInputJSON.data(using: .utf8),
+            let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else {
+            return envelope.metadata["tool_response"]?.trimmingCharacters(
+                in: .whitespacesAndNewlines
+            ).isEmpty == false
         }
 
         let answersCandidate = payload["answers"]
@@ -1181,28 +1413,29 @@ public enum HookPayloadMapper {
             return !answers.isEmpty
         }
 
-        return envelope.metadata["tool_response"]?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+        return envelope.metadata["tool_response"]?.trimmingCharacters(in: .whitespacesAndNewlines)
+            .isEmpty == false
     }
 
     private static func metadataLooksLikeQoderCLI(_ metadata: [String: String]) -> Bool {
         let normalizedOrigin = metadata["client_origin"]?
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
-        let normalizedBundleIdentifier = (
-            metadata["client_bundle_id"]
-                ?? metadata["terminal_bundle_id"]
-        )?
+        let normalizedBundleIdentifier =
+            (metadata["client_bundle_id"]
+            ?? metadata["terminal_bundle_id"])?
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
         if normalizedBundleIdentifier == "com.qoder.ide"
-            || normalizedBundleIdentifier == "com.qoder.work" {
+            || normalizedBundleIdentifier == "com.qoder.work"
+        {
             return false
         }
 
         let nameHints = [
             metadata["client_name"],
             metadata["client_originator"],
-            metadata["client"]
+            metadata["client"],
         ].compactMap {
             $0?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         }
@@ -1255,7 +1488,8 @@ public enum HookPayloadMapper {
             return SessionStatus(kind: .runningTool)
         case "aftertool":
             if let toolResponse = payload["tool_response"] as? [String: Any],
-               toolResponse["error"] != nil {
+                toolResponse["error"] != nil
+            {
                 return SessionStatus(kind: .error)
             }
             return SessionStatus(kind: .active)
@@ -1290,12 +1524,14 @@ public enum HookPayloadMapper {
             return questions
         }
         if let toolInput = payload["tool_input"] as? [String: Any],
-           let questions = toolInput["questions"] as? [[String: Any]],
-           !questions.isEmpty {
+            let questions = toolInput["questions"] as? [[String: Any]],
+            !questions.isEmpty
+        {
             return questions
         }
         if let toolInput = payload["tool_input"] as? [String: Any],
-           let questions = decodedQuestions(from: toolInput["questions"]) {
+            let questions = decodedQuestions(from: toolInput["questions"])
+        {
             return questions
         }
         return nil
@@ -1334,35 +1570,44 @@ public enum HookPayloadMapper {
 
     private static func normalizedToolName(from payload: [String: Any]) -> String? {
         guard let toolName = payload["tool_name"] as? String else { return nil }
-        return toolName
+        return
+            toolName
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .replacingOccurrences(of: "_", with: "")
             .replacingOccurrences(of: "-", with: "")
             .lowercased()
     }
 
-    private static func isQoderQuestionToolEvent(eventType: String, payload: [String: Any]) -> Bool {
+    private static func isQoderQuestionToolEvent(eventType: String, payload: [String: Any]) -> Bool
+    {
         guard eventType == "PreToolUse",
-              questionToolNames.contains(normalizedToolName(from: payload) ?? ""),
-              questionPayloads(from: payload) != nil else {
+            questionToolNames.contains(normalizedToolName(from: payload) ?? ""),
+            questionPayloads(from: payload) != nil
+        else {
             return false
         }
         return true
     }
 
-    private static func isQoderWorkPreToolQuestionEvent(eventType: String, payload: [String: Any]) -> Bool {
+    private static func isQoderWorkPreToolQuestionEvent(eventType: String, payload: [String: Any])
+        -> Bool
+    {
         guard eventType == "PreToolUse",
-              questionToolNames.contains(normalizedToolName(from: payload) ?? ""),
-              questionPayloads(from: payload) != nil else {
+            questionToolNames.contains(normalizedToolName(from: payload) ?? ""),
+            questionPayloads(from: payload) != nil
+        else {
             return false
         }
         return true
     }
 
-    private static func isQoderWorkPermissionQuestionEvent(eventType: String, payload: [String: Any]) -> Bool {
+    private static func isQoderWorkPermissionQuestionEvent(
+        eventType: String, payload: [String: Any]
+    ) -> Bool {
         guard eventType == "PermissionRequest",
-              questionToolNames.contains(normalizedToolName(from: payload) ?? ""),
-              questionPayloads(from: payload) != nil else {
+            questionToolNames.contains(normalizedToolName(from: payload) ?? ""),
+            questionPayloads(from: payload) != nil
+        else {
             return false
         }
         return true
@@ -1395,9 +1640,10 @@ public enum HookPayloadMapper {
         payload: [String: Any]
     ) -> Bool {
         guard eventType == "Notification",
-              (payload["notification_type"] as? String)?
-                  .trimmingCharacters(in: .whitespacesAndNewlines)
-                  .lowercased() == "permission_prompt" else {
+            (payload["notification_type"] as? String)?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased() == "permission_prompt"
+        else {
             return false
         }
 
@@ -1420,7 +1666,9 @@ public enum HookPayloadMapper {
             .lowercased()
     }
 
-    private static func isQoderCLIPlanExitApproval(eventType: String, payload: [String: Any]) -> Bool {
+    private static func isQoderCLIPlanExitApproval(eventType: String, payload: [String: Any])
+        -> Bool
+    {
         isQoderCLIPlanExitApproval(
             eventType: eventType,
             toolName: payload["tool_name"] as? String
@@ -1437,7 +1685,8 @@ public enum HookPayloadMapper {
 
     private static func qoderCLIPlanApprovalMessage(from payload: [String: Any]) -> String {
         if let toolInput = payload["tool_input"] as? [String: Any],
-           let plan = nonEmpty(toolInput["plan"] as? String) {
+            let plan = nonEmpty(toolInput["plan"] as? String)
+        {
             return plan
         }
 
@@ -1446,7 +1695,8 @@ public enum HookPayloadMapper {
 
     private static func normalizedToolName(_ toolName: String?) -> String? {
         guard let toolName else { return nil }
-        return toolName
+        return
+            toolName
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .replacingOccurrences(of: "_", with: "")
             .replacingOccurrences(of: "-", with: "")
@@ -1471,7 +1721,8 @@ public enum HookPayloadMapper {
         }
 
         if let permissionMode = normalizedPermissionMode(from: payload),
-           permissionMode == "bypasspermissions" || permissionMode == "plan" {
+            permissionMode == "bypasspermissions" || permissionMode == "plan"
+        {
             return false
         }
 
@@ -1498,8 +1749,9 @@ public enum HookPayloadMapper {
         }
 
         if let string = rawValue as? String,
-           let data = string.data(using: .utf8),
-           let json = try? JSONSerialization.jsonObject(with: data) {
+            let data = string.data(using: .utf8),
+            let json = try? JSONSerialization.jsonObject(with: data)
+        {
             if let questions = json as? [[String: Any]], !questions.isEmpty {
                 return questions
             }
@@ -1531,8 +1783,9 @@ public enum HookPayloadMapper {
         }
 
         guard JSONSerialization.isValidJSONObject(payload),
-              let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]),
-              let string = String(data: data, encoding: .utf8) else {
+            let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]),
+            let string = String(data: data, encoding: .utf8)
+        else {
             return "{}"
         }
 
@@ -1544,7 +1797,8 @@ public enum HookPayloadMapper {
         eventType: String,
         answers: [String: String]
     ) -> String {
-        let updatedInput = response.updatedInput?.mapValues(\.foundationObject)
+        let updatedInput =
+            response.updatedInput?.mapValues(\.foundationObject)
             ?? ["answers": answers]
         let payload: [String: Any] = [
             "hookSpecificOutput": [
@@ -1552,15 +1806,16 @@ public enum HookPayloadMapper {
                 "permissionDecision": "allow",
                 "decision": [
                     "behavior": "allow",
-                    "updatedInput": updatedInput
+                    "updatedInput": updatedInput,
                 ],
-                "updatedInput": updatedInput
+                "updatedInput": updatedInput,
             ]
         ]
 
         guard JSONSerialization.isValidJSONObject(payload),
-              let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]),
-              let string = String(data: data, encoding: .utf8) else {
+            let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]),
+            let string = String(data: data, encoding: .utf8)
+        else {
             return "{}"
         }
 
@@ -1583,7 +1838,7 @@ public enum HookPayloadMapper {
             behavior = "deny"
             decisionOutput = [
                 "behavior": "deny",
-                "message": response.reason ?? "Denied from Island"
+                "message": response.reason ?? "Denied from Island",
             ]
         case .answer:
             behavior = "allow"
@@ -1593,7 +1848,7 @@ public enum HookPayloadMapper {
         var hookSpecificOutput: [String: Any] = [
             "hookEventName": eventType,
             "permissionDecision": behavior,
-            "decision": decisionOutput
+            "decision": decisionOutput,
         ]
 
         if behavior == "deny" {
@@ -1602,8 +1857,9 @@ public enum HookPayloadMapper {
 
         let payload: [String: Any] = ["hookSpecificOutput": hookSpecificOutput]
         guard JSONSerialization.isValidJSONObject(payload),
-              let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]),
-              let string = String(data: data, encoding: .utf8) else {
+            let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]),
+            let string = String(data: data, encoding: .utf8)
+        else {
             return "{}"
         }
 
@@ -1615,19 +1871,21 @@ public enum HookPayloadMapper {
         eventType: String,
         answers: [String: String]
     ) -> String {
-        let updatedInput = response.updatedInput?.mapValues(\.foundationObject)
+        let updatedInput =
+            response.updatedInput?.mapValues(\.foundationObject)
             ?? ["answers": answers]
         let payload: [String: Any] = [
             "hookSpecificOutput": [
                 "hookEventName": eventType,
                 "permissionDecision": "allow",
-                "updatedInput": updatedInput
+                "updatedInput": updatedInput,
             ]
         ]
 
         guard JSONSerialization.isValidJSONObject(payload),
-              let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]),
-              let string = String(data: data, encoding: .utf8) else {
+            let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]),
+            let string = String(data: data, encoding: .utf8)
+        else {
             return "{}"
         }
 
@@ -1648,7 +1906,8 @@ public enum HookPayloadMapper {
             with: " ",
             options: .regularExpression
         )
-        cleaned = cleaned
+        cleaned =
+            cleaned
             .replacingOccurrences(of: "\r", with: " ")
             .replacingOccurrences(of: "\n", with: " ")
             .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
@@ -1658,8 +1917,8 @@ public enum HookPayloadMapper {
     }
 }
 
-private extension AgentProvider {
-    var displayName: String {
+extension AgentProvider {
+    fileprivate var displayName: String {
         switch self {
         case .claude:
             return "Claude"
@@ -1667,6 +1926,8 @@ private extension AgentProvider {
             return "Codex"
         case .copilot:
             return "Copilot"
+        case .kimi:
+            return "Kimi"
         case .gemini:
             return "Gemini"
         }

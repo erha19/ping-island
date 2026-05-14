@@ -70,7 +70,7 @@ struct IslandOpenedContentView: View {
         case .chat(let session):
             let liveSession = liveSession(for: session)
 
-            if liveSession.provider == .claude {
+            if liveSession.provider == .claude || liveSession.provider == .kimi {
                 ChatView(
                     sessionId: liveSession.sessionId,
                     initialSession: liveSession,

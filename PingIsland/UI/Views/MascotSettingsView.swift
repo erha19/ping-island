@@ -77,7 +77,11 @@ struct MascotSettingsView: View {
 
             LazyVGrid(columns: columns, alignment: .leading, spacing: 14) {
                 ForEach(MascotClient.allCases) { client in
-                    clientCard(for: client)
+                    MascotClientCard(
+                        client: client,
+                        previewStatus: previewStatus,
+                        automaticSelection: automaticSelection
+                    )
                 }
             }
         }
@@ -110,12 +114,22 @@ struct MascotSettingsView: View {
         }
     }
 
-    @ViewBuilder
-    private func clientCard(for client: MascotClient) -> some View {
+}
+
+private struct MascotClientCard: View {
+    @ObservedObject private var settings = AppSettings.shared
+    @State private var isHovered = false
+    @State private var isPreviewVisible = false
+
+    let client: MascotClient
+    let previewStatus: MascotStatus
+    let automaticSelection: String
+
+    var body: some View {
         let selectedMascot = settings.mascotKind(for: client)
         let isCustomized = settings.hasCustomMascot(for: client)
 
-        VStack(alignment: .leading, spacing: 14) {
+        return VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .top, spacing: 10) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(appLocalized: client.title)
@@ -147,10 +161,23 @@ struct MascotSettingsView: View {
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
                     .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
 
-                MascotView(kind: selectedMascot, status: previewStatus, size: 52)
-                    .padding(14)
+                MascotSettingsPreview(
+                    kind: selectedMascot,
+                    status: previewStatus,
+                    size: 52,
+                    isAnimated: isHovered,
+                    isVisible: isPreviewVisible
+                )
+                .padding(14)
             }
             .frame(height: 122)
+            .onAppear {
+                isPreviewVisible = true
+            }
+            .onDisappear {
+                isPreviewVisible = false
+                isHovered = false
+            }
 
             VStack(alignment: .leading, spacing: 6) {
                 Text(verbatim: AppLocalization.format("所属客户端：%@", AppLocalization.string(client.title)))
@@ -196,6 +223,10 @@ struct MascotSettingsView: View {
             RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .strokeBorder(Color.white.opacity(0.06), lineWidth: 1)
         )
+        .contentShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .onHover { hovering in
+            isHovered = hovering && isPreviewVisible
+        }
     }
 
     private func selectionBinding(for client: MascotClient) -> Binding<String> {
@@ -208,6 +239,26 @@ struct MascotSettingsView: View {
                 settings.setMascotOverride(mascot, for: client)
             }
         )
+    }
+}
+
+private struct MascotSettingsPreview: View {
+    let kind: MascotKind
+    let status: MascotStatus
+    let size: CGFloat
+    let isAnimated: Bool
+    let isVisible: Bool
+
+    var body: some View {
+        Group {
+            if isVisible {
+                MascotView(kind: kind, status: status, size: size)
+                    .environment(\.mascotAnimationsEnabled, isAnimated)
+            } else {
+                Color.clear
+            }
+        }
+        .frame(width: size, height: size)
     }
 }
 

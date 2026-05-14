@@ -6,7 +6,9 @@
 //
 
 import AppKit
+#if !APP_STORE
 import ApplicationServices
+#endif
 import CoreGraphics
 import Foundation
 import os.log
@@ -1075,6 +1077,9 @@ actor SessionLauncher {
 
     @MainActor
     private func restoreMiniaturizedWindows(for app: NSRunningApplication) {
+#if APP_STORE
+        Self.logger.debug("Skipping minimized-window restore for App Store build")
+#else
         guard AXIsProcessTrusted() else {
             Self.logger.debug("Skipping minimized-window restore for \(app.bundleIdentifier ?? "unknown", privacy: .public): accessibility not granted")
             return
@@ -1108,8 +1113,10 @@ actor SessionLauncher {
         if restoredWindowCount > 0 {
             Self.logger.debug("Restored \(restoredWindowCount, privacy: .public) minimized window(s) for \(app.bundleIdentifier ?? "unknown", privacy: .public)")
         }
+#endif
     }
 
+#if !APP_STORE
     @MainActor
     private static func isWindowMiniaturized(_ window: AXUIElement) -> Bool {
         var minimizedValue: CFTypeRef?
@@ -1127,6 +1134,7 @@ actor SessionLauncher {
 
         return false
     }
+#endif
 
     private func activateIDEChatSession(_ session: SessionState) async -> Bool {
         guard session.clientInfo.isQoderFamily else { return false }
@@ -1302,6 +1310,16 @@ actor SessionLauncher {
         }
 
         if let workspacePath = existingLocalWorkspacePath(workspacePath) {
+            if await focusExistingIDEWorkspaceWindow(
+                bundleIdentifiers: candidateBundleIdentifiers,
+                workspacePath: workspacePath,
+                appName: appName
+            ) {
+                Self.logger.debug("Focused existing IDE workspace window workspace=\(workspacePath, privacy: .public)")
+                try? await Task.sleep(nanoseconds: Self.ideWindowRoutingDelayNanoseconds)
+                return true
+            }
+
             for candidateBundleIdentifier in candidateBundleIdentifiers {
                 let result = await ProcessExecutor.shared.runWithResult(
                     "/usr/bin/open",
@@ -1334,6 +1352,185 @@ actor SessionLauncher {
         }
 
         return didOpenURL
+    }
+
+    private static func focusExistingIDEWorkspaceWindow(
+        bundleIdentifiers: [String],
+        workspacePath: String,
+        appName: String?
+    ) async -> Bool {
+#if APP_STORE
+        return false
+#else
+        await MainActor.run {
+            guard AXIsProcessTrusted() else {
+                return false
+            }
+
+            let candidateBundleIdentifiers = orderedUniqueBundleIdentifiers(
+                bundleIdentifiers.map(TerminalAppRegistry.normalizedHostBundleIdentifier(for:))
+            )
+            var bestMatch: (app: NSRunningApplication, window: AXUIElement, score: Int)?
+
+            for app in uniqueRunningApplications(forBundleIdentifiers: candidateBundleIdentifiers)
+                where !app.isTerminated {
+                let appElement = AXUIElementCreateApplication(app.processIdentifier)
+                var windowsValue: CFTypeRef?
+                guard AXUIElementCopyAttributeValue(
+                    appElement,
+                    kAXWindowsAttribute as CFString,
+                    &windowsValue
+                ) == .success,
+                let windows = windowsValue as? [AXUIElement] else {
+                    continue
+                }
+
+                for window in windows {
+                    let title = axStringAttribute(window, attribute: kAXTitleAttribute)
+                    let document = axStringAttribute(window, attribute: kAXDocumentAttribute)
+                    let score = ideWorkspaceWindowMatchScore(
+                        title: title,
+                        document: document,
+                        workspacePath: workspacePath,
+                        appName: appName ?? app.localizedName
+                    )
+
+                    guard score > (bestMatch?.score ?? 0) else { continue }
+                    bestMatch = (app, window, score)
+                }
+            }
+
+            guard let bestMatch else {
+                return false
+            }
+
+            if bestMatch.app.isHidden {
+                bestMatch.app.unhide()
+            }
+
+            let appElement = AXUIElementCreateApplication(bestMatch.app.processIdentifier)
+            _ = AXUIElementSetAttributeValue(
+                appElement,
+                kAXFocusedWindowAttribute as CFString,
+                bestMatch.window
+            )
+            _ = AXUIElementSetAttributeValue(
+                bestMatch.window,
+                kAXMainAttribute as CFString,
+                kCFBooleanTrue
+            )
+            _ = AXUIElementSetAttributeValue(
+                bestMatch.window,
+                kAXFocusedAttribute as CFString,
+                kCFBooleanTrue
+            )
+            _ = AXUIElementPerformAction(bestMatch.window, kAXRaiseAction as CFString)
+
+            return bestMatch.app.activate(options: [])
+        }
+#endif
+    }
+
+#if !APP_STORE
+    @MainActor
+    private static func axStringAttribute(_ element: AXUIElement, attribute: String) -> String? {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, attribute as CFString, &value) == .success else {
+            return nil
+        }
+        let stringValue = (value as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return stringValue?.isEmpty == false ? stringValue : nil
+    }
+#endif
+
+    nonisolated static func ideWorkspaceWindowMatchScore(
+        title: String?,
+        document: String?,
+        workspacePath: String,
+        appName: String?
+    ) -> Int {
+        guard let normalizedWorkspacePath = normalizedWorkspaceMatchPath(workspacePath),
+              !normalizedWorkspacePath.isEmpty else {
+            return 0
+        }
+
+        let workspaceName = URL(fileURLWithPath: normalizedWorkspacePath, isDirectory: true)
+            .lastPathComponent
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !workspaceName.isEmpty else { return 0 }
+
+        let normalizedWorkspaceName = workspaceName.lowercased()
+        if let documentPath = normalizedWorkspaceMatchPath(document) {
+            if documentPath == normalizedWorkspacePath {
+                return 320
+            }
+            if documentPath.hasPrefix(normalizedWorkspacePath + "/")
+                || normalizedWorkspacePath.hasPrefix(documentPath + "/") {
+                return 280
+            }
+        }
+
+        guard let title = title?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !title.isEmpty else {
+            return 0
+        }
+
+        let normalizedTitle = title.lowercased()
+        if normalizedTitle.contains(normalizedWorkspacePath.lowercased()) {
+            return 240
+        }
+
+        let appName = appName?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        let strippedTitle = appName.map { appName in
+            normalizedTitle
+                .replacingOccurrences(of: " - \(appName)", with: "")
+                .replacingOccurrences(of: " — \(appName)", with: "")
+                .replacingOccurrences(of: " – \(appName)", with: "")
+        } ?? normalizedTitle
+
+        if strippedTitle == normalizedWorkspaceName {
+            return 220
+        }
+
+        let titleParts = strippedTitle
+            .components(separatedBy: CharacterSet(charactersIn: " -—–|:/\\()[]{}"))
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+            .filter { !$0.isEmpty }
+        if titleParts.contains(normalizedWorkspaceName) {
+            return 180
+        }
+
+        if normalizedWorkspaceName.count >= 3,
+           strippedTitle.contains(normalizedWorkspaceName) {
+            return 120
+        }
+
+        return 0
+    }
+
+    private nonisolated static func normalizedWorkspaceMatchPath(_ path: String?) -> String? {
+        guard let path = path?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !path.isEmpty else {
+            return nil
+        }
+
+        let withoutFileURL: String
+        if path.lowercased().hasPrefix("file://"),
+           let url = URL(string: path) {
+            withoutFileURL = url.path
+        } else {
+            withoutFileURL = path
+        }
+
+        let standardized = URL(fileURLWithPath: withoutFileURL)
+            .standardizedFileURL
+            .path
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+
+        return standardized.isEmpty ? "/" : "/" + standardized
     }
 
     private static func orderedUniqueBundleIdentifiers(_ bundleIdentifiers: [String]) -> [String] {
@@ -1417,11 +1614,15 @@ actor SessionLauncher {
             }
         }
 
+#if APP_STORE
+        return false
+#else
         guard AXIsProcessTrusted() else {
             return false
         }
 
         return runningApps.contains { hasUsableAXWindow(forProcessIdentifier: $0.processIdentifier) }
+#endif
     }
 
     @MainActor
@@ -1468,6 +1669,7 @@ actor SessionLauncher {
         return false
     }
 
+#if !APP_STORE
     @MainActor
     private static func hasUsableAXWindow(forProcessIdentifier processIdentifier: pid_t) -> Bool {
         let appElement = AXUIElementCreateApplication(processIdentifier)
@@ -1511,5 +1713,6 @@ actor SessionLauncher {
 
         return unsafeBitCast(value, to: AXUIElement.self)
     }
+#endif
 
 }

@@ -2,12 +2,33 @@ import AppKit
 import Combine
 import SwiftUI
 
+struct DetachedIslandPetMetrics: Equatable {
+    let scale: CGFloat
+    let petVisualFrame: CGFloat
+    let petHitFrame: CGFloat
+    let mascotDisplaySize: CGFloat
+    let badgeOffset: CGSize
+    let floatingUsageBoltVerticalOffset: CGFloat
+
+    static let standard = DetachedIslandPetMetrics(scale: 1)
+
+    init(scale: CGFloat) {
+        let sanitizedScale = min(max(scale, 1), 1.22)
+        self.scale = sanitizedScale
+        self.petVisualFrame = 74 * sanitizedScale
+        self.petHitFrame = 92 * sanitizedScale
+        self.mascotDisplaySize = 46 * sanitizedScale
+        self.badgeOffset = CGSize(width: -6 * sanitizedScale, height: -10 * sanitizedScale)
+        self.floatingUsageBoltVerticalOffset = 6 * sanitizedScale
+    }
+}
+
 enum DetachedIslandPanelMetrics {
-    static let petVisualFrame: CGFloat = 74
-    static let petHitFrame: CGFloat = 92
-    static let mascotDisplaySize: CGFloat = 46
+    static let petVisualFrame: CGFloat = DetachedIslandPetMetrics.standard.petVisualFrame
+    static let petHitFrame: CGFloat = DetachedIslandPetMetrics.standard.petHitFrame
+    static let mascotDisplaySize: CGFloat = DetachedIslandPetMetrics.standard.mascotDisplaySize
     static let mascotRenderScale: CGFloat = 1.75
-    static let badgeOffset = CGSize(width: -6, height: -10)
+    static let badgeOffset = DetachedIslandPetMetrics.standard.badgeOffset
     static let bubbleGap: CGFloat = 8
     static let leftBubbleGap: CGFloat = 2
     static let bubbleTailWidth: CGFloat = 30
@@ -20,8 +41,43 @@ enum DetachedIslandPanelMetrics {
     static let bubbleVerticalPadding: CGFloat = 4
     static let usageFooterReservedHeight: CGFloat = 34
     static let usageFooterVerticalOffset: CGFloat = -3
-    static let floatingUsageBoltVerticalOffset: CGFloat = 6
+    static let floatingUsageBoltVerticalOffset: CGFloat =
+        DetachedIslandPetMetrics.standard.floatingUsageBoltVerticalOffset
     static let settingsHintBubbleSize = CGSize(width: 248, height: 92)
+
+    @MainActor
+    static func petMetrics(for screenRect: CGRect) -> DetachedIslandPetMetrics {
+        petMetrics(for: screenRect, sizeMode: AppSettings.floatingPetSizeMode)
+    }
+
+    static func petMetrics(
+        for screenRect: CGRect,
+        sizeMode: FloatingPetSizeMode
+    ) -> DetachedIslandPetMetrics {
+        DetachedIslandPetMetrics(scale: resolutionScale(for: screenRect, sizeMode: sizeMode))
+    }
+
+    static func resolutionScale(
+        for screenRect: CGRect,
+        sizeMode: FloatingPetSizeMode
+    ) -> CGFloat {
+        switch sizeMode {
+        case .standard:
+            return 1
+        case .automatic:
+            return automaticResolutionScale(for: screenRect)
+        case .large:
+            return max(1.16, automaticResolutionScale(for: screenRect))
+        }
+    }
+
+    private static func automaticResolutionScale(for screenRect: CGRect) -> CGFloat {
+        let baseArea: CGFloat = 1440 * 900
+        let area = max(screenRect.width * screenRect.height, baseArea)
+        let linearScale = sqrt(area / baseArea)
+
+        return min(1.22, 1 + ((linearScale - 1) * 0.45))
+    }
 }
 
 enum DetachedIslandBubbleCorner: Equatable {
@@ -106,11 +162,12 @@ enum DetachedIslandContentModel {
         for petScreenAnchor: CGPoint,
         bubbleSize: CGSize,
         availableFrame: CGRect,
-        preferredPlacement: DetachedIslandBubblePlacement = .topLeft
+        preferredPlacement: DetachedIslandBubblePlacement = .topLeft,
+        petMetrics: DetachedIslandPetMetrics = .standard
     ) -> DetachedIslandBubblePlacement {
         let petSize = CGSize(
-            width: DetachedIslandPanelMetrics.petHitFrame,
-            height: DetachedIslandPanelMetrics.petHitFrame
+            width: petMetrics.petHitFrame,
+            height: petMetrics.petHitFrame
         )
 
         var fallbackPlacement = preferredPlacement
@@ -285,9 +342,10 @@ enum DetachedIslandContentModel {
         petScreenAnchor: CGPoint? = nil,
         availableFrame: CGRect? = nil
     ) -> DetachedIslandWindowLayout {
+        let petMetrics = DetachedIslandPanelMetrics.petMetrics(for: viewModel.screenRect)
         let petSize = CGSize(
-            width: DetachedIslandPanelMetrics.petHitFrame,
-            height: DetachedIslandPanelMetrics.petHitFrame
+            width: petMetrics.petHitFrame,
+            height: petMetrics.petHitFrame
         )
         let hiddenAnchor = CGPoint(x: petSize.width / 2, y: petSize.height / 2)
 
@@ -304,7 +362,8 @@ enum DetachedIslandContentModel {
                     bubblePlacement: bubblePlacement,
                     bubbleContentMode: nil,
                     petScreenAnchor: petScreenAnchor,
-                    availableFrame: availableFrame
+                    availableFrame: availableFrame,
+                    petMetrics: petMetrics
                 )
             }
 
@@ -337,7 +396,8 @@ enum DetachedIslandContentModel {
             bubblePlacement: bubblePlacement,
             bubbleContentMode: mode,
             petScreenAnchor: petScreenAnchor,
-            availableFrame: availableFrame
+            availableFrame: availableFrame,
+            petMetrics: petMetrics
         )
     }
 
@@ -347,7 +407,8 @@ enum DetachedIslandContentModel {
         bubblePlacement: DetachedIslandBubblePlacement,
         bubbleContentMode: DetachedIslandBubbleContentMode?,
         petScreenAnchor: CGPoint?,
-        availableFrame: CGRect?
+        availableFrame: CGRect?,
+        petMetrics: DetachedIslandPetMetrics
     ) -> DetachedIslandWindowLayout {
         let resolvedPlacement: DetachedIslandBubblePlacement
         if let petScreenAnchor, let availableFrame {
@@ -355,7 +416,8 @@ enum DetachedIslandContentModel {
                 for: petScreenAnchor,
                 bubbleSize: bubbleSize,
                 availableFrame: availableFrame,
-                preferredPlacement: bubblePlacement
+                preferredPlacement: bubblePlacement,
+                petMetrics: petMetrics
             )
         } else {
             resolvedPlacement = bubblePlacement
@@ -366,11 +428,11 @@ enum DetachedIslandContentModel {
             : DetachedIslandPanelMetrics.bubbleGap
         let verticalGap = DetachedIslandPanelMetrics.bubbleGap
         let topPlacementVerticalAdjustment = resolvedPlacement == .topLeft
-            ? DetachedIslandPanelMetrics.petVisualFrame
+            ? petMetrics.petVisualFrame
             : 0
         let bottomPlacementVerticalAdjustment = resolvedPlacement.isBubbleAbovePet
             ? 0
-            : DetachedIslandPanelMetrics.petVisualFrame
+            : petMetrics.petVisualFrame
         let gutter = DetachedIslandPanelMetrics.bubbleWindowGutter
         let containerWidth = petSize.width + horizontalGap + bubbleSize.width + (gutter * 2)
         let containerHeight = max(
@@ -632,6 +694,10 @@ struct DetachedIslandPanelView: View {
         )
     }
 
+    private var petMetrics: DetachedIslandPetMetrics {
+        DetachedIslandPanelMetrics.petMetrics(for: viewModel.screenRect)
+    }
+
     private var usageSummaryProviders: [UsageSummaryProvider] {
         UsageSummaryPresenter.providers(
             claudeSnapshot: sessionMonitor.claudeUsageSnapshot,
@@ -743,6 +809,7 @@ struct DetachedIslandPanelView: View {
             usageWindows: floatingPetUsageWindows,
             mascotKind: compactMascotKind,
             mascotStatus: compactMascotStatus,
+            petMetrics: petMetrics,
             isDragging: interactionModel.isPetDragging,
             onTap: onPetTap,
             onDragStarted: {
@@ -839,6 +906,7 @@ private struct DetachedFloatingPetInteractionView: View {
     let usageWindows: [UsageSummaryWindow]
     let mascotKind: MascotKind
     let mascotStatus: MascotStatus
+    let petMetrics: DetachedIslandPetMetrics
     let isDragging: Bool
     let onTap: () -> Void
     let onDragStarted: () -> Void
@@ -850,29 +918,30 @@ private struct DetachedFloatingPetInteractionView: View {
             DetachedFloatingMascotView(
                 kind: mascotKind,
                 status: mascotStatus,
+                petMetrics: petMetrics,
                 isDragging: isDragging
             )
             .frame(
-                width: DetachedIslandPanelMetrics.petVisualFrame,
-                height: DetachedIslandPanelMetrics.petVisualFrame
+                width: petMetrics.petVisualFrame,
+                height: petMetrics.petVisualFrame
             )
 
             if activeCount > 0 {
                 activeCountBadge
                     .offset(
-                        x: DetachedIslandPanelMetrics.badgeOffset.width,
-                        y: DetachedIslandPanelMetrics.badgeOffset.height
+                        x: petMetrics.badgeOffset.width,
+                        y: petMetrics.badgeOffset.height
                     )
             }
         }
         .frame(
-            width: DetachedIslandPanelMetrics.petHitFrame,
-            height: DetachedIslandPanelMetrics.petHitFrame
+            width: petMetrics.petHitFrame,
+            height: petMetrics.petHitFrame
         )
         .overlay(alignment: .top) {
             if !usageWindows.isEmpty {
                 DetachedFloatingUsageBoltView(windows: usageWindows)
-                    .offset(y: DetachedIslandPanelMetrics.floatingUsageBoltVerticalOffset)
+                    .offset(y: petMetrics.floatingUsageBoltVerticalOffset)
                     .allowsHitTesting(false)
             }
         }
@@ -882,8 +951,8 @@ private struct DetachedFloatingPetInteractionView: View {
         .overlay {
             DetachedPetInteractionBridge(
                 size: CGSize(
-                    width: DetachedIslandPanelMetrics.petHitFrame,
-                    height: DetachedIslandPanelMetrics.petHitFrame
+                    width: petMetrics.petHitFrame,
+                    height: petMetrics.petHitFrame
                 ),
                 onTap: onTap,
                 onDragStarted: onDragStarted,
@@ -891,8 +960,8 @@ private struct DetachedFloatingPetInteractionView: View {
                 onDragEnded: onDragEnded
             )
             .frame(
-                width: DetachedIslandPanelMetrics.petHitFrame,
-                height: DetachedIslandPanelMetrics.petHitFrame
+                width: petMetrics.petHitFrame,
+                height: petMetrics.petHitFrame
             )
         }
     }
@@ -912,24 +981,46 @@ private struct DetachedFloatingPetInteractionView: View {
 private struct DetachedFloatingUsageBoltView: View {
     let windows: [UsageSummaryWindow]
 
+    @ObservedObject private var energyGovernor = EnergyGovernor.shared
+
     private let cycleInterval: TimeInterval = 1.8
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 24.0)) { context in
-            if let window = window(for: context.date) {
-                let phase = context.date.timeIntervalSinceReferenceDate
-                let pulse = 1 + (sin(phase * .pi * 2 / 1.2) * 0.05)
-                let lift = sin(phase * .pi * 2 / 1.6) * 1.2
-
-                Image(systemName: "bolt.fill")
-                    .font(.system(size: 8, weight: .black))
-                    .foregroundColor(color(for: window.severity))
-                    .scaleEffect((window.severity == .critical ? 1.08 : 1) * pulse)
-                    .offset(y: lift)
-                    .id(window.id)
-                    .help(window.resetText ?? window.valueText)
-                    .accessibilityLabel(Text(accessibilityLabel(for: window)))
+        if energyGovernor.policy.animationLevel == .staticFrames {
+            boltBody(date: .now, isAnimated: false)
+        } else {
+            TimelineView(.periodic(from: .now, by: boltInterval)) { context in
+                boltBody(date: context.date, isAnimated: true)
             }
+        }
+    }
+
+    @ViewBuilder
+    private func boltBody(date: Date, isAnimated: Bool) -> some View {
+        if let window = window(for: date) {
+            let phase = date.timeIntervalSinceReferenceDate
+            let pulse = isAnimated ? 1 + (sin(phase * .pi * 2 / 1.2) * 0.05) : 1
+            let lift = isAnimated ? sin(phase * .pi * 2 / 1.6) * 1.2 : 0
+
+            Image(systemName: "bolt.fill")
+                .font(.system(size: 8, weight: .black))
+                .foregroundColor(color(for: window.severity))
+                .scaleEffect((window.severity == .critical ? 1.08 : 1) * pulse)
+                .offset(y: lift)
+                .id(window.id)
+                .help(window.resetText ?? window.valueText)
+                .accessibilityLabel(Text(accessibilityLabel(for: window)))
+        }
+    }
+
+    private var boltInterval: TimeInterval {
+        switch energyGovernor.policy.animationLevel {
+        case .full:
+            1.0 / 24.0
+        case .reduced:
+            1.0 / 8.0
+        case .staticFrames:
+            1.0 / 24.0
         }
     }
 
@@ -1053,14 +1144,15 @@ private final class DetachedPetInteractionView: NSView {
 private struct DetachedFloatingMascotView: View {
     let kind: MascotKind
     let status: MascotStatus
+    let petMetrics: DetachedIslandPetMetrics
     let isDragging: Bool
 
     private var renderSize: CGFloat {
-        DetachedIslandPanelMetrics.mascotDisplaySize * DetachedIslandPanelMetrics.mascotRenderScale
+        petMetrics.mascotDisplaySize * DetachedIslandPanelMetrics.mascotRenderScale
     }
 
     private var displayScale: CGFloat {
-        DetachedIslandPanelMetrics.mascotDisplaySize / renderSize
+        petMetrics.mascotDisplaySize / renderSize
     }
 
     var body: some View {
@@ -1073,8 +1165,8 @@ private struct DetachedFloatingMascotView: View {
         .frame(width: renderSize, height: renderSize)
         .scaleEffect(displayScale)
         .frame(
-            width: DetachedIslandPanelMetrics.mascotDisplaySize,
-            height: DetachedIslandPanelMetrics.mascotDisplaySize
+            width: petMetrics.mascotDisplaySize,
+            height: petMetrics.mascotDisplaySize
         )
         .compositingGroup()
         .drawingGroup(opaque: false, colorMode: .linear)

@@ -31,25 +31,31 @@ private actor HermesHookDebugStore {
 
     func recordRuntime(_ message: String) {
         let line = "[\(formatter.string(from: Date()))] \(message)\n"
-        append(data: Data(line.utf8), to: Self.debugDirectoryURL.appendingPathComponent("receiver.log"))
+        append(
+            data: Data(line.utf8), to: Self.debugDirectoryURL.appendingPathComponent("receiver.log")
+        )
     }
 
     func recordEvent(_ fields: [String: Any]) {
         guard JSONSerialization.isValidJSONObject(fields),
-              let data = try? JSONSerialization.data(withJSONObject: fields, options: [.sortedKeys])
+            let data = try? JSONSerialization.data(withJSONObject: fields, options: [.sortedKeys])
         else {
             return
         }
 
         var line = data
         line.append(0x0A)
-        let dateKey = formatter.string(from: Date()).prefix(10).replacingOccurrences(of: "-", with: "")
-        append(data: line, to: Self.debugDirectoryURL.appendingPathComponent("\(dateKey)-receiver.jsonl"))
+        let dateKey = formatter.string(from: Date()).prefix(10).replacingOccurrences(
+            of: "-", with: "")
+        append(
+            data: line,
+            to: Self.debugDirectoryURL.appendingPathComponent("\(dateKey)-receiver.jsonl"))
     }
 
     private func append(data: Data, to url: URL) {
         do {
-            try fileManager.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try fileManager.createDirectory(
+                at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
             if !fileManager.fileExists(atPath: url.path) {
                 try data.write(to: url, options: .atomic)
                 return
@@ -127,12 +133,13 @@ struct HookEvent: Sendable {
 
         switch status {
         case "waiting_for_approval":
-            return .waitingForApproval(PermissionContext(
-                toolUseId: toolUseId ?? "",
-                toolName: tool ?? "unknown",
-                toolInput: toolInput,
-                receivedAt: Date()
-            ))
+            return .waitingForApproval(
+                PermissionContext(
+                    toolUseId: toolUseId ?? "",
+                    toolName: tool ?? "unknown",
+                    toolInput: toolInput,
+                    receivedAt: Date()
+                ))
         case "waiting_for_input":
             return .waitingForInput
         case "running_tool", "processing", "starting":
@@ -159,23 +166,17 @@ struct HookEvent: Sendable {
         return (event == "PermissionRequest" && status == "waiting_for_approval")
             || (event == "Notification" && status == "waiting_for_approval"
                 && clientInfo.isQwenCodeClient && notificationType == "permission_prompt")
-            || (
-                event == "Notification"
-                    && clientInfo.isCodeBuddyCLIClient
-                    && notificationType == "permission_prompt"
-                    && isCodeBuddyCLIAskUserQuestionNotification
-            )
-            || (
-                event == "PreToolUse"
-                    && normalizedTool == "askuserquestion"
-                    && toolInput?["questions"] != nil
-                    && !isAnsweredAskUserQuestionEvent
-            )
-            || (
-                event == "PreToolUse"
-                    && normalizedTool == "exitplanmode"
-                    && clientInfo.normalizedForClaudeRouting().profileID == "qoder-cli"
-            )
+            || (event == "Notification"
+                && clientInfo.isCodeBuddyCLIClient
+                && notificationType == "permission_prompt"
+                && isCodeBuddyCLIAskUserQuestionNotification)
+            || (event == "PreToolUse"
+                && normalizedTool == "askuserquestion"
+                && toolInput?["questions"] != nil
+                && !isAnsweredAskUserQuestionEvent)
+            || (event == "PreToolUse"
+                && normalizedTool == "exitplanmode"
+                && clientInfo.normalizedForClaudeRouting().profileID == "qoder-cli")
     }
 
     private nonisolated var isCodeBuddyCLIAskUserQuestionNotification: Bool {
@@ -201,7 +202,7 @@ struct HookEvent: Sendable {
             normalizedClientInfo.terminalBundleIdentifier,
             normalizedClientInfo.bundleIdentifier,
             clientInfo.terminalBundleIdentifier,
-            clientInfo.bundleIdentifier
+            clientInfo.bundleIdentifier,
         ].contains { value in
             value?
                 .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -254,8 +255,8 @@ extension HookEvent {
     }
 }
 
-private extension SessionIntervention {
-    nonisolated func withResolvedToolUseId(_ toolUseId: String) -> SessionIntervention {
+extension SessionIntervention {
+    fileprivate nonisolated func withResolvedToolUseId(_ toolUseId: String) -> SessionIntervention {
         guard !toolUseId.isEmpty else { return self }
 
         var metadata = self.metadata
@@ -280,6 +281,7 @@ private enum BridgeProvider: String, Codable, Sendable {
     case claude
     case codex
     case copilot
+    case kimi
     case gemini
 }
 
@@ -359,7 +361,8 @@ private struct BridgeEnvelope: Codable, Sendable {
         preview = try container.decodeIfPresent(String.self, forKey: .preview)
         cwd = try container.decodeIfPresent(String.self, forKey: .cwd)
         status = try container.decodeIfPresent(BridgeStatus.self, forKey: .status)
-        terminalContext = try container.decodeIfPresent(BridgeTerminalContext.self, forKey: .terminalContext)
+        terminalContext =
+            try container.decodeIfPresent(BridgeTerminalContext.self, forKey: .terminalContext)
             ?? BridgeTerminalContext(
                 terminalProgram: nil,
                 terminalBundleID: nil,
@@ -374,13 +377,16 @@ private struct BridgeEnvelope: Codable, Sendable {
                 tmuxSession: nil,
                 tmuxPane: nil
             )
-        intervention = try container.decodeIfPresent(BridgeEnvelopeIntervention.self, forKey: .intervention)
+        intervention = try container.decodeIfPresent(
+            BridgeEnvelopeIntervention.self, forKey: .intervention)
 
-        var decodedMetadata = try container.decodeIfPresent([String: String].self, forKey: .metadata) ?? [:]
+        var decodedMetadata =
+            try container.decodeIfPresent([String: String].self, forKey: .metadata) ?? [:]
         let expectation = try Self.decodeResponseExpectation(from: container)
         if decodedMetadata["tool_input_json"] == nil,
-           let injectedToolInput = expectation.injectedToolInput,
-           let encodedToolInput = Self.encodeToolInputJSON(injectedToolInput) {
+            let injectedToolInput = expectation.injectedToolInput,
+            let encodedToolInput = Self.encodeToolInputJSON(injectedToolInput)
+        {
             decodedMetadata["tool_input_json"] = encodedToolInput
         }
 
@@ -404,7 +410,9 @@ private struct BridgeEnvelope: Codable, Sendable {
             return (true, ["questions": questions])
         }
 
-        if let responseObject = try? container.decode([String: AnyCodable].self, forKey: .expectsResponse) {
+        if let responseObject = try? container.decode(
+            [String: AnyCodable].self, forKey: .expectsResponse)
+        {
             let normalizedObject = responseObject.mapValues(\.value)
             if normalizedObject["questions"] != nil {
                 return (true, normalizedObject)
@@ -414,7 +422,7 @@ private struct BridgeEnvelope: Codable, Sendable {
                 normalizedObject["question"],
                 normalizedObject["prompt"],
                 normalizedObject["header"],
-                normalizedObject["options"]
+                normalizedObject["options"],
             ].contains { $0 != nil }
 
             if looksLikeQuestion {
@@ -429,8 +437,9 @@ private struct BridgeEnvelope: Codable, Sendable {
 
     private static func encodeToolInputJSON(_ object: [String: Any]) -> String? {
         guard JSONSerialization.isValidJSONObject(object),
-              let data = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]),
-              let json = String(data: data, encoding: .utf8) else {
+            let data = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]),
+            let json = String(data: data, encoding: .utf8)
+        else {
             return nil
         }
         return json
@@ -456,7 +465,9 @@ private struct BridgeEnvelopeIntervention: Codable, Sendable {
         case sessionID
     }
 
-    func sessionIntervention(fallbackID: String?, metadata: [String: String]) -> SessionIntervention? {
+    func sessionIntervention(fallbackID: String?, metadata: [String: String])
+        -> SessionIntervention?
+    {
         guard let kind = SessionInterventionKind(rawValue: self.kind) else {
             return nil
         }
@@ -512,13 +523,17 @@ enum BridgeDecision: Encodable, Sendable {
 
         switch self {
         case .approve:
-            try container.encode(EmptyBridgeDecisionPayload(), forKey: BridgeDecisionCodingKey("approve"))
+            try container.encode(
+                EmptyBridgeDecisionPayload(), forKey: BridgeDecisionCodingKey("approve"))
         case .approveForSession:
-            try container.encode(EmptyBridgeDecisionPayload(), forKey: BridgeDecisionCodingKey("approveForSession"))
+            try container.encode(
+                EmptyBridgeDecisionPayload(), forKey: BridgeDecisionCodingKey("approveForSession"))
         case .deny:
-            try container.encode(EmptyBridgeDecisionPayload(), forKey: BridgeDecisionCodingKey("deny"))
+            try container.encode(
+                EmptyBridgeDecisionPayload(), forKey: BridgeDecisionCodingKey("deny"))
         case .cancel:
-            try container.encode(EmptyBridgeDecisionPayload(), forKey: BridgeDecisionCodingKey("cancel"))
+            try container.encode(
+                EmptyBridgeDecisionPayload(), forKey: BridgeDecisionCodingKey("cancel"))
         case .answer(let answers):
             try container.encode(
                 BridgeAnswerDecisionPayload(_0: answers),
@@ -559,31 +574,40 @@ private struct BridgeAnswerDecisionPayload: Encodable {
     let _0: [String: String]
 }
 
-private extension BridgeEnvelope {
-    var resolvedSessionID: String {
-        let sessionId = metadata["session_id"]
+extension BridgeEnvelope {
+    fileprivate var resolvedSessionID: String {
+        let sessionId =
+            metadata["session_id"]
             ?? metadata["thread_id"]
             ?? metadata["threadId"]
             ?? sessionKey.components(separatedBy: ":").dropFirst().joined(separator: ":")
         return sessionId.isEmpty ? sessionKey : sessionId
     }
 
-    var hookEvent: HookEvent {
+    fileprivate var hookEvent: HookEvent {
         let metadata = self.metadata
         let toolInput = Self.decodeToolInput(from: metadata["tool_input_json"])
         let sessionId = resolvedSessionID
+        let resolvedCWD = Self.resolvedCWD(
+            envelopeCWD: cwd,
+            terminalContext: terminalContext,
+            metadata: metadata
+        )
 
         return HookEvent(
             sessionId: sessionId,
-            cwd: cwd ?? terminalContext.currentDirectory ?? metadata["cwd"] ?? "",
+            cwd: resolvedCWD,
             event: eventType,
-            status: Self.mapStatus(eventType: eventType, status: status?.kind, notificationType: metadata["notification_type"]),
+            status: Self.mapStatus(
+                eventType: eventType, status: status?.kind,
+                notificationType: metadata["notification_type"]),
             provider: provider.sessionProvider,
             clientInfo: Self.makeClientInfo(
                 provider: provider,
                 sessionId: sessionId,
                 terminalContext: terminalContext,
-                metadata: metadata
+                metadata: metadata,
+                workspacePath: resolvedCWD
             ),
             pid: Int(metadata["pid"] ?? ""),
             tty: terminalContext.tty,
@@ -678,13 +702,13 @@ private extension BridgeEnvelope {
         provider: BridgeProvider,
         sessionId: String,
         terminalContext: BridgeTerminalContext,
-        metadata: [String: String]
+        metadata: [String: String],
+        workspacePath: String
     ) -> SessionClientInfo {
-        let explicitKind = (
-            metadata["client_kind"]
-                ?? metadata["client_type"]
-                ?? metadata["client"]
-        )?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let explicitKind =
+            (metadata["client_kind"]
+            ?? metadata["client_type"]
+            ?? metadata["client"])?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let explicitName = firstNonEmpty(
             metadata["client_name"],
             metadata["client_title"],
@@ -752,7 +776,8 @@ private extension BridgeEnvelope {
             effectiveExplicitKind = explicitKind
             effectiveExplicitName = explicitName
         }
-        let hasExplicitNonTerminalBundle = explicitBundleID.map { !TerminalAppRegistry.isTerminalBundle($0) } ?? false
+        let hasExplicitNonTerminalBundle =
+            explicitBundleID.map { !TerminalAppRegistry.isTerminalBundle($0) } ?? false
         let providerKind = provider.sessionProvider
         let matchedProfile = ClientProfileRegistry.matchRuntimeProfile(
             provider: providerKind,
@@ -794,6 +819,12 @@ private extension BridgeEnvelope {
             } else {
                 kind = .custom
             }
+        case .kimi:
+            if let matchedProfile {
+                kind = matchedProfile.kind
+            } else {
+                kind = .custom
+            }
         case .gemini:
             if let matchedProfile {
                 kind = matchedProfile.kind
@@ -806,14 +837,16 @@ private extension BridgeEnvelope {
         if matchedProfile?.kind == kind {
             resolvedProfile = matchedProfile
         } else if provider == .codex, kind == .codexCLI || kind == .codexApp {
-            resolvedProfile = ClientProfileRegistry.defaultRuntimeProfile(for: providerKind, kind: kind)
+            resolvedProfile = ClientProfileRegistry.defaultRuntimeProfile(
+                for: providerKind, kind: kind)
         } else {
             resolvedProfile = matchedProfile
         }
 
         let resolvedBundleID: String?
         if kind == .codexApp {
-            resolvedBundleID = explicitBundleID
+            resolvedBundleID =
+                explicitBundleID
                 ?? terminalBundleID
                 ?? resolvedProfile?.defaultBundleIdentifier
                 ?? "com.openai.codex"
@@ -825,7 +858,8 @@ private extension BridgeEnvelope {
         if let effectiveExplicitName {
             resolvedName = effectiveExplicitName
         } else {
-            resolvedName = resolvedProfile?.displayName
+            resolvedName =
+                resolvedProfile?.displayName
                 ?? (kind == .claudeCode ? "Claude Code" : nil)
         }
 
@@ -836,12 +870,12 @@ private extension BridgeEnvelope {
             resolvedLaunchURL = SessionClientInfo.appLaunchURL(
                 bundleIdentifier: resolvedBundleID ?? "com.openai.codex",
                 sessionId: sessionId,
-                workspacePath: terminalContext.currentDirectory
+                workspacePath: workspacePath
             )
         } else if let workspaceLaunchURL = terminalBundleID.flatMap({
             SessionClientInfo.appLaunchURL(
                 bundleIdentifier: $0,
-                workspacePath: terminalContext.currentDirectory
+                workspacePath: workspacePath
             )
         }) {
             resolvedLaunchURL = workspaceLaunchURL
@@ -853,7 +887,8 @@ private extension BridgeEnvelope {
         if let explicitOrigin {
             resolvedOrigin = explicitOrigin
         } else if provider == .codex {
-            resolvedOrigin = resolvedProfile?.defaultOrigin ?? (kind == .codexCLI ? "cli" : "desktop")
+            resolvedOrigin =
+                resolvedProfile?.defaultOrigin ?? (kind == .codexCLI ? "cli" : "desktop")
         } else if provider == .copilot {
             resolvedOrigin = resolvedProfile?.defaultOrigin ?? "cli"
         } else {
@@ -882,6 +917,141 @@ private extension BridgeEnvelope {
         )
     }
 
+    private static func resolvedCWD(
+        envelopeCWD: String?,
+        terminalContext: BridgeTerminalContext,
+        metadata: [String: String]
+    ) -> String {
+        let candidateCWD = firstNonEmpty(
+            envelopeCWD,
+            terminalContext.currentDirectory,
+            metadata["cwd"]
+        )
+        let sessionFileWorkspace = workspacePathFromSessionFilePath(
+            firstNonEmpty(
+                metadata["session_file_path"],
+                metadata["rollout_path"],
+                metadata["transcript_path"]
+            ))
+
+        if shouldPreferSessionFileWorkspace(sessionFileWorkspace, over: candidateCWD) {
+            return sessionFileWorkspace ?? ""
+        }
+
+        return candidateCWD ?? sessionFileWorkspace ?? ""
+    }
+
+    private static func workspacePathFromSessionFilePath(_ sessionFilePath: String?) -> String? {
+        guard let sessionFilePath = firstNonEmpty(sessionFilePath) else { return nil }
+        let components = URL(fileURLWithPath: sessionFilePath)
+            .standardizedFileURL
+            .pathComponents
+        guard let projectsIndex = components.lastIndex(of: "projects"),
+            components.indices.contains(projectsIndex + 1),
+            projectsIndex > 0,
+            components[projectsIndex - 1].hasPrefix(".")
+        else {
+            return nil
+        }
+
+        let slug = components[projectsIndex + 1]
+        return candidateWorkspacePaths(fromProjectSlug: slug).first { path in
+            var isDirectory: ObjCBool = false
+            return FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory)
+                && isDirectory.boolValue
+        }
+    }
+
+    private static func shouldPreferSessionFileWorkspace(
+        _ sessionFileWorkspace: String?,
+        over candidateCWD: String?
+    ) -> Bool {
+        guard let sessionFileWorkspace else { return false }
+        guard let candidateCWD = firstNonEmpty(candidateCWD) else { return true }
+
+        let normalizedCandidate = URL(fileURLWithPath: candidateCWD).standardizedFileURL.path
+        let normalizedWorkspace = URL(fileURLWithPath: sessionFileWorkspace).standardizedFileURL
+            .path
+        guard normalizedCandidate != normalizedWorkspace else { return false }
+
+        var candidateIsDirectory: ObjCBool = false
+        let candidateExists =
+            FileManager.default.fileExists(
+                atPath: normalizedCandidate,
+                isDirectory: &candidateIsDirectory
+            ) && candidateIsDirectory.boolValue
+
+        if !candidateExists {
+            return true
+        }
+
+        return isTopLevelClientConfigDirectory(normalizedCandidate)
+    }
+
+    private static func isTopLevelClientConfigDirectory(_ path: String) -> Bool {
+        let url = URL(fileURLWithPath: path).standardizedFileURL
+        let knownClientDirectories: Set<String> = [
+            ".claude",
+            ".codebuddy",
+            ".codex",
+            ".cursor",
+            ".gemini",
+            ".kimi",
+            ".openclaw",
+            ".qoder",
+            ".qwen",
+            ".workbuddy",
+        ]
+        guard knownClientDirectories.contains(url.lastPathComponent) else {
+            return false
+        }
+
+        return url.deletingLastPathComponent().path
+            == FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL.path
+    }
+
+    private static func candidateWorkspacePaths(fromProjectSlug slug: String) -> [String] {
+        let trimmedSlug = slug.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedSlug =
+            trimmedSlug.hasPrefix("-")
+            ? String(trimmedSlug.dropFirst())
+            : trimmedSlug
+        let parts =
+            normalizedSlug
+            .split(separator: "-", omittingEmptySubsequences: true)
+            .map(String.init)
+        guard parts.count >= 2, parts.count <= 12 else {
+            return []
+        }
+
+        var candidates: [String] = []
+        var seen: Set<String> = []
+
+        func appendCandidates(startIndex: Int, pathComponents: [String]) {
+            if startIndex == parts.count {
+                let path = "/" + pathComponents.joined(separator: "/")
+                if seen.insert(path).inserted {
+                    candidates.append(path)
+                }
+                return
+            }
+
+            var component = ""
+            for index in startIndex..<parts.count {
+                component = component.isEmpty ? parts[index] : component + "-" + parts[index]
+                appendCandidates(
+                    startIndex: index + 1,
+                    pathComponents: pathComponents + [component]
+                )
+            }
+        }
+
+        appendCandidates(startIndex: 0, pathComponents: [])
+        return candidates.sorted { lhs, rhs in
+            lhs.split(separator: "/").count > rhs.split(separator: "/").count
+        }
+    }
+
     private static func firstNonEmpty(_ values: String?...) -> String? {
         values.compactMap { value -> String? in
             guard let value else { return nil }
@@ -892,8 +1062,8 @@ private extension BridgeEnvelope {
 
 }
 
-private extension BridgeProvider {
-    var sessionProvider: SessionProvider {
+extension BridgeProvider {
+    fileprivate var sessionProvider: SessionProvider {
         switch self {
         case .claude:
             return .claude
@@ -901,6 +1071,8 @@ private extension BridgeProvider {
             return .codex
         case .copilot:
             return .copilot
+        case .kimi:
+            return .kimi
         case .gemini:
             return .gemini
         }
@@ -965,9 +1137,11 @@ struct CodexAuxiliaryHookFilter {
             return false
         }
 
-        let hasTitleGenerationRole = prompt.contains(titleGenerationPromptRoleMarker)
+        let hasTitleGenerationRole =
+            prompt.contains(titleGenerationPromptRoleMarker)
             || prompt.contains(titleGenerationPromptAlternateRoleMarker)
-        let hasDisplayOrReturnInstruction = prompt.contains(titleGenerationPromptDisplayMarker)
+        let hasDisplayOrReturnInstruction =
+            prompt.contains(titleGenerationPromptDisplayMarker)
             || prompt.contains(titleGenerationPromptReturnMarker)
             || prompt.contains("represent the prompt")
             || prompt.contains("no quotes or trailing punctuation")
@@ -985,7 +1159,8 @@ struct CodexAuxiliaryHookFilter {
 
     private static func normalizedPrompt(_ prompt: String?) -> String? {
         guard let prompt else { return nil }
-        let collapsed = prompt
+        let collapsed =
+            prompt
             .replacingOccurrences(of: "\n", with: " ")
             .replacingOccurrences(of: "\r", with: " ")
             .split(whereSeparator: \.isWhitespace)
@@ -1022,7 +1197,7 @@ class HookSocketServer {
     private static let interventionMatchingIgnoredInputKeys: Set<String> = [
         "description",
         "justification",
-        "reason"
+        "reason",
     ]
 
     static func inferredCodexClientKind(
@@ -1056,24 +1231,31 @@ class HookSocketServer {
         let normalizedTerminalProgram = terminalProgram?
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
-        let inferredTerminalProgramBundleID = TerminalAppRegistry
+        let inferredTerminalProgramBundleID =
+            TerminalAppRegistry
             .inferredBundleIdentifier(forTerminalProgram: terminalProgram)?
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
 
-        let isExplicitCLI = normalizedKind?.contains("cli") == true
+        let isExplicitCLI =
+            normalizedKind?.contains("cli") == true
             || normalizedKind?.contains("tui") == true
-        let isExplicitDesktop = normalizedKind?.contains("app") == true
+        let isExplicitDesktop =
+            normalizedKind?.contains("app") == true
             || normalizedKind?.contains("desktop") == true
             || normalizedBundleID == "com.openai.codex"
-        let hasHostedTerminalBundle = normalizedTerminalBundleID != nil
+        let hasHostedTerminalBundle =
+            normalizedTerminalBundleID != nil
             && normalizedTerminalBundleID != "com.openai.codex"
-        let hasHostedIDEBundle = normalizedIDEBundleID != nil
+        let hasHostedIDEBundle =
+            normalizedIDEBundleID != nil
             && normalizedIDEBundleID != "com.openai.codex"
-        let hasHostedTerminalProgram = normalizedTerminalProgram != nil
+        let hasHostedTerminalProgram =
+            normalizedTerminalProgram != nil
             && normalizedTerminalProgram != "codex"
             && inferredTerminalProgramBundleID != "com.openai.codex"
-        let hasTerminalContext = hasContent(terminalTTY)
+        let hasTerminalContext =
+            hasContent(terminalTTY)
             || hasHostedTerminalProgram
             || hasHostedTerminalBundle
             || hasHostedIDEBundle
@@ -1103,7 +1285,8 @@ class HookSocketServer {
     ) -> String? {
         func nonEmpty(_ value: String?) -> String? {
             guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines),
-                  !value.isEmpty else {
+                !value.isEmpty
+            else {
                 return nil
             }
             return value
@@ -1113,10 +1296,11 @@ class HookSocketServer {
         let ideBundleID = nonEmpty(ideBundleID)
 
         if let terminalBundleID,
-           let ideBundleID,
-           terminalBundleID.caseInsensitiveCompare(ideBundleID) != .orderedSame,
-           TerminalAppRegistry.isTerminalBundle(terminalBundleID),
-           !TerminalAppRegistry.isIDEBundle(terminalBundleID) {
+            let ideBundleID,
+            terminalBundleID.caseInsensitiveCompare(ideBundleID) != .orderedSame,
+            TerminalAppRegistry.isTerminalBundle(terminalBundleID),
+            !TerminalAppRegistry.isIDEBundle(terminalBundleID)
+        {
             return terminalBundleID
         }
 
@@ -1169,13 +1353,17 @@ class HookSocketServer {
         )
     }
 
-    func start(onEvent: @escaping HookEventHandler, onPermissionFailure: PermissionFailureHandler? = nil) {
+    func start(
+        onEvent: @escaping HookEventHandler, onPermissionFailure: PermissionFailureHandler? = nil
+    ) {
         queue.async { [weak self] in
             self?.startServer(onEvent: onEvent, onPermissionFailure: onPermissionFailure)
         }
     }
 
-    private func startServer(onEvent: @escaping HookEventHandler, onPermissionFailure: PermissionFailureHandler?) {
+    private func startServer(
+        onEvent: @escaping HookEventHandler, onPermissionFailure: PermissionFailureHandler?
+    ) {
         guard serverSocket < 0 else { return }
 
         eventHandler = onEvent
@@ -1256,20 +1444,27 @@ class HookSocketServer {
 
     func respondToPermission(toolUseId: String, decision: String, reason: String? = nil) {
         queue.async { [weak self] in
-            self?.sendHookResponse(toolUseId: toolUseId, decision: decision, reason: reason, updatedInput: nil)
+            self?.sendHookResponse(
+                toolUseId: toolUseId, decision: decision, reason: reason, updatedInput: nil)
         }
     }
 
     func respondToPermissionBySession(sessionId: String, decision: String, reason: String? = nil) {
         queue.async { [weak self] in
-            self?.sendPermissionResponseBySession(sessionId: sessionId, decision: decision, reason: reason)
+            self?.sendPermissionResponseBySession(
+                sessionId: sessionId, decision: decision, reason: reason)
         }
     }
 
-    func respondToIntervention(toolUseId: String, decision: String, updatedInput: [String: Any]? = nil, reason: String? = nil) {
+    func respondToIntervention(
+        toolUseId: String, decision: String, updatedInput: [String: Any]? = nil,
+        reason: String? = nil
+    ) {
         queue.async { [weak self] in
             let encodedInput = updatedInput?.mapValues { AnyCodable($0) }
-            self?.sendHookResponse(toolUseId: toolUseId, decision: decision, reason: reason, updatedInput: encodedInput)
+            self?.sendHookResponse(
+                toolUseId: toolUseId, decision: decision, reason: reason, updatedInput: encodedInput
+            )
         }
     }
 
@@ -1287,13 +1482,17 @@ class HookSocketServer {
             .contains { $0.sessionId == sessionId }
     }
 
-    func getPendingPermission(sessionId: String) -> (toolName: String?, toolId: String?, toolInput: [String: AnyCodable]?)? {
+    func getPendingPermission(sessionId: String) -> (
+        toolName: String?, toolId: String?, toolInput: [String: AnyCodable]?
+    )? {
         permissionsLock.lock()
         defer { permissionsLock.unlock() }
-        guard let pending = pendingPermissions.values
-            .flatMap({ $0 })
-            .sorted(by: { $0.receivedAt > $1.receivedAt })
-            .first(where: { $0.sessionId == sessionId }) else {
+        guard
+            let pending = pendingPermissions.values
+                .flatMap({ $0 })
+                .sorted(by: { $0.receivedAt > $1.receivedAt })
+                .first(where: { $0.sessionId == sessionId })
+        else {
             return nil
         }
         return (pending.event.tool, pending.toolUseId, pending.event.toolInput)
@@ -1307,14 +1506,17 @@ class HookSocketServer {
 
     private func cleanupSpecificPermission(toolUseId: String) {
         permissionsLock.lock()
-        guard let pendings = pendingPermissions.removeValue(forKey: toolUseId), !pendings.isEmpty else {
+        guard let pendings = pendingPermissions.removeValue(forKey: toolUseId), !pendings.isEmpty
+        else {
             permissionsLock.unlock()
             return
         }
         permissionsLock.unlock()
 
         for pending in pendings {
-            logger.debug("Tool completed externally, closing socket for \(pending.sessionId.prefix(8), privacy: .public) tool:\(toolUseId.prefix(12), privacy: .public)")
+            logger.debug(
+                "Tool completed externally, closing socket for \(pending.sessionId.prefix(8), privacy: .public) tool:\(toolUseId.prefix(12), privacy: .public)"
+            )
             close(pending.clientSocket)
         }
     }
@@ -1326,7 +1528,9 @@ class HookSocketServer {
         }
         for (toolUseId, pendings) in matching {
             for pending in pendings where pending.sessionId == sessionId {
-                logger.debug("Cleaning up stale permission for \(sessionId.prefix(8), privacy: .public) tool:\(toolUseId.prefix(12), privacy: .public)")
+                logger.debug(
+                    "Cleaning up stale permission for \(sessionId.prefix(8), privacy: .public) tool:\(toolUseId.prefix(12), privacy: .public)"
+                )
                 close(pending.clientSocket)
             }
             pendingPermissions.removeValue(forKey: toolUseId)
@@ -1340,11 +1544,14 @@ class HookSocketServer {
         return encoder
     }()
 
-    private static func cacheKey(sessionId: String, toolName: String?, toolInput: [String: AnyCodable]?) -> String {
+    private static func cacheKey(
+        sessionId: String, toolName: String?, toolInput: [String: AnyCodable]?
+    ) -> String {
         let inputStr: String
         if let input = Self.normalizedToolInputForInterventionMatching(toolInput),
-           let data = try? Self.sortedEncoder.encode(input),
-           let str = String(data: data, encoding: .utf8) {
+            let data = try? Self.sortedEncoder.encode(input),
+            let str = String(data: data, encoding: .utf8)
+        {
             inputStr = str
         } else {
             inputStr = "{}"
@@ -1356,12 +1563,15 @@ class HookSocketServer {
         permissionsLock.lock()
         defer { permissionsLock.unlock() }
 
-        let matching = pendingPermissions
+        let matching =
+            pendingPermissions
             .compactMap { toolUseId, pendings -> PendingPermission? in
                 guard let latestPending = pendings.max(by: { $0.receivedAt < $1.receivedAt }) else {
                     return nil
                 }
-                guard Self.eventsLikelyReferToSameIntervention(latestPending.event, event) else { return nil }
+                guard Self.eventsLikelyReferToSameIntervention(latestPending.event, event) else {
+                    return nil
+                }
                 return PendingPermission(
                     sessionId: latestPending.sessionId,
                     toolUseId: toolUseId,
@@ -1387,14 +1597,19 @@ class HookSocketServer {
             .replacingOccurrences(of: "_", with: "")
         guard normalizedLhsTool == normalizedRhsTool else { return false }
 
-        let exactKeyMatch = cacheKey(sessionId: lhs.sessionId, toolName: lhs.tool, toolInput: lhs.toolInput)
+        let exactKeyMatch =
+            cacheKey(sessionId: lhs.sessionId, toolName: lhs.tool, toolInput: lhs.toolInput)
             == cacheKey(sessionId: rhs.sessionId, toolName: rhs.tool, toolInput: rhs.toolInput)
         if exactKeyMatch {
             return true
         }
 
-        guard let lhsSignature = RecentInterventionResponseStore.questionSignature(from: lhs.toolInput),
-              let rhsSignature = RecentInterventionResponseStore.questionSignature(from: rhs.toolInput) else {
+        guard
+            let lhsSignature = RecentInterventionResponseStore.questionSignature(
+                from: lhs.toolInput),
+            let rhsSignature = RecentInterventionResponseStore.questionSignature(
+                from: rhs.toolInput)
+        else {
             return false
         }
         return lhsSignature == rhsSignature
@@ -1415,7 +1630,8 @@ class HookSocketServer {
     private func cacheToolUseId(event: HookEvent) {
         guard let toolUseId = event.toolUseId else { return }
 
-        let key = Self.cacheKey(sessionId: event.sessionId, toolName: event.tool, toolInput: event.toolInput)
+        let key = Self.cacheKey(
+            sessionId: event.sessionId, toolName: event.tool, toolInput: event.toolInput)
 
         cacheLock.lock()
         if toolUseIdCache[key] == nil {
@@ -1424,11 +1640,14 @@ class HookSocketServer {
         toolUseIdCache[key]?.append(toolUseId)
         cacheLock.unlock()
 
-        logger.debug("Cached tool_use_id for \(event.sessionId.prefix(8), privacy: .public) tool:\(event.tool ?? "?", privacy: .public) id:\(toolUseId.prefix(12), privacy: .public)")
+        logger.debug(
+            "Cached tool_use_id for \(event.sessionId.prefix(8), privacy: .public) tool:\(event.tool ?? "?", privacy: .public) id:\(toolUseId.prefix(12), privacy: .public)"
+        )
     }
 
     private func popCachedToolUseId(event: HookEvent) -> String? {
-        let key = Self.cacheKey(sessionId: event.sessionId, toolName: event.tool, toolInput: event.toolInput)
+        let key = Self.cacheKey(
+            sessionId: event.sessionId, toolName: event.tool, toolInput: event.toolInput)
 
         cacheLock.lock()
         defer { cacheLock.unlock() }
@@ -1445,7 +1664,9 @@ class HookSocketServer {
             toolUseIdCache[key] = queue
         }
 
-        logger.debug("Retrieved cached tool_use_id for \(event.sessionId.prefix(8), privacy: .public) tool:\(event.tool ?? "?", privacy: .public) id:\(toolUseId.prefix(12), privacy: .public)")
+        logger.debug(
+            "Retrieved cached tool_use_id for \(event.sessionId.prefix(8), privacy: .public) tool:\(event.tool ?? "?", privacy: .public) id:\(toolUseId.prefix(12), privacy: .public)"
+        )
         return toolUseId
     }
 
@@ -1458,7 +1679,9 @@ class HookSocketServer {
         cacheLock.unlock()
 
         if !keysToRemove.isEmpty {
-            logger.debug("Cleaned up \(keysToRemove.count) cache entries for session \(sessionId.prefix(8), privacy: .public)")
+            logger.debug(
+                "Cleaned up \(keysToRemove.count) cache entries for session \(sessionId.prefix(8), privacy: .public)"
+            )
         }
     }
 
@@ -1467,7 +1690,8 @@ class HookSocketServer {
         guard clientSocket >= 0 else { return }
 
         var nosigpipe: Int32 = 1
-        setsockopt(clientSocket, SOL_SOCKET, SO_NOSIGPIPE, &nosigpipe, socklen_t(MemoryLayout<Int32>.size))
+        setsockopt(
+            clientSocket, SOL_SOCKET, SO_NOSIGPIPE, &nosigpipe, socklen_t(MemoryLayout<Int32>.size))
 
         handleClient(clientSocket)
     }
@@ -1510,7 +1734,9 @@ class HookSocketServer {
 
         let decoder = JSONDecoder()
         guard let envelope = try? decoder.decode(BridgeEnvelope.self, from: allData) else {
-            logger.warning("Failed to parse bridge envelope: \(String(data: allData, encoding: .utf8) ?? "?", privacy: .public)")
+            logger.warning(
+                "Failed to parse bridge envelope: \(String(data: allData, encoding: .utf8) ?? "?", privacy: .public)"
+            )
             close(clientSocket)
             return
         }
@@ -1540,7 +1766,9 @@ class HookSocketServer {
 
         let expectsResponse = envelope.expectsResponse || envelope.hookEvent.expectsResponse
         var event = envelope.hookEvent
-        logger.debug("Received bridge envelope provider=\(envelope.provider.rawValue, privacy: .public) event=\(envelope.eventType, privacy: .public) session=\(event.sessionId.prefix(8), privacy: .public)")
+        logger.debug(
+            "Received bridge envelope provider=\(envelope.provider.rawValue, privacy: .public) event=\(envelope.eventType, privacy: .public) session=\(event.sessionId.prefix(8), privacy: .public)"
+        )
         if event.clientInfo.isQwenCodeClient {
             let lastAssistant = envelope.metadata["last_assistant_message"] ?? ""
             logger.info(
@@ -1581,10 +1809,13 @@ class HookSocketServer {
         if event.event == "PreToolUse" && event.toolUseId == nil {
             let syntheticToolUseId = "bridge-\(envelope.id.uuidString)"
             event = event.withToolUseId(syntheticToolUseId)
-            logger.debug("Generated synthetic tool_use_id for \(event.sessionId.prefix(8), privacy: .public) event=\(event.event, privacy: .public) id=\(syntheticToolUseId.prefix(12), privacy: .public)")
+            logger.debug(
+                "Generated synthetic tool_use_id for \(event.sessionId.prefix(8), privacy: .public) event=\(event.event, privacy: .public) id=\(syntheticToolUseId.prefix(12), privacy: .public)"
+            )
         } else if event.event == "PostToolUse",
-                  event.toolUseId == nil,
-                  let cachedToolUseId = popCachedToolUseId(event: event) {
+            event.toolUseId == nil,
+            let cachedToolUseId = popCachedToolUseId(event: event)
+        {
             event = event.withToolUseId(cachedToolUseId)
         }
 
@@ -1599,10 +1830,13 @@ class HookSocketServer {
         if expectsResponse {
             if let replay = recentInterventionResponses.response(for: event) {
                 let replayToolUseId = event.toolUseId ?? "replay-\(envelope.id.uuidString)"
-                logger.info("Replaying recent bridge response: \(replay.decision, privacy: .public) for \(event.sessionId.prefix(8), privacy: .public) tool:\(replayToolUseId.prefix(12), privacy: .public)")
+                logger.info(
+                    "Replaying recent bridge response: \(replay.decision, privacy: .public) for \(event.sessionId.prefix(8), privacy: .public) tool:\(replayToolUseId.prefix(12), privacy: .public)"
+                )
                 let response = BridgeResponse(
                     requestID: envelope.id,
-                    decision: bridgeDecision(for: replay.decision, updatedInput: replay.updatedInput),
+                    decision: bridgeDecision(
+                        for: replay.decision, updatedInput: replay.updatedInput),
                     reason: replay.reason,
                     updatedInput: replay.updatedInput,
                     errorMessage: nil
@@ -1617,7 +1851,8 @@ class HookSocketServer {
                 return
             }
 
-            let toolUseId = event.toolUseId
+            let toolUseId =
+                event.toolUseId
                 ?? matchingPendingToolUseId(for: event)
                 ?? popCachedToolUseId(event: event)
                 ?? "bridge-\(envelope.id.uuidString)"
@@ -1635,7 +1870,9 @@ class HookSocketServer {
             pendingPermissions[toolUseId, default: []].append(pending)
             permissionsLock.unlock()
 
-            logger.debug("Keeping socket open for \(event.sessionId.prefix(8), privacy: .public) tool:\(toolUseId.prefix(12), privacy: .public)")
+            logger.debug(
+                "Keeping socket open for \(event.sessionId.prefix(8), privacy: .public) tool:\(toolUseId.prefix(12), privacy: .public)"
+            )
             eventHandler?(updatedEvent)
             return
         }
@@ -1656,7 +1893,7 @@ class HookSocketServer {
             envelope.terminalContext.terminalBundleID,
             envelope.terminalContext.ideBundleID,
             envelope.metadata["terminal_bundle_id"],
-            envelope.metadata["client_bundle_id"]
+            envelope.metadata["client_bundle_id"],
         ]
         let isQoderIDEHosted = bundleIdentifiers.contains { value in
             value?
@@ -1667,7 +1904,8 @@ class HookSocketServer {
             return false
         }
         if envelope.hookEvent.isAskUserQuestionRequest
-            || isQoderIDEQuestionResolutionEvent(envelope.hookEvent) {
+            || isQoderIDEQuestionResolutionEvent(envelope.hookEvent)
+        {
             return false
         }
 
@@ -1693,7 +1931,9 @@ class HookSocketServer {
             || (event.event == "PostToolUse" && !(event.questionPayloads?.isEmpty ?? true))
     }
 
-    private func bridgeDecision(for decision: String, updatedInput: [String: AnyCodable]? = nil) -> BridgeDecision? {
+    private func bridgeDecision(for decision: String, updatedInput: [String: AnyCodable]? = nil)
+        -> BridgeDecision?
+    {
         switch decision {
         case "allow", "approve":
             return .approve
@@ -1710,11 +1950,15 @@ class HookSocketServer {
         }
     }
 
-    private func sendHookResponse(toolUseId: String, decision: String, reason: String?, updatedInput: [String: AnyCodable]?) {
+    private func sendHookResponse(
+        toolUseId: String, decision: String, reason: String?, updatedInput: [String: AnyCodable]?
+    ) {
         permissionsLock.lock()
-        guard let pendings = pendingPermissions.removeValue(forKey: toolUseId), !pendings.isEmpty else {
+        guard let pendings = pendingPermissions.removeValue(forKey: toolUseId), !pendings.isEmpty
+        else {
             permissionsLock.unlock()
-            logger.debug("No pending permission for toolUseId: \(toolUseId.prefix(12), privacy: .public)")
+            logger.debug(
+                "No pending permission for toolUseId: \(toolUseId.prefix(12), privacy: .public)")
             return
         }
         permissionsLock.unlock()
@@ -1750,7 +1994,9 @@ class HookSocketServer {
         }
     }
 
-    private func sendPermissionResponseBySession(sessionId: String, decision: String, reason: String?) {
+    private func sendPermissionResponseBySession(
+        sessionId: String, decision: String, reason: String?
+    ) {
         permissionsLock.lock()
         let matchingPending = pendingPermissions.values
             .flatMap { $0 }
@@ -1760,11 +2006,13 @@ class HookSocketServer {
 
         guard let pending = matchingPending else {
             permissionsLock.unlock()
-            logger.debug("No pending permission for session: \(sessionId.prefix(8), privacy: .public)")
+            logger.debug(
+                "No pending permission for session: \(sessionId.prefix(8), privacy: .public)")
             return
         }
         permissionsLock.unlock()
-        sendHookResponse(toolUseId: pending.toolUseId, decision: decision, reason: reason, updatedInput: nil)
+        sendHookResponse(
+            toolUseId: pending.toolUseId, decision: decision, reason: reason, updatedInput: nil)
     }
 
     private func writeBridgeResponse(
@@ -1804,7 +2052,9 @@ class HookSocketServer {
         )
     }
 
-    private static func answerDecisionPayload(from updatedInput: [String: AnyCodable]?) -> [String: String] {
+    private static func answerDecisionPayload(from updatedInput: [String: AnyCodable]?) -> [String:
+        String]
+    {
         guard let rawAnswers = updatedInput?["answers"]?.value else {
             return [:]
         }
@@ -1840,7 +2090,9 @@ class HookSocketServer {
         decision: String
     ) {
         let age = Date().timeIntervalSince(receivedAt)
-        logger.info("Sending bridge response: \(decision, privacy: .public) for \(sessionId.prefix(8), privacy: .public) tool:\(toolUseId.prefix(12), privacy: .public) (age: \(String(format: "%.1f", age), privacy: .public)s)")
+        logger.info(
+            "Sending bridge response: \(decision, privacy: .public) for \(sessionId.prefix(8), privacy: .public) tool:\(toolUseId.prefix(12), privacy: .public) (age: \(String(format: "%.1f", age), privacy: .public)s)"
+        )
 
         var writeSuccess = false
         data.withUnsafeBytes { bytes in
@@ -1890,7 +2142,8 @@ struct AnyCodable: Codable, @unchecked Sendable {
         } else if let dict = try? container.decode([String: AnyCodable].self) {
             value = dict.mapValues { $0.value }
         } else {
-            throw DecodingError.dataCorruptedError(in: container, debugDescription: "Cannot decode value")
+            throw DecodingError.dataCorruptedError(
+                in: container, debugDescription: "Cannot decode value")
         }
     }
 
@@ -1913,7 +2166,9 @@ struct AnyCodable: Codable, @unchecked Sendable {
         case let dict as [String: Any]:
             try container.encode(dict.mapValues { AnyCodable($0) })
         default:
-            throw EncodingError.invalidValue(value, EncodingError.Context(codingPath: [], debugDescription: "Cannot encode value"))
+            throw EncodingError.invalidValue(
+                value,
+                EncodingError.Context(codingPath: [], debugDescription: "Cannot encode value"))
         }
     }
 }

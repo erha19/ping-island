@@ -70,10 +70,13 @@ actor SessionStore {
     private let qoderConversationPollIntervalNs: UInt64 = 250_000_000
     private let qoderConversationPollTimeoutNs: UInt64 = 120_000_000_000
     private let qoderSubagentAssociationWindow: TimeInterval = 2 * 60
+    private let qoderConversationQuietPollIntervalNs: UInt64 = 2_000_000_000
     private let openClawConversationPollIntervalNs: UInt64 = 1_000_000_000
     private let openClawConversationPollTimeoutNs: UInt64 = 30_000_000_000
+    private let openClawConversationQuietPollIntervalNs: UInt64 = 5_000_000_000
     private let codeBuddyCLIQuestionPollIntervalNs: UInt64 = 150_000_000
     private let codeBuddyCLIQuestionPollTimeoutNs: UInt64 = 5_000_000_000
+    private let codeBuddyCLIQuestionQuietPollIntervalNs: UInt64 = 1_000_000_000
 
     /// Persisted session associations used to restore client routing across relaunches.
     private var persistedAssociations: [String: PersistedSessionAssociation] = [:]
@@ -152,6 +155,12 @@ actor SessionStore {
         case .clearDetected(let sessionId):
             await processClearDetected(sessionId: sessionId)
 
+        case .desktopSessionDiscovered(let info):
+            processDesktopSessionDiscovered(info)
+
+        case .desktopTurnCompleted(let sessionId):
+            processDesktopTurnCompleted(sessionId: sessionId)
+
         case .sessionEnded(let sessionId):
             await processSessionEnd(sessionId: sessionId)
 
@@ -229,6 +238,15 @@ actor SessionStore {
                 sessionFilePath: handle.sessionFilePath,
                 processName: "codex"
             )
+        case .kimi:
+            runtimeClientInfo = SessionClientInfo(
+                kind: .custom,
+                profileID: "kimi",
+                name: "Kimi Native",
+                origin: "native-runtime",
+                sessionFilePath: handle.sessionFilePath,
+                processName: "kimi"
+            )
         case .copilot:
             runtimeClientInfo = SessionClientInfo.default(for: .copilot)
         case .gemini:
@@ -275,6 +293,48 @@ actor SessionStore {
         sessions[handle.sessionID] = session
     }
 
+    private func processDesktopSessionDiscovered(_ info: ClaudeDesktopSessionInfo) {
+        guard sessions[info.sessionId] == nil else { return }
+
+        let clientInfo = SessionClientInfo(
+            kind: .custom,
+            profileID: "claude-desktop",
+            name: "Claude Desktop",
+            bundleIdentifier: "com.anthropic.claudefordesktop",
+            origin: "desktop",
+            sessionFilePath: info.auditFilePath
+        )
+        let projectName = info.title
+            ?? Self.projectName(for: info.cwd, fallback: "Claude Desktop")
+        let session = SessionState(
+            sessionId: info.sessionId,
+            cwd: info.cwd,
+            projectName: projectName,
+            provider: .claude,
+            clientInfo: clientInfo,
+            ingress: .desktopAppMonitor,
+            sessionName: nil,
+            pid: nil,
+            tty: nil,
+            isInTmux: false,
+            phase: .idle,
+            createdAt: info.createdAt
+        )
+        sessions[info.sessionId] = session
+    }
+
+    private func processDesktopTurnCompleted(sessionId: String) {
+        guard var session = sessions[sessionId] else { return }
+        let oldPhase = session.phase
+        if session.phase.canTransition(to: .waitingForInput) {
+            session.phase = .waitingForInput
+            sessions[sessionId] = session
+            Self.logger.info(
+                "Desktop turn completed session=\(sessionId.prefix(8), privacy: .public) phase=\(oldPhase.description, privacy: .public)→waitingForInput"
+            )
+        }
+    }
+
     private func processHookEvent(_ event: HookEvent) async {
         if shouldDropIgnoredCodexAuxiliaryHookEvent(event) {
             return
@@ -317,6 +377,7 @@ actor SessionStore {
         session.clientInfo = session.clientInfo.merged(with: event.clientInfo)
         session.clientInfo = normalizedClientInfo(session.clientInfo, provider: event.provider, sessionId: sessionId)
         session.ingress = event.ingress
+        applyHookWorkspace(event.cwd, to: &session)
         session.pid = event.pid
         if let pid = event.pid {
             session.isInTmux = ProcessTreeBuilder.shared.isInTmux(pid: pid, tree: tree)
@@ -354,6 +415,7 @@ actor SessionStore {
             // Re-apply enrichment
             session.clientInfo = session.clientInfo.merged(with: event.clientInfo)
             session.clientInfo = normalizedClientInfo(session.clientInfo, provider: event.provider, sessionId: sessionId)
+            applyHookWorkspace(event.cwd, to: &session)
         }
 
         let previousLastActivity = session.lastActivity
@@ -373,6 +435,12 @@ actor SessionStore {
         }
         if session.clientInfo.isGeminiClient {
             appendGeminiHookChatItem(event: event, session: &session)
+        }
+
+        // Kimi hooks don't carry message content, but Stop means the agent finished
+        // its turn. Set lastMessageRole so completion notifications/sounds fire.
+        if session.clientInfo.isKimiClient {
+            processKimiHookCompletion(event: event, session: &session)
         }
 
         let shouldPreserveEndedStopForAnsweredQuestion =
@@ -673,7 +741,9 @@ actor SessionStore {
     private func createSession(from event: HookEvent) -> SessionState {
         let restoredAssociation = persistedAssociation(for: event.provider, sessionId: event.sessionId)
         let resolvedCwd = event.cwd.isEmpty ? (restoredAssociation?.cwd ?? "") : event.cwd
-        let projectName = restoredAssociation?.projectName
+        let restoredCwdMatches = Self.normalizedPath(restoredAssociation?.cwd ?? "")
+            == Self.normalizedPath(resolvedCwd)
+        let projectName = (restoredCwdMatches ? restoredAssociation?.projectName : nil)
             ?? Self.projectName(for: resolvedCwd, fallback: event.provider.displayName)
         let restoredClientInfo = restoredAssociation?.clientInfo ?? SessionClientInfo.default(for: event.provider)
         let resolvedClientInfo = normalizedClientInfo(
@@ -689,12 +759,27 @@ actor SessionStore {
             provider: event.provider,
             clientInfo: resolvedClientInfo,
             ingress: event.ingress,
-            sessionName: restoredAssociation?.sessionName,
+            sessionName: restoredCwdMatches ? restoredAssociation?.sessionName : nil,
             pid: event.pid,
             tty: event.tty?.replacingOccurrences(of: "/dev/", with: ""),
             isInTmux: false,  // Will be updated
             phase: .idle
         )
+    }
+
+    private nonisolated func applyHookWorkspace(_ incomingCwd: String, to session: inout SessionState) {
+        guard Self.shouldAdoptHookWorkspace(current: session.cwd, incoming: incomingCwd) else {
+            return
+        }
+
+        let previousProjectName = session.projectName
+        let previousCwd = session.cwd
+        session.cwd = incomingCwd
+        session.projectName = Self.projectName(for: incomingCwd, fallback: session.provider.displayName)
+        if session.sessionName == previousProjectName
+            || session.sessionName == Self.projectName(for: previousCwd, fallback: previousProjectName) {
+            session.sessionName = nil
+        }
     }
 
     private func processToolTracking(event: HookEvent, session: inout SessionState) {
@@ -729,6 +814,22 @@ actor SessionStore {
         }
 
         return true
+    }
+
+    /// Kimi Stop means the agent turn ended (assistant finished responding).
+    /// Since Kimi hooks don't carry message text, we mark lastMessageRole as
+    /// "assistant" implicitly so completion notifications and sounds work.
+    private func processKimiHookCompletion(event: HookEvent, session: inout SessionState) {
+        guard event.event == "Stop" else { return }
+        guard session.lastMessageRole != "assistant" else { return }
+        session.conversationInfo = ConversationInfo(
+            summary: session.conversationInfo.summary,
+            lastMessage: session.conversationInfo.lastMessage,
+            lastMessageRole: "assistant",
+            lastToolName: session.conversationInfo.lastToolName,
+            firstUserMessage: session.conversationInfo.firstUserMessage,
+            lastUserMessageDate: session.conversationInfo.lastUserMessageDate
+        )
     }
 
     /// Build chat history items from Hermes hook events so the conversation is
@@ -1011,7 +1112,7 @@ actor SessionStore {
                 )
             case .hookBridge:
                 HookSocketServer.shared.cancelPendingPermission(toolUseId: toolUseId)
-            case .codexAppServer, .nativeRuntime:
+            case .codexAppServer, .nativeRuntime, .desktopAppMonitor:
                 break
             }
         }
@@ -2441,7 +2542,14 @@ actor SessionStore {
                     break
                 }
 
-                try? await Task.sleep(nanoseconds: self.qoderConversationPollIntervalNs)
+                guard let pollIntervalNs = await self.supplementalPollInterval(
+                    activeIntervalNs: self.qoderConversationPollIntervalNs,
+                    quietIntervalNs: self.qoderConversationQuietPollIntervalNs
+                ) else {
+                    break
+                }
+
+                try? await Task.sleep(nanoseconds: pollIntervalNs)
             }
 
             await self.finishQoderConversationPoll(sessionId: sessionId, pollID: pollID)
@@ -2515,7 +2623,14 @@ actor SessionStore {
                     break
                 }
 
-                try? await Task.sleep(nanoseconds: self.openClawConversationPollIntervalNs)
+                guard let pollIntervalNs = await self.supplementalPollInterval(
+                    activeIntervalNs: self.openClawConversationPollIntervalNs,
+                    quietIntervalNs: self.openClawConversationQuietPollIntervalNs
+                ) else {
+                    break
+                }
+
+                try? await Task.sleep(nanoseconds: pollIntervalNs)
             }
 
             await self.finishOpenClawConversationPoll(sessionId: sessionId, pollID: pollID)
@@ -2589,7 +2704,14 @@ actor SessionStore {
                     break
                 }
 
-                try? await Task.sleep(nanoseconds: self.codeBuddyCLIQuestionPollIntervalNs)
+                guard let pollIntervalNs = await self.supplementalPollInterval(
+                    activeIntervalNs: self.codeBuddyCLIQuestionPollIntervalNs,
+                    quietIntervalNs: self.codeBuddyCLIQuestionQuietPollIntervalNs
+                ) else {
+                    break
+                }
+
+                try? await Task.sleep(nanoseconds: pollIntervalNs)
             }
 
             await self.finishCodeBuddyCLIQuestionPoll(sessionId: sessionId, pollID: pollID)
@@ -2631,6 +2753,18 @@ actor SessionStore {
     private func finishCodeBuddyCLIQuestionPoll(sessionId: String, pollID: UUID) {
         guard pendingCodeBuddyCLIQuestionPolls[sessionId]?.id == pollID else { return }
         pendingCodeBuddyCLIQuestionPolls.removeValue(forKey: sessionId)
+    }
+
+    private func supplementalPollInterval(activeIntervalNs: UInt64, quietIntervalNs: UInt64) async -> UInt64? {
+        let energyState = await MainActor.run {
+            let policy = EnergyGovernor.shared.policy
+            return (
+                allowsFileWatcherRetry: policy.allowsFileWatcherRetry,
+                usesFullCadence: policy.animationLevel == .full
+            )
+        }
+        guard energyState.allowsFileWatcherRetry else { return nil }
+        return energyState.usesFullCadence ? activeIntervalNs : quietIntervalNs
     }
 
     private func scheduleCodexRolloutSync(
@@ -3183,6 +3317,57 @@ actor SessionStore {
     private nonisolated static func projectName(for cwd: String, fallback: String) -> String {
         let name = URL(fileURLWithPath: cwd).lastPathComponent
         return name.isEmpty ? fallback : name
+    }
+
+    private nonisolated static func shouldAdoptHookWorkspace(current: String, incoming: String) -> Bool {
+        let normalizedIncoming = normalizedPath(incoming)
+        guard !normalizedIncoming.isEmpty, normalizedIncoming != "/" else {
+            return false
+        }
+
+        let normalizedCurrent = normalizedPath(current)
+        guard normalizedCurrent != normalizedIncoming else {
+            return false
+        }
+
+        if isTopLevelClientConfigDirectory(normalizedIncoming),
+           !normalizedCurrent.isEmpty,
+           !isTopLevelClientConfigDirectory(normalizedCurrent) {
+            return false
+        }
+
+        return true
+    }
+
+    private nonisolated static func normalizedPath(_ path: String) -> String {
+        let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return ""
+        }
+
+        return URL(fileURLWithPath: trimmed).standardizedFileURL.path
+    }
+
+    private nonisolated static func isTopLevelClientConfigDirectory(_ path: String) -> Bool {
+        let url = URL(fileURLWithPath: path).standardizedFileURL
+        let knownClientDirectories: Set<String> = [
+            ".claude",
+            ".codebuddy",
+            ".codex",
+            ".cursor",
+            ".gemini",
+            ".kimi",
+            ".openclaw",
+            ".qoder",
+            ".qwen",
+            ".workbuddy"
+        ]
+        guard knownClientDirectories.contains(url.lastPathComponent) else {
+            return false
+        }
+
+        return url.deletingLastPathComponent().path
+            == FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL.path
     }
 
     private nonisolated static func normalizedHookMessage(_ message: String?) -> String? {
@@ -3873,6 +4058,8 @@ actor SessionStore {
             return clientInfo.normalizedForCodexRouting(sessionId: sessionId)
         case .copilot, .gemini:
             return clientInfo
+        case .kimi:
+            return clientInfo
         }
     }
 
@@ -3971,6 +4158,13 @@ actor SessionStore {
 
     private func shouldIgnoreCodexHookEvent(_ event: HookEvent, existingSession: SessionState?) -> Bool {
         guard event.provider == .codex else { return false }
+
+        // Background Codex agents (ambient suggestions, state queries, safety filters)
+        // run with cwd="/". They are internal system processes, not user coding sessions.
+        if event.cwd == "/" {
+            return true
+        }
+
         guard event.clientInfo.sessionFilePath?.isEmpty != false else { return false }
         guard !event.expectsResponse else { return false }
         guard case .none = event.intervention else { return false }
@@ -4111,7 +4305,7 @@ actor SessionStore {
             return codexHookPlaceholderPruneDelayNs
         case .codexAppServer:
             return codexAppServerPlaceholderPruneDelayNs
-        case .nativeRuntime:
+        case .nativeRuntime, .desktopAppMonitor:
             return codexAppServerPlaceholderPruneDelayNs
         }
     }

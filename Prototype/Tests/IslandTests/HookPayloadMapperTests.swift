@@ -314,6 +314,84 @@ func mapsClaudeIDEAndRemoteContextFromEnvironment() throws {
 }
 
 @Test
+func recoversCursorWorkspaceFromAgentTranscriptPathWhenPWDIsClientConfig() throws {
+    let tempRoot = FileManager.default.temporaryDirectory
+        .appendingPathComponent("pingislandcursor\(UUID().uuidString.replacingOccurrences(of: "-", with: ""))", isDirectory: true)
+    let workspaceURL = tempRoot.appendingPathComponent("Island", isDirectory: true)
+    try FileManager.default.createDirectory(at: workspaceURL, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+    let workspacePath = workspaceURL.standardizedFileURL.path
+    let projectSlug = workspacePath
+        .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        .replacingOccurrences(of: "/", with: "-")
+    let transcriptPath = "/synthetic/.cursor/projects/\(projectSlug)/agent-transcripts/cursor-session/cursor-session.jsonl"
+    let payload = """
+    {
+      "hook_event_name": "SessionStart",
+      "session_id": "cursor-session",
+      "transcript_path": "\(transcriptPath)"
+    }
+    """.data(using: .utf8)!
+
+    let envelope = HookPayloadMapper.makeEnvelope(
+        source: .claude,
+        arguments: [
+            "island-bridge",
+            "--source", "claude",
+            "--client-kind", "cursor",
+            "--client-name", "Cursor",
+            "--client-originator", "Cursor"
+        ],
+        environment: [
+            "PWD": "/synthetic/.cursor",
+            "__CFBundleIdentifier": "com.todesktop.230313mzl4w4u92"
+        ],
+        stdinData: payload
+    )
+
+    #expect(envelope.cwd == workspacePath)
+    #expect(envelope.terminalContext.currentDirectory == workspacePath)
+    #expect(envelope.metadata["cwd"] == workspacePath)
+}
+
+@Test
+func keepsExplicitWorkspaceWhenCursorTranscriptPathAlsoExists() throws {
+    let tempRoot = FileManager.default.temporaryDirectory
+        .appendingPathComponent("pingislandcursor\(UUID().uuidString.replacingOccurrences(of: "-", with: ""))", isDirectory: true)
+    let workspaceURL = tempRoot.appendingPathComponent("Island", isDirectory: true)
+    let explicitURL = tempRoot.appendingPathComponent("Explicit", isDirectory: true)
+    try FileManager.default.createDirectory(at: workspaceURL, withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(at: explicitURL, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+    let workspacePath = workspaceURL.standardizedFileURL.path
+    let explicitPath = explicitURL.standardizedFileURL.path
+    let projectSlug = workspacePath
+        .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        .replacingOccurrences(of: "/", with: "-")
+    let transcriptPath = "/synthetic/.cursor/projects/\(projectSlug)/agent-transcripts/cursor-session/cursor-session.jsonl"
+    let payload = """
+    {
+      "hook_event_name": "SessionStart",
+      "session_id": "cursor-session",
+      "cwd": "\(explicitPath)",
+      "transcript_path": "\(transcriptPath)"
+    }
+    """.data(using: .utf8)!
+
+    let envelope = HookPayloadMapper.makeEnvelope(
+        source: .claude,
+        arguments: ["island-bridge", "--source", "claude", "--client-kind", "cursor"],
+        environment: ["PWD": "/synthetic/.cursor"],
+        stdinData: payload
+    )
+
+    #expect(envelope.cwd == explicitPath)
+    #expect(envelope.metadata["cwd"] == explicitPath)
+}
+
+@Test
 func mapsSSHRemoteHostFromHostnameEnvironmentBeforeConnectionIP() throws {
     let payload = """
     {

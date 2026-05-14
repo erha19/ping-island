@@ -12,15 +12,17 @@ actor SessionStore {
     }
 
     func ingest(_ envelope: BridgeEnvelope) async {
-        var session = sessions[envelope.sessionKey] ?? AgentSession(
-            id: envelope.sessionKey,
-            provider: envelope.provider,
-            title: envelope.title ?? defaultTitle(for: envelope.provider),
-            preview: envelope.preview ?? "Waiting for activity",
-            cwd: envelope.cwd,
-            status: envelope.status ?? SessionStatus(kind: .active),
-            terminalContext: envelope.terminalContext
-        )
+        var session =
+            sessions[envelope.sessionKey]
+            ?? AgentSession(
+                id: envelope.sessionKey,
+                provider: envelope.provider,
+                title: envelope.title ?? defaultTitle(for: envelope.provider),
+                preview: envelope.preview ?? "Waiting for activity",
+                cwd: envelope.cwd,
+                status: envelope.status ?? SessionStatus(kind: .active),
+                terminalContext: envelope.terminalContext
+            )
 
         session.title = envelope.title ?? session.title
         session.preview = envelope.preview ?? session.preview
@@ -45,13 +47,15 @@ actor SessionStore {
         status: SessionStatus,
         metadata: [String: String] = [:]
     ) async {
-        var session = sessions[sessionID] ?? AgentSession(
-            id: sessionID,
-            provider: .codex,
-            title: title ?? "Codex Session",
-            preview: preview ?? "Waiting for activity",
-            status: status
-        )
+        var session =
+            sessions[sessionID]
+            ?? AgentSession(
+                id: sessionID,
+                provider: .codex,
+                title: title ?? "Codex Session",
+                preview: preview ?? "Waiting for activity",
+                status: status
+            )
         session.title = title ?? session.title
         session.preview = preview ?? session.preview
         session.status = status
@@ -104,6 +108,7 @@ actor SessionStore {
         case .claude: "Claude Session"
         case .codex: "Codex Session"
         case .copilot: "Copilot Session"
+        case .kimi: "Kimi Session"
         case .gemini: "Gemini Session"
         }
     }

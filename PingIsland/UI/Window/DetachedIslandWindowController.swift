@@ -642,6 +642,15 @@ final class DetachedIslandWindowController: NSWindowController, NSWindowDelegate
             }
             .store(in: &cancellables)
 
+        AppSettings.shared.$floatingPetSizeMode
+            .dropFirst()
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.scheduleWindowSizeUpdate()
+            }
+            .store(in: &cancellables)
+
         AppSettings.shared.$autoOpenCompletionPanel
             .dropFirst()
             .removeDuplicates()
@@ -839,7 +848,7 @@ final class DetachedIslandWindowController: NSWindowController, NSWindowDelegate
         in visibleFrame: CGRect,
         alignedTo activeWindowFrame: CGRect? = nil
     ) -> CGPoint {
-        let halfPet = DetachedIslandPanelMetrics.petHitFrame / 2
+        let halfPet = DetachedIslandPanelMetrics.petMetrics(for: visibleFrame).petHitFrame / 2
         let referenceFrame = activeWindowFrame?
             .intersection(visibleFrame)
             .nilIfEmpty ?? visibleFrame
@@ -854,7 +863,7 @@ final class DetachedIslandWindowController: NSWindowController, NSWindowDelegate
         _ petAnchor: CGPoint,
         in visibleFrame: CGRect
     ) -> CGPoint {
-        let halfPet = DetachedIslandPanelMetrics.petHitFrame / 2
+        let halfPet = DetachedIslandPanelMetrics.petMetrics(for: visibleFrame).petHitFrame / 2
         let minX = visibleFrame.minX + halfPet
         let maxX = visibleFrame.maxX - halfPet
         let minY = visibleFrame.minY + halfPet
