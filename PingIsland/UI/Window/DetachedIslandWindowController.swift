@@ -711,6 +711,10 @@ final class DetachedIslandWindowController: NSWindowController, NSWindowDelegate
     }
 
     private func applyPendingWindowSizeUpdate() {
+        applyPendingWindowSizeUpdate(renderedBubbleState: bubbleViewState.renderedBubbleState)
+    }
+
+    private func applyPendingWindowSizeUpdate(renderedBubbleState: DetachedIslandBubbleState) {
         guard let window else { return }
         guard hasPendingWindowSizeUpdate else { return }
 
@@ -728,7 +732,7 @@ final class DetachedIslandWindowController: NSWindowController, NSWindowDelegate
         let newLayout = Self.windowLayout(
             for: viewModel,
             sessionMonitor: sessionMonitor,
-            bubbleState: bubbleViewState.renderedBubbleState,
+            bubbleState: renderedBubbleState,
             bubblePlacement: interactionModel.bubblePlacement,
             measuredAttentionBubbleHeight: bubbleViewState.measuredAttentionBubbleHeight,
             activeCompletionNotification: activeCompletionNotification,
@@ -1085,8 +1089,8 @@ final class DetachedIslandWindowController: NSWindowController, NSWindowDelegate
         bubbleVisibilityWorkItem = nil
         cancelBubbleHoverGraceTimer()
         bubbleViewState.setBubbleVisible(false)
+        applyWindowSizeUpdateImmediately(renderedBubbleState: .hidden)
         bubbleViewState.prepareLayout(for: .hidden)
-        applyWindowSizeUpdateImmediately()
     }
 
     private func hideBubblePresentation() {
@@ -1103,8 +1107,8 @@ final class DetachedIslandWindowController: NSWindowController, NSWindowDelegate
             guard let self else { return }
             self.bubbleVisibilityWorkItem = nil
             guard self.interactionModel.bubbleState == .hidden else { return }
+            self.applyWindowSizeUpdateImmediately(renderedBubbleState: .hidden)
             self.bubbleViewState.prepareLayout(for: .hidden)
-            self.applyWindowSizeUpdateImmediately()
         }
 
         bubbleVisibilityWorkItem = workItem
@@ -1114,9 +1118,13 @@ final class DetachedIslandWindowController: NSWindowController, NSWindowDelegate
         )
     }
 
-    private func applyWindowSizeUpdateImmediately() {
+    private func applyWindowSizeUpdateImmediately(
+        renderedBubbleState: DetachedIslandBubbleState? = nil
+    ) {
         hasPendingWindowSizeUpdate = true
-        applyPendingWindowSizeUpdate()
+        applyPendingWindowSizeUpdate(
+            renderedBubbleState: renderedBubbleState ?? bubbleViewState.renderedBubbleState
+        )
     }
 
     private func applyBubbleStateChange(_ change: () -> Void) {

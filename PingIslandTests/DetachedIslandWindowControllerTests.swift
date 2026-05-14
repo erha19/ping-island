@@ -1303,6 +1303,32 @@ final class DetachedIslandWindowControllerTests: XCTestCase {
         waitForBubbleHidden(controller)
     }
 
+    func testBubbleHideCollapsePreservesPetAnchorAfterFade() throws {
+        let viewModel = makeViewModel()
+        let sessionMonitor = makeSessionMonitor()
+        sessionMonitor.instances = [
+            makeSession(id: "active", phase: .processing)
+        ]
+
+        let controller = DetachedIslandWindowController(
+            viewModel: viewModel,
+            sessionMonitor: sessionMonitor,
+            onClose: {}
+        )
+        defer { controller.dismiss() }
+
+        controller.present(atPetAnchor: CGPoint(x: 1260, y: 180))
+        controller.presentHoverBubbleForTesting()
+
+        let expandedAnchor = try XCTUnwrap(controller.currentPetAnchor)
+        controller.hideBubbleForTesting()
+        waitForBubbleHidden(controller)
+        let collapsedAnchor = try XCTUnwrap(controller.currentPetAnchor)
+
+        XCTAssertEqual(collapsedAnchor.x, expandedAnchor.x, accuracy: 0.5)
+        XCTAssertEqual(collapsedAnchor.y, expandedAnchor.y, accuracy: 0.5)
+    }
+
     private func waitForBubbleHidden(
         _ controller: DetachedIslandWindowController,
         timeout: TimeInterval = 1.0,
