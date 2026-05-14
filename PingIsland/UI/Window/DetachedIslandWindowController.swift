@@ -313,6 +313,7 @@ final class DetachedIslandWindowController: NSWindowController, NSWindowDelegate
             bubbleState: bubbleViewState.renderedBubbleState,
             bubblePlacement: interactionModel.bubblePlacement,
             measuredAttentionBubbleHeight: bubbleViewState.measuredAttentionBubbleHeight,
+            measuredCompletionBubbleHeight: bubbleViewState.measuredCompletionBubbleHeight,
             activeCompletionNotification: activeCompletionNotification,
             guideBubbleSize: currentGuideBubbleSize
         )
@@ -347,6 +348,7 @@ final class DetachedIslandWindowController: NSWindowController, NSWindowDelegate
             bubbleState: bubbleViewState.renderedBubbleState,
             bubblePlacement: interactionModel.bubblePlacement,
             measuredAttentionBubbleHeight: bubbleViewState.measuredAttentionBubbleHeight,
+            measuredCompletionBubbleHeight: bubbleViewState.measuredCompletionBubbleHeight,
             activeCompletionNotification: activeCompletionNotification,
             guideBubbleSize: currentGuideBubbleSize,
             petAnchorScreen: petAnchor,
@@ -611,6 +613,15 @@ final class DetachedIslandWindowController: NSWindowController, NSWindowDelegate
             }
             .store(in: &cancellables)
 
+        bubbleViewState.$measuredCompletionBubbleHeight
+            .dropFirst()
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.scheduleWindowSizeUpdate()
+            }
+            .store(in: &cancellables)
+
         interactionModel.$bubbleState
             .dropFirst()
             .removeDuplicates()
@@ -735,6 +746,7 @@ final class DetachedIslandWindowController: NSWindowController, NSWindowDelegate
             bubbleState: renderedBubbleState,
             bubblePlacement: interactionModel.bubblePlacement,
             measuredAttentionBubbleHeight: bubbleViewState.measuredAttentionBubbleHeight,
+            measuredCompletionBubbleHeight: bubbleViewState.measuredCompletionBubbleHeight,
             activeCompletionNotification: activeCompletionNotification,
             guideBubbleSize: currentGuideBubbleSize,
             petAnchorScreen: petAnchorScreen,
@@ -768,6 +780,7 @@ final class DetachedIslandWindowController: NSWindowController, NSWindowDelegate
         bubbleState: DetachedIslandBubbleState = .hidden,
         bubblePlacement: DetachedIslandBubblePlacement = .topLeft,
         measuredAttentionBubbleHeight: CGFloat? = nil,
+        measuredCompletionBubbleHeight: CGFloat? = nil,
         activeCompletionNotification: SessionCompletionNotification? = nil,
         guideBubbleSize: CGSize? = nil,
         petAnchorScreen: CGPoint? = nil,
@@ -805,6 +818,7 @@ final class DetachedIslandWindowController: NSWindowController, NSWindowDelegate
             bubbleState: bubbleState,
             bubblePlacement: bubblePlacement,
             measuredAttentionBubbleHeight: measuredAttentionBubbleHeight,
+            measuredCompletionBubbleHeight: measuredCompletionBubbleHeight,
             additionalFooterHeight: additionalFooterHeight,
             activeCompletionNotification: activeCompletionNotification,
             guideBubbleSize: guideBubbleSize,
@@ -819,6 +833,7 @@ final class DetachedIslandWindowController: NSWindowController, NSWindowDelegate
         bubbleState: DetachedIslandBubbleState = .hidden,
         bubblePlacement: DetachedIslandBubblePlacement = .topLeft,
         measuredAttentionBubbleHeight: CGFloat? = nil,
+        measuredCompletionBubbleHeight: CGFloat? = nil,
         activeCompletionNotification: SessionCompletionNotification? = nil,
         guideBubbleSize: CGSize? = nil,
         petAnchorScreen: CGPoint? = nil,
@@ -830,6 +845,7 @@ final class DetachedIslandWindowController: NSWindowController, NSWindowDelegate
             bubbleState: bubbleState,
             bubblePlacement: bubblePlacement,
             measuredAttentionBubbleHeight: measuredAttentionBubbleHeight,
+            measuredCompletionBubbleHeight: measuredCompletionBubbleHeight,
             activeCompletionNotification: activeCompletionNotification,
             guideBubbleSize: guideBubbleSize,
             petAnchorScreen: petAnchorScreen,
@@ -1395,6 +1411,7 @@ final class DetachedIslandWindowController: NSWindowController, NSWindowDelegate
             bubbleState: bubbleViewState.renderedBubbleState,
             bubblePlacement: interactionModel.bubblePlacement,
             measuredAttentionBubbleHeight: bubbleViewState.measuredAttentionBubbleHeight,
+            measuredCompletionBubbleHeight: bubbleViewState.measuredCompletionBubbleHeight,
             activeCompletionNotification: activeCompletionNotification,
             guideBubbleSize: currentGuideBubbleSize,
             petAnchorScreen: petAnchorScreen,

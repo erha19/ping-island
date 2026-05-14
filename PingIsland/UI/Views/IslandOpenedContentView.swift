@@ -67,6 +67,14 @@ struct IslandOpenedContentView: View {
                 onHoverChanged: onCompletionNotificationHoverChanged,
                 onDismiss: onDismissCompletionNotification
             )
+            .background(
+                GeometryReader { geometry in
+                    Color.clear.preference(
+                        key: OpenedPanelContentHeightPreferenceKey.self,
+                        value: geometry.size.height
+                    )
+                }
+            )
         case .chat(let session):
             let liveSession = liveSession(for: session)
 

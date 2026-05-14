@@ -648,6 +648,45 @@ final class DetachedIslandWindowControllerTests: XCTestCase {
         XCTAssertEqual(cappedHeight, 740, accuracy: 0.5)
     }
 
+    func testCompletionBubbleUsesMeasuredHeightBeforeFallback() {
+        let viewModel = makeViewModel()
+        let notification = SessionCompletionNotification(
+            session: makeCompletedSession(id: "done"),
+            kind: .completed
+        )
+
+        let fallbackHeight = DetachedIslandContentModel.bubbleContentSize(
+            for: .completionNotification(notification),
+            sessions: [notification.session],
+            viewModel: viewModel
+        ).height
+        let measuredHeight = DetachedIslandContentModel.bubbleContentSize(
+            for: .completionNotification(notification),
+            sessions: [notification.session],
+            viewModel: viewModel,
+            measuredCompletionBubbleHeight: 190
+        ).height
+        let minimumHeight = DetachedIslandContentModel.bubbleContentSize(
+            for: .completionNotification(notification),
+            sessions: [notification.session],
+            viewModel: viewModel,
+            measuredCompletionBubbleHeight: 100
+        ).height
+
+        XCTAssertEqual(
+            fallbackHeight,
+            DetachedIslandPanelMetrics.completionBubbleFallbackHeight,
+            accuracy: 0.5
+        )
+        XCTAssertEqual(measuredHeight, 190, accuracy: 0.5)
+        XCTAssertEqual(
+            minimumHeight,
+            DetachedIslandPanelMetrics.completionBubbleMinimumHeight,
+            accuracy: 0.5
+        )
+        XCTAssertLessThan(fallbackHeight, 260)
+    }
+
     func testNewAttentionAutoOpensHoverBubble() {
         let attention = makeSession(
             id: "attention",
