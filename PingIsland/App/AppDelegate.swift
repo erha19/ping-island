@@ -9,6 +9,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private let startupSessionMonitor = SessionMonitor()
     private let globalShortcutManager = GlobalShortcutManager.shared
     private var shouldPresentSettingsAfterOnboarding = false
+    private var shouldRunHookWalkthroughAfterOnboarding = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         if launchConfiguration.shouldEnforceSingleInstance && !ensureSingleInstance() {
@@ -50,6 +51,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             presentationModeOnboardingPending: AppSettings.presentationModeOnboardingPending
         )
         shouldPresentSettingsAfterOnboarding = launchFlow.shouldPresentSettingsWindowAfterOnboarding
+        shouldRunHookWalkthroughAfterOnboarding = launchFlow.shouldPresentSurfaceModeOnboarding
 
         if launchFlow.shouldStartMonitoringImmediately {
             // Keep hook and app-server ingestion alive even when first-run onboarding
@@ -86,21 +88,43 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @MainActor
-    private func presentHookInstallOnboardingIfNeeded() {
-        guard AppSettings.hookInstallOnboardingPending else { return }
+    @discardableResult
+    private func presentHookInstallOnboardingIfNeeded() -> Bool {
+        guard AppSettings.hookInstallOnboardingPending else {
+            startHookWalkthroughAfterOnboardingIfNeeded()
+            return false
+        }
         HookInstallWelcomeWindowController.shared.present { decision in
             switch decision {
             case .installDefaults:
+#if APP_STORE
+                let didInstall = HookInstaller.performFirstRunDefaultInstallWithUserAuthorization()
+                AppSettings.hookInstallOnboardingPending = !didInstall
+                if didInstall {
+                    self.startHookWalkthroughAfterOnboardingIfNeeded()
+                }
+#else
                 HookInstaller.performFirstRunDefaultInstall()
                 AppSettings.hookInstallOnboardingPending = false
+                self.startHookWalkthroughAfterOnboardingIfNeeded()
+#endif
             case .customize:
+#if APP_STORE
+                AppSettings.hookInstallOnboardingPending = true
+                self.shouldRunHookWalkthroughAfterOnboarding = false
+                SettingsWindowController.shared.present(category: .integration)
+#else
                 HookInstaller.performFirstRunDefaultInstall()
                 AppSettings.hookInstallOnboardingPending = false
+                self.shouldRunHookWalkthroughAfterOnboarding = false
                 SettingsWindowController.shared.present()
+#endif
             case .skip:
                 AppSettings.hookInstallOnboardingPending = false
+                self.startHookWalkthroughAfterOnboardingIfNeeded()
             }
         }
+        return true
     }
 
     @MainActor
@@ -113,8 +137,24 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func completePresentationModeOnboarding(with selectedMode: IslandSurfaceMode) {
         AppSettings.surfaceMode = selectedMode
         AppSettings.presentationModeOnboardingPending = false
-        AppSettings.notchDetachmentHintPending = selectedMode == .notch
+        AppSettings.notchDetachmentHintPending = false
+        AppSettings.floatingPetSettingsHintPending = false
         startWindowManagerIfNeeded()
+
+        if shouldRunHookWalkthroughAfterOnboarding {
+#if APP_STORE
+            shouldRunHookWalkthroughAfterOnboarding = false
+            _ = presentHookInstallOnboardingIfNeeded()
+#else
+            if AppSettings.hookInstallOnboardingPending {
+                HookInstaller.performFirstRunDefaultInstall()
+            }
+            AppSettings.hookInstallOnboardingPending = false
+            shouldPresentSettingsAfterOnboarding = false
+            startHookWalkthroughAfterOnboardingIfNeeded()
+#endif
+            return
+        }
 
         if shouldPresentSettingsAfterOnboarding {
             SettingsWindowController.shared.present()
@@ -122,6 +162,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             presentHookInstallOnboardingIfNeeded()
         }
+    }
+
+    @MainActor
+    private func startHookWalkthroughAfterOnboardingIfNeeded() {
+        guard shouldRunHookWalkthroughAfterOnboarding else { return }
+        shouldRunHookWalkthroughAfterOnboarding = false
+        HookWalkthroughDemoRunner.shared.start()
     }
 
     @MainActor

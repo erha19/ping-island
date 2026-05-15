@@ -17,6 +17,9 @@ struct ChatView: View {
 
     @State private var inputText: String = ""
     @State private var history: [ChatHistoryItem] = []
+    @State private var displayedHistory: [ChatHistoryItem] = []
+    @State private var latestUserMessageId: String = ""
+    @State private var historyRevision: Int = 0
     @State private var session: SessionState
     @State private var isLoading: Bool = true
     @State private var hasLoadedOnce: Bool = false
@@ -38,6 +41,9 @@ struct ChatView: View {
         let cachedHistory = ChatHistoryManager.shared.history(for: sessionId)
         let alreadyLoaded = !cachedHistory.isEmpty
         self._history = State(initialValue: cachedHistory)
+        self._displayedHistory = State(initialValue: cachedHistory.reversedForChatDisplay())
+        self._latestUserMessageId = State(initialValue: cachedHistory.latestUserMessageId)
+        self._historyRevision = State(initialValue: ChatHistoryManager.shared.revision(for: sessionId))
         self._isLoading = State(initialValue: !alreadyLoaded)
         self._hasLoadedOnce = State(initialValue: alreadyLoaded)
     }
@@ -60,7 +66,7 @@ struct ChatView: View {
     private var shouldShowCompletedFollowupPrompt: Bool {
         guard session.phase != .ended else { return false }
         guard session.clientInfo.prefersAnsweredQuestionFollowupAction else { return false }
-        guard let latestTool = history.reversed().compactMap({ item -> ToolCallItem? in
+        guard let latestTool = displayedHistory.compactMap({ item -> ToolCallItem? in
             guard case .toolCall(let tool) = item.type else { return nil }
             return tool
         }).first else { return false }
@@ -137,14 +143,20 @@ struct ChatView: View {
 
             // Check if already loaded (from previous visit)
             if ChatHistoryManager.shared.isLoaded(sessionId: sessionId) {
-                history = ChatHistoryManager.shared.history(for: sessionId)
+                replaceHistoryWithoutListAnimation(
+                    ChatHistoryManager.shared.history(for: sessionId),
+                    revision: ChatHistoryManager.shared.revision(for: sessionId)
+                )
                 isLoading = false
                 return
             }
 
             // Load in background, show loading state
             await ChatHistoryManager.shared.loadFromFile(sessionId: sessionId, cwd: session.cwd)
-            history = ChatHistoryManager.shared.history(for: sessionId)
+            replaceHistoryWithoutListAnimation(
+                ChatHistoryManager.shared.history(for: sessionId),
+                revision: ChatHistoryManager.shared.revision(for: sessionId)
+            )
 
             withAnimation(.easeOut(duration: 0.2)) {
                 isLoading = false
@@ -153,6 +165,8 @@ struct ChatView: View {
         .onReceive(ChatHistoryManager.shared.$histories) { histories in
             // Update when count changes, last item differs, or content changes (e.g., tool status)
             if let newHistory = histories[sessionId] {
+                let newRevision = ChatHistoryManager.shared.revision(for: sessionId)
+                guard newRevision != historyRevision else { return }
                 let countChanged = newHistory.count != history.count
                 let lastItemChanged = newHistory.last?.id != history.last?.id
                 // Always update - the @Published ensures we only get notified on real changes
@@ -165,7 +179,7 @@ struct ChatView: View {
                         previousHistoryCount = newHistory.count
                     }
 
-                    history = newHistory
+                    replaceHistoryWithoutListAnimation(newHistory, revision: newRevision)
 
                     // Auto-scroll to bottom only if autoscroll is NOT paused
                     if !isAutoscrollPaused && countChanged {
@@ -176,6 +190,8 @@ struct ChatView: View {
                     if isLoading && !newHistory.isEmpty {
                         isLoading = false
                     }
+                } else {
+                    historyRevision = newRevision
                 }
             } else if hasLoadedOnce {
                 // Session was loaded but is now gone (removed via /clear) - navigate back
@@ -184,7 +200,7 @@ struct ChatView: View {
         }
         .onReceive(sessionMonitor.$instances) { sessions in
             if let updated = sessions.first(where: { $0.sessionId == sessionId }),
-               updated != session {
+               !session.matchesChatPresentation(of: updated) {
                 // Check if permission was just accepted (transition from waitingForApproval to processing)
                 let wasWaiting = isWaitingForApproval
                 session = updated
@@ -300,14 +316,13 @@ struct ChatView: View {
         session.clientTintColor
     }
 
-    /// Get the last user message ID for stable text selection per turn
-    private var lastUserMessageId: String {
-        for item in history.reversed() {
-            if case .user = item.type {
-                return item.id
-            }
-        }
-        return ""
+    private var assistantStyleID: String {
+        [
+            session.provider.rawValue,
+            session.clientInfo.brand.rawValue,
+            session.clientInfo.profileID ?? "",
+            session.clientInfo.name ?? ""
+        ].joined(separator: "|")
     }
 
     // MARK: - Loading State
@@ -344,86 +359,22 @@ struct ChatView: View {
     private let fadeColor = Color(red: 0.00, green: 0.00, blue: 0.00)
 
     private var messageList: some View {
-        GeometryReader { geometry in
-            ScrollViewReader { proxy in
-                ScrollView(.vertical, showsIndicators: false) {
-                    LazyVStack(spacing: 16) {
-                        // Invisible anchor at bottom (first due to flip)
-                        Color.clear
-                            .frame(height: 1)
-                            .id("bottom")
-
-                        // Processing indicator at bottom (first due to flip)
-                        if isProcessing {
-                            ProcessingIndicatorView(turnId: lastUserMessageId, color: processingAccentColor)
-                                .padding(.horizontal, 16)
-                                .scaleEffect(x: 1, y: -1)
-                                .transition(.asymmetric(
-                                    insertion: .opacity.combined(with: .scale(scale: 0.95)).combined(with: .offset(y: -4)),
-                                    removal: .opacity
-                                ))
-                        }
-
-                        ForEach(history.reversed()) { item in
-                            MessageItemView(
-                                item: item,
-                                sessionId: sessionId,
-                                assistantAccentColor: assistantAccentColor,
-                                assistantTextColor: assistantTextColor,
-                                onActivateSession: { focusTerminal() }
-                            )
-                                .padding(.horizontal, 16)
-                                .scaleEffect(x: 1, y: -1)
-                                .transition(.asymmetric(
-                                    insertion: .opacity.combined(with: .scale(scale: 0.98)),
-                                    removal: .opacity
-                                ))
-                        }
-                    }
-                    .padding(.top, shouldTopAlignMessages ? 10 : 20)
-                    .padding(.bottom, shouldTopAlignMessages ? 12 : 20)
-                    .frame(
-                        maxWidth: .infinity,
-                        minHeight: geometry.size.height,
-                        // The scroll view is vertically flipped below. `.top` keeps sparse
-                        // chats visually anchored near the footer, while `.bottom` moves
-                        // intervention reminders upward so they don't leave a large blank area.
-                        alignment: shouldTopAlignMessages ? .bottom : .top
-                    )
-                    .animation(.spring(response: 0.3, dampingFraction: 0.8), value: isProcessing)
-                    .animation(.spring(response: 0.3, dampingFraction: 0.8), value: history.count)
-                }
-                .scaleEffect(x: 1, y: -1)
-                .onChange(of: shouldScrollToBottom) { _, shouldScroll in
-                    if shouldScroll {
-                        withAnimation(.easeOut(duration: 0.3)) {
-                            // In inverted scroll, use .bottom anchor to scroll to the visual bottom
-                            proxy.scrollTo("bottom", anchor: .bottom)
-                        }
-                        shouldScrollToBottom = false
-                        resumeAutoscroll()
-                    }
-                }
-                // New messages indicator overlay
-                .overlay(alignment: .bottom) {
-                    if isAutoscrollPaused && newMessageCount > 0 {
-                        NewMessagesIndicator(count: newMessageCount) {
-                            withAnimation(.easeOut(duration: 0.3)) {
-                                // In inverted scroll, use .bottom anchor to scroll to the visual bottom
-                                proxy.scrollTo("bottom", anchor: .bottom)
-                            }
-                            resumeAutoscroll()
-                        }
-                        .padding(.bottom, 16)
-                        .transition(.asymmetric(
-                            insertion: .opacity.combined(with: .move(edge: .bottom)),
-                            removal: .opacity
-                        ))
-                    }
-                }
-                .animation(.spring(response: 0.35, dampingFraction: 0.85), value: isAutoscrollPaused && newMessageCount > 0)
-            }
-        }
+        ChatTranscriptView(
+            items: displayedHistory,
+            sessionId: sessionId,
+            isProcessing: isProcessing,
+            latestUserMessageId: latestUserMessageId,
+            assistantStyleID: assistantStyleID,
+            assistantAccentColor: assistantAccentColor,
+            assistantTextColor: assistantTextColor,
+            processingAccentColor: processingAccentColor,
+            shouldTopAlignMessages: shouldTopAlignMessages,
+            shouldScrollToBottom: $shouldScrollToBottom,
+            isAutoscrollPaused: $isAutoscrollPaused,
+            newMessageCount: $newMessageCount,
+            onResumeAutoscroll: { resumeAutoscroll() },
+            onActivateSession: { focusTerminal() }
+        )
     }
 
     // MARK: - Input Bar
@@ -711,6 +662,20 @@ struct ChatView: View {
         previousHistoryCount = history.count
     }
 
+    private func replaceHistoryWithoutListAnimation(_ newHistory: [ChatHistoryItem], revision: Int? = nil) {
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        transaction.animation = nil
+        withTransaction(transaction) {
+            history = newHistory
+            displayedHistory = newHistory.reversedForChatDisplay()
+            latestUserMessageId = newHistory.latestUserMessageId
+            if let revision {
+                historyRevision = revision
+            }
+        }
+    }
+
     // MARK: - Actions
 
     private func focusTerminal() {
@@ -768,14 +733,153 @@ struct ChatView: View {
     }
 }
 
+private extension SessionState {
+    func matchesChatPresentation(of other: SessionState) -> Bool {
+        sessionId == other.sessionId
+            && cwd == other.cwd
+            && provider == other.provider
+            && clientInfo == other.clientInfo
+            && ingress == other.ingress
+            && titleOnlySubagentDisplayTitle == other.titleOnlySubagentDisplayTitle
+            && interactionDisplayName == other.interactionDisplayName
+            && phase == other.phase
+            && intervention == other.intervention
+            && pid == other.pid
+            && tty == other.tty
+            && isInTmux == other.isInTmux
+            && autoApprovePermissions == other.autoApprovePermissions
+    }
+}
+
+private extension Array where Element == ChatHistoryItem {
+    func reversedForChatDisplay() -> [ChatHistoryItem] {
+        Array(reversed())
+    }
+
+    var latestUserMessageId: String {
+        for item in reversed() {
+            if case .user = item.type {
+                return item.id
+            }
+        }
+        return ""
+    }
+}
+
+// MARK: - Transcript View
+
+private struct ChatTranscriptView: View {
+    let items: [ChatHistoryItem]
+    let sessionId: String
+    let isProcessing: Bool
+    let latestUserMessageId: String
+    let assistantStyleID: String
+    let assistantAccentColor: Color
+    let assistantTextColor: Color
+    let processingAccentColor: Color
+    let shouldTopAlignMessages: Bool
+    @Binding var shouldScrollToBottom: Bool
+    @Binding var isAutoscrollPaused: Bool
+    @Binding var newMessageCount: Int
+    let onResumeAutoscroll: () -> Void
+    let onActivateSession: () -> Void
+
+    var body: some View {
+        GeometryReader { geometry in
+            ScrollViewReader { proxy in
+                ScrollView(.vertical, showsIndicators: false) {
+                    LazyVStack(spacing: 16) {
+                        // Invisible anchor at bottom (first due to flip)
+                        Color.clear
+                            .frame(height: 1)
+                            .id("bottom")
+
+                        // Processing indicator at bottom (first due to flip)
+                        if isProcessing {
+                            ProcessingIndicatorView(turnId: latestUserMessageId, color: processingAccentColor)
+                                .padding(.horizontal, 16)
+                                .scaleEffect(x: 1, y: -1)
+                                .transition(.asymmetric(
+                                    insertion: .opacity.combined(with: .scale(scale: 0.95)).combined(with: .offset(y: -4)),
+                                    removal: .opacity
+                                ))
+                        }
+
+                        ForEach(items) { item in
+                            MessageItemView(
+                                item: item,
+                                sessionId: sessionId,
+                                assistantStyleID: assistantStyleID,
+                                assistantAccentColor: assistantAccentColor,
+                                assistantTextColor: assistantTextColor,
+                                onActivateSession: onActivateSession
+                            )
+                            .equatable()
+                            .padding(.horizontal, 16)
+                            .scaleEffect(x: 1, y: -1)
+                        }
+                    }
+                    .padding(.top, shouldTopAlignMessages ? 10 : 20)
+                    .padding(.bottom, shouldTopAlignMessages ? 12 : 20)
+                    .frame(
+                        maxWidth: .infinity,
+                        minHeight: geometry.size.height,
+                        // The scroll view is vertically flipped below. `.top` keeps sparse
+                        // chats visually anchored near the footer, while `.bottom` moves
+                        // intervention reminders upward so they don't leave a large blank area.
+                        alignment: shouldTopAlignMessages ? .bottom : .top
+                    )
+                    .animation(.spring(response: 0.3, dampingFraction: 0.8), value: isProcessing)
+                }
+                .scaleEffect(x: 1, y: -1)
+                .onChange(of: shouldScrollToBottom) { _, shouldScroll in
+                    if shouldScroll {
+                        withAnimation(.easeOut(duration: 0.3)) {
+                            // In inverted scroll, use .bottom anchor to scroll to the visual bottom
+                            proxy.scrollTo("bottom", anchor: .bottom)
+                        }
+                        shouldScrollToBottom = false
+                        onResumeAutoscroll()
+                    }
+                }
+                // New messages indicator overlay
+                .overlay(alignment: .bottom) {
+                    if isAutoscrollPaused && newMessageCount > 0 {
+                        NewMessagesIndicator(count: newMessageCount) {
+                            withAnimation(.easeOut(duration: 0.3)) {
+                                // In inverted scroll, use .bottom anchor to scroll to the visual bottom
+                                proxy.scrollTo("bottom", anchor: .bottom)
+                            }
+                            onResumeAutoscroll()
+                        }
+                        .padding(.bottom, 16)
+                        .transition(.asymmetric(
+                            insertion: .opacity.combined(with: .move(edge: .bottom)),
+                            removal: .opacity
+                        ))
+                    }
+                }
+                .animation(.spring(response: 0.35, dampingFraction: 0.85), value: isAutoscrollPaused && newMessageCount > 0)
+            }
+        }
+    }
+}
+
 // MARK: - Message Item View
 
-struct MessageItemView: View {
+struct MessageItemView: View, Equatable {
     let item: ChatHistoryItem
     let sessionId: String
+    let assistantStyleID: String
     let assistantAccentColor: Color
     let assistantTextColor: Color
     let onActivateSession: () -> Void
+
+    static func == (lhs: MessageItemView, rhs: MessageItemView) -> Bool {
+        lhs.item == rhs.item
+            && lhs.sessionId == rhs.sessionId
+            && lhs.assistantStyleID == rhs.assistantStyleID
+    }
 
     var body: some View {
         switch item.type {
@@ -873,17 +977,17 @@ struct ProcessingIndicatorView: View {
 
     var body: some View {
         if energyGovernor.policy.animationLevel == .staticFrames {
-            processingBody(dotCount: 1)
+            processingBody(dotCount: 1, date: nil)
         } else {
             TimelineView(.periodic(from: .now, by: dotInterval)) { context in
-                processingBody(dotCount: dotPhase(for: context.date))
+                processingBody(dotCount: dotPhase(for: context.date), date: context.date)
             }
         }
     }
 
-    private func processingBody(dotCount: Int) -> some View {
+    private func processingBody(dotCount: Int, date: Date?) -> some View {
         HStack(alignment: .center, spacing: 6) {
-            ProcessingSpinner()
+            ProcessingSpinner(color: color, date: date)
                 .frame(width: 6)
 
             Text(baseText + String(repeating: ".", count: dotCount))

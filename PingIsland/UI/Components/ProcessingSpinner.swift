@@ -9,17 +9,21 @@ import SwiftUI
 
 struct ProcessingSpinner: View {
     let color: Color
+    let date: Date?
     @ObservedObject private var energyGovernor = EnergyGovernor.shared
 
     private let symbols = ["·", "✢", "✳", "∗", "✻", "✽"]
 
-    init(color: Color = Color(red: 0.85, green: 0.47, blue: 0.34)) {
+    init(color: Color = Color(red: 0.85, green: 0.47, blue: 0.34), date: Date? = nil) {
         self.color = color
+        self.date = date
     }
 
     var body: some View {
         if energyGovernor.policy.animationLevel == .staticFrames {
             spinnerText(phase: 0)
+        } else if let date {
+            spinnerText(phase: spinnerPhase(for: date))
         } else {
             TimelineView(.periodic(from: .now, by: spinnerInterval)) { context in
                 spinnerText(phase: spinnerPhase(for: context.date))

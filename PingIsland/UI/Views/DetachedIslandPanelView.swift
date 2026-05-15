@@ -36,6 +36,7 @@ enum DetachedIslandPanelMetrics {
     static let bubbleTailOverlap: CGFloat = 7
     static let bubbleTailInset: CGFloat = 4
     static let bubbleCornerRadius: CGFloat = 22
+    static let bubbleRenderInset: CGFloat = 1.5
     static let bubbleWindowGutter: CGFloat = 2
     static let bubbleHorizontalPadding: CGFloat = 6
     static let bubbleVerticalPadding: CGFloat = 4
@@ -44,6 +45,8 @@ enum DetachedIslandPanelMetrics {
     static let floatingUsageBoltVerticalOffset: CGFloat =
         DetachedIslandPetMetrics.standard.floatingUsageBoltVerticalOffset
     static let settingsHintBubbleSize = CGSize(width: 248, height: 92)
+    static let completionBubbleMinimumHeight: CGFloat = 120
+    static let completionBubbleFallbackHeight: CGFloat = 180
 
     @MainActor
     static func petMetrics(for screenRect: CGRect) -> DetachedIslandPetMetrics {
@@ -80,13 +83,6 @@ enum DetachedIslandPanelMetrics {
     }
 }
 
-enum DetachedIslandBubbleCorner: Equatable {
-    case topLeading
-    case topTrailing
-    case bottomLeading
-    case bottomTrailing
-}
-
 enum DetachedIslandBubblePlacement: CaseIterable, Equatable {
     case topLeft
     case topRight
@@ -118,18 +114,6 @@ enum DetachedIslandBubblePlacement: CaseIterable, Equatable {
         }
     }
 
-    var trimmedCorner: DetachedIslandBubbleCorner {
-        switch self {
-        case .topLeft:
-            return .bottomTrailing
-        case .topRight:
-            return .bottomLeading
-        case .bottomLeft:
-            return .topTrailing
-        case .bottomRight:
-            return .topLeading
-        }
-    }
 }
 
 enum DetachedIslandBubbleContentMode: Equatable {
@@ -253,6 +237,7 @@ enum DetachedIslandContentModel {
         sessions: [SessionState],
         viewModel: NotchViewModel,
         measuredAttentionBubbleHeight: CGFloat? = nil,
+        measuredCompletionBubbleHeight: CGFloat? = nil,
         additionalFooterHeight: CGFloat = 0
     ) -> CGSize {
         let widthLimit = viewModel.screenRect.width - 132
@@ -289,8 +274,15 @@ enum DetachedIslandContentModel {
             return CGSize(width: width, height: max(170, height))
         case .completionNotification:
             let width = min(widthLimit, 392)
-            let height = min(viewModel.screenRect.height - 160, 260)
-            return CGSize(width: width, height: max(190, height))
+            let height = measuredCompletionBubbleHeight
+                ?? DetachedIslandPanelMetrics.completionBubbleFallbackHeight
+            return CGSize(
+                width: width,
+                height: min(
+                    viewModel.screenRect.height - 160,
+                    max(DetachedIslandPanelMetrics.completionBubbleMinimumHeight, height)
+                )
+            )
         case .chat:
             return viewModel.panelSize(for: .detached)
         }
@@ -325,7 +317,9 @@ enum DetachedIslandContentModel {
     ) -> CGFloat {
         max(
             0,
-            bubbleFrameWidth - (DetachedIslandPanelMetrics.bubbleHorizontalPadding * 2)
+            bubbleFrameWidth
+                - (DetachedIslandPanelMetrics.bubbleRenderInset * 2)
+                - (DetachedIslandPanelMetrics.bubbleHorizontalPadding * 2)
         )
     }
 
@@ -336,6 +330,7 @@ enum DetachedIslandContentModel {
         bubbleState: DetachedIslandBubbleState,
         bubblePlacement: DetachedIslandBubblePlacement,
         measuredAttentionBubbleHeight: CGFloat? = nil,
+        measuredCompletionBubbleHeight: CGFloat? = nil,
         additionalFooterHeight: CGFloat = 0,
         activeCompletionNotification: SessionCompletionNotification? = nil,
         guideBubbleSize: CGSize? = nil,
@@ -388,6 +383,7 @@ enum DetachedIslandContentModel {
             sessions: sessions,
             viewModel: viewModel,
             measuredAttentionBubbleHeight: measuredAttentionBubbleHeight,
+            measuredCompletionBubbleHeight: measuredCompletionBubbleHeight,
             additionalFooterHeight: additionalFooterHeight
         )
         return bubbleLayout(
@@ -603,6 +599,7 @@ final class DetachedIslandBubbleViewState: ObservableObject {
     @Published private(set) var renderedBubbleState: DetachedIslandBubbleState = .hidden
     @Published private(set) var isBubbleVisible = false
     @Published private(set) var measuredAttentionBubbleHeight: CGFloat?
+    @Published private(set) var measuredCompletionBubbleHeight: CGFloat?
 
     var bubbleFadeDuration: TimeInterval { 0.18 }
 
@@ -625,6 +622,12 @@ final class DetachedIslandBubbleViewState: ObservableObject {
         let sanitized = height.map { ceil(max(0, $0)) }
         guard measuredAttentionBubbleHeight != sanitized else { return }
         measuredAttentionBubbleHeight = sanitized
+    }
+
+    func setMeasuredCompletionBubbleHeight(_ height: CGFloat?) {
+        let sanitized = height.map { ceil(max(0, $0)) }
+        guard measuredCompletionBubbleHeight != sanitized else { return }
+        measuredCompletionBubbleHeight = sanitized
     }
 
     func setActiveCompletionNotification(_ notification: SessionCompletionNotification?) {
@@ -684,6 +687,7 @@ struct DetachedIslandPanelView: View {
             bubbleState: bubbleViewState.renderedBubbleState,
             bubblePlacement: interactionModel.bubblePlacement,
             measuredAttentionBubbleHeight: bubbleViewState.measuredAttentionBubbleHeight,
+            measuredCompletionBubbleHeight: bubbleViewState.measuredCompletionBubbleHeight,
             additionalFooterHeight: shouldShowFloatingUsageFooter
                 ? DetachedIslandPanelMetrics.usageFooterReservedHeight
                 : 0,
@@ -780,26 +784,43 @@ struct DetachedIslandPanelView: View {
             }
         }
         .onChange(of: bubbleRoute) { _, route in
-            guard case .attentionNotification = route else {
+            switch route {
+            case .attentionNotification:
+                bubbleViewState.setMeasuredCompletionBubbleHeight(nil)
+            case .completionNotification:
                 bubbleViewState.setMeasuredAttentionBubbleHeight(nil)
-                return
+            default:
+                bubbleViewState.setMeasuredAttentionBubbleHeight(nil)
+                bubbleViewState.setMeasuredCompletionBubbleHeight(nil)
             }
         }
         .onPreferenceChange(OpenedPanelContentHeightPreferenceKey.self) { height in
-            guard case .attentionNotification = bubbleRoute else {
+            switch bubbleRoute {
+            case .attentionNotification:
+                let measuredHeight = height > 0
+                    ? min(
+                        viewModel.screenRect.height - 160,
+                        max(
+                            170,
+                            height + (DetachedIslandPanelMetrics.bubbleVerticalPadding * 2)
+                        )
+                    )
+                    : nil
+                bubbleViewState.setMeasuredAttentionBubbleHeight(measuredHeight)
+            case .completionNotification:
+                let measuredHeight = height > 0
+                    ? min(
+                        viewModel.screenRect.height - 160,
+                        max(
+                            DetachedIslandPanelMetrics.completionBubbleMinimumHeight,
+                            height + (DetachedIslandPanelMetrics.bubbleVerticalPadding * 2)
+                        )
+                    )
+                    : nil
+                bubbleViewState.setMeasuredCompletionBubbleHeight(measuredHeight)
+            default:
                 return
             }
-
-            let measuredHeight = height > 0
-                ? min(
-                    viewModel.screenRect.height - 160,
-                    max(
-                        170,
-                        height + (DetachedIslandPanelMetrics.bubbleVerticalPadding * 2)
-                    )
-                )
-                : nil
-            bubbleViewState.setMeasuredAttentionBubbleHeight(measuredHeight)
         }
     }
 
@@ -1179,77 +1200,30 @@ private struct DetachedIslandBubbleChrome<Content: View>: View {
     @ViewBuilder let content: Content
 
     var body: some View {
-        content
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .padding(.horizontal, DetachedIslandPanelMetrics.bubbleHorizontalPadding)
-            .padding(.vertical, DetachedIslandPanelMetrics.bubbleVerticalPadding)
-            .background(
-                DetachedIslandBubbleShape(placement: placement)
-                    .fill(Color.black)
-            )
+        let shape = DetachedIslandBubbleShape(placement: placement)
+
+        ZStack(alignment: .topLeading) {
+            shape.fill(Color.black)
+
+            content
+                .padding(.horizontal, DetachedIslandPanelMetrics.bubbleHorizontalPadding)
+                .padding(.vertical, DetachedIslandPanelMetrics.bubbleVerticalPadding)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        }
+            .compositingGroup()
+            .mask(shape)
+            .padding(DetachedIslandPanelMetrics.bubbleRenderInset)
     }
 }
 
-private struct DetachedIslandBubbleShape: Shape {
+struct DetachedIslandBubbleShape: Shape {
     let placement: DetachedIslandBubblePlacement
 
     func path(in rect: CGRect) -> Path {
-        var path = Path()
         let radius = min(
             DetachedIslandPanelMetrics.bubbleCornerRadius,
             min(rect.width, rect.height) / 2
         )
-        let topLeadingRadius = placement.trimmedCorner == .topLeading ? 0 : radius
-        let topTrailingRadius = placement.trimmedCorner == .topTrailing ? 0 : radius
-        let bottomTrailingRadius = placement.trimmedCorner == .bottomTrailing ? 0 : radius
-        let bottomLeadingRadius = placement.trimmedCorner == .bottomLeading ? 0 : radius
-
-        path.move(to: CGPoint(x: rect.minX + topLeadingRadius, y: rect.minY))
-        path.addLine(to: CGPoint(x: rect.maxX - topTrailingRadius, y: rect.minY))
-        addCorner(
-            on: &path,
-            to: CGPoint(x: rect.maxX, y: rect.minY + topTrailingRadius),
-            control: CGPoint(x: rect.maxX, y: rect.minY),
-            radius: topTrailingRadius
-        )
-
-        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY - bottomTrailingRadius))
-        addCorner(
-            on: &path,
-            to: CGPoint(x: rect.maxX - bottomTrailingRadius, y: rect.maxY),
-            control: CGPoint(x: rect.maxX, y: rect.maxY),
-            radius: bottomTrailingRadius
-        )
-
-        path.addLine(to: CGPoint(x: rect.minX + bottomLeadingRadius, y: rect.maxY))
-        addCorner(
-            on: &path,
-            to: CGPoint(x: rect.minX, y: rect.maxY - bottomLeadingRadius),
-            control: CGPoint(x: rect.minX, y: rect.maxY),
-            radius: bottomLeadingRadius
-        )
-
-        path.addLine(to: CGPoint(x: rect.minX, y: rect.minY + topLeadingRadius))
-        addCorner(
-            on: &path,
-            to: CGPoint(x: rect.minX + topLeadingRadius, y: rect.minY),
-            control: CGPoint(x: rect.minX, y: rect.minY),
-            radius: topLeadingRadius
-        )
-        path.closeSubpath()
-        return path
-    }
-
-    private func addCorner(
-        on path: inout Path,
-        to: CGPoint,
-        control: CGPoint,
-        radius: CGFloat
-    ) {
-        if radius > 0 {
-            path.addQuadCurve(to: to, control: control)
-        } else {
-            path.addLine(to: to)
-        }
+        return Path(roundedRect: rect, cornerRadius: radius)
     }
 }

@@ -1,12 +1,18 @@
 import AppKit
+import QuartzCore
 import SwiftUI
 
 extension Notification.Name {
     static let settingsWindowVisibilityDidChange = Notification.Name("settingsWindowVisibilityDidChange")
+    static let settingsWindowCategorySelectionRequested = Notification.Name("settingsWindowCategorySelectionRequested")
 }
 
 enum SettingsWindowVisibilityNotification {
     static let isVisibleKey = "isVisible"
+}
+
+enum SettingsWindowCategorySelectionRequest {
+    static let categoryKey = "category"
 }
 
 final class SettingsPanelWindow: NSWindow {
@@ -93,6 +99,15 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         publishVisibilityDidChange(isVisible: true)
     }
 
+    func present(category: SettingsCategory) {
+        present()
+        NotificationCenter.default.post(
+            name: .settingsWindowCategorySelectionRequested,
+            object: self,
+            userInfo: [SettingsWindowCategorySelectionRequest.categoryKey: category.rawValue]
+        )
+    }
+
     func dismiss() {
         window?.orderOut(nil)
         publishVisibilityDidChange(isVisible: false)
@@ -126,7 +141,10 @@ final class PresentationModeWelcomeWindowController: NSWindowController, NSWindo
 
     private let fixedContentSize = NSSize(width: 760, height: 520)
     private let hostingController = NSHostingController(rootView: AnyView(EmptyView()))
+    private let presentationAnimationDuration: TimeInterval = 0.22
+    private let dismissalAnimationDuration: TimeInterval = 0.16
     private var completion: ((IslandSurfaceMode) -> Void)?
+    private var isDismissing = false
 
     private init() {
         let window = SettingsPanelWindow(
@@ -153,6 +171,7 @@ final class PresentationModeWelcomeWindowController: NSWindowController, NSWindo
 
         super.init(window: window)
         self.window?.delegate = self
+        hostingController.view.wantsLayer = true
     }
 
     required init?(coder: NSCoder) {
@@ -160,6 +179,7 @@ final class PresentationModeWelcomeWindowController: NSWindowController, NSWindo
     }
 
     func present(onComplete: @escaping (IslandSurfaceMode) -> Void) {
+        isDismissing = false
         completion = onComplete
         hostingController.rootView = AnyView(
             AppLocalizedRootView {
@@ -174,14 +194,22 @@ final class PresentationModeWelcomeWindowController: NSWindowController, NSWindo
         if !window.isVisible {
             window.center()
         }
+        window.alphaValue = 0
+        setContentScale(0.965)
         NSApp.activate(ignoringOtherApps: true)
         showWindow(nil)
         window.makeKeyAndOrderFront(nil)
         window.orderFrontRegardless()
+        animateContentScale(from: 0.965, to: 1, duration: presentationAnimationDuration)
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = presentationAnimationDuration
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            window.animator().alphaValue = 1
+        }
     }
 
     func dismiss() {
-        window?.orderOut(nil)
+        dismissAnimated()
     }
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
@@ -191,8 +219,56 @@ final class PresentationModeWelcomeWindowController: NSWindowController, NSWindo
     private func finish(with mode: IslandSurfaceMode) {
         let completion = completion
         self.completion = nil
-        dismiss()
-        completion?(mode)
+        dismissAnimated {
+            completion?(mode)
+        }
+    }
+
+    private func dismissAnimated(completion: (() -> Void)? = nil) {
+        guard let window else {
+            completion?()
+            return
+        }
+        guard window.isVisible else {
+            completion?()
+            return
+        }
+        guard !isDismissing else { return }
+
+        isDismissing = true
+        animateContentScale(from: 1, to: 0.985, duration: dismissalAnimationDuration)
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = dismissalAnimationDuration
+            context.timingFunction = CAMediaTimingFunction(name: .easeIn)
+            window.animator().alphaValue = 0
+        } completionHandler: { [weak self, weak window] in
+            MainActor.assumeIsolated {
+                guard let self, let window else { return }
+                window.orderOut(nil)
+                window.alphaValue = 1
+                self.setContentScale(1)
+                self.isDismissing = false
+                completion?()
+            }
+        }
+    }
+
+    private func setContentScale(_ scale: CGFloat) {
+        guard let layer = hostingController.view.layer else { return }
+        layer.removeAnimation(forKey: "presentationModeWelcomeScale")
+        layer.transform = CATransform3DMakeScale(scale, scale, 1)
+    }
+
+    private func animateContentScale(from startScale: CGFloat, to endScale: CGFloat, duration: TimeInterval) {
+        guard let layer = hostingController.view.layer else { return }
+        layer.removeAnimation(forKey: "presentationModeWelcomeScale")
+        let animation = CABasicAnimation(keyPath: "transform.scale")
+        animation.fromValue = startScale
+        animation.toValue = endScale
+        animation.duration = duration
+        animation.timingFunction = CAMediaTimingFunction(name: endScale >= startScale ? .easeOut : .easeIn)
+        layer.transform = CATransform3DMakeScale(endScale, endScale, 1)
+        layer.add(animation, forKey: "presentationModeWelcomeScale")
     }
 }
 
@@ -206,7 +282,11 @@ enum HookInstallOnboardingDecision {
 final class HookInstallWelcomeWindowController: NSWindowController, NSWindowDelegate {
     static let shared = HookInstallWelcomeWindowController()
 
+#if APP_STORE
+    private let fixedContentSize = NSSize(width: 560, height: 548)
+#else
     private let fixedContentSize = NSSize(width: 540, height: 480)
+#endif
     private let hostingController = NSHostingController(rootView: AnyView(EmptyView()))
     private var completion: ((HookInstallOnboardingDecision) -> Void)?
 
@@ -305,15 +385,19 @@ private struct HookInstallWelcomeView: View {
 
             VStack(alignment: .leading, spacing: 20) {
                 VStack(alignment: .leading, spacing: 10) {
-                    Text(appLocalized: "为以下客户端安装 Hooks")
+                    Text(appLocalized: title)
                         .font(.system(size: 24, weight: .bold))
                         .foregroundColor(.white)
 
-                    Text(appLocalized: "Ping Island 通过 Hooks 监听会话事件、显示通知与审批。可以一键安装默认配置，或选择仅启用部分事件。")
+                    Text(appLocalized: subtitle)
                         .font(.system(size: 12, weight: .medium))
                         .foregroundColor(.white.opacity(0.66))
                         .fixedSize(horizontal: false, vertical: true)
                 }
+
+#if APP_STORE
+                appStoreAuthorizationNotice
+#endif
 
                 profileList
 
@@ -324,11 +408,72 @@ private struct HookInstallWelcomeView: View {
             .padding(.horizontal, 28)
             .padding(.vertical, 26)
         }
-        .frame(width: 540, height: 480)
+        .frame(width: contentSize.width, height: contentSize.height)
         .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
         .shadow(color: Color.black.opacity(0.24), radius: 24, y: 14)
         .preferredColorScheme(.dark)
     }
+
+    private var title: String {
+#if APP_STORE
+        "授权后安装 Hooks"
+#else
+        "为以下客户端安装 Hooks"
+#endif
+    }
+
+    private var subtitle: String {
+#if APP_STORE
+        "Mac App Store 版本不会自动写入 ~/.claude、~/.codex 等目录。选择安装时，Ping Island 会请求你授权用户主目录后再写入配置。"
+#else
+        "Ping Island 通过 Hooks 监听会话事件、显示通知与审批。可以一键安装默认配置，或选择仅启用部分事件。"
+#endif
+    }
+
+    private var contentSize: CGSize {
+#if APP_STORE
+        CGSize(width: 560, height: 548)
+#else
+        CGSize(width: 540, height: 480)
+#endif
+    }
+
+#if APP_STORE
+    private var appStoreAuthorizationNotice: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "lock.open.display")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundColor(TerminalColors.amber)
+                .frame(width: 24, height: 24)
+                .background(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(Color.white.opacity(0.08))
+                )
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(appLocalized: "前往设置的 Hooks 管理")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundColor(.white.opacity(0.88))
+                Text(appLocalized: "你也可以稍后到“设置 > 集成 > Hooks 管理”点击安装；系统会请求授权用户主目录后再写入配置。")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundColor(.white.opacity(0.58))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.white.opacity(0.055))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(TerminalColors.amber.opacity(0.22), lineWidth: 1)
+        )
+    }
+#endif
 
     private var profileList: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -387,7 +532,7 @@ private struct HookInstallWelcomeView: View {
             Button {
                 onComplete(.installDefaults)
             } label: {
-                Text(appLocalized: "使用默认配置安装（推荐）")
+                Text(appLocalized: primaryButtonTitle)
                     .font(.system(size: 14, weight: .bold))
                     .foregroundColor(.black.opacity(0.86))
                     .frame(maxWidth: .infinity)
@@ -404,7 +549,7 @@ private struct HookInstallWelcomeView: View {
                 Button {
                     onComplete(.customize)
                 } label: {
-                    Text(appLocalized: "自定义事件…")
+                    Text(appLocalized: secondaryButtonTitle)
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundColor(.white)
                         .frame(maxWidth: .infinity)
@@ -441,6 +586,22 @@ private struct HookInstallWelcomeView: View {
                 .buttonStyle(.plain)
             }
         }
+    }
+
+    private var primaryButtonTitle: String {
+#if APP_STORE
+        "授权主目录并安装"
+#else
+        "使用默认配置安装（推荐）"
+#endif
+    }
+
+    private var secondaryButtonTitle: String {
+#if APP_STORE
+        "打开设置并授权 Hooks…"
+#else
+        "自定义事件…"
+#endif
     }
 }
 

@@ -322,12 +322,26 @@ final class SettingsPanelViewModel: ObservableObject {
     }
 
     func installHooks(for profile: ManagedHookClientProfile) {
+#if APP_STORE
+        let didInstall = HookInstaller.installWithUserAuthorization(profile)
+        if didInstall {
+            AppSettings.hookInstallOnboardingPending = false
+        }
+#else
         HookInstaller.install(profile)
+#endif
         refreshHookInstallationStates()
     }
 
     func installHooks(for profile: ManagedHookClientProfile, selection: HookInstallSelection) {
+#if APP_STORE
+        let didInstall = HookInstaller.installWithUserAuthorization(profile, selection: selection)
+        if didInstall {
+            AppSettings.hookInstallOnboardingPending = false
+        }
+#else
         HookInstaller.install(profile, selection: selection)
+#endif
         refreshHookInstallationStates()
     }
 
@@ -344,8 +358,12 @@ final class SettingsPanelViewModel: ObservableObject {
         Task {
             await Task.yield()
 
+#if APP_STORE
+            let didInstall = HookInstaller.reinstallWithUserAuthorization(profile, selection: selection)
+#else
             HookInstaller.reinstall(profile)
             let didInstall = HookInstaller.isInstalled(profile)
+#endif
 
             try? await Task.sleep(nanoseconds: 450_000_000)
 
@@ -382,8 +400,12 @@ final class SettingsPanelViewModel: ObservableObject {
         Task {
             await Task.yield()
 
+#if APP_STORE
+            let didInstall = HookInstaller.reinstallWithUserAuthorization(profile)
+#else
             HookInstaller.reinstall(profile)
             let didInstall = HookInstaller.isInstalled(profile)
+#endif
 
             try? await Task.sleep(nanoseconds: 450_000_000)
 
@@ -406,7 +428,13 @@ final class SettingsPanelViewModel: ObservableObject {
     }
 
     func uninstallHooks(for profile: ManagedHookClientProfile) {
+#if APP_STORE
+        guard HookInstaller.uninstallWithUserAuthorization(profile) else {
+            return
+        }
+#else
         HookInstaller.uninstall(profile)
+#endif
         refreshHookInstallationStates()
     }
 
@@ -421,7 +449,13 @@ final class SettingsPanelViewModel: ObservableObject {
     }
 
     func uninstallAllHooks() {
+#if APP_STORE
+        guard HookInstaller.uninstallAllWithUserAuthorization() else {
+            return
+        }
+#else
         HookInstaller.uninstall()
+#endif
         for installation in HookInstaller.customInstallations() {
             HookInstaller.uninstallCustom(id: installation.id)
         }
@@ -641,15 +675,12 @@ private struct SoundSettingsContent: View {
                     }
                 }
 
-                SettingsSectionCard(title: "固定映射") {
+                SettingsSectionCard(title: "阶段音效") {
                     ForEach(NotificationEvent.allCases) { event in
-                        BundledThemeEventLine(
+                        BundledSoundEventLine(
                             event: event,
-                            soundLabel: AppLocalization.string(event.island8BitSound.label),
-                            isEnabled: Binding(
-                                get: { AppSettings.isSoundEnabled(for: event) },
-                                set: { AppSettings.setSoundEnabled($0, for: event) }
-                            )
+                            isEnabled: soundEnabledBinding(for: event),
+                            selectedSound: bundledSoundBinding(for: event)
                         ) {
                             AppSettings.playSound(for: event)
                         }
@@ -755,6 +786,21 @@ private struct SoundSettingsContent: View {
             return $settings.taskErrorSound
         case .resourceLimit:
             return $settings.resourceLimitSound
+        }
+    }
+
+    private func bundledSoundBinding(for event: NotificationEvent) -> Binding<Island8BitSound> {
+        switch event {
+        case .processingStarted:
+            return $settings.island8BitProcessingStartSound
+        case .attentionRequired:
+            return $settings.island8BitAttentionRequiredSound
+        case .taskCompleted:
+            return $settings.island8BitTaskCompletedSound
+        case .taskError:
+            return $settings.island8BitTaskErrorSound
+        case .resourceLimit:
+            return $settings.island8BitResourceLimitSound
         }
     }
 
@@ -937,6 +983,15 @@ private struct SettingsPanelContentView: View {
             if isVisible {
                 scheduleCategoryRefresh(for: currentCategory, showLoading: false)
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .settingsWindowCategorySelectionRequested)) { notification in
+            guard presentation == .window,
+                  let rawCategory = notification.userInfo?[SettingsWindowCategorySelectionRequest.categoryKey] as? String,
+                  let category = SettingsCategory(rawValue: rawCategory) else {
+                return
+            }
+
+            selectSidebarCategory(category)
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             scheduleCategoryRefresh(for: currentCategory, showLoading: false)
@@ -1618,6 +1673,25 @@ private struct SettingsPanelContentView: View {
         }
     }
 
+    private func replayFirstRunOnboardingDemo() {
+        SettingsWindowController.shared.dismiss()
+        AppSettings.notchDetachmentHintPending = false
+        AppSettings.floatingPetSettingsHintPending = false
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            PresentationModeWelcomeWindowController.shared.present { selectedMode in
+                AppSettings.surfaceMode = selectedMode
+                AppSettings.presentationModeOnboardingPending = false
+                AppSettings.notchDetachmentHintPending = false
+                AppSettings.floatingPetSettingsHintPending = false
+
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
+                    HookWalkthroughDemoRunner.shared.start()
+                }
+            }
+        }
+    }
+
     private var shortcutsContent: some View {
         VStack(alignment: .leading, spacing: 18) {
             SettingsSectionCard(title: "全局快捷键") {
@@ -1669,6 +1743,19 @@ private struct SettingsPanelContentView: View {
 
     private var integrationContent: some View {
         VStack(alignment: .leading, spacing: 18) {
+#if APP_STORE
+            SettingsSectionCard(title: "App Store 沙箱") {
+                SettingsInfoLine(
+                    title: "需要手动授权目录",
+                    subtitle: "App Store 版本不会默认写入 ~/.claude、~/.codex 等配置。安装或重装 Hooks 时，请在系统弹窗中授权用户主目录。"
+                ) {
+                    Image(systemName: "lock.shield")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(TerminalColors.amber)
+                }
+            }
+#endif
+
             let hookProfiles = viewModel.visibleHookProfiles
             if !hookProfiles.isEmpty {
                 SettingsSectionCard(title: "Hooks 管理") {
@@ -1771,6 +1858,31 @@ private struct SettingsPanelContentView: View {
                     subtitle: "开启后 Ping Island 不再代答 Claude / Codex 等的工具审批和 AskUserQuestion，所有提问保留在终端中处理；状态指示仍会显示。",
                     isOn: $settings.routePromptsToTerminal
                 )
+                SettingsLineDivider()
+
+                SettingsActionLine(
+                    title: "重新体验首次引导",
+                    subtitle: "手动打开形态选择引导；选择刘海屏或独立悬浮宠物后，会继续进入 Hooks 演示。"
+                ) {
+                    replayFirstRunOnboardingDemo()
+                } accessory: {
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(SettingsCategory.integration.tint.opacity(0.95))
+                }
+                SettingsLineDivider()
+
+                SettingsActionLine(
+                    title: "体验 Hooks 演示",
+                    subtitle: "启动一轮可交互案例：干净桌面背景、审批提交、处理完成、完成提醒。顶部 Island 与独立悬浮宠物都支持。"
+                ) {
+                    SettingsWindowController.shared.dismiss()
+                    HookWalkthroughDemoRunner.shared.start()
+                } accessory: {
+                    Image(systemName: "play.circle.fill")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(TerminalColors.blue.opacity(0.95))
+                }
             }
 
 #if !APP_STORE
@@ -5055,10 +5167,10 @@ private struct SoundPackEventLine: View {
     }
 }
 
-private struct BundledThemeEventLine: View {
+private struct BundledSoundEventLine: View {
     let event: NotificationEvent
-    let soundLabel: String
     @Binding var isEnabled: Bool
+    @Binding var selectedSound: Island8BitSound
     let preview: () -> Void
 
     var body: some View {
@@ -5073,10 +5185,20 @@ private struct BundledThemeEventLine: View {
 
                 Spacer(minLength: 12)
 
-                HStack(spacing: 8) {
+                HStack(alignment: .center, spacing: 8) {
                     Toggle("", isOn: $isEnabled)
                         .labelsHidden()
                         .settingsCompactSwitch()
+
+                    Picker(event.title, selection: $selectedSound) {
+                        ForEach(Island8BitSound.allOrdered) { sound in
+                            Text(sound.label).tag(sound)
+                        }
+                    }
+                    .id(selectedSound)
+                    .labelsHidden()
+                    .settingsMenuPicker(width: 148)
+                    .disabled(!isEnabled)
 
                     Button(action: preview) {
                         Image(systemName: "play.fill")
@@ -5098,10 +5220,6 @@ private struct BundledThemeEventLine: View {
                 .foregroundColor(.white.opacity(0.58))
                 .fixedSize(horizontal: false, vertical: true)
                 .layoutPriority(1)
-
-            Text(AppLocalization.format("固定音效：%@", soundLabel))
-                .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                .foregroundColor(.white.opacity(0.42))
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 16)

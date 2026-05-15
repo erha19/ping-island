@@ -209,6 +209,7 @@ enum SessionCompletionNotificationPolicy {
 struct SessionCompletionNotificationView: View {
     static let minimumContentHeight: CGFloat = 172
     static let maximumAssistantContentHeight: CGFloat = 300
+    static let bubbleAssistantLineLimit = 9
 
     let notification: SessionCompletionNotification
     let presentationStyle: SessionCompletionNotificationPresentationStyle
@@ -281,30 +282,50 @@ struct SessionCompletionNotificationView: View {
                 fontSize: bodyFontSize
             )
             .frame(maxWidth: .infinity, alignment: .leading)
-            .fixedSize(horizontal: false, vertical: true)
+            .lineLimit(assistantLineLimit)
+            .truncationMode(.tail)
+            .fixedSize(horizontal: false, vertical: presentationStyle == .panel)
         } else {
             Text(appLocalized: notification.kind.fallbackAssistantMessageKey)
                 .font(.system(size: bodyFontSize, weight: .medium))
                 .foregroundColor(.white.opacity(0.7))
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .fixedSize(horizontal: false, vertical: true)
+                .lineLimit(assistantLineLimit)
+                .truncationMode(.tail)
+                .fixedSize(horizontal: false, vertical: presentationStyle == .panel)
         }
     }
 
-    private var assistantScrollView: some View {
-        ScrollView(.vertical, showsIndicators: true) {
-            assistantContent
-                .background(
-                    GeometryReader { proxy in
-                        Color.clear.preference(
-                            key: SessionCompletionContentHeightPreferenceKey.self,
-                            value: proxy.size.height
-                        )
-                    }
-                )
+    private var assistantLineLimit: Int? {
+        switch presentationStyle {
+        case .panel:
+            return nil
+        case .bubble:
+            return Self.bubbleAssistantLineLimit
         }
-        .frame(height: assistantContentHeight, alignment: .topLeading)
-        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private var assistantMessageView: some View {
+        switch presentationStyle {
+        case .panel:
+            ScrollView(.vertical, showsIndicators: true) {
+                assistantContent
+                    .background(
+                        GeometryReader { proxy in
+                            Color.clear.preference(
+                                key: SessionCompletionContentHeightPreferenceKey.self,
+                                value: proxy.size.height
+                            )
+                        }
+                    )
+            }
+            .frame(height: assistantContentHeight, alignment: .topLeading)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        case .bubble:
+            assistantContent
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+        }
     }
 
     private var assistantSection: some View {
@@ -313,7 +334,7 @@ struct SessionCompletionNotificationView: View {
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundColor(assistantPrefixColor)
 
-            assistantScrollView
+            assistantMessageView
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 14)

@@ -477,6 +477,9 @@ struct NotchView: View {
             .onReceive(NotificationCenter.default.publisher(for: .pingIslandPresentNotchDetachmentHint)) { _ in
                 presentDetachmentHintIfNeeded(force: true)
             }
+            .onReceive(NotificationCenter.default.publisher(for: .pingIslandHookWalkthroughDemoShouldCloseNotch)) { _ in
+                closeDockedNotchForHookWalkthroughDemo()
+            }
             .onPreferenceChange(OpenedPanelContentHeightPreferenceKey.self) { height in
                 guard viewModel.status == .opened else {
                     viewModel.updateOpenedMeasuredHeight(nil)
@@ -495,6 +498,16 @@ struct NotchView: View {
                     viewModel.updateOpenedMeasuredHeight(nil)
                 }
             }
+    }
+
+    private func closeDockedNotchForHookWalkthroughDemo() {
+        guard settings.surfaceMode == .notch else { return }
+        guard viewModel.presentationMode == .docked else { return }
+        guard viewModel.status == .opened else { return }
+
+        withAnimation(viewModel.animation) {
+            viewModel.notchClose()
+        }
     }
 
     private var instrumentedBody: some View {

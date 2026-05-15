@@ -1,4 +1,17 @@
+import Darwin
 import Foundation
+
+enum UserHomeDirectoryResolver {
+    nonisolated static var hookConfigurationHomeDirectory: URL {
+#if APP_STORE
+        if let passwd = getpwuid(getuid()),
+           let home = passwd.pointee.pw_dir {
+            return URL(fileURLWithPath: String(cString: home), isDirectory: true)
+        }
+#endif
+        return FileManager.default.homeDirectoryForCurrentUser
+    }
+}
 
 enum HookProtocolFamily: String, Sendable {
     case claudeHooks
@@ -229,7 +242,7 @@ struct ManagedHookClientProfile: Identifiable, Sendable {
     }
 
     nonisolated var configurationURLs: [URL] {
-        configurationRelativePaths.map(Self.resolveConfigurationURL(relativePath:))
+        configurationURLs(homeDirectory: UserHomeDirectoryResolver.hookConfigurationHomeDirectory)
     }
 
     nonisolated var primaryConfigurationURL: URL {
@@ -241,6 +254,26 @@ struct ManagedHookClientProfile: Identifiable, Sendable {
             return nil
         }
         return Self.resolveConfigurationURL(relativePath: activationConfigurationRelativePath)
+    }
+
+    nonisolated func configurationURLs(homeDirectory: URL) -> [URL] {
+        configurationRelativePaths.map {
+            Self.resolveConfigurationURL(relativePath: $0, homeDirectory: homeDirectory)
+        }
+    }
+
+    nonisolated func primaryConfigurationURL(homeDirectory: URL) -> URL {
+        configurationURLs(homeDirectory: homeDirectory)[0]
+    }
+
+    nonisolated func activationConfigurationURL(homeDirectory: URL) -> URL? {
+        guard let activationConfigurationRelativePath else {
+            return nil
+        }
+        return Self.resolveConfigurationURL(
+            relativePath: activationConfigurationRelativePath,
+            homeDirectory: homeDirectory
+        )
     }
 
     nonisolated var supportsEventSelection: Bool {
@@ -272,10 +305,19 @@ struct ManagedHookClientProfile: Identifiable, Sendable {
     }
 
     nonisolated private static func resolveConfigurationURL(relativePath: String) -> URL {
-        let home = FileManager.default.homeDirectoryForCurrentUser
+        resolveConfigurationURL(
+            relativePath: relativePath,
+            homeDirectory: UserHomeDirectoryResolver.hookConfigurationHomeDirectory
+        )
+    }
+
+    nonisolated private static func resolveConfigurationURL(
+        relativePath: String,
+        homeDirectory: URL
+    ) -> URL {
         return relativePath
             .split(separator: "/")
-            .reduce(home) { partialURL, component in
+            .reduce(homeDirectory) { partialURL, component in
                 partialURL.appendingPathComponent(String(component))
             }
     }

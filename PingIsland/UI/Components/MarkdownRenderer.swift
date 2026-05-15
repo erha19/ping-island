@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 
 struct MarkdownText: View {
@@ -19,16 +20,45 @@ struct MarkdownText: View {
     }
 
     private var renderedText: AttributedString {
+        MarkdownTextCache.shared.attributedString(for: text)
+    }
+}
+
+@MainActor
+private final class MarkdownTextCache {
+    static let shared = MarkdownTextCache()
+
+    private final class Entry {
+        let value: AttributedString
+
+        init(value: AttributedString) {
+            self.value = value
+        }
+    }
+
+    private let cache = NSCache<NSString, Entry>()
+
+    private init() {
+        cache.countLimit = 500
+        cache.totalCostLimit = 2 * 1024 * 1024
+    }
+
+    func attributedString(for text: String) -> AttributedString {
+        let key = text as NSString
+        if let cached = cache.object(forKey: key) {
+            return cached.value
+        }
+
         let options = AttributedString.MarkdownParsingOptions(
             interpretedSyntax: .full,
             failurePolicy: .returnPartiallyParsedIfPossible
         )
 
-        if let attributed = try? AttributedString(markdown: text, options: options) {
-            return attributed
-        }
+        let rendered = (try? AttributedString(markdown: text, options: options))
+            ?? AttributedString(text)
 
-        return AttributedString(text)
+        cache.setObject(Entry(value: rendered), forKey: key, cost: text.utf8.count)
+        return rendered
     }
 }
 

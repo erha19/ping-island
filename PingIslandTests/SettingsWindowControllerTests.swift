@@ -56,6 +56,18 @@ final class SettingsWindowControllerTests: XCTestCase {
         XCTAssertTrue(
             english.contains("\"需要重新打开设置面板时，直接右键宠物形象就可以。\" = \"When you need the Settings panel again, just right-click the mascot.\";")
         )
+        XCTAssertTrue(
+            zhHans.contains("\"重新体验首次引导\" = \"重新体验首次引导\";")
+        )
+        XCTAssertTrue(
+            zhHans.contains("\"手动打开形态选择引导；选择刘海屏或独立悬浮宠物后，会继续进入 Hooks 演示。\" = \"手动打开形态选择引导；选择刘海屏或独立悬浮宠物后，会继续进入 Hooks 演示。\";")
+        )
+        XCTAssertTrue(
+            english.contains("\"重新体验首次引导\" = \"Replay first-run onboarding\";")
+        )
+        XCTAssertTrue(
+            english.contains("\"手动打开形态选择引导；选择刘海屏或独立悬浮宠物后，会继续进入 Hooks 演示。\" = \"Manually open the surface selection onboarding. After choosing the top Island or floating pet, Ping Island continues into the Hooks demo.\";")
+        )
     }
 
     func testPresentReusesExistingWindowAndKeepsItVisible() throws {

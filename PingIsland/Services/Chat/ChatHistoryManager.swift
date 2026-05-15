@@ -12,6 +12,7 @@ class ChatHistoryManager: ObservableObject {
 
     @Published private(set) var histories: [String: [ChatHistoryItem]] = [:]
     @Published private(set) var agentDescriptions: [String: [String: String]] = [:]
+    private var historyRevisions: [String: Int] = [:]
 
     private var loadedSessions: Set<String> = []
     private var cancellables = Set<AnyCancellable>()
@@ -29,6 +30,10 @@ class ChatHistoryManager: ObservableObject {
 
     func history(for sessionId: String) -> [ChatHistoryItem] {
         histories[sessionId] ?? []
+    }
+
+    func revision(for sessionId: String) -> Int {
+        historyRevisions[sessionId] ?? 0
     }
 
     func isLoaded(sessionId: String) -> Bool {
@@ -68,6 +73,7 @@ class ChatHistoryManager: ObservableObject {
     func clearHistory(for sessionId: String) {
         loadedSessions.remove(sessionId)
         histories.removeValue(forKey: sessionId)
+        historyRevisions.removeValue(forKey: sessionId)
         Task {
             await SessionStore.shared.process(.sessionArchived(sessionId: sessionId))
         }
@@ -78,14 +84,24 @@ class ChatHistoryManager: ObservableObject {
     private func updateFromSessions(_ sessions: [SessionState]) {
         var newHistories: [String: [ChatHistoryItem]] = [:]
         var newAgentDescriptions: [String: [String: String]] = [:]
+        var newHistoryRevisions = historyRevisions
         for session in sessions {
             let filteredItems = filterOutSubagentTools(session.chatItems)
             newHistories[session.sessionId] = filteredItems
             newAgentDescriptions[session.sessionId] = session.subagentState.agentDescriptions
+            if histories[session.sessionId] != filteredItems {
+                newHistoryRevisions[session.sessionId, default: 0] += 1
+            }
             loadedSessions.insert(session.sessionId)
         }
-        histories = newHistories
-        agentDescriptions = newAgentDescriptions
+        newHistoryRevisions = newHistoryRevisions.filter { newHistories.keys.contains($0.key) }
+        historyRevisions = newHistoryRevisions
+        if histories != newHistories {
+            histories = newHistories
+        }
+        if agentDescriptions != newAgentDescriptions {
+            agentDescriptions = newAgentDescriptions
+        }
     }
 
     private func filterOutSubagentTools(_ items: [ChatHistoryItem]) -> [ChatHistoryItem] {

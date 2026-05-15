@@ -84,7 +84,7 @@ final class AppLaunchConfigurationTests: XCTestCase {
         XCTAssertEqual(configuration.activationPolicy, .accessory)
     }
 
-    func testLaunchFlowDefersMainWindowUntilPresentationModeOnboardingCompletes() {
+    func testLaunchFlowPresentsPresentationModeOnboardingWhenPending() {
         let configuration = AppLaunchConfiguration(environment: [:], isDebuggerAttached: false)
 
         let flow = AppLaunchFlow(
@@ -95,6 +95,21 @@ final class AppLaunchConfigurationTests: XCTestCase {
         XCTAssertTrue(flow.shouldStartMonitoringImmediately)
         XCTAssertTrue(flow.shouldPresentSurfaceModeOnboarding)
         XCTAssertFalse(flow.shouldCreateInitialIslandWindow)
+        XCTAssertFalse(flow.shouldPresentSettingsWindowImmediately)
+        XCTAssertFalse(flow.shouldPresentSettingsWindowAfterOnboarding)
+    }
+
+    func testLaunchFlowCreatesIslandWindowWithoutOnboardingMarker() {
+        let configuration = AppLaunchConfiguration(environment: [:], isDebuggerAttached: false)
+
+        let flow = AppLaunchFlow(
+            configuration: configuration,
+            presentationModeOnboardingPending: false
+        )
+
+        XCTAssertTrue(flow.shouldStartMonitoringImmediately)
+        XCTAssertFalse(flow.shouldPresentSurfaceModeOnboarding)
+        XCTAssertTrue(flow.shouldCreateInitialIslandWindow)
         XCTAssertFalse(flow.shouldPresentSettingsWindowImmediately)
         XCTAssertFalse(flow.shouldPresentSettingsWindowAfterOnboarding)
     }
@@ -117,6 +132,24 @@ final class AppLaunchConfigurationTests: XCTestCase {
         XCTAssertTrue(flow.shouldPresentSettingsWindowAfterOnboarding)
     }
 
+    func testLaunchFlowPresentsSettingsImmediatelyWithoutOnboardingMarker() {
+        let configuration = AppLaunchConfiguration(
+            environment: ["PING_ISLAND_SHOW_SETTINGS_ON_LAUNCH": "1"],
+            isDebuggerAttached: false
+        )
+
+        let flow = AppLaunchFlow(
+            configuration: configuration,
+            presentationModeOnboardingPending: false
+        )
+
+        XCTAssertTrue(flow.shouldStartMonitoringImmediately)
+        XCTAssertFalse(flow.shouldPresentSurfaceModeOnboarding)
+        XCTAssertTrue(flow.shouldCreateInitialIslandWindow)
+        XCTAssertTrue(flow.shouldPresentSettingsWindowImmediately)
+        XCTAssertFalse(flow.shouldPresentSettingsWindowAfterOnboarding)
+    }
+
     func testLaunchFlowKeepsMonitoringDisabledWhileRunningTests() {
         let configuration = AppLaunchConfiguration(
             environment: ["XCTestConfigurationFilePath": "/tmp/test.xctestconfiguration"],
@@ -125,7 +158,7 @@ final class AppLaunchConfigurationTests: XCTestCase {
 
         let flow = AppLaunchFlow(
             configuration: configuration,
-            presentationModeOnboardingPending: false
+            presentationModeOnboardingPending: true
         )
 
         XCTAssertFalse(flow.shouldStartMonitoringImmediately)

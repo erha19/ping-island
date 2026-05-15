@@ -5,6 +5,7 @@
 //  Installs and manages hook integrations for supported clients.
 //
 
+import AppKit
 import Foundation
 
 private enum HookConfigParser {
@@ -412,6 +413,17 @@ struct HookInstaller {
             markPresentationOnboardingPending: markPresentationOnboardingPending
         )
 
+#if APP_STORE
+        if isFirstLaunch {
+            if let markHookInstallOnboardingPending {
+                markHookInstallOnboardingPending()
+            } else {
+                UserDefaults.standard.set(true, forKey: AppSettingsDefaultKeys.hookInstallOnboardingPending)
+            }
+        }
+        updateVersionMetadata()
+        return
+#else
         let qoderCLISupportsClaudeHooks = qoderCLIUsesClaudeCompatibleHooks()
         var preferredTargets = preferredTargets()
         if qoderCLISupportsClaudeHooks,
@@ -447,6 +459,7 @@ struct HookInstaller {
 
         // Update version metadata after installation
         updateVersionMetadata()
+#endif
     }
 
     /// Run the default first-run install for every defaultEnabled profile.
@@ -460,6 +473,113 @@ struct HookInstaller {
             install(profile, persistPreference: true, bypassAvailabilityCheck: !canManage(profile))
         }
     }
+
+#if APP_STORE
+    @discardableResult
+    static func performFirstRunDefaultInstallWithUserAuthorization() -> Bool {
+        guard requestAppStoreHookDirectoryAuthorization() else {
+            return false
+        }
+        performFirstRunDefaultInstall()
+        return true
+    }
+
+    @discardableResult
+    static func installWithUserAuthorization(_ profile: ManagedHookClientProfile) -> Bool {
+        guard requestAppStoreHookDirectoryAuthorization() else {
+            return false
+        }
+        install(profile)
+        return isInstalled(profile)
+    }
+
+    @discardableResult
+    static func installWithUserAuthorization(
+        _ profile: ManagedHookClientProfile,
+        selection: HookInstallSelection
+    ) -> Bool {
+        guard requestAppStoreHookDirectoryAuthorization() else {
+            return false
+        }
+        install(profile, selection: selection)
+        return isInstalled(profile)
+    }
+
+    @discardableResult
+    static func reinstallWithUserAuthorization(_ profile: ManagedHookClientProfile) -> Bool {
+        guard requestAppStoreHookDirectoryAuthorization() else {
+            return false
+        }
+        reinstall(profile)
+        return isInstalled(profile)
+    }
+
+    @discardableResult
+    static func reinstallWithUserAuthorization(
+        _ profile: ManagedHookClientProfile,
+        selection: HookInstallSelection
+    ) -> Bool {
+        guard requestAppStoreHookDirectoryAuthorization() else {
+            return false
+        }
+        saveSelection(selection, for: profile)
+        reinstall(profile)
+        return isInstalled(profile)
+    }
+
+    static func uninstallWithUserAuthorization(_ profile: ManagedHookClientProfile) -> Bool {
+        guard requestAppStoreHookDirectoryAuthorization() else {
+            return false
+        }
+        uninstall(profile)
+        return true
+    }
+
+    static func uninstallAllWithUserAuthorization() -> Bool {
+        guard requestAppStoreHookDirectoryAuthorization() else {
+            return false
+        }
+        uninstall()
+        return true
+    }
+
+    private static func requestAppStoreHookDirectoryAuthorization() -> Bool {
+        let homeDirectory = UserHomeDirectoryResolver.hookConfigurationHomeDirectory
+        let panel = NSOpenPanel()
+        panel.title = AppLocalization.string("授权 Hooks 配置目录")
+        panel.message = AppLocalization.string("Mac App Store 版本需要你手动授权用户主目录，之后才能写入 Claude、Codex 等客户端的 Hooks 配置。")
+        panel.prompt = AppLocalization.string("授权并继续")
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = false
+        panel.directoryURL = homeDirectory
+
+        guard panel.runModal() == .OK,
+              let selectedURL = panel.url else {
+            return false
+        }
+
+        guard selectedURL.standardizedFileURL == homeDirectory.standardizedFileURL else {
+            let alert = NSAlert()
+            alert.messageText = AppLocalization.string("请选择用户主目录")
+            alert.informativeText = AppLocalization.string("为了同时写入 ~/.claude、~/.codex 等多个客户端配置，请授权你的用户主目录。")
+            alert.addButton(withTitle: AppLocalization.string("好"))
+            alert.runModal()
+            return false
+        }
+
+        let didStartAccess = selectedURL.startAccessingSecurityScopedResource()
+        appStoreAuthorizedHookDirectory = selectedURL
+        if didStartAccess {
+            appStoreSecurityScopedHookDirectories.append(selectedURL)
+        }
+        return true
+    }
+
+    private static var appStoreAuthorizedHookDirectory: URL?
+    private static var appStoreSecurityScopedHookDirectories: [URL] = []
+#endif
 
     static func defaultEnabledManageableProfiles() -> [ManagedHookClientProfile] {
         let qoderCLISupportsClaudeHooks = qoderCLIUsesClaudeCompatibleHooks()

@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 import XCTest
 @testable import Ping_Island
 
@@ -453,22 +454,37 @@ final class DetachedIslandWindowControllerTests: XCTestCase {
         )
     }
 
-    func testBubblePlacementMapsTrimmedCornerToPetFacingEdge() {
+    func testBubbleShapeKeepsAllCornersRoundedForEveryPlacement() {
+        let rect = CGRect(x: 0, y: 0, width: 280, height: 180)
+        let cornerSamples = [
+            CGPoint(x: rect.minX + 1, y: rect.minY + 1),
+            CGPoint(x: rect.maxX - 1, y: rect.minY + 1),
+            CGPoint(x: rect.maxX - 1, y: rect.maxY - 1),
+            CGPoint(x: rect.minX + 1, y: rect.maxY - 1)
+        ]
+
+        for placement in DetachedIslandBubblePlacement.allCases {
+            let path = DetachedIslandBubbleShape(placement: placement).path(in: rect)
+
+            for sample in cornerSamples {
+                XCTAssertFalse(
+                    path.contains(sample),
+                    "Expected \(placement) bubble to keep corner sample \(sample) transparent"
+                )
+            }
+        }
+    }
+
+    func testBubbleContentWidthReservesRenderInsetAndPadding() {
+        let frameWidth: CGFloat = 280
+        let expectedWidth = frameWidth
+            - (DetachedIslandPanelMetrics.bubbleRenderInset * 2)
+            - (DetachedIslandPanelMetrics.bubbleHorizontalPadding * 2)
+
         XCTAssertEqual(
-            DetachedIslandBubblePlacement.topLeft.trimmedCorner,
-            .bottomTrailing
-        )
-        XCTAssertEqual(
-            DetachedIslandBubblePlacement.topRight.trimmedCorner,
-            .bottomLeading
-        )
-        XCTAssertEqual(
-            DetachedIslandBubblePlacement.bottomLeft.trimmedCorner,
-            .topTrailing
-        )
-        XCTAssertEqual(
-            DetachedIslandBubblePlacement.bottomRight.trimmedCorner,
-            .topLeading
+            DetachedIslandContentModel.contentWidth(for: frameWidth),
+            expectedWidth,
+            accuracy: 0.5
         )
     }
 
@@ -630,6 +646,45 @@ final class DetachedIslandWindowControllerTests: XCTestCase {
 
         XCTAssertEqual(measuredHeight, 420, accuracy: 0.5)
         XCTAssertEqual(cappedHeight, 740, accuracy: 0.5)
+    }
+
+    func testCompletionBubbleUsesMeasuredHeightBeforeFallback() {
+        let viewModel = makeViewModel()
+        let notification = SessionCompletionNotification(
+            session: makeCompletedSession(id: "done"),
+            kind: .completed
+        )
+
+        let fallbackHeight = DetachedIslandContentModel.bubbleContentSize(
+            for: .completionNotification(notification),
+            sessions: [notification.session],
+            viewModel: viewModel
+        ).height
+        let measuredHeight = DetachedIslandContentModel.bubbleContentSize(
+            for: .completionNotification(notification),
+            sessions: [notification.session],
+            viewModel: viewModel,
+            measuredCompletionBubbleHeight: 190
+        ).height
+        let minimumHeight = DetachedIslandContentModel.bubbleContentSize(
+            for: .completionNotification(notification),
+            sessions: [notification.session],
+            viewModel: viewModel,
+            measuredCompletionBubbleHeight: 100
+        ).height
+
+        XCTAssertEqual(
+            fallbackHeight,
+            DetachedIslandPanelMetrics.completionBubbleFallbackHeight,
+            accuracy: 0.5
+        )
+        XCTAssertEqual(measuredHeight, 190, accuracy: 0.5)
+        XCTAssertEqual(
+            minimumHeight,
+            DetachedIslandPanelMetrics.completionBubbleMinimumHeight,
+            accuracy: 0.5
+        )
+        XCTAssertLessThan(fallbackHeight, 260)
     }
 
     func testNewAttentionAutoOpensHoverBubble() {
@@ -1285,6 +1340,32 @@ final class DetachedIslandWindowControllerTests: XCTestCase {
         XCTAssertFalse(controller.isBubbleVisibleForTesting)
 
         waitForBubbleHidden(controller)
+    }
+
+    func testBubbleHideCollapsePreservesPetAnchorAfterFade() throws {
+        let viewModel = makeViewModel()
+        let sessionMonitor = makeSessionMonitor()
+        sessionMonitor.instances = [
+            makeSession(id: "active", phase: .processing)
+        ]
+
+        let controller = DetachedIslandWindowController(
+            viewModel: viewModel,
+            sessionMonitor: sessionMonitor,
+            onClose: {}
+        )
+        defer { controller.dismiss() }
+
+        controller.present(atPetAnchor: CGPoint(x: 1260, y: 180))
+        controller.presentHoverBubbleForTesting()
+
+        let expandedAnchor = try XCTUnwrap(controller.currentPetAnchor)
+        controller.hideBubbleForTesting()
+        waitForBubbleHidden(controller)
+        let collapsedAnchor = try XCTUnwrap(controller.currentPetAnchor)
+
+        XCTAssertEqual(collapsedAnchor.x, expandedAnchor.x, accuracy: 0.5)
+        XCTAssertEqual(collapsedAnchor.y, expandedAnchor.y, accuracy: 0.5)
     }
 
     private func waitForBubbleHidden(

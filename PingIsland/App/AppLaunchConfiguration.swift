@@ -55,9 +55,10 @@ struct AppLaunchFlow: Equatable {
 
     init(
         configuration: AppLaunchConfiguration,
-        presentationModeOnboardingPending: Bool
+        presentationModeOnboardingPending: Bool = false
     ) {
-        let shouldPresentOnboarding = configuration.shouldCreateNotchWindow && presentationModeOnboardingPending
+        let shouldPresentOnboarding = configuration.shouldCreateNotchWindow
+            && presentationModeOnboardingPending
 
         self.shouldStartMonitoringImmediately = !configuration.isRunningTests
         self.shouldPresentSurfaceModeOnboarding = shouldPresentOnboarding
