@@ -272,11 +272,17 @@ code {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 2rem;
+  min-width: 2.55rem;
   padding: 0.15rem 0.45rem;
   border-radius: 9999px;
   background: rgba(255, 255, 255, 0.08);
   font-size: 0.8rem;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.star-count.is-loading {
+  color: rgba(255, 255, 255, 0.58);
 }
 
 .page-shell {

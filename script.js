@@ -13,26 +13,106 @@ if (desktopDemo) {
   }, 3000);
 }
 
-async function refreshStars() {
+const githubRepoApiUrl = "https://api.github.com/repos/erha19/ping-island";
+const starCacheKey = "ping-island-stars";
+const starCacheMaxAge = 1000 * 60 * 30;
+const starNodes = Array.from(document.querySelectorAll("[data-stars]"));
+
+function formatStars(stars) {
+  return new Intl.NumberFormat("en", {
+    notation: stars >= 10000 ? "compact" : "standard",
+    maximumFractionDigits: 1
+  }).format(stars);
+}
+
+function setStarCount(stars, source = "GitHub") {
+  if (!Number.isFinite(stars) || stars < 0) return;
+
+  const label = formatStars(stars);
+
+  starNodes.forEach((node) => {
+    node.textContent = label;
+    node.classList.remove("is-loading");
+    node.title = `${stars.toLocaleString("en")} stars on ${source}`;
+  });
+}
+
+function readCachedStars() {
   try {
-    const response = await fetch("https://api.github.com/repos/erha19/ping-island", {
+    const cached = JSON.parse(window.localStorage.getItem(starCacheKey) || "null");
+
+    if (
+      cached &&
+      Number.isFinite(cached.stars) &&
+      Number.isFinite(cached.updatedAt) &&
+      Date.now() - cached.updatedAt < starCacheMaxAge
+    ) {
+      return cached.stars;
+    }
+  } catch {
+    try {
+      window.localStorage.removeItem(starCacheKey);
+    } catch {
+      // Ignore storage cleanup failures.
+    }
+  }
+
+  return null;
+}
+
+function writeCachedStars(stars) {
+  try {
+    window.localStorage.setItem(
+      starCacheKey,
+      JSON.stringify({
+        stars,
+        updatedAt: Date.now()
+      })
+    );
+  } catch {
+    // Ignore storage failures; the live GitHub response already updated the page.
+  }
+}
+
+async function refreshStars() {
+  if (starNodes.length === 0) return;
+
+  const cachedStars = readCachedStars();
+
+  if (cachedStars !== null) {
+    setStarCount(cachedStars, "cached GitHub data");
+  }
+
+  try {
+    const response = await fetch(githubRepoApiUrl, {
+      cache: "no-store",
       headers: {
-        Accept: "application/vnd.github+json"
+        Accept: "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28"
       }
     });
 
-    if (!response.ok) return;
+    if (!response.ok) {
+      throw new Error(`GitHub API returned ${response.status}`);
+    }
 
     const repo = await response.json();
     const stars = typeof repo.stargazers_count === "number" ? repo.stargazers_count : null;
 
-    if (stars === null) return;
+    if (stars === null) {
+      throw new Error("GitHub API response did not include stargazers_count");
+    }
 
-    document.querySelectorAll("[data-stars]").forEach((node) => {
-      node.textContent = String(stars);
-    });
+    setStarCount(stars);
+    writeCachedStars(stars);
   } catch {
-    // Keep fallback count when API is unavailable.
+    if (cachedStars === null) {
+      starNodes.forEach((node) => {
+        node.textContent = "--";
+        node.classList.remove("is-loading");
+        node.title = "GitHub star count is temporarily unavailable";
+      });
+    }
   }
 }
 
