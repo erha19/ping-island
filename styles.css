@@ -138,6 +138,7 @@ code {
 
 .brand-copy strong,
 .hero-title,
+.hero-subtitle,
 .section-head h2,
 .star-callout h2,
 .demo-row-title strong,
@@ -389,6 +390,15 @@ code {
   max-width: none;
   font-size: clamp(1.9rem, 4.4vw, 3.5rem);
   line-height: 0.95;
+}
+
+.hero-subtitle {
+  max-width: 48rem;
+  margin: 0.9rem 0 0;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: clamp(1rem, 2vw, 1.25rem);
+  font-weight: 500;
+  line-height: 1.45;
 }
 
 .gradient-text {
@@ -996,6 +1006,7 @@ code {
 
 .section-head p,
 .feature-card p,
+.install-card p,
 .install-card li,
 .star-callout p,
 .mascot-card figcaption .mono-label,
@@ -1364,7 +1375,23 @@ code {
 }
 
 .install-grid {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.install-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.install-card-featured {
+  border-color: rgba(245, 158, 11, 0.24);
+  box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.08), var(--shadow-card);
+}
+
+.install-card p {
+  margin: 0 0 1rem;
+  line-height: 1.5;
 }
 
 .install-card ol {
@@ -1372,7 +1399,12 @@ code {
   padding-left: 1.2rem;
 }
 
+.install-card .button {
+  margin-top: auto;
+}
+
 .code-block {
+  width: 100%;
   margin: 0 0 1.5rem;
   padding: 1rem;
   overflow-x: auto;
@@ -1542,6 +1574,10 @@ code {
   .hero-title {
     max-width: none;
     font-size: clamp(2.15rem, 10vw, 3.5rem);
+  }
+
+  .hero-subtitle {
+    font-size: 1rem;
   }
 
   .button {

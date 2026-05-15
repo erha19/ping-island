@@ -3,17 +3,35 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Ping Island | Ambient Control for AI Coding Sessions</title>
+    <title>Ping Island | macOS Dynamic Island for AI Coding Agents</title>
     <meta
       name="description"
-      content="Ping Island is a macOS menu bar app that surfaces approvals, questions, completions, focus return, and detached Buddy interactions for AI coding sessions in a calm, premium dark interface."
+      content="Ping Island is an open-source macOS menu bar app for Claude Code, Codex, Gemini CLI, Qwen Code, OpenCode, and other AI coding agents, with Homebrew Cask and GitHub Release installs."
     />
+    <meta
+      name="keywords"
+      content="Ping Island, macOS menu bar app, Dynamic Island, AI coding agents, Claude Code, Codex, Gemini CLI, Qwen Code, OpenCode, Homebrew Cask"
+    />
+    <meta name="robots" content="index, follow" />
+    <meta name="theme-color" content="#0a0a0f" />
+    <link rel="canonical" href="https://erha19.github.io/ping-island/" />
     <meta property="og:title" content="Ping Island" />
     <meta
       property="og:description"
-      content="A premium dark control surface for Claude Code, Codex, Gemini CLI, Hermes Agent, Qwen Code, OpenClaw, and other AI coding clients on macOS, now including detached Buddy mode."
+      content="Open-source macOS Dynamic Island controls for AI coding agents, with approvals, questions, completion alerts, focus return, Homebrew Cask, and GitHub Release installs."
     />
     <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://erha19.github.io/ping-island/" />
+    <meta property="og:image" content="https://erha19.github.io/ping-island/assets/ping-island-mascot-poster.png" />
+    <meta property="og:image:alt" content="Ping Island mascots for supported AI coding clients" />
+    <meta property="og:site_name" content="Ping Island" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Ping Island" />
+    <meta
+      name="twitter:description"
+      content="A macOS Dynamic Island for Claude Code, Codex, Gemini CLI, Qwen Code, OpenCode, and other AI coding agents."
+    />
+    <meta name="twitter:image" content="https://erha19.github.io/ping-island/assets/ping-island-mascot-poster.png" />
     <link rel="icon" href="./assets/ping-island-icon.svg" type="image/svg+xml" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -22,6 +40,26 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="./styles.css" />
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "Ping Island",
+        "applicationCategory": "DeveloperApplication",
+        "operatingSystem": "macOS 14+",
+        "description": "Open-source macOS menu bar app that surfaces approvals, questions, completions, focus return, and detached Buddy interactions for AI coding agents.",
+        "url": "https://erha19.github.io/ping-island/",
+        "codeRepository": "https://github.com/erha19/ping-island",
+        "downloadUrl": "https://github.com/erha19/ping-island/releases",
+        "installUrl": "https://github.com/erha19/ping-island#installation",
+        "license": "https://github.com/erha19/ping-island/blob/main/LICENSE.md",
+        "offers": {
+          "@type": "Offer",
+          "price": "0",
+          "priceCurrency": "USD"
+        }
+      }
+    </script>
   </head>
   <body>
     <div class="ambient-orb ambient-orb-top" aria-hidden="true"></div>
@@ -75,9 +113,12 @@
           </div>
 
           <h1 class="hero-title">
-            A Dynamic Island for the moments your agents
-            <span class="gradient-text">need you.</span>
+            Ping Island for AI coding
+            <span class="gradient-text">agents.</span>
           </h1>
+          <p class="hero-subtitle">
+            A macOS Dynamic Island-style control surface for Claude Code, Codex, Gemini CLI, Qwen Code, OpenCode, and compatible hook-driven agent sessions.
+          </p>
 
           <div class="hero-actions">
             <a
@@ -546,12 +587,31 @@
       <section id="install" class="content-section">
         <div class="section-head">
           <span class="mono-label">Install</span>
-          <h2>Start with the release build, or go straight to source.</h2>
+          <h2>Install from Homebrew, GitHub Releases, or source.</h2>
+          <p>These paths mirror the README so the website stays aligned with the supported macOS install flow.</p>
         </div>
 
         <div class="install-grid">
+          <article class="panel install-card install-card-featured">
+            <span class="mono-label">Recommended</span>
+            <h3>Homebrew Cask</h3>
+            <p>Install or update from the same notarized DMG published through the release pipeline.</p>
+            <pre class="code-block">brew tap erha19/tap
+brew install --cask ping-island</pre>
+            <a
+              class="button button-primary"
+              href="https://github.com/erha19/homebrew-tap"
+              target="_blank"
+              rel="noreferrer"
+            >
+              View Homebrew Tap
+            </a>
+          </article>
+
           <article class="panel install-card">
-            <h3>Release path</h3>
+            <span class="mono-label">Manual install</span>
+            <h3>GitHub Release</h3>
+            <p>Download the latest DMG from GitHub, move the app into Applications, then launch Ping Island.</p>
             <ol>
               <li>Open GitHub Releases.</li>
               <li>Download the latest DMG.</li>
@@ -569,7 +629,9 @@
           </article>
 
           <article class="panel install-card">
-            <h3>Source path</h3>
+            <span class="mono-label">Develop locally</span>
+            <h3>Build from source</h3>
+            <p>Clone the repository and build the main Xcode scheme when you want to inspect or modify the app.</p>
             <pre class="code-block">git clone https://github.com/erha19/ping-island.git
 cd ping-island
 xcodebuild -project PingIsland.xcodeproj \
