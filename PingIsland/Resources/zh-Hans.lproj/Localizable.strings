@@ -515,6 +515,17 @@
 "请选择用户主目录" = "请选择用户主目录";
 "为了同时写入 ~/.claude、~/.codex 等多个客户端配置，请授权你的用户主目录。" = "为了同时写入 ~/.claude、~/.codex 等多个客户端配置，请授权你的用户主目录。";
 "好" = "好";
+"Bridge 链路尚未检测" = "Bridge 链路尚未检测";
+"Bridge 链路自检" = "Bridge 链路自检";
+"Bridge launcher 未安装或不可执行" = "Bridge launcher 未安装或不可执行";
+"PingIslandBridge 二进制缺失" = "PingIslandBridge 二进制缺失";
+"Bridge launcher 需要重新安装以写入 App Store 沙箱路径" = "Bridge launcher 需要重新安装以写入 App Store 沙箱路径";
+"Bridge 监听尚未启动，请保持 Ping Island 正在运行后重试" = "Bridge 监听尚未启动，请保持 Ping Island 正在运行后重试";
+"Bridge launcher 自检失败，请重启 Ping Island 后重新安装 Hooks" = "Bridge launcher 自检失败，请重启 Ping Island 后重新安装 Hooks";
+"Bridge 链路正常，Hooks 事件可转发到当前 App" = "Bridge 链路正常，Hooks 事件可转发到当前 App";
+"正常" = "正常";
+"异常" = "异常";
+"重新检测" = "重新检测";
 "App Store 沙箱" = "App Store 沙箱";
 "需要手动授权目录" = "需要手动授权目录";
 "App Store 版本不会默认写入 ~/.claude、~/.codex 等配置。安装或重装 Hooks 时，请在系统弹窗中授权用户主目录。" = "App Store 版本不会默认写入 ~/.claude、~/.codex 等配置。安装或重装 Hooks 时，请在系统弹窗中授权用户主目录。";

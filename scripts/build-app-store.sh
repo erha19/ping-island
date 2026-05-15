@@ -14,11 +14,23 @@ SCHEME="${PING_ISLAND_APP_STORE_SCHEME:-PingIslandAppStore}"
 PROJECT_FILE="${PING_ISLAND_PROJECT_FILE:-PingIsland.xcodeproj}"
 SKIP_SIGNING="${PING_ISLAND_SKIP_APP_STORE_SIGNING:-0}"
 UPLOAD="${PING_ISLAND_APP_STORE_UPLOAD:-0}"
+APP_STORE_ENTITLEMENTS="$PROJECT_DIR/PingIsland/Resources/PingIsland-AppStore.entitlements"
+APP_GROUP_ID="group.com.wudanwu.PingIsland"
 
 rm -rf "$BUILD_DIR"
 mkdir -p "$BUILD_DIR"
 
 cd "$PROJECT_DIR"
+
+if ! /usr/libexec/PlistBuddy -c "Print :com.apple.security.application-groups" "$APP_STORE_ENTITLEMENTS" 2>/dev/null | grep -q "$APP_GROUP_ID"; then
+    echo "error: App Store entitlements must include application group '$APP_GROUP_ID' for bridge IPC." >&2
+    exit 1
+fi
+
+if ! /usr/libexec/PlistBuddy -c "Print :com.apple.security.files.bookmarks.app-scope" "$APP_STORE_ENTITLEMENTS" 2>/dev/null | grep -q "true"; then
+    echo "error: App Store entitlements must allow app-scoped bookmarks for persisted hook directory authorization." >&2
+    exit 1
+fi
 
 archive_args=(
     xcodebuild archive

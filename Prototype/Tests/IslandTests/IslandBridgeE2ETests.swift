@@ -4,6 +4,53 @@ import IslandShared
 import Testing
 
 @Test
+func islandBridgeHealthCheckRoundTripsThroughSocketServer() async throws {
+    try await withTemporaryDirectory { directory in
+        let recorder = await MainActor.run { SnapshotRecorder() }
+        let store = SessionStore { snapshot in
+            recorder.snapshot = snapshot
+        }
+        let coordinator = ApprovalCoordinator()
+        let socketPath = directory.appending(path: "island.sock").path()
+        try await withRunningSocketServer(
+            socketPath: socketPath,
+            sessionStore: store,
+            approvalCoordinator: coordinator
+        ) { _ in
+            let executable = try TestRuntime.executableURL(named: "PingIslandBridge")
+            let process = try RunningProcess(
+                executableURL: executable,
+                arguments: ["--mode", "health-check"],
+                environment: ["ISLAND_SOCKET_PATH": socketPath]
+            )
+
+            let result = process.waitForExit()
+
+            #expect(result.terminationStatus == 0)
+            #expect(result.stdout.trimmingCharacters(in: .whitespacesAndNewlines) == "ok")
+            #expect(result.stderr.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        }
+    }
+}
+
+@Test
+func islandBridgeHealthCheckFailsWhenSocketIsUnavailable() throws {
+    let executable = try TestRuntime.executableURL(named: "PingIslandBridge")
+    let process = try RunningProcess(
+        executableURL: executable,
+        arguments: ["--mode", "health-check"],
+        environment: [
+            "ISLAND_SOCKET_PATH": "/tmp/ping-island-missing-\(UUID().uuidString).sock"
+        ]
+    )
+
+    let result = process.waitForExit()
+
+    #expect(result.terminationStatus != 0)
+    #expect(result.stdout.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+}
+
+@Test
 func islandBridgeAllowsStateOnlyEventsWhenAppIsUnavailable() throws {
     let executable = try TestRuntime.executableURL(named: "PingIslandBridge")
     let process = try RunningProcess(

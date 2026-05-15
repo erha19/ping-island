@@ -78,6 +78,24 @@ func routePromptsToTerminalDropsAskUserQuestionIntervention() throws {
 }
 
 @Test
+func bridgeRuntimeConfigLoadsFromEnvironmentPath() async throws {
+    try await withTemporaryDirectory { directory in
+        let configURL = directory.appending(path: "bridge-config.json")
+        try """
+        {
+          "routePromptsToTerminal": true
+        }
+        """.write(to: configURL, atomically: true, encoding: .utf8)
+
+        let config = BridgeRuntimeConfig.load(
+            environment: [BridgeRuntimeConfig.configPathEnvironmentKey: configURL.path()]
+        )
+
+        #expect(config.routePromptsToTerminal)
+    }
+}
+
+@Test
 func mapsGhosttyTerminalContextFromEnvironment() throws {
     let payload = """
     {

@@ -35,7 +35,7 @@ struct IslandBridgeMain {
                 if environment["TTY"]?.isEmpty != false, let tty = detectTTY(parentPID: getppid()) {
                     environment["TTY"] = tty
                 }
-                let runtimeConfig = BridgeRuntimeConfig.load()
+                let runtimeConfig = BridgeRuntimeConfig.load(environment: environment)
                 let envelope = HookPayloadMapper.makeEnvelope(
                     source: source,
                     arguments: CommandLine.arguments,
@@ -100,6 +100,11 @@ struct IslandBridgeMain {
             case .remoteAgentAttach:
                 let controlSocket = try requiredArgument("--control-socket", arguments: CommandLine.arguments)
                 try RemoteAgentAttach.run(controlSocketPath: controlSocket)
+            case .healthCheck:
+                let environment = ProcessInfo.processInfo.environment
+                let socketPath = environment["ISLAND_SOCKET_PATH"] ?? "/tmp/island.sock"
+                try SocketClient.sendHealthCheck(socketPath: socketPath)
+                FileHandle.standardOutput.write(Data("ok\n".utf8))
             }
         } catch {
             FileHandle.standardError.write(Data("PingIslandBridge error: \(error.localizedDescription)\n".utf8))
@@ -579,9 +584,13 @@ private enum BridgeRuntimeMode: String {
     case hook
     case remoteAgentService = "remote-agent-service"
     case remoteAgentAttach = "remote-agent-attach"
+    case healthCheck = "health-check"
 }
 
 private enum SocketClient {
+    private static let healthCheckRequest = #"{"type":"ping-island-health-check"}"#
+    private static let healthCheckResponse = #"{"ok":true}"#
+
     static func send(envelope: BridgeEnvelope, socketPath: String) throws -> BridgeResponse {
         let fd = socket(AF_UNIX, islandStreamSocketType, 0)
         guard fd >= 0 else {
@@ -592,6 +601,9 @@ private enum SocketClient {
         var address = sockaddr_un()
         address.sun_family = sa_family_t(AF_UNIX)
         let utf8 = socketPath.utf8CString.map(UInt8.init(bitPattern:))
+        guard utf8.count <= MemoryLayout.size(ofValue: address.sun_path) else {
+            throw BridgeError.connectionFailed
+        }
         withUnsafeMutableBytes(of: &address.sun_path) { buffer in
             buffer.copyBytes(from: utf8)
         }
@@ -617,6 +629,55 @@ private enum SocketClient {
             return BridgeResponse(requestID: envelope.id)
         }
         return try BridgeCodec.decodeResponse(Data(buffer.prefix(count)))
+    }
+
+    static func sendHealthCheck(socketPath: String) throws {
+        let fd = socket(AF_UNIX, islandStreamSocketType, 0)
+        guard fd >= 0 else {
+            throw BridgeError.connectionFailed
+        }
+        defer { close(fd) }
+
+        var address = sockaddr_un()
+        address.sun_family = sa_family_t(AF_UNIX)
+        let utf8 = socketPath.utf8CString.map(UInt8.init(bitPattern:))
+        guard utf8.count <= MemoryLayout.size(ofValue: address.sun_path) else {
+            throw BridgeError.connectionFailed
+        }
+        withUnsafeMutableBytes(of: &address.sun_path) { buffer in
+            buffer.copyBytes(from: utf8)
+        }
+
+        let result = withUnsafePointer(to: &address) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                connect(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
+            }
+        }
+        guard result == 0 else {
+            throw BridgeError.connectionFailed
+        }
+
+        let request = Data(Self.healthCheckRequest.utf8)
+        let wrote = request.withUnsafeBytes { buffer -> Bool in
+            guard let baseAddress = buffer.baseAddress else { return false }
+            return write(fd, baseAddress, request.count) == request.count
+        }
+        guard wrote else {
+            throw BridgeError.connectionFailed
+        }
+        shutdown(fd, islandShutdownWrite)
+
+        var buffer = [UInt8](repeating: 0, count: 128)
+        let count = read(fd, &buffer, buffer.count)
+        guard count > 0 else {
+            throw BridgeError.connectionFailed
+        }
+
+        let response = String(decoding: buffer.prefix(count), as: UTF8.self)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard response == Self.healthCheckResponse else {
+            throw BridgeError.connectionFailed
+        }
     }
 }
 

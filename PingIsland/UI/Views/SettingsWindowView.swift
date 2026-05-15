@@ -179,6 +179,10 @@ final class SettingsPanelViewModel: ObservableObject {
     @Published private(set) var qoderCLIHookRefreshStatus: HookInstaller.QoderCLIHookRefreshStatus?
     @Published private(set) var qoderCLIHookRefreshNoticeStatus: HookInstaller.QoderCLIHookRefreshStatus?
     @Published private(set) var closedNotchUsageAvailability = ClosedNotchUsageAvailability()
+    @Published private(set) var bridgeHealthStatus = HookInstaller.BridgeHealthStatus(
+        isHealthy: false,
+        message: AppLocalization.string("Bridge 链路尚未检测")
+    )
 
     private var hookFeedbackClearTasks: [String: Task<Void, Never>] = [:]
     private let qoderCLIHookRefreshStatusProvider: @MainActor () -> HookInstaller.QoderCLIHookRefreshStatus?
@@ -256,6 +260,7 @@ final class SettingsPanelViewModel: ObservableObject {
             refreshIDEExtensionInstallationStates()
             refreshCustomHookInstallations()
             refreshQoderCLIHookRefreshStatus()
+            refreshBridgeHealthStatus()
         case .general, .shortcuts, .mascot, .remote, .labs, .about:
             break
         }
@@ -300,6 +305,10 @@ final class SettingsPanelViewModel: ObservableObject {
         closedNotchUsageAvailability = ClosedNotchUsageAvailability.current()
     }
 
+    func refreshBridgeHealthStatus() {
+        bridgeHealthStatus = HookInstaller.bridgeHealthStatus()
+    }
+
     func setLaunchAtLogin(_ enabled: Bool) {
         do {
             if enabled {
@@ -331,6 +340,7 @@ final class SettingsPanelViewModel: ObservableObject {
         HookInstaller.install(profile)
 #endif
         refreshHookInstallationStates()
+        refreshBridgeHealthStatus()
     }
 
     func installHooks(for profile: ManagedHookClientProfile, selection: HookInstallSelection) {
@@ -343,6 +353,7 @@ final class SettingsPanelViewModel: ObservableObject {
         HookInstaller.install(profile, selection: selection)
 #endif
         refreshHookInstallationStates()
+        refreshBridgeHealthStatus()
     }
 
     func reinstallHooks(for profile: ManagedHookClientProfile, selection: HookInstallSelection) {
@@ -368,6 +379,7 @@ final class SettingsPanelViewModel: ObservableObject {
             try? await Task.sleep(nanoseconds: 450_000_000)
 
             refreshHookInstallationStates()
+            refreshBridgeHealthStatus()
             reinstallingHookProfileID = nil
             hookReinstallFeedbacks[profile.id] = HookReinstallFeedback(
                 message: didInstall
@@ -410,6 +422,7 @@ final class SettingsPanelViewModel: ObservableObject {
             try? await Task.sleep(nanoseconds: 450_000_000)
 
             refreshHookInstallationStates()
+            refreshBridgeHealthStatus()
             reinstallingHookProfileID = nil
             hookReinstallFeedbacks[profile.id] = HookReinstallFeedback(
                 message: didInstall
@@ -436,6 +449,7 @@ final class SettingsPanelViewModel: ObservableObject {
         HookInstaller.uninstall(profile)
 #endif
         refreshHookInstallationStates()
+        refreshBridgeHealthStatus()
     }
 
     func installCustomHook(profileID: String, directoryPath: String) {
@@ -461,6 +475,7 @@ final class SettingsPanelViewModel: ObservableObject {
         }
         refreshHookInstallationStates()
         refreshCustomHookInstallations()
+        refreshBridgeHealthStatus()
     }
 
     func refreshCustomHookInstallations() {
@@ -1752,6 +1767,37 @@ private struct SettingsPanelContentView: View {
                     Image(systemName: "lock.shield")
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundColor(TerminalColors.amber)
+                }
+
+                SettingsLineDivider()
+
+                SettingsInfoLine(
+                    title: "Bridge 链路自检",
+                    subtitle: viewModel.bridgeHealthStatus.message
+                ) {
+                    HStack(spacing: 10) {
+                        Text(appLocalized: viewModel.bridgeHealthStatus.isHealthy ? "正常" : "异常")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundColor(viewModel.bridgeHealthStatus.isHealthy ? TerminalColors.green : TerminalColors.amber)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(
+                                Capsule(style: .continuous)
+                                    .fill((viewModel.bridgeHealthStatus.isHealthy ? TerminalColors.green : TerminalColors.amber).opacity(0.16))
+                            )
+                            .overlay(
+                                Capsule(style: .continuous)
+                                    .strokeBorder((viewModel.bridgeHealthStatus.isHealthy ? TerminalColors.green : TerminalColors.amber).opacity(0.28), lineWidth: 1)
+                            )
+
+                        HookManagementButton(
+                            title: "重新检测",
+                            tint: TerminalColors.blue,
+                            action: {
+                                viewModel.refreshBridgeHealthStatus()
+                            }
+                        )
+                    }
                 }
             }
 #endif

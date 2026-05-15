@@ -343,6 +343,11 @@ struct HookInstaller {
         let minimumVersion: String
     }
 
+    struct BridgeHealthStatus: Equatable {
+        let isHealthy: Bool
+        let message: String
+    }
+
     private static let preferredTargetsDefaultsKey = "HookInstaller.preferredTargets.v1"
     private static let eventSelectionsDefaultsKey = "HookInstaller.eventSelections.v1"
     private static let qoderMigrationDefaultsKey = "HookInstaller.preferredTargets.qoder-default.v1"
@@ -357,6 +362,9 @@ struct HookInstaller {
     private static let bridgeBinaryName = "PingIslandBridge"
     private static let legacyBridgeBinaryName = "IslandBridge"
     private static let statusLineScriptName = "island-statusline"
+#if APP_STORE
+    private static let appStoreHookDirectoryBookmarkDefaultsKey = "HookInstaller.appStoreHookDirectoryBookmark.v1"
+#endif
 
     private struct VersionMetadata: Codable {
         let version: String
@@ -476,6 +484,43 @@ struct HookInstaller {
 
 #if APP_STORE
     @discardableResult
+    static func restoreAppStoreHookDirectoryAuthorizationIfAvailable() -> Bool {
+        guard appStoreAuthorizedHookDirectory == nil else {
+            return true
+        }
+
+        guard let bookmarkData = UserDefaults.standard.data(forKey: appStoreHookDirectoryBookmarkDefaultsKey) else {
+            return false
+        }
+
+        var isStale = false
+        do {
+            let url = try URL(
+                resolvingBookmarkData: bookmarkData,
+                options: [.withSecurityScope],
+                relativeTo: nil,
+                bookmarkDataIsStale: &isStale
+            )
+
+            guard url.standardizedFileURL == UserHomeDirectoryResolver
+                .hookConfigurationHomeDirectory
+                .standardizedFileURL else {
+                UserDefaults.standard.removeObject(forKey: appStoreHookDirectoryBookmarkDefaultsKey)
+                return false
+            }
+
+            activateAppStoreHookDirectory(url)
+            if isStale {
+                persistAppStoreHookDirectoryBookmark(url)
+            }
+            return true
+        } catch {
+            UserDefaults.standard.removeObject(forKey: appStoreHookDirectoryBookmarkDefaultsKey)
+            return false
+        }
+    }
+
+    @discardableResult
     static func performFirstRunDefaultInstallWithUserAuthorization() -> Bool {
         guard requestAppStoreHookDirectoryAuthorization() else {
             return false
@@ -544,6 +589,10 @@ struct HookInstaller {
     }
 
     private static func requestAppStoreHookDirectoryAuthorization() -> Bool {
+        if restoreAppStoreHookDirectoryAuthorizationIfAvailable() {
+            return true
+        }
+
         let homeDirectory = UserHomeDirectoryResolver.hookConfigurationHomeDirectory
         let panel = NSOpenPanel()
         panel.title = AppLocalization.string("授权 Hooks 配置目录")
@@ -569,12 +618,32 @@ struct HookInstaller {
             return false
         }
 
-        let didStartAccess = selectedURL.startAccessingSecurityScopedResource()
-        appStoreAuthorizedHookDirectory = selectedURL
-        if didStartAccess {
-            appStoreSecurityScopedHookDirectories.append(selectedURL)
-        }
+        activateAppStoreHookDirectory(selectedURL)
+        persistAppStoreHookDirectoryBookmark(selectedURL)
         return true
+    }
+
+    private static func activateAppStoreHookDirectory(_ url: URL) {
+        let standardizedURL = url.standardizedFileURL
+        let didStartAccess = standardizedURL.startAccessingSecurityScopedResource()
+        appStoreAuthorizedHookDirectory = standardizedURL
+        if didStartAccess,
+           !appStoreSecurityScopedHookDirectories.contains(where: {
+               $0.standardizedFileURL == standardizedURL
+           }) {
+            appStoreSecurityScopedHookDirectories.append(standardizedURL)
+        }
+    }
+
+    private static func persistAppStoreHookDirectoryBookmark(_ url: URL) {
+        guard let bookmarkData = try? url.bookmarkData(
+            options: [.withSecurityScope],
+            includingResourceValuesForKeys: nil,
+            relativeTo: nil
+        ) else {
+            return
+        }
+        UserDefaults.standard.set(bookmarkData, forKey: appStoreHookDirectoryBookmarkDefaultsKey)
     }
 
     private static var appStoreAuthorizedHookDirectory: URL?
@@ -588,6 +657,54 @@ struct HookInstaller {
             return canManage(profile)
                 || (profile.id == "qoder-cli-hooks" && qoderCLISupportsClaudeHooks)
         }
+    }
+
+    static func bridgeHealthStatus() -> BridgeHealthStatus {
+        installBridgeLauncherIfNeeded()
+
+        let launcherURL = islandSupportDirectory()
+            .appendingPathComponent("bin", isDirectory: true)
+            .appendingPathComponent(bridgeLauncherName)
+        guard FileManager.default.isExecutableFile(atPath: launcherURL.path) else {
+            return BridgeHealthStatus(
+                isHealthy: false,
+                message: AppLocalization.string("Bridge launcher 未安装或不可执行")
+            )
+        }
+
+        guard preferredBridgeBinaryURL() != nil else {
+            return BridgeHealthStatus(
+                isHealthy: false,
+                message: AppLocalization.string("PingIslandBridge 二进制缺失")
+            )
+        }
+
+        guard launcherContainsCurrentRuntimeEnvironment(launcherURL) else {
+            return BridgeHealthStatus(
+                isHealthy: false,
+                message: AppLocalization.string("Bridge launcher 需要重新安装以写入 App Store 沙箱路径")
+            )
+        }
+
+        let socketPath = BridgeRuntimePaths.socketPath
+        guard FileManager.default.fileExists(atPath: socketPath) else {
+            return BridgeHealthStatus(
+                isHealthy: false,
+                message: AppLocalization.string("Bridge 监听尚未启动，请保持 Ping Island 正在运行后重试")
+            )
+        }
+
+        guard runBridgeLauncherHealthCheck(launcherURL) else {
+            return BridgeHealthStatus(
+                isHealthy: false,
+                message: AppLocalization.string("Bridge launcher 自检失败，请重启 Ping Island 后重新安装 Hooks")
+            )
+        }
+
+        return BridgeHealthStatus(
+            isHealthy: true,
+            message: AppLocalization.string("Bridge 链路正常，Hooks 事件可转发到当前 App")
+        )
     }
 
     /// Check if this is the first launch and mark as installed
@@ -1200,6 +1317,7 @@ struct HookInstaller {
             .appendingPathComponent("bin", isDirectory: true)
         let launcherURL = binDirectory.appendingPathComponent(bridgeLauncherName)
 
+        BridgeRuntimePaths.prepareRuntimeDirectory()
         try? FileManager.default.createDirectory(
             at: binDirectory,
             withIntermediateDirectories: true
@@ -1207,10 +1325,6 @@ struct HookInstaller {
 
         installBridgeBinaryIfNeeded(in: binDirectory)
         installStatusLineScript(in: binDirectory)
-
-        guard !FileManager.default.fileExists(atPath: launcherURL.path) else {
-            return
-        }
 
         let bundleBridge = (Bundle.main.executableURL?
             .deletingLastPathComponent()
@@ -1221,8 +1335,17 @@ struct HookInstaller {
             .appendingPathComponent(legacyBridgeBinaryName)
             .path) ?? ""
 
+        let environmentExports = BridgeRuntimePaths.launcherEnvironment
+            .sorted { $0.key < $1.key }
+            .map { key, value in
+                "export \(key)=\(shellQuoted(value))"
+            }
+            .joined(separator: "\n")
+
         let script = """
         #!/bin/zsh
+        \(environmentExports)
+
         SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
         candidates=(
           "$SCRIPT_DIR/\(bridgeBinaryName)"
@@ -1241,11 +1364,57 @@ struct HookInstaller {
         exit 127
         """
 
+        if let existingData = try? Data(contentsOf: launcherURL),
+           existingData == Data(script.utf8) {
+            return
+        }
+
         try? Data(script.utf8).write(to: launcherURL, options: .atomic)
         try? FileManager.default.setAttributes(
             [.posixPermissions: 0o755],
             ofItemAtPath: launcherURL.path
         )
+    }
+
+    private static func launcherContainsCurrentRuntimeEnvironment(_ launcherURL: URL) -> Bool {
+        guard let content = try? String(contentsOf: launcherURL, encoding: .utf8) else {
+            return false
+        }
+
+        return BridgeRuntimePaths.launcherEnvironment.allSatisfy { key, value in
+            content.contains("export \(key)=") && content.contains(shellQuoted(value))
+        }
+    }
+
+    private static func runBridgeLauncherHealthCheck(_ launcherURL: URL) -> Bool {
+        let process = Process()
+        process.executableURL = launcherURL
+        process.arguments = ["--mode", "health-check"]
+
+        let outputPipe = Pipe()
+        process.standardOutput = outputPipe
+        process.standardError = Pipe()
+
+        let finished = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in
+            finished.signal()
+        }
+
+        do {
+            try process.run()
+        } catch {
+            return false
+        }
+
+        guard finished.wait(timeout: .now() + 2) == .success else {
+            process.terminate()
+            return false
+        }
+
+        let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
+        let output = String(decoding: outputData, as: UTF8.self)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return process.terminationStatus == 0 && output == "ok"
     }
 
     private static func installStatusLineScript(in binDirectory: URL) {

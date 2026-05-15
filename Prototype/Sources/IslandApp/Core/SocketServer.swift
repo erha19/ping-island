@@ -2,6 +2,9 @@ import Foundation
 import IslandShared
 
 actor SocketServer {
+    private static let healthCheckRequest = #"{"type":"ping-island-health-check"}"#
+    private static let healthCheckResponse = #"{"ok":true}"#
+
     private let socketPath: String
     private let sessionStore: SessionStore
     private let approvalCoordinator: ApprovalCoordinator
@@ -97,6 +100,12 @@ actor SocketServer {
 
         do {
             let data = try Self.readAll(from: clientFD)
+            if String(data: data, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) == Self.healthCheckRequest {
+                try Self.writeHealthCheckResponse(to: clientFD)
+                return
+            }
+
             let envelope = try BridgeCodec.decodeEnvelope(data)
             await sessionStore.ingest(envelope)
 
@@ -133,6 +142,17 @@ actor SocketServer {
             data.append(buffer, count: readCount)
         }
         return data
+    }
+
+    private static func writeHealthCheckResponse(to fd: Int32) throws {
+        let data = Data(healthCheckResponse.utf8)
+        let wrote = data.withUnsafeBytes { buffer -> Bool in
+            guard let baseAddress = buffer.baseAddress else { return false }
+            return write(fd, baseAddress, data.count) == data.count
+        }
+        guard wrote else {
+            throw POSIXError(.EIO)
+        }
     }
 
     private static func wakeListener(socketPath: String) {

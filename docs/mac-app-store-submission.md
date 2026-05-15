@@ -11,8 +11,8 @@ current direct-download lane.
 - App Store name: Ping Island
 - Bundle display name: Ping Island
 - Bundle ID: `com.wudanwu.PingIsland`
-- Version: `0.14.0`
-- Build: `42`
+- Version: `0.14.1`
+- Build: `43`
 - Xcode: 26.4
 - Primary category: Developer Tools
 - Suggested App Store Connect SKU: `ping-island-macos`
@@ -28,6 +28,10 @@ current direct-download lane.
 The App Store target:
 
 - enables App Sandbox,
+- uses the `group.com.wudanwu.PingIsland` App Group for the local hook bridge
+  socket and bridge runtime config,
+- enables app-scoped security bookmarks so the user-selected hooks directory
+  authorization can survive app relaunches,
 - removes the Sparkle package dependency from the App Store target,
 - compiles the update manager with `APP_STORE`, which turns the independent
   updater into a no-op managed-by-App-Store path,
@@ -44,6 +48,10 @@ Validated on 2026-05-05:
   package processing.
 - `PingIslandBridge` is signed with the same sandbox entitlements as the app
   bundle so App Store Connect accepts the embedded executable.
+- App Store hook installs now persist a security-scoped bookmark for the
+  user-selected home directory, and the generated launcher exports
+  `ISLAND_SOCKET_PATH` / `PING_ISLAND_BRIDGE_CONFIG` into the App Group runtime
+  directory before launching `PingIslandBridge`.
 
 Known warning: symbol upload currently reports a missing `PingIslandBridge` dSYM.
 This does not block the package upload, but crash symbolication for the bridge
@@ -65,13 +73,13 @@ Result: build succeeded.
 
 ## Remaining Items Before Review
 
-1. Audit sandbox-incompatible features.
+1. Audit remaining sandbox-incompatible features.
 
-   Core Ping Island workflows read and write tool configs under locations such as
-   `~/.claude`, `~/.codex`, `~/.gemini`, `~/.qwen`, `~/.qoder`, `~/.hermes`, and
-   remote SSH targets. A sandboxed build needs a deliberate access model, likely
-   user-selected directories, security-scoped bookmarks, and feature gating for
-   unsupported automatic installs.
+   Local hook installs use user-selected home-directory authorization plus a
+   persisted security-scoped bookmark. The local bridge socket and runtime config
+   live under the App Group container. Remote SSH flows and any future automatic
+   installs outside the selected home directory still need deliberate review and
+   feature gating before App Store submission.
 
 2. Complete App Store Connect review metadata.
 
@@ -92,6 +100,11 @@ Signed export for App Store Connect:
 ```sh
 PING_ISLAND_TEAM_ID=K46RM9974S ./scripts/build-app-store.sh
 ```
+
+Before running a signed export, ensure the Apple Developer App ID for
+`com.wudanwu.PingIsland` has the `group.com.wudanwu.PingIsland` App Group
+enabled; otherwise provisioning will fail even though local unsigned validation
+can build.
 
 Signed upload to App Store Connect:
 

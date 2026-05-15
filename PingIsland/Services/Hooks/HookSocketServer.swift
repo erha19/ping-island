@@ -1164,7 +1164,9 @@ typealias PermissionFailureHandler = @Sendable (_ sessionId: String, _ toolUseId
 
 class HookSocketServer {
     static let shared = HookSocketServer()
-    static let socketPath = "/tmp/island.sock"
+    static var socketPath: String { BridgeRuntimePaths.socketPath }
+    static let healthCheckRequest = #"{"type":"ping-island-health-check"}"#
+    static let healthCheckResponse = #"{"ok":true}"#
     private static let interventionMatchingIgnoredInputKeys: Set<String> = [
         "description",
         "justification",
@@ -1325,6 +1327,7 @@ class HookSocketServer {
         eventHandler = onEvent
         permissionFailureHandler = onPermissionFailure
 
+        BridgeRuntimePaths.prepareRuntimeDirectory()
         unlink(Self.socketPath)
 
         serverSocket = socket(AF_UNIX, SOCK_STREAM, 0)
@@ -1338,12 +1341,17 @@ class HookSocketServer {
 
         var addr = sockaddr_un()
         addr.sun_family = sa_family_t(AF_UNIX)
-        Self.socketPath.withCString { ptr in
-            withUnsafeMutablePointer(to: &addr.sun_path) { pathPtr in
-                let pathBufferPtr = UnsafeMutableRawPointer(pathPtr)
-                    .assumingMemoryBound(to: CChar.self)
-                strcpy(pathBufferPtr, ptr)
-            }
+
+        let socketPath = Self.socketPath
+        let pathBytes = socketPath.utf8CString.map(UInt8.init(bitPattern:))
+        guard pathBytes.count <= MemoryLayout.size(ofValue: addr.sun_path) else {
+            logger.error("Socket path is too long for Unix domain sockets: \(socketPath, privacy: .public)")
+            close(serverSocket)
+            serverSocket = -1
+            return
+        }
+        withUnsafeMutableBytes(of: &addr.sun_path) { buffer in
+            buffer.copyBytes(from: pathBytes)
         }
 
         let bindResult = withUnsafePointer(to: &addr) { ptr in
@@ -1652,6 +1660,12 @@ class HookSocketServer {
             return
         }
 
+        if String(data: allData, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) == Self.healthCheckRequest {
+            sendHealthCheckResponse(to: clientSocket)
+            return
+        }
+
         let decoder = JSONDecoder()
         guard let envelope = try? decoder.decode(BridgeEnvelope.self, from: allData) else {
             logger.warning("Failed to parse bridge envelope: \(String(data: allData, encoding: .utf8) ?? "?", privacy: .public)")
@@ -1781,6 +1795,15 @@ class HookSocketServer {
 
         close(clientSocket)
         eventHandler?(event)
+    }
+
+    private func sendHealthCheckResponse(to clientSocket: Int32) {
+        let data = Data(Self.healthCheckResponse.utf8)
+        data.withUnsafeBytes { buffer in
+            guard let baseAddress = buffer.baseAddress else { return }
+            _ = write(clientSocket, baseAddress, data.count)
+        }
+        close(clientSocket)
     }
 
     private static func shouldSkipQoderIDEEvent(_ envelope: BridgeEnvelope) -> Bool {
