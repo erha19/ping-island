@@ -86,6 +86,14 @@ actor SessionStore {
         SessionStore.cancelPendingHookResponse(toolUseId: $0, ingress: $1)
     }
 
+    /// Periodic sweep that removes sessions whose Claude process has died
+    /// without delivering `SessionEnd` (Ctrl-C kill, OOM, terminal closed) and
+    /// garbage-collects sessions already in `.ended` phase. Borrowed from
+    /// `farouqaldori/vibe-notch`'s liveness check; runs every 5 s while the
+    /// monitor is started.
+    private var livenessSweepTask: Task<Void, Never>?
+    private let livenessSweepIntervalNs: UInt64 = 5_000_000_000
+
     // MARK: - Published State (for UI)
 
     /// Publisher for session state changes (nonisolated for Combine subscription from any context)
@@ -2374,6 +2382,58 @@ actor SessionStore {
         session.autoApprovePermissions = false
         if !wasAlreadyEnded {
             session.lastActivity = Date()
+        }
+    }
+
+    // MARK: - Liveness Sweep
+
+    /// Start the periodic sweep that removes sessions whose process is no
+    /// longer alive and garbage-collects `.ended` sessions. Idempotent.
+    /// Wired from `SessionMonitor.startMonitoring()`.
+    func startLivenessSweep() {
+        guard livenessSweepTask == nil else { return }
+        let intervalNs = livenessSweepIntervalNs
+        livenessSweepTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: intervalNs)
+                guard !Task.isCancelled else { break }
+                await self?.sweepDeadOrEndedSessions()
+            }
+        }
+    }
+
+    /// Stop the periodic liveness sweep. Wired from
+    /// `SessionMonitor.stopMonitoring()`.
+    func stopLivenessSweep() {
+        livenessSweepTask?.cancel()
+        livenessSweepTask = nil
+    }
+
+    /// Remove sessions in `.ended` phase, plus sessions whose tracked `pid`
+    /// is confirmed dead via `kill(pid, 0)`. Sessions without a `pid` are
+    /// left alone (we cannot assert they are dead). Per-session pending
+    /// tasks are cancelled to avoid orphan work.
+    func sweepDeadOrEndedSessions() {
+        var removedAny = false
+        for (sessionId, session) in Array(sessions) {
+            let endedReap = session.phase == .ended
+            let pidIsDead: Bool = {
+                guard let pid = session.pid, pid > 0 else { return false }
+                return Darwin.kill(pid_t(pid), 0) != 0 && errno == ESRCH
+            }()
+            guard endedReap || pidIsDead else { continue }
+
+            sessions.removeValue(forKey: sessionId)
+            clearCodexSessionAliases(for: sessionId)
+            cancelPendingSync(sessionId: sessionId)
+            cancelPendingCodexPlaceholderPrune(sessionId: sessionId)
+            cancelPendingQoderConversationPoll(sessionId: sessionId)
+            cancelPendingOpenClawConversationPoll(sessionId: sessionId)
+            cancelPendingCodeBuddyCLIQuestionPoll(sessionId: sessionId)
+            removedAny = true
+        }
+        if removedAny {
+            publishState()
         }
     }
 

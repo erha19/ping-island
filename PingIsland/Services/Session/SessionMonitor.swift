@@ -101,6 +101,14 @@ class SessionMonitor: ObservableObject {
             startEnergyAwareMaintenanceLoop()
         }
 
+        // Periodic liveness sweep: removes sessions whose Claude process has
+        // died without delivering SessionEnd, plus garbage-collects sessions
+        // already in .ended phase. See SessionStore.startLivenessSweep for
+        // details.
+        Task {
+            await SessionStore.shared.startLivenessSweep()
+        }
+
         let handleHookEvent: @Sendable (HookEvent) -> Void = { [self] event in
             Task { @MainActor in
                 await self.handleIncomingHookEvent(event)
@@ -241,6 +249,9 @@ class SessionMonitor: ObservableObject {
         maintenanceTask = nil
         usageRefreshTask?.cancel()
         usageRefreshTask = nil
+        Task {
+            await SessionStore.shared.stopLivenessSweep()
+        }
         HookSocketServer.shared.stop()
         RemoteConnectorManager.shared.stop()
         Task {
