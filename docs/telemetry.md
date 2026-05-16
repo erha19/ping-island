@@ -19,7 +19,7 @@ For local release testing, set the same three values in
 
 ```xcconfig
 PING_ISLAND_TELEMETRY_SLS_HOST = ap-southeast-1.log.aliyuncs.com
-PING_ISLAND_TELEMETRY_SLS_PROJECT = ping-island-global
+PING_ISLAND_TELEMETRY_SLS_PROJECT = ping-island
 PING_ISLAND_TELEMETRY_SLS_LOGSTORE = ping-island
 ```
 
