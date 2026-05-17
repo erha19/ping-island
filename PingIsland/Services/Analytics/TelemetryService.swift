@@ -63,22 +63,81 @@ struct TelemetryConfiguration: Equatable, Sendable {
 }
 
 enum TelemetryEventName: String, CaseIterable, Sendable {
-    case appLaunched = "app_launched"
-    case telemetryPreferenceChanged = "telemetry_preference_changed"
+    case dailyUsageSnapshot = "daily_usage_snapshot"
     case settingChanged = "setting_changed"
-    case hookInstallCompleted = "hook_install_completed"
-    case hookReinstallCompleted = "hook_reinstall_completed"
-    case integrationStatusSnapshot = "integration_status_snapshot"
-    case islandOpened = "island_opened"
-    case islandClosed = "island_closed"
-    case attentionRequested = "attention_requested"
-    case attentionResolved = "attention_resolved"
-    case sessionDetected = "session_detected"
-    case sessionCompleted = "session_completed"
 }
 
 struct TelemetryRecord: Codable, Equatable, Sendable {
     let fields: [String: String]
+}
+
+private struct TelemetryDailyAggregate: Codable, Equatable, Sendable {
+    var appLaunchCount: Int = 0
+    var sessionCount: Int = 0
+    var tmuxSessionCount: Int = 0
+    var clientSessionCounts: [String: Int] = [:]
+    var providerSessionCounts: [String: Int] = [:]
+    var settingChangeCounts: [String: Int] = [:]
+    var surfaceMode: String = "unknown"
+
+    nonisolated var hasActivity: Bool {
+        appLaunchCount > 0
+            || sessionCount > 0
+            || tmuxSessionCount > 0
+            || !clientSessionCounts.isEmpty
+            || !providerSessionCounts.isEmpty
+            || !settingChangeCounts.isEmpty
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case appLaunchCount
+        case sessionCount
+        case tmuxSessionCount
+        case clientSessionCounts
+        case providerSessionCounts
+        case settingChangeCounts
+        case surfaceMode
+    }
+
+    nonisolated init(
+        appLaunchCount: Int = 0,
+        sessionCount: Int = 0,
+        tmuxSessionCount: Int = 0,
+        clientSessionCounts: [String: Int] = [:],
+        providerSessionCounts: [String: Int] = [:],
+        settingChangeCounts: [String: Int] = [:],
+        surfaceMode: String = "unknown"
+    ) {
+        self.appLaunchCount = appLaunchCount
+        self.sessionCount = sessionCount
+        self.tmuxSessionCount = tmuxSessionCount
+        self.clientSessionCounts = clientSessionCounts
+        self.providerSessionCounts = providerSessionCounts
+        self.settingChangeCounts = settingChangeCounts
+        self.surfaceMode = surfaceMode
+    }
+
+    nonisolated init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        appLaunchCount = try container.decodeIfPresent(Int.self, forKey: .appLaunchCount) ?? 0
+        sessionCount = try container.decodeIfPresent(Int.self, forKey: .sessionCount) ?? 0
+        tmuxSessionCount = try container.decodeIfPresent(Int.self, forKey: .tmuxSessionCount) ?? 0
+        clientSessionCounts = try container.decodeIfPresent([String: Int].self, forKey: .clientSessionCounts) ?? [:]
+        providerSessionCounts = try container.decodeIfPresent([String: Int].self, forKey: .providerSessionCounts) ?? [:]
+        settingChangeCounts = try container.decodeIfPresent([String: Int].self, forKey: .settingChangeCounts) ?? [:]
+        surfaceMode = try container.decodeIfPresent(String.self, forKey: .surfaceMode) ?? "unknown"
+    }
+
+    nonisolated func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(appLaunchCount, forKey: .appLaunchCount)
+        try container.encode(sessionCount, forKey: .sessionCount)
+        try container.encode(tmuxSessionCount, forKey: .tmuxSessionCount)
+        try container.encode(clientSessionCounts, forKey: .clientSessionCounts)
+        try container.encode(providerSessionCounts, forKey: .providerSessionCounts)
+        try container.encode(settingChangeCounts, forKey: .settingChangeCounts)
+        try container.encode(surfaceMode, forKey: .surfaceMode)
+    }
 }
 
 protocol TelemetrySink: Sendable {
@@ -137,10 +196,12 @@ actor TelemetryService {
     private let flushIntervalNs: UInt64
     private let maxBatchSize: Int
     private let maxQueueSize: Int
+    private let now: @Sendable () -> Date
 
     private var queue: [TelemetryRecord] = []
     private var flushLoop: Task<Void, Never>?
     private var recordedSessionIDs: Set<String> = []
+    private var recordedTmuxSessionIDs: Set<String> = []
 
     init(
         configuration: TelemetryConfiguration = TelemetryConfiguration(),
@@ -149,7 +210,8 @@ actor TelemetryService {
         calendar: Calendar = .current,
         flushIntervalNs: UInt64 = 60_000_000_000,
         maxBatchSize: Int = 10,
-        maxQueueSize: Int = 200
+        maxQueueSize: Int = 200,
+        now: @escaping @Sendable () -> Date = Date.init
     ) {
         self.configuration = configuration
         self.defaults = defaults
@@ -158,6 +220,7 @@ actor TelemetryService {
         self.flushIntervalNs = flushIntervalNs
         self.maxBatchSize = max(1, maxBatchSize)
         self.maxQueueSize = max(1, maxQueueSize)
+        self.now = now
     }
 
     func start() {
@@ -166,7 +229,8 @@ actor TelemetryService {
         flushLoop = Task { [flushIntervalNs] in
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: flushIntervalNs)
-                await flush()
+                await self.uploadPendingDailyUsageSnapshots()
+                await self.flush()
             }
         }
     }
@@ -174,16 +238,20 @@ actor TelemetryService {
     func stop() async {
         flushLoop?.cancel()
         flushLoop = nil
+        await uploadPendingDailyUsageSnapshots()
         await flush()
     }
 
     func handleConsentChanged(enabled: Bool) async {
         if enabled {
             start()
-            await record(.telemetryPreferenceChanged, properties: ["enabled": "true"])
+            markDailyActive()
+            await uploadPendingDailyUsageSnapshots()
         } else {
             queue.removeAll()
             recordedSessionIDs.removeAll()
+            recordedTmuxSessionIDs.removeAll()
+            clearStoredTelemetryAggregates()
             defaults.removeObject(forKey: TelemetryConsent.anonymousIDKey)
         }
     }
@@ -195,6 +263,11 @@ actor TelemetryService {
         throttleKey: String? = nil
     ) async {
         guard isTelemetryActive else { return }
+        guard name == .dailyUsageSnapshot else {
+            aggregate(name, properties: properties)
+            await uploadPendingDailyUsageSnapshots()
+            return
+        }
         guard shouldAcceptEvent(name, minimumInterval: minimumInterval, throttleKey: throttleKey) else { return }
         guard consumeDailyBudget() else { return }
 
@@ -214,135 +287,54 @@ actor TelemetryService {
     }
 
     func recordAppLaunch() async {
-        await record(
-            .appLaunched,
-            properties: [
-                "auto_update_enabled": defaults.bool(forKey: "automaticUpdateChecksEnabled").description,
-                "show_usage": defaults.bool(forKey: "showUsage").description
-            ],
-            minimumInterval: 6 * 60 * 60,
-            throttleKey: "app_launch"
-        )
+        markDailyActive()
+        await uploadPendingDailyUsageSnapshots()
     }
 
     func recordIntegrationSnapshot() async {
-        let installedProfiles = await MainActor.run {
-            ClientProfileRegistry.managedHookProfiles.filter { HookInstaller.isInstalled($0) }
-        }
-        await record(
-            .integrationStatusSnapshot,
-            properties: [
-                "installed_count": "\(installedProfiles.count)",
-                "enabled_clients": installedProfiles.map(\.id).sorted().joined(separator: ",")
-            ],
-            minimumInterval: 12 * 60 * 60,
-            throttleKey: "integration_status_snapshot"
-        )
+        await uploadPendingDailyUsageSnapshots()
     }
 
     func recordHookInstall(profileID: String, result: Bool, source: String) async {
-        await record(
-            .hookInstallCompleted,
-            properties: [
-                "client": sanitizedClientID(profileID),
-                "result": result ? "success" : "failed",
-                "source": source
-            ],
-            minimumInterval: 60,
-            throttleKey: "hook_install:\(profileID):\(result)"
-        )
+        await uploadPendingDailyUsageSnapshots()
     }
 
     func recordHookReinstall(profileID: String, result: Bool) async {
-        await record(
-            .hookReinstallCompleted,
-            properties: [
-                "client": sanitizedClientID(profileID),
-                "result": result ? "success" : "failed"
-            ],
-            minimumInterval: 60,
-            throttleKey: "hook_reinstall:\(profileID):\(result)"
-        )
+        await uploadPendingDailyUsageSnapshots()
     }
 
     func recordIslandOpened(openSource: String, contentRoute: String, presentation: String) async {
-        await record(
-            .islandOpened,
-            properties: [
-                "open_source": openSource,
-                "content_route": contentRoute,
-                "presentation": presentation
-            ],
-            minimumInterval: 2,
-            throttleKey: "island_opened:\(presentation):\(openSource):\(contentRoute)"
-        )
+        await uploadPendingDailyUsageSnapshots()
     }
 
     func recordIslandClosed(openSource: String, contentRoute: String, presentation: String) async {
-        await record(
-            .islandClosed,
-            properties: [
-                "open_source": openSource,
-                "content_route": contentRoute,
-                "presentation": presentation
-            ],
-            minimumInterval: 2,
-            throttleKey: "island_closed:\(presentation):\(openSource):\(contentRoute)"
-        )
+        await uploadPendingDailyUsageSnapshots()
     }
 
     func recordAttentionRequested(_ session: SessionState) async {
-        await record(
-            .attentionRequested,
-            properties: attentionProperties(for: session),
-            minimumInterval: 60,
-            throttleKey: "attention_requested:\(session.sessionId):\(attentionType(for: session))"
-        )
+        await uploadPendingDailyUsageSnapshots()
     }
 
     func recordAttentionResolved(_ session: SessionState, resolution: String) async {
-        var properties = attentionProperties(for: session)
-        properties["resolution"] = resolution
-        if let requestedAt = session.attentionRequestedAt {
-            properties["duration_bucket"] = durationBucket(Date().timeIntervalSince(requestedAt))
-        } else {
-            properties["duration_bucket"] = "unknown"
-        }
-        await record(
-            .attentionResolved,
-            properties: properties,
-            minimumInterval: 30,
-            throttleKey: "attention_resolved:\(session.sessionId):\(resolution)"
-        )
+        await uploadPendingDailyUsageSnapshots()
     }
 
     func recordSessionDetected(_ session: SessionState) async {
-        guard recordedSessionIDs.insert(session.sessionId).inserted else { return }
+        guard recordUniqueSession(session.sessionId) else { return }
         trimRecordedSessionIDsIfNeeded()
-        await record(
-            .sessionDetected,
-            properties: [
-                "client": safeClientID(for: session),
-                "provider": session.provider.rawValue,
-                "ingress": session.ingress.rawValue
-            ]
-        )
+        mutateAggregateForToday { aggregate in
+            aggregate.sessionCount += 1
+            aggregate.clientSessionCounts[safeClientID(for: session), default: 0] += 1
+            aggregate.providerSessionCounts[session.provider.rawValue, default: 0] += 1
+            aggregate.surfaceMode = currentSurfaceMode()
+        }
+        recordTmuxSessionIfNeeded(session)
+        await uploadPendingDailyUsageSnapshots()
     }
 
     func recordSessionCompleted(_ session: SessionState) async {
-        await record(
-            .sessionCompleted,
-            properties: [
-                "client": safeClientID(for: session),
-                "provider": session.provider.rawValue,
-                "ingress": session.ingress.rawValue,
-                "duration_bucket": durationBucket(Date().timeIntervalSince(session.createdAt)),
-                "tool_count_bucket": countBucket(session.toolTracker.seenIds.count),
-                "had_attention_request": (session.intervention != nil).description
-            ],
-            minimumInterval: 60,
-            throttleKey: "session_completed:\(session.sessionId)"
-        )
+        recordTmuxSessionIfNeeded(session)
+        await uploadPendingDailyUsageSnapshots()
     }
 
     func flush() async {
@@ -363,14 +355,14 @@ actor TelemetryService {
     private func commonFields() -> [String: String] {
         let info = Bundle.main.infoDictionary ?? [:]
         return [
-            "schema_version": "1",
+            "schema_version": "2",
             "app_version": info["CFBundleShortVersionString"] as? String ?? "unknown",
             "build_number": info["CFBundleVersion"] as? String ?? "unknown",
             "distribution_channel": distributionChannel,
             "macos_major": Foundation.ProcessInfo.processInfo.operatingSystemVersion.majorVersion.description,
             "arch": architecture,
             "language": languageBucket(),
-            "surface_mode": defaults.string(forKey: AppSettingsDefaultKeys.surfaceMode) ?? "notch",
+            "surface_mode": currentSurfaceMode(),
             "anonymous_user_id": anonymousID()
         ]
     }
@@ -443,26 +435,19 @@ actor TelemetryService {
 
     private nonisolated static func allowedProperties(for name: TelemetryEventName) -> Set<String> {
         switch name {
-        case .appLaunched:
-            return ["auto_update_enabled", "show_usage"]
-        case .telemetryPreferenceChanged:
-            return ["enabled"]
+        case .dailyUsageSnapshot:
+            return [
+                "report_date",
+                "active_device",
+                "app_launch_count",
+                "session_count",
+                "client_session_counts",
+                "provider_session_counts",
+                "tmux_session_count",
+                "setting_change_counts"
+            ]
         case .settingChanged:
             return ["setting_key", "value"]
-        case .hookInstallCompleted, .hookReinstallCompleted:
-            return ["client", "result", "source"]
-        case .integrationStatusSnapshot:
-            return ["installed_count", "enabled_clients"]
-        case .islandOpened, .islandClosed:
-            return ["open_source", "content_route", "presentation"]
-        case .attentionRequested:
-            return ["client", "provider", "ingress", "attention_type"]
-        case .attentionResolved:
-            return ["client", "provider", "ingress", "attention_type", "resolution", "duration_bucket"]
-        case .sessionDetected:
-            return ["client", "provider", "ingress"]
-        case .sessionCompleted:
-            return ["client", "provider", "ingress", "duration_bucket", "tool_count_bucket", "had_attention_request"]
         }
     }
 
@@ -483,60 +468,47 @@ actor TelemetryService {
         Self.sanitizedValue(value.lowercased())
     }
 
-    private func attentionProperties(for session: SessionState) -> [String: String] {
-        [
-            "client": safeClientID(for: session),
-            "provider": session.provider.rawValue,
-            "ingress": session.ingress.rawValue,
-            "attention_type": attentionType(for: session)
-        ]
+    private func currentSurfaceMode() -> String {
+        defaults.string(forKey: AppSettingsDefaultKeys.surfaceMode) ?? "notch"
     }
 
-    private func attentionType(for session: SessionState) -> String {
-        if session.needsQuestionResponse {
-            return "question"
-        }
-        if session.needsApprovalResponse {
-            return "approval"
-        }
-        if session.intervention != nil {
-            return "intervention"
-        }
-        if session.phase.needsAttention {
-            return "attention"
-        }
-        return "unknown"
-    }
-
-    private func durationBucket(_ duration: TimeInterval) -> String {
-        if duration < 60 {
-            return "lt_1m"
-        }
-        if duration < 5 * 60 {
-            return "1_5m"
-        }
-        if duration < 15 * 60 {
-            return "5_15m"
-        }
-        if duration < 60 * 60 {
-            return "15_60m"
-        }
-        return "gt_60m"
-    }
-
-    private func countBucket(_ count: Int) -> String {
-        switch count {
-        case 0:
-            return "0"
-        case 1...3:
-            return "1_3"
-        case 4...10:
-            return "4_10"
-        case 11...30:
-            return "11_30"
+    private func aggregate(_ name: TelemetryEventName, properties: [String: String]) {
+        switch name {
+        case .settingChanged:
+            guard let key = properties["setting_key"], !key.isEmpty else { return }
+            mutateAggregateForToday { aggregate in
+                aggregate.settingChangeCounts[Self.sanitizedValue(key), default: 0] += 1
+                aggregate.surfaceMode = currentSurfaceMode()
+            }
         default:
-            return "gt_30"
+            break
         }
+    }
+
+    private func markDailyActive() {
+        mutateAggregateForToday { aggregate in
+            aggregate.appLaunchCount += 1
+            aggregate.surfaceMode = currentSurfaceMode()
+        }
+    }
+
+    private func recordTmuxSessionIfNeeded(_ session: SessionState) {
+        guard hasTmuxEvidence(session) else { return }
+        guard recordUniqueTmuxSession(session.sessionId) else { return }
+        mutateAggregateForToday { aggregate in
+            aggregate.tmuxSessionCount += 1
+            aggregate.surfaceMode = currentSurfaceMode()
+        }
+    }
+
+    private func hasTmuxEvidence(_ session: SessionState) -> Bool {
+        session.isInTmux
+            || hasContent(session.clientInfo.tmuxPaneIdentifier)
+            || hasContent(session.clientInfo.tmuxSessionIdentifier)
+    }
+
+    private func hasContent(_ value: String?) -> Bool {
+        value?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
     }
 
     private func shouldAcceptEvent(
@@ -553,9 +525,9 @@ actor TelemetryService {
         return true
     }
 
-    private func consumeDailyBudget(now: Date = Date()) -> Bool {
+    private func consumeDailyBudget(now: Date? = nil) -> Bool {
         guard configuration.dailyEventLimit > 0 else { return false }
-        let bucket = dailyBucket(for: now)
+        let bucket = dailyBucket(for: now ?? self.now())
         let storedBucket = defaults.string(forKey: "telemetryDailyBucket")
         var count = storedBucket == bucket ? defaults.integer(forKey: "telemetryDailyCount") : 0
         guard count < configuration.dailyEventLimit else { return false }
@@ -568,6 +540,161 @@ actor TelemetryService {
     private func dailyBucket(for date: Date) -> String {
         let components = calendar.dateComponents([.year, .month, .day], from: date)
         return "\(components.year ?? 0)-\(components.month ?? 0)-\(components.day ?? 0)"
+    }
+
+    private func todayBucket() -> String {
+        dailyBucket(for: now())
+    }
+
+    private func mutateAggregateForToday(_ update: (inout TelemetryDailyAggregate) -> Void) {
+        let bucket = todayBucket()
+        var aggregate = dailyAggregate(for: bucket)
+        update(&aggregate)
+        saveDailyAggregate(aggregate, for: bucket)
+        rememberAggregateBucket(bucket)
+    }
+
+    private func dailyAggregate(for bucket: String) -> TelemetryDailyAggregate {
+        guard let data = defaults.data(forKey: dailyAggregateKey(bucket)),
+              let aggregate = try? JSONDecoder().decode(TelemetryDailyAggregate.self, from: data) else {
+            return TelemetryDailyAggregate(surfaceMode: currentSurfaceMode())
+        }
+        return aggregate
+    }
+
+    private func saveDailyAggregate(_ aggregate: TelemetryDailyAggregate, for bucket: String) {
+        guard let data = try? JSONEncoder().encode(aggregate) else { return }
+        defaults.set(data, forKey: dailyAggregateKey(bucket))
+    }
+
+    private func rememberAggregateBucket(_ bucket: String) {
+        var buckets = Set(defaults.stringArray(forKey: Self.dailyAggregateBucketsKey) ?? [])
+        buckets.insert(bucket)
+        defaults.set(buckets.sorted(), forKey: Self.dailyAggregateBucketsKey)
+    }
+
+    private func uploadPendingDailyUsageSnapshots() async {
+        guard isTelemetryActive, configuration.dailyEventLimit > 0 else { return }
+        let today = todayBucket()
+        let buckets = (defaults.stringArray(forKey: Self.dailyAggregateBucketsKey) ?? [])
+            .filter { $0 != today && !defaults.bool(forKey: dailySnapshotUploadedKey($0)) }
+            .sorted()
+        guard !buckets.isEmpty else { return }
+
+        for chunk in chunks(from: buckets, size: maxBatchSize) {
+            var pending: [(bucket: String, record: TelemetryRecord)] = []
+            for bucket in chunk {
+                guard let record = dailyUsageRecord(for: bucket) else { continue }
+                guard consumeDailyBudget() else { return }
+                pending.append((bucket, record))
+            }
+            let records = pending.map(\.record)
+            guard !records.isEmpty else { continue }
+            do {
+                try await sink.send(records, configuration: configuration)
+                for bucket in pending.map(\.bucket) {
+                    defaults.set(true, forKey: dailySnapshotUploadedKey(bucket))
+                    defaults.removeObject(forKey: dailyAggregateKey(bucket))
+                }
+                pruneAggregateBuckets()
+            } catch {
+                Self.logger.debug("Daily telemetry snapshot upload skipped: \(error.localizedDescription, privacy: .public)")
+                return
+            }
+        }
+    }
+
+    private func dailyUsageRecord(for bucket: String) -> TelemetryRecord? {
+        let aggregate = dailyAggregate(for: bucket)
+        guard aggregate.hasActivity else { return nil }
+        let fields = sanitizedFields(
+            name: .dailyUsageSnapshot,
+            properties: [
+                "report_date": bucket,
+                "active_device": "true",
+                "app_launch_count": "\(aggregate.appLaunchCount)",
+                "session_count": "\(aggregate.sessionCount)",
+                "client_session_counts": compactCounts(aggregate.clientSessionCounts),
+                "provider_session_counts": compactCounts(aggregate.providerSessionCounts),
+                "tmux_session_count": "\(aggregate.tmuxSessionCount)",
+                "setting_change_counts": compactCounts(aggregate.settingChangeCounts),
+                "surface_mode": aggregate.surfaceMode
+            ].merging(commonFields(), uniquingKeysWith: { current, _ in current })
+        )
+        return fields.isEmpty ? nil : TelemetryRecord(fields: fields)
+    }
+
+    private func compactCounts(_ counts: [String: Int]) -> String {
+        guard !counts.isEmpty else { return "none" }
+        let pairs = counts
+            .sorted { lhs, rhs in
+                if lhs.value == rhs.value { return lhs.key < rhs.key }
+                return lhs.value > rhs.value
+            }
+            .prefix(12)
+            .map { key, value in "\(Self.sanitizedValue(key))=\(value)" }
+        return pairs.joined(separator: ",")
+    }
+
+    private func pruneAggregateBuckets() {
+        let buckets = defaults.stringArray(forKey: Self.dailyAggregateBucketsKey) ?? []
+        let retained = buckets.filter { defaults.data(forKey: dailyAggregateKey($0)) != nil }
+        defaults.set(retained, forKey: Self.dailyAggregateBucketsKey)
+    }
+
+    private func dailyAggregateKey(_ bucket: String) -> String {
+        "telemetryDailyAggregate.\(bucket)"
+    }
+
+    private func dailySnapshotUploadedKey(_ bucket: String) -> String {
+        "telemetryDailySnapshotUploaded.\(bucket)"
+    }
+
+    private nonisolated static let dailyAggregateBucketsKey = "telemetryDailyAggregateBuckets"
+
+    private func clearStoredTelemetryAggregates() {
+        let buckets = defaults.stringArray(forKey: Self.dailyAggregateBucketsKey) ?? []
+        for bucket in buckets {
+            defaults.removeObject(forKey: dailyAggregateKey(bucket))
+            defaults.removeObject(forKey: dailySnapshotUploadedKey(bucket))
+            defaults.removeObject(forKey: "telemetryDailySessionIDs.\(bucket)")
+            defaults.removeObject(forKey: "telemetryDailyTmuxSessionIDs.\(bucket)")
+        }
+        defaults.removeObject(forKey: Self.dailyAggregateBucketsKey)
+        defaults.removeObject(forKey: "telemetryDailyBucket")
+        defaults.removeObject(forKey: "telemetryDailyCount")
+    }
+
+    private func recordUniqueSession(_ sessionID: String) -> Bool {
+        guard insertDailyUniqueValue(sessionID, namespace: "telemetryDailySessionIDs") else { return false }
+        recordedSessionIDs.insert(sessionID)
+        return true
+    }
+
+    private func recordUniqueTmuxSession(_ sessionID: String) -> Bool {
+        guard insertDailyUniqueValue(sessionID, namespace: "telemetryDailyTmuxSessionIDs") else { return false }
+        recordedTmuxSessionIDs.insert(sessionID)
+        return true
+    }
+
+    private func insertDailyUniqueValue(_ value: String, namespace: String) -> Bool {
+        guard !value.isEmpty else { return false }
+        let key = "\(namespace).\(todayBucket())"
+        var values = Set(defaults.stringArray(forKey: key) ?? [])
+        guard values.insert(value).inserted else { return false }
+        if values.count > 1_000 {
+            values = Set(values.sorted().suffix(1_000))
+        }
+        defaults.set(values.sorted(), forKey: key)
+        return true
+    }
+
+    private func chunks<T>(from values: [T], size: Int) -> [[T]] {
+        guard !values.isEmpty else { return [] }
+        let chunkSize = max(1, size)
+        return stride(from: 0, to: values.count, by: chunkSize).map { start in
+            Array(values[start..<min(start + chunkSize, values.count)])
+        }
     }
 
     private func trimRecordedSessionIDsIfNeeded() {

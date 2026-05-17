@@ -435,6 +435,7 @@ final class AppSettingsStore: ObservableObject {
         didSet {
             guard !isBootstrapping else { return }
             defaults.set(soundEnabled, forKey: Keys.soundEnabled)
+            recordTelemetrySettingChange(key: Keys.soundEnabled, value: soundEnabled.description)
         }
     }
 
@@ -507,6 +508,10 @@ final class AppSettingsStore: ObservableObject {
         didSet {
             guard !isBootstrapping else { return }
             defaults.set(processingStartSoundEnabled, forKey: Keys.processingStartSoundEnabled)
+            recordTelemetrySettingChange(
+                key: Keys.processingStartSoundEnabled,
+                value: processingStartSoundEnabled.description
+            )
         }
     }
 
@@ -514,6 +519,10 @@ final class AppSettingsStore: ObservableObject {
         didSet {
             guard !isBootstrapping else { return }
             defaults.set(attentionRequiredSoundEnabled, forKey: Keys.attentionRequiredSoundEnabled)
+            recordTelemetrySettingChange(
+                key: Keys.attentionRequiredSoundEnabled,
+                value: attentionRequiredSoundEnabled.description
+            )
         }
     }
 
@@ -521,6 +530,10 @@ final class AppSettingsStore: ObservableObject {
         didSet {
             guard !isBootstrapping else { return }
             defaults.set(taskCompletedSoundEnabled, forKey: Keys.taskCompletedSoundEnabled)
+            recordTelemetrySettingChange(
+                key: Keys.taskCompletedSoundEnabled,
+                value: taskCompletedSoundEnabled.description
+            )
         }
     }
 
@@ -528,6 +541,7 @@ final class AppSettingsStore: ObservableObject {
         didSet {
             guard !isBootstrapping else { return }
             defaults.set(taskErrorSoundEnabled, forKey: Keys.taskErrorSoundEnabled)
+            recordTelemetrySettingChange(key: Keys.taskErrorSoundEnabled, value: taskErrorSoundEnabled.description)
         }
     }
 
@@ -535,6 +549,10 @@ final class AppSettingsStore: ObservableObject {
         didSet {
             guard !isBootstrapping else { return }
             defaults.set(resourceLimitSoundEnabled, forKey: Keys.resourceLimitSoundEnabled)
+            recordTelemetrySettingChange(
+                key: Keys.resourceLimitSoundEnabled,
+                value: resourceLimitSoundEnabled.description
+            )
         }
     }
 
@@ -592,6 +610,7 @@ final class AppSettingsStore: ObservableObject {
         didSet {
             guard !isBootstrapping else { return }
             defaults.set(hideInFullscreen, forKey: Keys.hideInFullscreen)
+            recordTelemetrySettingChange(key: Keys.hideInFullscreen, value: hideInFullscreen.description)
         }
     }
 
@@ -607,6 +626,7 @@ final class AppSettingsStore: ObservableObject {
         didSet {
             guard !isBootstrapping else { return }
             defaults.set(autoCollapseOnLeave, forKey: Keys.autoCollapseOnLeave)
+            recordTelemetrySettingChange(key: Keys.autoCollapseOnLeave, value: autoCollapseOnLeave.description)
         }
     }
 
@@ -622,6 +642,10 @@ final class AppSettingsStore: ObservableObject {
         didSet {
             guard !isBootstrapping else { return }
             defaults.set(autoOpenCompletionPanel, forKey: Keys.autoOpenCompletionPanel)
+            recordTelemetrySettingChange(
+                key: Keys.autoOpenCompletionPanel,
+                value: autoOpenCompletionPanel.description
+            )
         }
     }
 
@@ -629,6 +653,10 @@ final class AppSettingsStore: ObservableObject {
         didSet {
             guard !isBootstrapping else { return }
             defaults.set(autoOpenCompactedNotificationPanel, forKey: Keys.autoOpenCompactedNotificationPanel)
+            recordTelemetrySettingChange(
+                key: Keys.autoOpenCompactedNotificationPanel,
+                value: autoOpenCompactedNotificationPanel.description
+            )
         }
     }
 
@@ -636,6 +664,7 @@ final class AppSettingsStore: ObservableObject {
         didSet {
             guard !isBootstrapping else { return }
             defaults.set(showAgentDetail, forKey: Keys.showAgentDetail)
+            recordTelemetrySettingChange(key: Keys.showAgentDetail, value: showAgentDetail.description)
         }
     }
 
@@ -790,6 +819,10 @@ final class AppSettingsStore: ObservableObject {
         didSet {
             guard !isBootstrapping else { return }
             defaults.set(automaticUpdateChecksEnabled, forKey: Keys.automaticUpdateChecksEnabled)
+            recordTelemetrySettingChange(
+                key: Keys.automaticUpdateChecksEnabled,
+                value: automaticUpdateChecksEnabled.description
+            )
         }
     }
 
@@ -851,6 +884,7 @@ final class AppSettingsStore: ObservableObject {
         didSet {
             guard !isBootstrapping else { return }
             defaults.set(routePromptsToTerminal, forKey: Keys.routePromptsToTerminal)
+            recordTelemetrySettingChange(key: Keys.routePromptsToTerminal, value: routePromptsToTerminal.description)
             writeEffectiveBridgeRuntimeConfig()
         }
     }
@@ -861,6 +895,10 @@ final class AppSettingsStore: ObservableObject {
             defaults.set(
                 autoRoutePromptsToTerminalWhenIdleEnabled,
                 forKey: Keys.autoRoutePromptsToTerminalWhenIdleEnabled
+            )
+            recordTelemetrySettingChange(
+                key: Keys.autoRoutePromptsToTerminalWhenIdleEnabled,
+                value: autoRoutePromptsToTerminalWhenIdleEnabled.description
             )
             if !autoRoutePromptsToTerminalWhenIdleEnabled {
                 setIdleAutoRoutePromptsToTerminalActive(false)

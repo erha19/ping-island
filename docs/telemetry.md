@@ -44,38 +44,35 @@ accepted.
 ## Cost Controls
 
 - Telemetry requires user consent and is disabled when the SLS host is empty.
-- Events are batched, with a default flush interval of 60 seconds and batch
-  size of 10.
-- The default daily cap is 200 events per device.
-- Startup and integration snapshots are throttled to avoid repeated uploads.
+- The app aggregates product metrics locally and uploads at most one usage
+  snapshot per device for each local calendar day.
+- Daily snapshots are uploaded after the day is complete, usually the next time
+  the app is active or the background telemetry loop runs after midnight.
+- The default daily cap remains a safety backstop, but normal telemetry volume
+  is one event per active device per day.
 - Only allowlisted fields are serialized; unknown fields are dropped.
 - Values are truncated to 160 characters and restricted to a conservative
   ASCII-safe character set.
 
 ## Event Allowlist
 
-Current event names:
+The upload surface is intentionally small. Current uploaded event names:
 
-- `app_launched`
-- `telemetry_preference_changed`
-- `setting_changed`
-- `hook_install_completed`
-- `hook_reinstall_completed`
-- `integration_status_snapshot`
-- `island_opened`
-- `island_closed`
-- `attention_requested`
-- `attention_resolved`
-- `session_detected`
-- `session_completed`
+- `daily_usage_snapshot`
 
-Current fields describe only product behavior, such as app version, build,
-distribution channel, macOS major version, architecture, language bucket,
-surface mode, client type, ingress type, install result, duration bucket, and
-tool count bucket. Island interaction events include only coarse source,
-presentation, and content-route buckets. Notification and approval events
-include only attention type, resolution bucket, client/provider/ingress, and
-response-duration bucket.
+Current fields describe only coarse product usage:
+
+- app version, build, distribution channel, macOS major version, architecture,
+  language bucket, surface mode, and anonymous device ID.
+- `report_date` and `active_device`, which let SLS count daily active devices.
+- Daily session counts grouped by client and provider, for example whether
+  Codex or Claude sessions are more common.
+- Daily tmux session count.
+- Daily setting-toggle adjustment counts by setting key.
+
+The app still uses internal telemetry method names for call-site compatibility,
+but those calls only update the local daily aggregate. They do not upload
+separate open/close, approval, install, or per-session events.
 
 ## Explicitly Not Collected
 
