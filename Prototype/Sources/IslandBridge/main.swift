@@ -695,6 +695,8 @@ private final class RemoteAgentService: @unchecked Sendable {
     private var controlReadBuffer = Data()
     private var pendingRequests: [UUID: PendingRemoteBridgeRequest] = [:]
     private var queuedMessages: [Data] = []
+    private var codexStateSource: DispatchSourceTimer?
+    private var deliveredCodexThreadUpdates: [String: Int64] = [:]
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
 
@@ -728,6 +730,8 @@ private final class RemoteAgentService: @unchecked Sendable {
             self?.acceptControlConnection()
         }
         controlAcceptSource?.resume()
+
+        startCodexStatePolling()
     }
 
     private func makeListeningSocket(path: String) throws -> Int32 {
@@ -816,6 +820,33 @@ private final class RemoteAgentService: @unchecked Sendable {
         if payload.expectsResponse == false {
             close(clientSocket)
         }
+    }
+
+    private func startCodexStatePolling() {
+        let source = DispatchSource.makeTimerSource(queue: queue)
+        source.schedule(deadline: .now() + 1, repeating: 2)
+        source.setEventHandler { [weak self] in
+            self?.pollCodexState()
+        }
+        codexStateSource = source
+        source.resume()
+    }
+
+    private func pollCodexState() {
+        let cutoff = Int64(Date().timeIntervalSince1970 * 1000) - 15 * 60 * 1000
+        let codexHome = Self.homeDirectory.appendingPathComponent(".codex")
+        for thread in RemoteCodexStatePoller.readRecentThreads(codexHome: codexHome, updatedSinceMs: cutoff) {
+            guard thread.updatedAtMs > (deliveredCodexThreadUpdates[thread.id] ?? 0) else { continue }
+            deliveredCodexThreadUpdates[thread.id] = thread.updatedAtMs
+            enqueue(RemoteBridgeMessageBuilder.message(from: thread))
+        }
+    }
+
+    private nonisolated static var homeDirectory: URL {
+        if let home = ProcessInfo.processInfo.environment["HOME"], !home.isEmpty {
+            return URL(fileURLWithPath: home, isDirectory: true)
+        }
+        return FileManager.default.homeDirectoryForCurrentUser
     }
 
     private func acceptControlConnection() {
@@ -995,6 +1026,110 @@ private struct PendingRemoteBridgeRequest {
     let clientSocket: Int32
 }
 
+private struct RemoteCodexThread: Codable, Equatable {
+    let id: String
+    let cwd: String
+    let title: String?
+    let preview: String?
+    let rolloutPath: String?
+    let source: String?
+    let threadSource: String?
+    let updatedAtMs: Int64
+}
+
+private enum RemoteCodexStatePoller {
+    static func readRecentThreads(codexHome: URL, updatedSinceMs: Int64) -> [RemoteCodexThread] {
+        guard let stateURL = newestStateDatabase(in: codexHome) else { return [] }
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = ["python3", "-c", pythonScript, stateURL.path, String(updatedSinceMs)]
+
+        let outputPipe = Pipe()
+        process.standardOutput = outputPipe
+        process.standardError = Pipe()
+
+        do {
+            try process.run()
+            process.waitUntilExit()
+        } catch {
+            return []
+        }
+
+        guard process.terminationStatus == 0 else { return [] }
+
+        let data = outputPipe.fileHandleForReading.readDataToEndOfFile()
+        return (try? JSONDecoder().decode([RemoteCodexThread].self, from: data)) ?? []
+    }
+
+    private static func newestStateDatabase(in codexHome: URL) -> URL? {
+        let contents = (try? FileManager.default.contentsOfDirectory(
+            at: codexHome,
+            includingPropertiesForKeys: nil
+        )) ?? []
+
+        return contents
+            .compactMap(StateDatabase.init(url:))
+            .max(by: { $0.version < $1.version })?
+            .url
+    }
+
+    private static let pythonScript = #"""
+import json
+import sqlite3
+import sys
+
+db_path = sys.argv[1]
+updated_since_ms = int(sys.argv[2])
+
+query = """
+SELECT
+  id,
+  cwd,
+  NULLIF(title, '') AS title,
+  NULLIF(preview, '') AS preview,
+  NULLIF(rollout_path, '') AS rolloutPath,
+  NULLIF(source, '') AS source,
+  NULLIF(thread_source, '') AS threadSource,
+  COALESCE(updated_at_ms, updated_at * 1000, created_at_ms, created_at * 1000) AS updatedAtMs
+FROM threads
+WHERE archived = 0
+  AND cwd != ''
+  AND COALESCE(NULLIF(preview, ''), NULLIF(title, '')) IS NOT NULL
+  AND COALESCE(updated_at_ms, updated_at * 1000, created_at_ms, created_at * 1000) >= ?
+ORDER BY updatedAtMs DESC
+LIMIT 12
+"""
+
+try:
+    con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    con.row_factory = sqlite3.Row
+    rows = con.execute(query, (updated_since_ms,)).fetchall()
+    con.close()
+    print(json.dumps([dict(row) for row in rows], ensure_ascii=False))
+except Exception:
+    print("[]")
+"""#
+}
+
+private struct StateDatabase {
+    let url: URL
+    let version: Int
+
+    init?(url: URL) {
+        let name = url.lastPathComponent
+        guard name.hasPrefix("state_"), name.hasSuffix(".sqlite") else { return nil }
+
+        let versionText = name
+            .dropFirst("state_".count)
+            .dropLast(".sqlite".count)
+        guard let version = Int(versionText) else { return nil }
+
+        self.url = url
+        self.version = version
+    }
+}
+
 private struct RemoteHookClientInfoPayload: Codable {
     let kind: String
     let profileID: String?
@@ -1054,6 +1189,10 @@ private struct RemoteDecisionEnvelope: Codable {
 }
 
 private enum RemoteBridgeMessageBuilder {
+    static func message(from thread: RemoteCodexThread) -> RemoteHookEventMessage {
+        RemoteHookEventMessage(type: "hook_event", payload: payload(from: thread))
+    }
+
     static func payload(from envelope: BridgeEnvelope) -> RemoteHookEventPayload {
         let metadata = envelope.metadata
         let toolInput = decodeToolInput(from: metadata["tool_input_json"])
@@ -1070,7 +1209,7 @@ private enum RemoteBridgeMessageBuilder {
             event: envelope.eventType,
             status: mapStatus(eventType: envelope.eventType, status: envelope.status?.kind, notificationType: metadata["notification_type"]),
             provider: envelope.provider.rawValue,
-            pid: Int(metadata["pid"] ?? "") ?? Int(getppid()) ?? Int(getppid()),
+            pid: Int(metadata["pid"] ?? "") ?? Int(getppid()),
             tty: terminalContext.tty,
             tool: normalizedToolName(metadata["tool_name"] ?? envelope.title),
             toolInput: toolInput,
@@ -1100,6 +1239,46 @@ private enum RemoteBridgeMessageBuilder {
                 tmuxSessionIdentifier: terminalContext.tmuxSession,
                 tmuxPaneIdentifier: terminalContext.tmuxPane,
                 processName: firstNonEmpty(metadata["source_process_name"], metadata["process_name"])
+            )
+        )
+    }
+
+    private static func payload(from thread: RemoteCodexThread) -> RemoteHookEventPayload {
+        let message = firstNonEmpty(thread.preview, thread.title)
+        return RemoteHookEventPayload(
+            requestID: UUID(),
+            sessionID: thread.id,
+            cwd: thread.cwd,
+            event: "RemoteCodexThreadUpdated",
+            status: "processing",
+            provider: AgentProvider.codex.rawValue,
+            pid: nil,
+            tty: nil,
+            tool: nil,
+            toolInput: nil,
+            toolUseID: nil,
+            notificationType: nil,
+            message: message,
+            expectsResponse: false,
+            clientInfo: RemoteHookClientInfoPayload(
+                kind: "codexCLI",
+                profileID: "codex-cli",
+                name: "Codex CLI",
+                bundleIdentifier: nil,
+                launchURL: nil,
+                origin: "cli",
+                originator: "Codex App",
+                threadSource: firstNonEmpty(thread.threadSource, thread.source, "app-server"),
+                transport: "ssh",
+                remoteHost: ProcessInfo.processInfo.hostName,
+                sessionFilePath: thread.rolloutPath,
+                terminalBundleIdentifier: nil,
+                terminalProgram: nil,
+                terminalSessionIdentifier: nil,
+                iTermSessionIdentifier: nil,
+                tmuxSessionIdentifier: nil,
+                tmuxPaneIdentifier: nil,
+                processName: "codex app-server"
             )
         )
     }
