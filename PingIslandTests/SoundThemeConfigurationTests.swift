@@ -68,6 +68,7 @@ final class SoundThemeConfigurationTests: XCTestCase {
         }
     }
 
+    @MainActor
     func testPerEventIsland8BitDefaultsMatchSpec() {
         // Defaults documented in openspec change `customize-8bit-sound-per-event`.
         let defaults = UserDefaults(suiteName: "test.island8bit.defaults.\(UUID().uuidString)")!

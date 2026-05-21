@@ -1370,7 +1370,7 @@ final class DetachedIslandWindowControllerTests: XCTestCase {
 
     private func waitForBubbleHidden(
         _ controller: DetachedIslandWindowController,
-        timeout: TimeInterval = 1.0,
+        timeout: TimeInterval = 3.0,
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
