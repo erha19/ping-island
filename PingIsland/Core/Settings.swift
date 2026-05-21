@@ -1283,16 +1283,16 @@ final class AppSettingsStore: ObservableObject {
         ) ?? .menuSelect)
         _island8BitAttentionRequiredSound = Published(initialValue: Island8BitSound(
             rawValue: defaults.string(forKey: Keys.island8BitAttentionRequiredSound) ?? ""
-        ) ?? .itemPickup)
+        ) ?? .approvalAlert)
         _island8BitTaskCompletedSound = Published(initialValue: Island8BitSound(
             rawValue: defaults.string(forKey: Keys.island8BitTaskCompletedSound) ?? ""
-        ) ?? .winJingle)
+        ) ?? .submitBlip)
         _island8BitTaskErrorSound = Published(initialValue: Island8BitSound(
             rawValue: defaults.string(forKey: Keys.island8BitTaskErrorSound) ?? ""
         ) ?? .hurt)
         _island8BitResourceLimitSound = Published(initialValue: Island8BitSound(
             rawValue: defaults.string(forKey: Keys.island8BitResourceLimitSound) ?? ""
-        ) ?? .hurt)
+        ) ?? .completeDing)
         _soundThemeMode = Published(initialValue: resolvedSoundThemeMode)
         _selectedSoundPackPath = Published(initialValue: defaults.string(forKey: Keys.selectedSoundPackPath) ?? "")
         _hideInFullscreen = Published(initialValue: Self.boolValue(

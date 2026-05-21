@@ -1719,12 +1719,12 @@ final class DetachedIslandWindowController: NSWindowController, NSWindowDelegate
     private func primeSoundTransitions(_ instances: [SessionState]) {
         previousProcessingIds = Set(
             instances
-                .filter { $0.phase == .processing || $0.phase == .compacting }
+                .filter(\.phase.contributesToProcessingSoundEdge)
                 .map(\.stableId)
         )
         previousAttentionSoundIds = Set(
             instances
-                .filter { $0.needsApprovalResponse || ($0.phase == .waitingForInput && $0.intervention != nil) }
+                .filter(SessionAttentionSoundEvaluator.shouldContributeToAttentionSoundEdge)
                 .map(\.stableId)
         )
         previousCompletionSoundIds = Set(
@@ -1751,12 +1751,10 @@ final class DetachedIslandWindowController: NSWindowController, NSWindowDelegate
             return
         }
 
-        let processingSessions = instances.filter {
-            $0.phase == .processing || $0.phase == .compacting
-        }
-        let attentionSessions = instances.filter {
-            $0.needsApprovalResponse || ($0.phase == .waitingForInput && $0.intervention != nil)
-        }
+        let processingSessions = instances.filter(\.phase.contributesToProcessingSoundEdge)
+        let attentionSessions = instances.filter(
+            SessionAttentionSoundEvaluator.shouldContributeToAttentionSoundEdge
+        )
         let completedSessions = instances.filter { SessionCompletionStateEvaluator.isCompletedReadySession($0) }
         let resourceLimitedSessions = instances.filter {
             $0.phase == .compacting

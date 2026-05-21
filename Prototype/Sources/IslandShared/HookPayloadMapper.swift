@@ -401,6 +401,12 @@ public enum HookPayloadMapper {
         if lowered.contains("notification") {
             return SessionStatus(kind: .notification)
         }
+        // Sub-agent events have to be matched before pretool/posttool/start/end
+        // because their names contain those substrings ("subagentstart" matches
+        // "start"). The parent session continues processing regardless.
+        if lowered == "subagentstart" || lowered == "subagentstop" {
+            return SessionStatus(kind: .runningTool)
+        }
         if lowered.contains("pretool") {
             return SessionStatus(kind: .runningTool)
         }
@@ -411,13 +417,25 @@ public enum HookPayloadMapper {
             return SessionStatus(kind: .active)
         }
         if lowered.contains("stop") || lowered.contains("end") {
-            // Kimi's "Stop" means "agent turn ended" (finished responding), not "session closed".
-            // Map it to .waitingForInput so completion notifications and sounds fire correctly.
-            // Only "SessionEnd" actually terminates a Kimi session.
-            if clientKind == "kimi", lowered == "stop" {
+            // Per Anthropic hook docs (and confirmed by farouqaldori/vibe-notch's
+            // shipped behavior): Stop / StopFailure mean "the agent finished its
+            // turn and is waiting for the next user input"; only SessionEnd
+            // actually terminates the session. The Kimi-only carve-out that
+            // previously lived here is now the default behavior for every
+            // shared-.claude client (claude-code, codebuddy, codebuddy-cli,
+            // qoderwork, qwen-code, hermes, openclaw, workbuddy, kimi).
+            switch lowered {
+            case "sessionend":
+                return SessionStatus(kind: .completed)
+            case "stop", "stopfailure":
                 return SessionStatus(kind: .waitingForInput)
+            default:
+                // Unknown stop/end variant from a future client we have not
+                // audited: stay conservative so we don't accumulate ghost
+                // sessions. The periodic liveness sweep is the safety net if
+                // we guessed wrong.
+                return SessionStatus(kind: .completed)
             }
-            return SessionStatus(kind: .completed)
         }
         if lowered.contains("compact") {
             return SessionStatus(kind: .compacting)

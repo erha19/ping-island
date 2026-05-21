@@ -174,6 +174,22 @@ enum SessionPhase: Sendable {
         }
         return nil
     }
+
+    /// Whether the session is "still in flight" for the purposes of the
+    /// `processingStarted` notification-sound edge. Includes
+    /// `.waitingForApproval` alongside `.processing` and `.compacting` so
+    /// that a PermissionRequest → resolution flow does not briefly leave
+    /// the set and re-enter, which would generate a spurious
+    /// processingStarted edge right before the Stop-driven taskCompleted —
+    /// audible as two chimes firing near-simultaneously at completion.
+    nonisolated var contributesToProcessingSoundEdge: Bool {
+        switch self {
+        case .processing, .compacting, .waitingForApproval:
+            return true
+        case .idle, .waitingForInput, .ended:
+            return false
+        }
+    }
 }
 
 // MARK: - Equatable

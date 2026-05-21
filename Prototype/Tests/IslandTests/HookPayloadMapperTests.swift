@@ -2214,7 +2214,10 @@ func qwenCodeStopUsesLastAssistantMessageAsPreview() throws {
     )
 
     #expect(envelope.eventType == "Stop")
-    #expect(envelope.status?.kind == .completed)
+    // Updated by fix-claude-sound-triggers: Stop now means "agent turn ended,
+    // ready for user input" for every shared-.claude client (was .completed
+    // pre-fix, which incorrectly killed the session).
+    #expect(envelope.status?.kind == .waitingForInput)
     #expect(envelope.preview == "Done. I updated the files and left notes in the summary.")
 }
 
@@ -2271,7 +2274,9 @@ func hermesStopUsesLastAssistantMessageAsPreview() throws {
     )
 
     #expect(envelope.eventType == "Stop")
-    #expect(envelope.status?.kind == .completed)
+    // Updated by fix-claude-sound-triggers: Stop now means "agent turn ended,
+    // ready for user input" for every shared-.claude client.
+    #expect(envelope.status?.kind == .waitingForInput)
     #expect(envelope.preview == "Done. I inspected the tool calls and wrote the follow-up notes.")
 }
 
@@ -2376,4 +2381,156 @@ func copilotStdoutPayloadUsesPermissionDecisionAndModifiedArgs() throws {
     let modifiedArgs = try #require(json["modifiedArgs"] as? [String: String])
     #expect(modifiedArgs["path"] == "/tmp/demo.swift")
     #expect(modifiedArgs["replace"] == "updated")
+}
+
+// MARK: - Stop family mapping (fix-claude-sound-triggers)
+
+@Test
+func claudeStopMapsToWaitingForInput() throws {
+    let payload = """
+    {
+      "hook_event_name": "Stop",
+      "session_id": "claude-stop-1"
+    }
+    """.data(using: .utf8)!
+
+    let envelope = HookPayloadMapper.makeEnvelope(
+        source: .claude,
+        arguments: ["island-bridge", "--source", "claude"],
+        environment: ["TERM_PROGRAM": "iTerm.app", "PWD": "/tmp/demo"],
+        stdinData: payload
+    )
+
+    #expect(envelope.eventType == "Stop")
+    #expect(envelope.status?.kind == .waitingForInput)
+    #expect(envelope.intervention == nil)
+}
+
+@Test
+func claudeSubagentStopMapsToRunningTool() throws {
+    let payload = """
+    {
+      "hook_event_name": "SubagentStop",
+      "session_id": "claude-subagent-1"
+    }
+    """.data(using: .utf8)!
+
+    let envelope = HookPayloadMapper.makeEnvelope(
+        source: .claude,
+        arguments: ["island-bridge", "--source", "claude"],
+        environment: ["TERM_PROGRAM": "iTerm.app", "PWD": "/tmp/demo"],
+        stdinData: payload
+    )
+
+    #expect(envelope.eventType == "SubagentStop")
+    #expect(envelope.status?.kind == .runningTool)
+}
+
+@Test
+func claudeSubagentStartMapsToRunningTool() throws {
+    let payload = """
+    {
+      "hook_event_name": "SubagentStart",
+      "session_id": "claude-subagent-2"
+    }
+    """.data(using: .utf8)!
+
+    let envelope = HookPayloadMapper.makeEnvelope(
+        source: .claude,
+        arguments: ["island-bridge", "--source", "claude"],
+        environment: ["TERM_PROGRAM": "iTerm.app", "PWD": "/tmp/demo"],
+        stdinData: payload
+    )
+
+    #expect(envelope.eventType == "SubagentStart")
+    #expect(envelope.status?.kind == .runningTool)
+}
+
+@Test
+func claudeStopFailureMapsToWaitingForInput() throws {
+    let payload = """
+    {
+      "hook_event_name": "StopFailure",
+      "session_id": "claude-stopfail-1",
+      "error": "rate_limit"
+    }
+    """.data(using: .utf8)!
+
+    let envelope = HookPayloadMapper.makeEnvelope(
+        source: .claude,
+        arguments: ["island-bridge", "--source", "claude"],
+        environment: ["TERM_PROGRAM": "iTerm.app", "PWD": "/tmp/demo"],
+        stdinData: payload
+    )
+
+    #expect(envelope.eventType == "StopFailure")
+    #expect(envelope.status?.kind == .waitingForInput)
+}
+
+@Test
+func claudeSessionEndMapsToCompleted() throws {
+    let payload = """
+    {
+      "hook_event_name": "SessionEnd",
+      "session_id": "claude-end-1"
+    }
+    """.data(using: .utf8)!
+
+    let envelope = HookPayloadMapper.makeEnvelope(
+        source: .claude,
+        arguments: ["island-bridge", "--source", "claude"],
+        environment: ["TERM_PROGRAM": "iTerm.app", "PWD": "/tmp/demo"],
+        stdinData: payload
+    )
+
+    #expect(envelope.eventType == "SessionEnd")
+    #expect(envelope.status?.kind == .completed)
+}
+
+@Test
+func kimiStopMapsToWaitingForInputSameAsClaude() throws {
+    // Regression: kimi previously had a special carve-out; behavior is now the
+    // same as claude's default. Test ensures the kimi path is unchanged.
+    let payload = """
+    {
+      "hook_event_name": "Stop",
+      "session_id": "kimi-stop-1"
+    }
+    """.data(using: .utf8)!
+
+    let envelope = HookPayloadMapper.makeEnvelope(
+        source: .kimi,
+        arguments: [
+            "island-bridge",
+            "--source", "kimi",
+            "--client-kind", "kimi"
+        ],
+        environment: ["TERM_PROGRAM": "iTerm.app", "PWD": "/tmp/demo"],
+        stdinData: payload
+    )
+
+    #expect(envelope.eventType == "Stop")
+    #expect(envelope.status?.kind == .waitingForInput)
+}
+
+@Test
+func unknownStopVariantFallsBackToCompleted() throws {
+    // Conservative default: an unknown stop/end-substring event we have not
+    // audited stays mapped to .completed so we don't accumulate ghost sessions.
+    let payload = """
+    {
+      "hook_event_name": "MysteryStopThing",
+      "session_id": "claude-mystery-1"
+    }
+    """.data(using: .utf8)!
+
+    let envelope = HookPayloadMapper.makeEnvelope(
+        source: .claude,
+        arguments: ["island-bridge", "--source", "claude"],
+        environment: ["TERM_PROGRAM": "iTerm.app", "PWD": "/tmp/demo"],
+        stdinData: payload
+    )
+
+    #expect(envelope.eventType == "MysteryStopThing")
+    #expect(envelope.status?.kind == .completed)
 }
