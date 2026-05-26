@@ -695,6 +695,8 @@ private final class RemoteAgentService: @unchecked Sendable {
     private var controlReadBuffer = Data()
     private var pendingRequests: [UUID: PendingRemoteBridgeRequest] = [:]
     private var queuedMessages: [Data] = []
+    private var codexStateSource: DispatchSourceTimer?
+    private var deliveredCodexThreadUpdates: [String: Int64] = [:]
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
 
@@ -728,6 +730,8 @@ private final class RemoteAgentService: @unchecked Sendable {
             self?.acceptControlConnection()
         }
         controlAcceptSource?.resume()
+
+        startCodexStatePolling()
     }
 
     private func makeListeningSocket(path: String) throws -> Int32 {
@@ -763,6 +767,34 @@ private final class RemoteAgentService: @unchecked Sendable {
             throw BridgeError.connectionFailed
         }
         return fd
+    }
+
+    private func startCodexStatePolling() {
+        let source = DispatchSource.makeTimerSource(queue: queue)
+        source.schedule(deadline: .now() + 1, repeating: 2)
+        source.setEventHandler { [weak self] in
+            self?.pollCodexState()
+        }
+        codexStateSource = source
+        source.resume()
+    }
+
+    private func pollCodexState() {
+        let cutoff = Int64(Date().timeIntervalSince1970 * 1000) - 15 * 60 * 1000
+        let codexHome = Self.homeDirectory.appendingPathComponent(".codex", isDirectory: true)
+        for thread in RemoteCodexStatePoller.readRecentThreads(codexHome: codexHome, updatedSinceMs: cutoff) {
+            guard thread.updatedAtMs > (deliveredCodexThreadUpdates[thread.id] ?? 0) else { continue }
+            deliveredCodexThreadUpdates[thread.id] = thread.updatedAtMs
+            enqueue(RemoteBridgeMessageBuilder.message(from: thread))
+        }
+    }
+
+    private nonisolated static var homeDirectory: URL {
+        if let home = ProcessInfo.processInfo.environment["HOME"]?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !home.isEmpty {
+            return URL(fileURLWithPath: home, isDirectory: true)
+        }
+        return FileManager.default.homeDirectoryForCurrentUser
     }
 
     private func acceptHookConnection() {
@@ -995,6 +1027,275 @@ private struct PendingRemoteBridgeRequest {
     let clientSocket: Int32
 }
 
+private struct RemoteCodexThread: Equatable {
+    let id: String
+    let cwd: String
+    let title: String?
+    let preview: String?
+    let rolloutPath: String?
+    let source: String?
+    let threadSource: String?
+    let updatedAtMs: Int64
+}
+
+private enum RemoteCodexStatePoller {
+    static func readRecentThreads(codexHome: URL, updatedSinceMs: Int64) -> [RemoteCodexThread] {
+        guard let stateURL = newestStateDatabase(in: codexHome),
+              let database = RemoteSQLiteDatabase.openReadOnly(path: stateURL.path) else {
+            return []
+        }
+        defer { database.close() }
+
+        let columns = database.tableColumns(named: "threads")
+        guard columns.contains("id"),
+              columns.contains("cwd"),
+              let updatedExpression = updatedAtExpression(columns: columns) else {
+            return []
+        }
+
+        let titleExpression = coalescedTextExpression(["title", "first_user_message"], columns: columns)
+        let previewExpression = nullableTextExpression("preview", columns: columns)
+        let rolloutPathExpression = nullableTextExpression("rollout_path", columns: columns)
+        let sourceExpression = nullableTextExpression("source", columns: columns)
+        let threadSourceExpression = nullableTextExpression("thread_source", columns: columns)
+        let archivedPredicate = columns.contains("archived") ? "AND COALESCE(archived, 0) = 0" : ""
+        let messagePredicate = "COALESCE(\(previewExpression), \(titleExpression)) IS NOT NULL"
+        let query = """
+        SELECT
+          id,
+          cwd,
+          \(titleExpression) AS title,
+          \(previewExpression) AS preview,
+          \(rolloutPathExpression) AS rolloutPath,
+          \(sourceExpression) AS source,
+          \(threadSourceExpression) AS threadSource,
+          \(updatedExpression) AS updatedAtMs
+        FROM threads
+        WHERE cwd != ''
+          \(archivedPredicate)
+          AND \(messagePredicate)
+          AND \(updatedExpression) >= ?
+        ORDER BY updatedAtMs DESC
+        LIMIT 12
+        """
+
+        return database.recentCodexThreads(query: query, updatedSinceMs: updatedSinceMs)
+    }
+
+    private static func newestStateDatabase(in codexHome: URL) -> URL? {
+        let contents = (try? FileManager.default.contentsOfDirectory(
+            at: codexHome,
+            includingPropertiesForKeys: nil
+        )) ?? []
+
+        return contents
+            .compactMap(CodexStateDatabase.init(url:))
+            .max(by: { $0.version < $1.version })?
+            .url
+    }
+
+    private static func updatedAtExpression(columns: Set<String>) -> String? {
+        let candidates: [String] = [
+            columns.contains("updated_at_ms") ? "updated_at_ms" : nil,
+            columns.contains("updated_at") ? "updated_at * 1000" : nil,
+            columns.contains("created_at_ms") ? "created_at_ms" : nil,
+            columns.contains("created_at") ? "created_at * 1000" : nil
+        ].compactMap { $0 }
+        guard !candidates.isEmpty else { return nil }
+        return "COALESCE(\(candidates.joined(separator: ", ")))"
+    }
+
+    private static func coalescedTextExpression(_ names: [String], columns: Set<String>) -> String {
+        let expressions = names.map { nullableTextExpression($0, columns: columns) }
+        return "COALESCE(\(expressions.joined(separator: ", ")))"
+    }
+
+    private static func nullableTextExpression(_ name: String, columns: Set<String>) -> String {
+        columns.contains(name) ? "NULLIF(\(name), '')" : "NULL"
+    }
+}
+
+private final class RemoteSQLiteDatabase {
+    fileprivate typealias SQLiteOpenV2 = @convention(c) (UnsafePointer<CChar>?, UnsafeMutablePointer<OpaquePointer?>?, Int32, UnsafePointer<CChar>?) -> Int32
+    fileprivate typealias SQLiteClose = @convention(c) (OpaquePointer?) -> Int32
+    fileprivate typealias SQLitePrepareV2 = @convention(c) (OpaquePointer?, UnsafePointer<CChar>?, Int32, UnsafeMutablePointer<OpaquePointer?>?, UnsafeMutablePointer<UnsafePointer<CChar>?>?) -> Int32
+    fileprivate typealias SQLiteStep = @convention(c) (OpaquePointer?) -> Int32
+    fileprivate typealias SQLiteFinalize = @convention(c) (OpaquePointer?) -> Int32
+    fileprivate typealias SQLiteColumnText = @convention(c) (OpaquePointer?, Int32) -> UnsafePointer<UInt8>?
+    fileprivate typealias SQLiteColumnInt64 = @convention(c) (OpaquePointer?, Int32) -> Int64
+    fileprivate typealias SQLiteBindInt64 = @convention(c) (OpaquePointer?, Int32, Int64) -> Int32
+
+    private static let sqliteOpenReadonly: Int32 = 0x00000001
+    private static let sqliteRow: Int32 = 100
+
+    private let handle: OpaquePointer?
+    private let symbols: RemoteSQLiteSymbols
+
+    private init(handle: OpaquePointer?, symbols: RemoteSQLiteSymbols) {
+        self.handle = handle
+        self.symbols = symbols
+    }
+
+    static func openReadOnly(path: String) -> RemoteSQLiteDatabase? {
+        guard let symbols = RemoteSQLiteSymbols.load() else { return nil }
+        var handle: OpaquePointer?
+        let result = path.withCString { pathPointer in
+            symbols.openV2(pathPointer, &handle, sqliteOpenReadonly, nil)
+        }
+        guard result == 0 else {
+            if handle != nil {
+                _ = symbols.close(handle)
+            }
+            return nil
+        }
+        return RemoteSQLiteDatabase(handle: handle, symbols: symbols)
+    }
+
+    func close() {
+        _ = symbols.close(handle)
+    }
+
+    func tableColumns(named tableName: String) -> Set<String> {
+        guard tableName.range(of: #"^[A-Za-z_][A-Za-z0-9_]*$"#, options: .regularExpression) != nil else {
+            return []
+        }
+
+        var statement: OpaquePointer?
+        guard prepare("PRAGMA table_info(\(tableName))", statement: &statement) else { return [] }
+        defer { _ = symbols.finalize(statement) }
+
+        var columns = Set<String>()
+        while symbols.step(statement) == Self.sqliteRow {
+            if let name = textColumn(statement, 1) {
+                columns.insert(name)
+            }
+        }
+        return columns
+    }
+
+    func recentCodexThreads(query: String, updatedSinceMs: Int64) -> [RemoteCodexThread] {
+        var statement: OpaquePointer?
+        guard prepare(query, statement: &statement) else { return [] }
+        defer { _ = symbols.finalize(statement) }
+
+        guard symbols.bindInt64(statement, 1, updatedSinceMs) == 0 else { return [] }
+
+        var threads: [RemoteCodexThread] = []
+        while symbols.step(statement) == Self.sqliteRow {
+            guard let id = textColumn(statement, 0),
+                  let cwd = textColumn(statement, 1),
+                  !id.isEmpty,
+                  !cwd.isEmpty else {
+                continue
+            }
+
+            threads.append(RemoteCodexThread(
+                id: id,
+                cwd: cwd,
+                title: textColumn(statement, 2),
+                preview: textColumn(statement, 3),
+                rolloutPath: textColumn(statement, 4),
+                source: textColumn(statement, 5),
+                threadSource: textColumn(statement, 6),
+                updatedAtMs: symbols.columnInt64(statement, 7)
+            ))
+        }
+        return threads
+    }
+
+    private func prepare(_ sql: String, statement: UnsafeMutablePointer<OpaquePointer?>) -> Bool {
+        sql.withCString { sqlPointer in
+            symbols.prepareV2(handle, sqlPointer, -1, statement, nil) == 0
+        }
+    }
+
+    private func textColumn(_ statement: OpaquePointer?, _ index: Int32) -> String? {
+        guard let text = symbols.columnText(statement, index) else { return nil }
+        let value = String(cString: UnsafeRawPointer(text).assumingMemoryBound(to: CChar.self))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? nil : value
+    }
+}
+
+private struct RemoteSQLiteSymbols: @unchecked Sendable {
+    // Keep the dlopen handle alive for the lifetime of the cached C symbols.
+    let library: UnsafeMutableRawPointer
+    let openV2: RemoteSQLiteDatabase.SQLiteOpenV2
+    let close: RemoteSQLiteDatabase.SQLiteClose
+    let prepareV2: RemoteSQLiteDatabase.SQLitePrepareV2
+    let step: RemoteSQLiteDatabase.SQLiteStep
+    let finalize: RemoteSQLiteDatabase.SQLiteFinalize
+    let columnText: RemoteSQLiteDatabase.SQLiteColumnText
+    let columnInt64: RemoteSQLiteDatabase.SQLiteColumnInt64
+    let bindInt64: RemoteSQLiteDatabase.SQLiteBindInt64
+
+    static func load() -> RemoteSQLiteSymbols? {
+        cached
+    }
+
+    private static let cached: RemoteSQLiteSymbols? = loadUncached()
+
+    private static func loadUncached() -> RemoteSQLiteSymbols? {
+        for name in libraryNames {
+            guard let library = dlopen(name, RTLD_NOW | RTLD_LOCAL),
+                  let openV2: RemoteSQLiteDatabase.SQLiteOpenV2 = symbol("sqlite3_open_v2", in: library),
+                  let close: RemoteSQLiteDatabase.SQLiteClose = symbol("sqlite3_close", in: library),
+                  let prepareV2: RemoteSQLiteDatabase.SQLitePrepareV2 = symbol("sqlite3_prepare_v2", in: library),
+                  let step: RemoteSQLiteDatabase.SQLiteStep = symbol("sqlite3_step", in: library),
+                  let finalize: RemoteSQLiteDatabase.SQLiteFinalize = symbol("sqlite3_finalize", in: library),
+                  let columnText: RemoteSQLiteDatabase.SQLiteColumnText = symbol("sqlite3_column_text", in: library),
+                  let columnInt64: RemoteSQLiteDatabase.SQLiteColumnInt64 = symbol("sqlite3_column_int64", in: library),
+                  let bindInt64: RemoteSQLiteDatabase.SQLiteBindInt64 = symbol("sqlite3_bind_int64", in: library) else {
+                continue
+            }
+
+            return RemoteSQLiteSymbols(
+                library: library,
+                openV2: openV2,
+                close: close,
+                prepareV2: prepareV2,
+                step: step,
+                finalize: finalize,
+                columnText: columnText,
+                columnInt64: columnInt64,
+                bindInt64: bindInt64
+            )
+        }
+        return nil
+    }
+
+    private static var libraryNames: [String] {
+        #if canImport(Darwin)
+        ["/usr/lib/libsqlite3.dylib", "libsqlite3.dylib"]
+        #else
+        ["libsqlite3.so.0", "libsqlite3.so"]
+        #endif
+    }
+
+    private static func symbol<T>(_ name: String, in library: UnsafeMutableRawPointer) -> T? {
+        guard let pointer = dlsym(library, name) else { return nil }
+        return unsafeBitCast(pointer, to: T.self)
+    }
+}
+
+private struct CodexStateDatabase {
+    let url: URL
+    let version: Int
+
+    init?(url: URL) {
+        let name = url.lastPathComponent
+        guard name.hasPrefix("state_"), name.hasSuffix(".sqlite") else { return nil }
+
+        let versionText = name
+            .dropFirst("state_".count)
+            .dropLast(".sqlite".count)
+        guard let version = Int(versionText) else { return nil }
+
+        self.url = url
+        self.version = version
+    }
+}
+
 private struct RemoteHookClientInfoPayload: Codable {
     let kind: String
     let profileID: String?
@@ -1054,6 +1355,10 @@ private struct RemoteDecisionEnvelope: Codable {
 }
 
 private enum RemoteBridgeMessageBuilder {
+    static func message(from thread: RemoteCodexThread) -> RemoteHookEventMessage {
+        RemoteHookEventMessage(type: "hook_event", payload: payload(from: thread))
+    }
+
     static func payload(from envelope: BridgeEnvelope) -> RemoteHookEventPayload {
         let metadata = envelope.metadata
         let toolInput = decodeToolInput(from: metadata["tool_input_json"])
@@ -1070,7 +1375,7 @@ private enum RemoteBridgeMessageBuilder {
             event: envelope.eventType,
             status: mapStatus(eventType: envelope.eventType, status: envelope.status?.kind, notificationType: metadata["notification_type"]),
             provider: envelope.provider.rawValue,
-            pid: Int(metadata["pid"] ?? "") ?? Int(getppid()) ?? Int(getppid()),
+            pid: Int(metadata["pid"] ?? "") ?? Int(getppid()),
             tty: terminalContext.tty,
             tool: normalizedToolName(metadata["tool_name"] ?? envelope.title),
             toolInput: toolInput,
@@ -1100,6 +1405,46 @@ private enum RemoteBridgeMessageBuilder {
                 tmuxSessionIdentifier: terminalContext.tmuxSession,
                 tmuxPaneIdentifier: terminalContext.tmuxPane,
                 processName: firstNonEmpty(metadata["source_process_name"], metadata["process_name"])
+            )
+        )
+    }
+
+    private static func payload(from thread: RemoteCodexThread) -> RemoteHookEventPayload {
+        let message = firstNonEmpty(thread.preview, thread.title)
+        return RemoteHookEventPayload(
+            requestID: UUID(),
+            sessionID: thread.id,
+            cwd: thread.cwd,
+            event: "RemoteCodexThreadUpdated",
+            status: "processing",
+            provider: AgentProvider.codex.rawValue,
+            pid: nil,
+            tty: nil,
+            tool: nil,
+            toolInput: nil,
+            toolUseID: nil,
+            notificationType: nil,
+            message: message,
+            expectsResponse: false,
+            clientInfo: RemoteHookClientInfoPayload(
+                kind: "codexCLI",
+                profileID: "codex-cli",
+                name: "Codex CLI",
+                bundleIdentifier: nil,
+                launchURL: nil,
+                origin: "cli",
+                originator: "Codex App",
+                threadSource: firstNonEmpty(thread.threadSource, thread.source, "app-server"),
+                transport: "ssh",
+                remoteHost: ProcessInfo.processInfo.hostName,
+                sessionFilePath: thread.rolloutPath,
+                terminalBundleIdentifier: nil,
+                terminalProgram: nil,
+                terminalSessionIdentifier: nil,
+                iTermSessionIdentifier: nil,
+                tmuxSessionIdentifier: nil,
+                tmuxPaneIdentifier: nil,
+                processName: "codex app-server"
             )
         )
     }
