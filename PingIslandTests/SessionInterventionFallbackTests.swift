@@ -133,4 +133,101 @@ final class SessionInterventionFallbackTests: XCTestCase {
 
         await store.process(.sessionArchived(sessionId: sessionId))
     }
+
+    func testCompletedClaudeQuestionToolClearsTranscriptFallbackIntervention() async {
+        let sessionId = "claude-transcript-completed-\(UUID().uuidString)"
+        let toolUseId = "toolu_transcript_question_completed"
+        let store = SessionStore.shared
+
+        await store.process(.hookReceived(
+            HookEvent(
+                sessionId: sessionId,
+                cwd: "/tmp/project",
+                event: "UserPromptSubmit",
+                status: "processing",
+                provider: .claude,
+                clientInfo: SessionClientInfo(
+                    kind: .claudeCode,
+                    profileID: "claude_code",
+                    name: "Claude Code",
+                    bundleIdentifier: "com.anthropic.claudecode"
+                ),
+                pid: nil,
+                tty: nil,
+                tool: nil,
+                toolInput: nil,
+                toolUseId: nil,
+                notificationType: nil,
+                message: "使用工具问我一个问题"
+            )
+        ))
+
+        await store.process(.fileUpdated(
+            FileUpdatePayload(
+                sessionId: sessionId,
+                cwd: "/tmp/project",
+                messages: [
+                    ChatMessage(
+                        id: "assistant-tool",
+                        role: .assistant,
+                        timestamp: Date(),
+                        content: [
+                            .toolUse(ToolUseBlock(
+                                id: toolUseId,
+                                name: "AskUserQuestion",
+                                input: [
+                                    "questions": """
+                                    [{"question":"你今天想先处理什么？","header":"今日目标","options":[{"label":"修复bug"},{"label":"添加新功能"}],"multiSelect":false}]
+                                    """
+                                ]
+                            ))
+                        ]
+                    )
+                ],
+                isIncremental: true,
+                completedToolIds: [],
+                toolResults: [:],
+                structuredResults: [:]
+            )
+        ))
+
+        var session = await store.session(for: sessionId)
+        XCTAssertEqual(session?.phase, .waitingForInput)
+        XCTAssertEqual(session?.intervention?.kind, .question)
+
+        await store.process(.fileUpdated(
+            FileUpdatePayload(
+                sessionId: sessionId,
+                cwd: "/tmp/project",
+                messages: [],
+                isIncremental: true,
+                completedToolIds: [toolUseId],
+                toolResults: [
+                    toolUseId: ConversationParser.ToolResult(
+                        content: "Answered in transcript",
+                        stdout: nil,
+                        stderr: nil,
+                        isError: false
+                    )
+                ],
+                structuredResults: [:]
+            )
+        ))
+
+        session = await store.session(for: sessionId)
+        XCTAssertNil(session?.intervention)
+        XCTAssertFalse(session?.needsQuestionResponse ?? true)
+        XCTAssertEqual(session?.phase, .processing)
+
+        guard let toolItem = session?.chatItems.first(where: { $0.id == toolUseId }),
+              case .toolCall(let tool) = toolItem.type else {
+            XCTFail("Expected AskUserQuestion tool item")
+            await store.process(.sessionArchived(sessionId: sessionId))
+            return
+        }
+        XCTAssertEqual(tool.status, .success)
+        XCTAssertEqual(tool.result, "Answered in transcript")
+
+        await store.process(.sessionArchived(sessionId: sessionId))
+    }
 }

@@ -1469,7 +1469,8 @@ actor SessionStore {
         if let existingItem = session.chatItems.first(where: { $0.id == toolUseId }),
            case .toolCall(let tool) = existingItem.type,
            tool.status == .success || tool.status == .error || tool.status == .interrupted {
-            // Already completed, skip
+            _ = clearResolvedToolCompletionIntervention(in: &session, toolUseId: toolUseId)
+            sessions[sessionId] = session
             return
         }
 
@@ -1515,7 +1516,7 @@ actor SessionStore {
             session.completedErrorToolIDs.insert(toolUseId)
         }
 
-        clearResolvedApprovalIntervention(in: &session, toolUseId: toolUseId)
+        _ = clearResolvedToolCompletionIntervention(in: &session, toolUseId: toolUseId)
         sessions[sessionId] = session
     }
 
@@ -1527,6 +1528,26 @@ actor SessionStore {
         }
 
         session.intervention = nil
+    }
+
+    @discardableResult
+    private func clearResolvedToolCompletionIntervention(in session: inout SessionState, toolUseId: String) -> Bool {
+        guard let intervention = session.intervention,
+              intervention.matchesResolvedToolUseId(toolUseId) else {
+            return false
+        }
+
+        switch intervention.kind {
+        case .approval:
+            session.intervention = nil
+            return true
+        case .question:
+            session.intervention = nil
+            if session.phase == .waitingForInput {
+                session.phase = .processing
+            }
+            return true
+        }
     }
 
     /// Find the next tool waiting for approval (excluding a specific tool ID)
@@ -1992,11 +2013,16 @@ actor SessionStore {
         toolResults: [String: ConversationParser.ToolResult],
         structuredResults: [String: ToolResultData]
     ) async {
+        var emittedToolIds: Set<String> = []
+
         for item in session.chatItems {
             guard case .toolCall(let tool) = item.type else { continue }
 
-            // Only emit for tools that are running or waiting but have results in JSONL
-            guard tool.status == .running || tool.status == .waitingForApproval else { continue }
+            // Emit for pending tools, plus stale interventions whose tool item
+            // already looks complete but still needs UI cleanup.
+            let isPendingTool = tool.status == .running || tool.status == .waitingForApproval
+            let matchesCurrentIntervention = session.intervention?.matchesResolvedToolUseId(item.id) == true
+            guard isPendingTool || matchesCurrentIntervention else { continue }
             guard completedToolIds.contains(item.id) else { continue }
 
             let result = ToolCompletionResult.from(
@@ -2005,7 +2031,18 @@ actor SessionStore {
             )
 
             // Process the completion event (this will update state and phase consistently)
+            emittedToolIds.insert(item.id)
             await process(.toolCompleted(sessionId: sessionId, toolUseId: item.id, result: result))
+        }
+
+        guard let intervention = session.intervention else { return }
+        for toolUseId in completedToolIds where !emittedToolIds.contains(toolUseId) {
+            guard intervention.matchesResolvedToolUseId(toolUseId) else { continue }
+            let result = ToolCompletionResult.from(
+                parserResult: toolResults[toolUseId],
+                structuredResult: structuredResults[toolUseId]
+            )
+            await process(.toolCompleted(sessionId: sessionId, toolUseId: toolUseId, result: result))
         }
     }
 
@@ -2562,7 +2599,12 @@ actor SessionStore {
                 await self?.process(.clearDetected(sessionId: sessionId))
             }
 
-            guard !result.newMessages.isEmpty || result.clearDetected else {
+            let hasPendingCompletedToolResult = await self?.hasPendingCompletedToolResult(
+                sessionId: sessionId,
+                completedToolIds: result.completedToolIds
+            ) ?? false
+
+            guard !result.newMessages.isEmpty || result.clearDetected || hasPendingCompletedToolResult else {
                 return
             }
 
@@ -2577,6 +2619,26 @@ actor SessionStore {
             )
 
             await self?.process(.fileUpdated(payload))
+        }
+    }
+
+    private func hasPendingCompletedToolResult(sessionId: String, completedToolIds: Set<String>) -> Bool {
+        guard !completedToolIds.isEmpty,
+              let session = sessions[sessionId] else {
+            return false
+        }
+
+        if let intervention = session.intervention,
+           completedToolIds.contains(where: { intervention.matchesResolvedToolUseId($0) }) {
+            return true
+        }
+
+        return session.chatItems.contains { item in
+            guard completedToolIds.contains(item.id),
+                  case .toolCall(let tool) = item.type else {
+                return false
+            }
+            return tool.status == .running || tool.status == .waitingForApproval
         }
     }
 
