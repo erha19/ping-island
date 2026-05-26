@@ -74,6 +74,65 @@ final class ClaudeAskUserQuestionSessionTests: XCTestCase {
         await store.process(.sessionArchived(sessionId: sessionId))
     }
 
+    func testConcurrentClaudeQuestionsQueueWithoutCancellingOlderPendingHook() async {
+        let sessionId = "claude-concurrent-question-\(UUID().uuidString)"
+        let store = SessionStore.shared
+        let cancellations = CancellationRecorder()
+        await store.setPendingHookResponseCancellationHandlerForTesting { toolUseId, ingress in
+            cancellations.record(toolUseId: toolUseId, ingress: ingress)
+        }
+
+        await store.process(.hookReceived(makeClaudeQuestionEvent(
+            sessionId: sessionId,
+            toolUseId: "toolu_first_\(sessionId)",
+            questionId: "first",
+            question: "先回答第一个问题？"
+        )))
+        await store.process(.hookReceived(makeClaudeQuestionEvent(
+            sessionId: sessionId,
+            toolUseId: "toolu_second_\(sessionId)",
+            questionId: "second",
+            question: "再回答第二个问题？"
+        )))
+
+        var session = await store.session(for: sessionId)
+        XCTAssertEqual(session?.phase, .waitingForInput)
+        XCTAssertEqual(session?.intervention?.metadata["originalToolUseId"], "toolu_first_\(sessionId)")
+        XCTAssertEqual(session?.intervention?.resolvedQuestions.first?.prompt, "先回答第一个问题？")
+        XCTAssertEqual(session?.pendingInterventions.map { $0.metadata["originalToolUseId"] }, [
+            "toolu_first_\(sessionId)",
+            "toolu_second_\(sessionId)"
+        ])
+        XCTAssertFalse(cancellations.toolUseIds.contains("toolu_first_\(sessionId)"))
+
+        await store.process(
+            .interventionResolved(
+                sessionId: sessionId,
+                nextPhase: .processing,
+                submittedAnswers: ["first": ["会话层"]]
+            )
+        )
+
+        session = await store.session(for: sessionId)
+        XCTAssertEqual(session?.phase, .waitingForInput)
+        XCTAssertEqual(session?.intervention?.metadata["originalToolUseId"], "toolu_second_\(sessionId)")
+        XCTAssertEqual(session?.intervention?.resolvedQuestions.first?.prompt, "再回答第二个问题？")
+        XCTAssertEqual(session?.pendingInterventions.map { $0.metadata["originalToolUseId"] }, [
+            "toolu_second_\(sessionId)"
+        ])
+        XCTAssertFalse(cancellations.toolUseIds.contains("toolu_first_\(sessionId)"))
+
+        await store.process(
+            .interventionResolved(
+                sessionId: sessionId,
+                nextPhase: .processing,
+                submittedAnswers: ["second": ["UI 层"]]
+            )
+        )
+        await store.setPendingHookResponseCancellationHandlerForTesting(nil)
+        await store.process(.sessionArchived(sessionId: sessionId))
+    }
+
     func testQoderWorkPermissionRequestStaysNotifyOnly() async {
         let sessionId = "qoderwork-permission-\(UUID().uuidString)"
         let store = SessionStore.shared
@@ -421,7 +480,12 @@ final class ClaudeAskUserQuestionSessionTests: XCTestCase {
         await store.process(.sessionArchived(sessionId: sessionId))
     }
 
-    private func makeClaudeQuestionEvent(sessionId: String) -> HookEvent {
+    private func makeClaudeQuestionEvent(
+        sessionId: String,
+        toolUseId: String? = nil,
+        questionId: String = "project",
+        question: String = "你想先处理哪个模块？"
+    ) -> HookEvent {
         HookEvent(
             sessionId: sessionId,
             cwd: "/tmp/project",
@@ -440,9 +504,9 @@ final class ClaudeAskUserQuestionSessionTests: XCTestCase {
             toolInput: [
                 "questions": AnyCodable([
                     [
-                        "id": "project",
+                        "id": questionId,
                         "header": "方向",
-                        "question": "你想先处理哪个模块？",
+                        "question": question,
                         "options": [
                             ["label": "会话层"],
                             ["label": "UI 层"]
@@ -450,7 +514,7 @@ final class ClaudeAskUserQuestionSessionTests: XCTestCase {
                     ]
                 ])
             ],
-            toolUseId: "toolu_\(sessionId)",
+            toolUseId: toolUseId ?? "toolu_\(sessionId)",
             notificationType: nil,
             message: nil
         )
@@ -891,5 +955,22 @@ final class ClaudeAskUserQuestionSessionTests: XCTestCase {
             notificationType: nil,
             message: "使用工具问我一个问题"
         )
+    }
+}
+
+private final class CancellationRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var records: [(toolUseId: String, ingress: SessionIngress)] = []
+
+    var toolUseIds: [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return records.map { $0.toolUseId }
+    }
+
+    func record(toolUseId: String, ingress: SessionIngress) {
+        lock.lock()
+        records.append((toolUseId, ingress))
+        lock.unlock()
     }
 }

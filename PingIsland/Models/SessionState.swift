@@ -52,6 +52,7 @@ struct SessionState: Equatable, Identifiable, Sendable {
     var previewText: String?
     var latestHookMessage: String?
     var intervention: SessionIntervention?
+    var pendingInterventions: [SessionIntervention]
     var codexParentThreadId: String?
     var codexSubagentDepth: Int?
     var codexSubagentNickname: String?
@@ -123,6 +124,7 @@ struct SessionState: Equatable, Identifiable, Sendable {
         previewText: String? = nil,
         latestHookMessage: String? = nil,
         intervention: SessionIntervention? = nil,
+        pendingInterventions: [SessionIntervention] = [],
         codexParentThreadId: String? = nil,
         codexSubagentDepth: Int? = nil,
         codexSubagentNickname: String? = nil,
@@ -157,6 +159,7 @@ struct SessionState: Equatable, Identifiable, Sendable {
         self.previewText = previewText
         self.latestHookMessage = latestHookMessage
         self.intervention = intervention
+        self.pendingInterventions = pendingInterventions
         self.codexParentThreadId = codexParentThreadId
         self.codexSubagentDepth = codexSubagentDepth
         self.codexSubagentNickname = codexSubagentNickname

@@ -583,7 +583,9 @@ actor SessionStore {
         }
 
         if let intervention {
-            if session.clientInfo.brand == .qoder, intervention.kind == .question {
+            if shouldQueuePendingQuestionIntervention(intervention, in: session) {
+                enqueuePendingQuestionIntervention(intervention, in: &session)
+            } else if session.clientInfo.brand == .qoder, intervention.kind == .question {
                 session.intervention = mergedQoderQuestionIntervention(
                     current: session.intervention,
                     proposed: intervention
@@ -612,7 +614,7 @@ actor SessionStore {
         } else if shouldPreserveQoderCLIQuestionIntervention {
             session.phase = .waitingForInput
         } else if shouldClearCurrentIntervention {
-            session.intervention = nil
+            clearCurrentIntervention(in: &session, nextPhase: session.phase)
         }
 
         if event.event == "PermissionRequest", let toolUseId = event.toolUseId {
@@ -1138,6 +1140,105 @@ actor SessionStore {
         }
     }
 
+    private nonisolated func shouldQueuePendingQuestionIntervention(
+        _ intervention: SessionIntervention,
+        in session: SessionState
+    ) -> Bool {
+        intervention.kind == .question
+            && intervention.supportsInlineResponse
+            && session.clientInfo.kind == .claudeCode
+    }
+
+    private func enqueuePendingQuestionIntervention(
+        _ intervention: SessionIntervention,
+        in session: inout SessionState
+    ) {
+        if let current = session.intervention,
+           shouldQueuePendingQuestionIntervention(current, in: session),
+           !session.pendingInterventions.contains(where: { interventionsMatch($0, current) }) {
+            session.pendingInterventions.insert(current, at: 0)
+        }
+
+        if let index = session.pendingInterventions.firstIndex(where: { interventionsMatch($0, intervention) }) {
+            session.pendingInterventions[index] = intervention
+        } else {
+            session.pendingInterventions.append(intervention)
+        }
+
+        if let current = session.intervention,
+           shouldQueuePendingQuestionIntervention(current, in: session),
+           interventionsMatch(current, intervention) {
+            session.intervention = intervention
+            return
+        }
+
+        if let current = session.intervention,
+           shouldQueuePendingQuestionIntervention(current, in: session),
+           session.pendingInterventions.contains(where: { interventionsMatch($0, current) }) {
+            return
+        }
+
+        session.intervention = session.pendingInterventions.first
+    }
+
+    private func clearCurrentIntervention(
+        in session: inout SessionState,
+        nextPhase: SessionPhase
+    ) {
+        if let intervention = session.intervention {
+            removePendingIntervention(intervention, from: &session)
+        }
+
+        if let nextIntervention = session.pendingInterventions.first {
+            session.intervention = nextIntervention
+            if nextIntervention.kind == .question {
+                session.phase = .waitingForInput
+            }
+            return
+        }
+
+        session.intervention = nil
+        if session.phase.canTransition(to: nextPhase) || session.phase == nextPhase {
+            session.phase = nextPhase
+        }
+    }
+
+    private func removePendingIntervention(
+        _ intervention: SessionIntervention,
+        from session: inout SessionState
+    ) {
+        session.pendingInterventions.removeAll { queued in
+            interventionsMatch(queued, intervention)
+        }
+    }
+
+    private nonisolated func interventionsMatch(
+        _ lhs: SessionIntervention,
+        _ rhs: SessionIntervention
+    ) -> Bool {
+        if lhs.id == rhs.id {
+            return true
+        }
+
+        let lhsToolUseIds = Set(pendingHookResponseToolUseIdCandidates(for: lhs))
+        guard !lhsToolUseIds.isEmpty else { return false }
+        let rhsToolUseIds = Set(pendingHookResponseToolUseIdCandidates(for: rhs))
+        return !lhsToolUseIds.isDisjoint(with: rhsToolUseIds)
+    }
+
+    private nonisolated func pendingHookResponseToolUseIdCandidates(for intervention: SessionIntervention) -> [String] {
+        [
+            intervention.metadata["originalToolUseId"],
+            intervention.metadata["toolUseId"],
+            intervention.metadata["tool_use_id"],
+            intervention.id
+        ].compactMap { value -> String? in
+            guard let value else { return nil }
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }
+    }
+
     private func pendingHookResponse(in session: SessionState) -> PendingHookResponse? {
         if let activePermission = session.activePermission,
            !activePermission.toolUseId.isEmpty {
@@ -1161,19 +1262,8 @@ actor SessionStore {
         )
     }
 
-    private func pendingHookResponseToolUseId(for intervention: SessionIntervention) -> String? {
-        [
-            intervention.metadata["originalToolUseId"],
-            intervention.metadata["toolUseId"],
-            intervention.metadata["tool_use_id"],
-            intervention.id
-        ]
-        .compactMap { value -> String? in
-            guard let value else { return nil }
-            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-            return trimmed.isEmpty ? nil : trimmed
-        }
-        .first
+    private nonisolated func pendingHookResponseToolUseId(for intervention: SessionIntervention) -> String? {
+        pendingHookResponseToolUseIdCandidates(for: intervention).first
     }
 
     private func cancelOrphanedPendingHookResponse(
@@ -1210,10 +1300,19 @@ actor SessionStore {
         guard let intervention = session.intervention,
               intervention.kind == pending.kind,
               intervention.supportsInlineResponse else {
-            return false
+            return session.pendingInterventions.contains { intervention in
+                intervention.kind == pending.kind
+                    && intervention.supportsInlineResponse
+                    && intervention.matchesResolvedToolUseId(pending.toolUseId)
+            }
         }
 
         return intervention.matchesResolvedToolUseId(pending.toolUseId)
+            || session.pendingInterventions.contains { intervention in
+                intervention.kind == pending.kind
+                    && intervention.supportsInlineResponse
+                    && intervention.matchesResolvedToolUseId(pending.toolUseId)
+            }
     }
 
     private func processSubagentTracking(event: HookEvent, session: inout SessionState) {
@@ -1617,16 +1716,14 @@ actor SessionStore {
         guard var session = sessions[sessionId] else { return }
         if let intervention = session.intervention,
            shouldAwaitExternalContinuationAfterResolving(intervention, in: session) {
+            removePendingIntervention(intervention, from: &session)
             session.intervention = intervention.markingAwaitingExternalContinuation(
                 actorName: session.interactionDisplayName,
                 selectedAnswers: submittedAnswers
             )
             session.phase = .waitingForInput
         } else {
-            session.intervention = nil
-            if session.phase.canTransition(to: nextPhase) || session.phase == nextPhase {
-                session.phase = nextPhase
-            }
+            clearCurrentIntervention(in: &session, nextPhase: nextPhase)
         }
         session.lastActivity = Date()
         sessions[sessionId] = session
@@ -2383,6 +2480,7 @@ actor SessionStore {
         let wasAlreadyEnded = session.phase == .ended
         session.phase = .ended
         session.intervention = nil
+        session.pendingInterventions.removeAll()
         session.autoApprovePermissions = false
         if !wasAlreadyEnded {
             session.lastActivity = Date()
@@ -4019,6 +4117,7 @@ actor SessionStore {
             previewText: previousSession.previewText,
             latestHookMessage: previousSession.latestHookMessage,
             intervention: previousSession.intervention,
+            pendingInterventions: previousSession.pendingInterventions,
             codexParentThreadId: previousSession.codexParentThreadId,
             codexSubagentDepth: previousSession.codexSubagentDepth,
             codexSubagentNickname: previousSession.codexSubagentNickname,
