@@ -105,6 +105,7 @@ This file is a routing layer for coding agents working in this repo. Keep it sho
 - If you change tmux or terminal focusing, trace through `Services/Tmux`, `Services/Window`, and `TerminalVisibilityDetector`.
 - If you change IDE terminal jump behavior, inspect both `TerminalSessionFocuser` and `IDEExtensionInstaller`, plus the integration settings UI so install state and URI schemes stay aligned.
 - If you change Codex behavior, verify both the monitor layer under `PingIsland/Services/Codex/` and the UI under `PingIsland/UI/Views/CodexSessionView.swift`.
+  - Long Codex/subagent prompts, results, tool details, and transcript rows must keep full data in `SessionStore` / snapshots and apply bounded display text only at SwiftUI rendering boundaries. Prefer `SessionTextSanitizer.boundedDisplayText` for inline `Text` / Markdown content, add or preserve tests for truncation behavior, and avoid passing unbounded transcripts directly into expanded Island detail views.
 - If you change app updates or release notes, trace through `PingIsland/Services/Update/`, `PingIsland/Info.plist`, the settings UI, and `scripts/create-release.sh` so appcast assets, runtime config, and update messaging stay aligned.
 - If you change Sparkle configuration keys or hosting assumptions, update `Config/App.xcconfig`, `Config/LocalSecrets.example.xcconfig`, `scripts/generate-keys.sh`, and `docs/sparkle-release.md` together.
 - If you change App Store distribution behavior, keep the `PingIslandAppStore` target isolated from the regular `PingIsland` Developer ID/Sparkle lane, and update `docs/mac-app-store-submission.md` plus `scripts/build-app-store.sh` together.
@@ -156,6 +157,7 @@ This file is a routing layer for coding agents working in this repo. Keep it sho
   - SwiftUI view-local `@State`
   - shared `ObservableObject` state
   - actor-owned `SessionStore` state
+- Keep localization lookups at UI or other actor-appropriate boundaries. `AppLocalization.string` is main-actor isolated on CI toolchains, so nonisolated utilities such as sanitizers, parsers, stores, and model helpers should expose localization keys or plain data instead of calling localization APIs directly.
 - When adding bundled assets or fonts, make sure app startup initializes them.
 - Keep this file high-signal. If a section becomes long, move the durable detail into a dedicated markdown doc and link it here.
 

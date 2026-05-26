@@ -185,6 +185,27 @@ final class SessionStateTests: XCTestCase {
         XCTAssertEqual(session.queueSortActivityDate, now)
     }
 
+    func testBoundedDisplayTextKeepsShortTextUnchanged() {
+        XCTAssertEqual(
+            SessionTextSanitizer.boundedDisplayText(
+                "short detail",
+                maxCharacters: 20,
+                truncationNotice: "[truncated]"
+            ),
+            "short detail"
+        )
+    }
+
+    func testBoundedDisplayTextTruncatesLongTextWithNotice() {
+        let result = SessionTextSanitizer.boundedDisplayText(
+            "abcdefghijklmnopqrstuvwxyz",
+            maxCharacters: 8,
+            truncationNotice: "[truncated]"
+        )
+
+        XCTAssertEqual(result, "abcdefgh\n\n[truncated]")
+    }
+
     func testIdleQueueSortActivityDateStillUsesLastUserMessageDateWhenPresent() {
         let now = Date()
         let lastUserMessageDate = now.addingTimeInterval(-60)

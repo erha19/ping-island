@@ -6,6 +6,15 @@ struct CodexSessionView: View {
     @ObservedObject var viewModel: NotchViewModel
     @State private var isHeaderHovered = false
 
+    private enum DisplayLimits {
+        static let titleCharacters = 300
+        static let summaryPreviewCharacters = 1_200
+    }
+
+    private var truncationNotice: String {
+        AppLocalization.string(SessionDetailDisplayStrings.truncationNoticeKey)
+    }
+
     var body: some View {
         ScrollView(.vertical, showsIndicators: false) {
             VStack(alignment: .leading, spacing: 16) {
@@ -62,9 +71,14 @@ struct CodexSessionView: View {
 
     private var summaryCard: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(session.displayTitle)
+            Text(SessionTextSanitizer.boundedDisplayText(
+                session.displayTitle,
+                maxCharacters: DisplayLimits.titleCharacters,
+                truncationNotice: truncationNotice
+            ) ?? session.displayTitle)
                 .font(.system(size: 16, weight: .semibold))
                 .foregroundColor(.white)
+                .lineLimit(2)
 
             HStack(spacing: 8) {
                 providerBadge
@@ -93,14 +107,22 @@ struct CodexSessionView: View {
                     .lineLimit(1)
             }
 
-            if let subagentLabel = session.codexSubagentLabel {
+            if let subagentLabel = SessionTextSanitizer.boundedDisplayText(
+                session.codexSubagentLabel,
+                maxCharacters: DisplayLimits.titleCharacters,
+                truncationNotice: truncationNotice
+            ) {
                 Text(subagentLabel)
                     .font(.system(size: 11, weight: .medium, design: .monospaced))
                     .foregroundColor(.white.opacity(0.55))
                     .lineLimit(1)
             }
 
-            if let preview = session.previewText ?? session.lastMessage {
+            if let preview = SessionTextSanitizer.boundedDisplayText(
+                session.previewText ?? session.lastMessage,
+                maxCharacters: DisplayLimits.summaryPreviewCharacters,
+                truncationNotice: truncationNotice
+            ) {
                 Text(preview)
                     .font(.system(size: 13))
                     .foregroundColor(.white.opacity(0.72))
@@ -288,6 +310,11 @@ struct CodexThreadInspectorView: View {
     @State private var loadError: String?
     @FocusState private var isFollowUpFocused: Bool
 
+    private enum DisplayLimits {
+        static let primaryResultCharacters = 8_000
+        static let historyRowCharacters = 2_000
+    }
+
     private var canSendFollowUp: Bool {
         guard mode == .chat else { return false }
         guard session.phase != .ended else { return false }
@@ -302,8 +329,13 @@ struct CodexThreadInspectorView: View {
     }
 
     private var primaryResultText: String? {
-        session.codexSubagentSummaryText(
-            for: snapshot?.displayResultText ?? session.previewText ?? session.lastMessage
+        let bounded = SessionTextSanitizer.boundedDisplayText(
+            snapshot?.displayResultText ?? session.previewText ?? session.lastMessage,
+            maxCharacters: DisplayLimits.primaryResultCharacters,
+            truncationNotice: truncationNotice
+        )
+        return session.codexSubagentSummaryText(
+            for: bounded
         )
     }
 
@@ -322,6 +354,10 @@ struct CodexThreadInspectorView: View {
 
     private var bodyFontSize: CGFloat {
         CGFloat(settings.contentFontSize)
+    }
+
+    private var truncationNotice: String {
+        AppLocalization.string(SessionDetailDisplayStrings.truncationNoticeKey)
     }
 
     var body: some View {
@@ -466,14 +502,22 @@ struct CodexThreadInspectorView: View {
     private func rowContent(for item: ChatHistoryItem) -> (prefix: String, prefixColor: Color, text: String, textColor: Color) {
         switch item.type {
         case .user(let text):
-            return ("你", .white.opacity(0.72), text, .white.opacity(0.72))
+            return ("你", .white.opacity(0.72), boundedHistoryText(text), .white.opacity(0.72))
         case .assistant(let text):
-            return ("答", .white, text, .white.opacity(0.82))
+            return ("答", .white, boundedHistoryText(text), .white.opacity(0.82))
         case .thinking(let text):
-            return ("注", TerminalColors.blue.opacity(0.9), text, .white.opacity(0.58))
+            return ("注", TerminalColors.blue.opacity(0.9), boundedHistoryText(text), .white.opacity(0.58))
         case .toolCall, .interrupted:
             return ("", .clear, "", .clear)
         }
+    }
+
+    private func boundedHistoryText(_ text: String) -> String {
+        SessionTextSanitizer.boundedDisplayText(
+            text,
+            maxCharacters: DisplayLimits.historyRowCharacters,
+            truncationNotice: truncationNotice
+        ) ?? ""
     }
 
     @MainActor

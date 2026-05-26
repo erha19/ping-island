@@ -45,4 +45,33 @@ enum SessionTextSanitizer {
 
         return cleaned.isEmpty ? nil : cleaned
     }
+
+    static func boundedDisplayText(
+        _ text: String?,
+        maxCharacters: Int,
+        truncationNotice: String
+    ) -> String? {
+        guard let text else { return nil }
+        guard !text.isEmpty else { return nil }
+        guard maxCharacters > 0 else { return truncationNotice }
+
+        guard let cutoff = text.index(
+            text.startIndex,
+            offsetBy: maxCharacters,
+            limitedBy: text.endIndex
+        ) else {
+            return text
+        }
+
+        guard cutoff < text.endIndex else {
+            return text
+        }
+
+        let prefix = text[..<cutoff].trimmingCharacters(in: .whitespacesAndNewlines)
+        return "\(prefix)\n\n\(truncationNotice)"
+    }
+}
+
+enum SessionDetailDisplayStrings {
+    static let truncationNoticeKey = "Showing a shortened preview to keep Ping Island responsive. Open the client to view the full content."
 }

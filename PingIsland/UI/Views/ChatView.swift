@@ -1063,6 +1063,10 @@ struct ToolCallView: View {
         tool.name == "Edit" || isExpanded
     }
 
+    private var truncationNotice: String {
+        AppLocalization.string(SessionDetailDisplayStrings.truncationNoticeKey)
+    }
+
     private var agentDescription: String? {
         guard tool.name == "AgentOutputTool",
               let agentId = tool.input["agentId"],
@@ -1070,6 +1074,14 @@ struct ToolCallView: View {
             return nil
         }
         return sessionDescriptions[agentId]
+    }
+
+    private func boundedInlineDetail(_ text: String) -> String {
+        SessionTextSanitizer.boundedDisplayText(
+            text,
+            maxCharacters: 300,
+            truncationNotice: truncationNotice
+        ) ?? text
     }
 
     var body: some View {
@@ -1084,7 +1096,7 @@ struct ToolCallView: View {
                     .fixedSize()
 
                 if tool.name == "Task" && !tool.subagentTools.isEmpty {
-                    let taskDesc = tool.input["description"] ?? AppLocalization.string("Running agent...")
+                    let taskDesc = boundedInlineDetail(tool.input["description"] ?? AppLocalization.string("Running agent..."))
                     Text(verbatim: AppLocalization.format("%@ (%lld tools)", taskDesc, tool.subagentTools.count))
                         .font(.system(size: 11))
                         .foregroundColor(textColor.opacity(0.7))
@@ -1092,7 +1104,8 @@ struct ToolCallView: View {
                         .truncationMode(.tail)
                 } else if tool.name == "AgentOutputTool", let desc = agentDescription {
                     let blocking = tool.input["block"] == "true"
-                    Text(blocking ? "Waiting: \(desc)" : desc)
+                    let detail = boundedInlineDetail(desc)
+                    Text(blocking ? "Waiting: \(detail)" : detail)
                         .font(.system(size: 11))
                         .foregroundColor(textColor.opacity(0.7))
                         .lineLimit(1)

@@ -341,6 +341,7 @@
 "Latest thread result" = "Latest thread result";
 "Session result" = "Session result";
 "No thread details yet. Once Codex responds, the latest result will show here." = "No thread details yet. Once Codex responds, the latest result will show here.";
+"Showing a shortened preview to keep Ping Island responsive. Open the client to view the full content." = "Showing a shortened preview to keep Ping Island responsive. Open the client to view the full content.";
 "Open Claude Code in tmux to enable messaging" = "Open Claude Code in tmux to enable messaging";
 "Processing" = "Processing";
 "Working" = "Working";

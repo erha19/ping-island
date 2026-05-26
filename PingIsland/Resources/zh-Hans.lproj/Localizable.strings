@@ -336,6 +336,7 @@
 "Latest thread result" = "最新线程结果";
 "Session result" = "会话结果";
 "No thread details yet. Once Codex responds, the latest result will show here." = "暂时还没有线程详情。等 Codex 回复后，最新结果会显示在这里。";
+"Showing a shortened preview to keep Ping Island responsive. Open the client to view the full content." = "为保持 Ping Island 流畅，已显示精简预览。请打开客户端查看完整内容。";
 "Open Claude Code in tmux to enable messaging" = "在 tmux 中打开 Claude Code 以启用发消息";
 "Processing" = "处理中";
 "Working" = "工作中";
