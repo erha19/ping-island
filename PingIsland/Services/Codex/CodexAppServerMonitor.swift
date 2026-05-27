@@ -617,6 +617,28 @@ actor CodexAppServerMonitor {
         }
     }
 
+    // MARK: - Codex approval-policy helpers
+
+    /// Returns `true` if the thread's persisted approval policy is "never",
+    /// meaning Codex will auto-approve the request without waiting for our
+    /// response. We mirror that auto-approval so no blocking card appears.
+    nonisolated static func threadIsAutoApprove(_ threadId: String) -> Bool {
+        guard
+            let data = try? Data(contentsOf: URL(
+                fileURLWithPath: NSHomeDirectory()
+                    .appending("/.codex/.codex-global-state.json")
+            )),
+            let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let atomState = root["electron-persisted-atom-state"] as? [String: Any],
+            let permsMap = atomState["heartbeat-thread-permissions-by-id"] as? [String: Any],
+            let entry = permsMap[threadId] as? [String: Any],
+            let policy = entry["approvalPolicy"] as? String
+        else {
+            return false
+        }
+        return policy == "never"
+    }
+
     private func handleServerRequest(id: String, method: String, params: [String: Any]) async {
         switch method {
         case "item/commandExecution/requestApproval":
@@ -624,6 +646,12 @@ actor CodexAppServerMonitor {
             guard !threadId.isEmpty else { return }
 
             let command = ((params["command"] as? [String]) ?? []).joined(separator: " ")
+
+            if Self.threadIsAutoApprove(threadId) {
+                await sendResponse(id: id, result: ["decision": "accept"])
+                return
+            }
+
             let cwd = params["cwd"] as? String
             let reason = params["reason"] as? String
             let intervention = SessionIntervention(
@@ -666,6 +694,12 @@ actor CodexAppServerMonitor {
             guard let threadId = params["threadId"] as? String else { return }
             let reason = params["reason"] as? String
             let grantRoot = params["grantRoot"] as? String
+
+            if Self.threadIsAutoApprove(threadId) {
+                await sendResponse(id: id, result: ["decision": "accept"])
+                return
+            }
+
             let intervention = SessionIntervention(
                 id: id,
                 kind: .approval,
@@ -706,6 +740,15 @@ actor CodexAppServerMonitor {
             let permissions = params["permissions"] as? [String: Any] ?? [:]
             let reason = params["reason"] as? String
             let message = reason ?? permissionSummary(permissions)
+
+            if Self.threadIsAutoApprove(threadId) {
+                await sendResponse(id: id, result: [
+                    "permissions": permissions,
+                    "scope": "session"
+                ])
+                return
+            }
+
             let intervention = SessionIntervention(
                 id: id,
                 kind: .approval,
