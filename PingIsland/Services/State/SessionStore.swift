@@ -373,6 +373,27 @@ actor SessionStore {
         let sessionId = event.provider == .codex
             ? resolveOrAdoptCodexHookSession(event)
             : event.sessionId
+
+        // Auto-approve PermissionRequest for Codex threads whose approvalPolicy is "never".
+        // Codex already handles approval internally in this mode; showing a UI card is
+        // misleading since the user's response has no effect.  Respond immediately so the
+        // hook client (Codex process) is never left waiting.
+        if event.provider == .codex,
+           event.event == "PermissionRequest",
+           event.expectsResponse {
+            let isNeverPolicy =
+                CodexAppServerMonitor.approvalPolicyFromGlobalState(threadId: event.sessionId) == "never"
+                || (sessionId != event.sessionId
+                    && CodexAppServerMonitor.approvalPolicyFromGlobalState(threadId: sessionId) == "never")
+            if isNeverPolicy {
+                Self.logger.notice(
+                    "Auto-approving Codex PermissionRequest (approvalPolicy=never) session=\(sessionId.prefix(8), privacy: .public)"
+                )
+                HookSocketServer.shared.respondToPermissionBySession(sessionId: sessionId, decision: "approve")
+                return
+            }
+        }
+
         if shouldIgnoreClaudeAskUserQuestionPermissionRequest(event) {
             Self.logger.notice(
                 "Ignoring duplicate Claude AskUserQuestion permission session=\(sessionId, privacy: .public)"

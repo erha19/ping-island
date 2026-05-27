@@ -505,7 +505,7 @@ actor CodexAppServerMonitor {
         }
 
         if let method = json["method"] as? String {
-            if let idValue = json["id"] {
+            if let idValue = json["id"], !(idValue is NSNull) {
                 await handleServerRequest(
                     id: stringify(idValue),
                     method: method,
@@ -622,19 +622,18 @@ actor CodexAppServerMonitor {
     // MARK: - Codex approval-policy helpers
 
     /// Returns `true` if the thread's approval policy is "never", meaning
+    /// Returns `true` if the thread's approval policy is "never", meaning
     /// Codex auto-approves without waiting for our response.
     ///
     /// Lookup order:
-    /// 1. In-memory cache populated from app-server thread data (most reliable,
-    ///    available as soon as the thread is ingested).
-    /// 2. `~/.codex/.codex-global-state.json` persisted by Codex Desktop
-    ///    (fallback for threads whose policy was set after last ingestion).
+    /// 1. In-memory cache populated from app-server thread data.
+    /// 2. `~/.codex/.codex-global-state.json` — per-thread entry, then global
+    ///    agent-mode default (new threads inherit the global mode before their
+    ///    first heartbeat write).
     private func isAutoApproveThread(_ threadId: String) -> Bool {
-        // 1. Check in-memory cache first.
         if let cached = threadApprovalModes[threadId] {
             return cached == "never"
         }
-        // 2. Fall back to reading the Codex global state file.
         return Self.approvalPolicyFromGlobalState(threadId: threadId) == "never"
     }
 
@@ -645,13 +644,34 @@ actor CodexAppServerMonitor {
                     .appending("/.codex/.codex-global-state.json")
             )),
             let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-            let atomState = root["electron-persisted-atom-state"] as? [String: Any],
-            let permsMap = atomState["heartbeat-thread-permissions-by-id"] as? [String: Any],
-            let entry = permsMap[threadId] as? [String: Any]
+            let atomState = root["electron-persisted-atom-state"] as? [String: Any]
         else {
             return nil
         }
-        return entry["approvalPolicy"] as? String
+
+        // 1. Check per-thread heartbeat permissions (most authoritative).
+        if let permsMap = atomState["heartbeat-thread-permissions-by-id"] as? [String: Any],
+           let entry = permsMap[threadId] as? [String: Any],
+           let policy = entry["approvalPolicy"] as? String {
+            return policy
+        }
+
+        // 2. Fall back to the global default agent mode.
+        // New threads inherit the global mode before the first heartbeat writes their
+        // per-thread entry. "full-access" in the UI corresponds to approvalPolicy "never".
+        if let agentModeMap = atomState["agent-mode-by-host-id"] as? [String: Any],
+           let globalMode = agentModeMap["local"] as? String {
+            switch globalMode {
+            case "full-access":
+                return "never"
+            case "guardian-approvals":
+                return "untrusted"
+            default:
+                return nil
+            }
+        }
+
+        return nil
     }
 
     private func handleServerRequest(id: String, method: String, params: [String: Any]) async {
@@ -910,7 +930,8 @@ actor CodexAppServerMonitor {
         guard let threadId = thread["id"] as? String else { return }
         // Cache approvalMode from app-server data so approval-policy checks
         // don't have to re-read the global state file on every request.
-        if let mode = thread["approvalMode"] as? String ?? thread["approval_mode"] as? String {
+        let rawMode = thread["approvalMode"] as? String ?? thread["approval_mode"] as? String
+        if let mode = rawMode {
             threadApprovalModes[threadId] = mode
         }
         let name = thread["name"] as? String
@@ -1606,4 +1627,6 @@ actor CodexAppServerMonitor {
         return bundle.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String
             ?? bundle.object(forInfoDictionaryKey: "CFBundleName") as? String
     }
+
 }
+
