@@ -83,6 +83,10 @@ struct HookEvent: Sendable {
     let ingress: SessionIngress
     let bridgeIntervention: SessionIntervention?
     let suppressInAppPrompt: Bool
+    /// True when Codex fires a PermissionRequest hook with `permission_mode=bypassPermissions`,
+    /// meaning Codex has already auto-approved the tool call internally.  Island should
+    /// respond to the hook immediately without showing an approval card.
+    let codexBypassPermissions: Bool
 
     init(
         sessionId: String,
@@ -100,7 +104,8 @@ struct HookEvent: Sendable {
         message: String?,
         ingress: SessionIngress = .hookBridge,
         bridgeIntervention: SessionIntervention? = nil,
-        suppressInAppPrompt: Bool = false
+        suppressInAppPrompt: Bool = false,
+        codexBypassPermissions: Bool = false
     ) {
         self.sessionId = sessionId
         self.cwd = cwd
@@ -118,6 +123,7 @@ struct HookEvent: Sendable {
         self.ingress = ingress
         self.bridgeIntervention = bridgeIntervention
         self.suppressInAppPrompt = suppressInAppPrompt
+        self.codexBypassPermissions = codexBypassPermissions
     }
 
     nonisolated var sessionPhase: SessionPhase {
@@ -228,7 +234,8 @@ extension HookEvent {
             message: message,
             ingress: ingress,
             bridgeIntervention: bridgeIntervention?.withResolvedToolUseId(toolUseId),
-            suppressInAppPrompt: suppressInAppPrompt
+            suppressInAppPrompt: suppressInAppPrompt,
+            codexBypassPermissions: codexBypassPermissions
         )
     }
 
@@ -249,7 +256,8 @@ extension HookEvent {
             message: message,
             ingress: ingress,
             bridgeIntervention: bridgeIntervention,
-            suppressInAppPrompt: suppressInAppPrompt
+            suppressInAppPrompt: suppressInAppPrompt,
+            codexBypassPermissions: codexBypassPermissions
         )
     }
 }
@@ -607,7 +615,11 @@ private extension BridgeEnvelope {
                 fallbackID: metadata["tool_use_id"],
                 metadata: metadata
             ),
-            suppressInAppPrompt: (metadata["suppress_in_app_prompt"] == "true")
+            suppressInAppPrompt: (metadata["suppress_in_app_prompt"] == "true"),
+            codexBypassPermissions: (
+                eventType == "PermissionRequest"
+                && metadata["permission_mode"] == "bypassPermissions"
+            )
         )
     }
 

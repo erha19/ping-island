@@ -649,26 +649,13 @@ actor CodexAppServerMonitor {
             return nil
         }
 
-        // 1. Check per-thread heartbeat permissions (most authoritative).
+        // Check per-thread heartbeat permissions (most authoritative for Desktop threads).
+        // CLI-only sessions (e.g. agentloop) are not present here; their approval policy
+        // is signalled by permission_mode=bypassPermissions in the hook payload instead.
         if let permsMap = atomState["heartbeat-thread-permissions-by-id"] as? [String: Any],
            let entry = permsMap[threadId] as? [String: Any],
            let policy = entry["approvalPolicy"] as? String {
             return policy
-        }
-
-        // 2. Fall back to the global default agent mode.
-        // New threads inherit the global mode before the first heartbeat writes their
-        // per-thread entry. "full-access" in the UI corresponds to approvalPolicy "never".
-        if let agentModeMap = atomState["agent-mode-by-host-id"] as? [String: Any],
-           let globalMode = agentModeMap["local"] as? String {
-            switch globalMode {
-            case "full-access":
-                return "never"
-            case "guardian-approvals":
-                return "untrusted"
-            default:
-                return nil
-            }
         }
 
         return nil

@@ -374,24 +374,16 @@ actor SessionStore {
             ? resolveOrAdoptCodexHookSession(event)
             : event.sessionId
 
-        // Auto-approve PermissionRequest for Codex threads whose approvalPolicy is "never".
-        // Codex already handles approval internally in this mode; showing a UI card is
-        // misleading since the user's response has no effect.  Respond immediately so the
-        // hook client (Codex process) is never left waiting.
-        if event.provider == .codex,
-           event.event == "PermissionRequest",
-           event.expectsResponse {
-            let isNeverPolicy =
-                CodexAppServerMonitor.approvalPolicyFromGlobalState(threadId: event.sessionId) == "never"
-                || (sessionId != event.sessionId
-                    && CodexAppServerMonitor.approvalPolicyFromGlobalState(threadId: sessionId) == "never")
-            if isNeverPolicy {
-                Self.logger.notice(
-                    "Auto-approving Codex PermissionRequest (approvalPolicy=never) session=\(sessionId.prefix(8), privacy: .public)"
-                )
-                HookSocketServer.shared.respondToPermissionBySession(sessionId: sessionId, decision: "approve")
-                return
-            }
+        // When Codex fires a PermissionRequest hook with permission_mode=bypassPermissions,
+        // Codex has already auto-approved the tool call internally (approval_mode "never").
+        // No UI card is needed — respond to the hook immediately so the hook client is
+        // never left waiting on a 24-hour timeout.
+        if event.codexBypassPermissions {
+            Self.logger.notice(
+                "Auto-approving bypassPermissions hook session=\(sessionId.prefix(8), privacy: .public)"
+            )
+            HookSocketServer.shared.respondToPermissionBySession(sessionId: sessionId, decision: "approve")
+            return
         }
 
         if shouldIgnoreClaudeAskUserQuestionPermissionRequest(event) {
