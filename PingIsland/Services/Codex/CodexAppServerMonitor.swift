@@ -622,14 +622,15 @@ actor CodexAppServerMonitor {
     // MARK: - Codex approval-policy helpers
 
     /// Returns `true` if the thread's approval policy is "never", meaning
-    /// Returns `true` if the thread's approval policy is "never", meaning
-    /// Codex auto-approves without waiting for our response.
+    /// Codex auto-approves WebSocket approval requests without waiting for our response.
+    ///
+    /// Used for the WebSocket path (`item/*/requestApproval`).  The hook-based path
+    /// uses `codexBypassPermissions` on the `HookEvent` instead, which is populated
+    /// directly from `permission_mode=bypassPermissions` in the hook payload.
     ///
     /// Lookup order:
-    /// 1. In-memory cache populated from app-server thread data.
-    /// 2. `~/.codex/.codex-global-state.json` — per-thread entry, then global
-    ///    agent-mode default (new threads inherit the global mode before their
-    ///    first heartbeat write).
+    /// 1. In-memory cache populated from WebSocket thread list / thread/read responses.
+    /// 2. `~/.codex/.codex-global-state.json` — per-thread heartbeat entry only.
     private func isAutoApproveThread(_ threadId: String) -> Bool {
         if let cached = threadApprovalModes[threadId] {
             return cached == "never"
