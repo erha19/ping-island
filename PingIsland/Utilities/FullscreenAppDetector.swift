@@ -10,43 +10,23 @@ struct FullscreenAppDetector {
         return isFullscreenWindowOwned(by: frontmostApp.processIdentifier, screenFrame: screenFrame)
     }
 
-    static func isFullscreenBrowserActive(screenFrame: CGRect) -> Bool {
+    static func isFullscreenChromeActive(screenFrame: CGRect) -> Bool {
         guard let frontmostApp = frontmostApplicationExcludingSelf(),
-              isBrowserBundleIdentifier(frontmostApp.bundleIdentifier) else {
+              isChromeBundleIdentifier(frontmostApp.bundleIdentifier) else {
             return false
         }
 
         return isFullscreenWindowOwned(by: frontmostApp.processIdentifier, screenFrame: screenFrame)
     }
 
-    static func isBrowserBundleIdentifier(_ bundleIdentifier: String?) -> Bool {
+    static func isChromeBundleIdentifier(_ bundleIdentifier: String?) -> Bool {
         guard let normalized = bundleIdentifier?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
               !normalized.isEmpty else {
             return false
         }
 
-        let knownBundleIdentifiers: Set<String> = [
-            "com.apple.safari",
-            "com.apple.safaritechnologypreview",
-            "com.google.chrome",
-            "com.google.chrome.canary",
-            "com.microsoft.edgemac",
-            "com.brave.browser",
-            "company.thebrowser.browser",
-            "com.operasoftware.opera",
-            "org.mozilla.firefox"
-        ]
-
-        if knownBundleIdentifiers.contains(normalized) {
-            return true
-        }
-
-        return normalized.contains("chrome")
-            || normalized.contains("safari")
-            || normalized.contains("edge")
-            || normalized.contains("brave")
-            || normalized.contains("opera")
-            || normalized.contains("firefox")
+        return normalized == "com.google.chrome"
+            || normalized == "com.google.chrome.canary"
     }
 
     private static func frontmostApplicationExcludingSelf() -> NSRunningApplication? {

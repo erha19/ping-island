@@ -48,7 +48,7 @@ class NotchViewModel: ObservableObject {
     @Published private(set) var openedMeasuredHeight: CGFloat?
     @Published private(set) var isFullscreenEdgeRevealActive = false
     @Published private(set) var isFullscreenPhysicalNotchCompactActive = false
-    @Published private(set) var isFullscreenBrowserHiddenActive = false
+    @Published private(set) var isFullscreenChromeHiddenActive = false
     @Published private(set) var isIdleAutoHiddenActive = false
     @Published private(set) var isSettingsPopoverPresented = false
     @Published private(set) var isInlineTextInputActive = false
@@ -277,7 +277,7 @@ class NotchViewModel: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     private let events: EventMonitors?
     private let fullscreenActivityProvider: @MainActor (CGRect) -> Bool
-    private let fullscreenBrowserHiddenProvider: @MainActor (CGRect) -> Bool
+    private let fullscreenChromeHiddenProvider: @MainActor (CGRect) -> Bool
     private let hideInFullscreenProvider: @MainActor () -> Bool
     private let autoHideWhenIdleProvider: @MainActor () -> Bool
     private var hoverTimer: DispatchWorkItem?
@@ -322,7 +322,7 @@ class NotchViewModel: ObservableObject {
         observeSystemEnvironment: Bool = true,
         fullscreenActivityProvider: @escaping @MainActor (CGRect) -> Bool = FullscreenAppDetector.isFullscreenAppActive,
         hideInFullscreenProvider: @escaping @MainActor () -> Bool = { AppSettings.hideInFullscreen },
-        fullscreenBrowserHiddenProvider: @escaping @MainActor (CGRect) -> Bool = FullscreenAppDetector.isFullscreenBrowserActive,
+        fullscreenChromeHiddenProvider: @escaping @MainActor (CGRect) -> Bool = FullscreenAppDetector.isFullscreenChromeActive,
         autoHideWhenIdleProvider: @escaping @MainActor () -> Bool = { AppSettings.autoHideWhenIdle },
         fullscreenStateSettleDelay: TimeInterval = 0.18
     ) {
@@ -338,7 +338,7 @@ class NotchViewModel: ObservableObject {
         )
         self.events = enableEventMonitoring ? EventMonitors.shared : nil
         self.fullscreenActivityProvider = fullscreenActivityProvider
-        self.fullscreenBrowserHiddenProvider = fullscreenBrowserHiddenProvider
+        self.fullscreenChromeHiddenProvider = fullscreenChromeHiddenProvider
         self.hideInFullscreenProvider = hideInFullscreenProvider
         self.autoHideWhenIdleProvider = autoHideWhenIdleProvider
         self.fullscreenStateSettleDelay = fullscreenStateSettleDelay
@@ -414,12 +414,12 @@ class NotchViewModel: ObservableObject {
 
     private func refreshFullscreenPresentationState() {
         let isFullscreenActive = fullscreenActivityProvider(screenRect)
-        let shouldHideForFullscreenBrowser = fullscreenBrowserHiddenProvider(screenRect)
+        let shouldHideForFullscreenChrome = fullscreenChromeHiddenProvider(screenRect)
         let shouldUseEdgeReveal = shouldUseFullscreenEdgeReveal(isFullscreenActive: isFullscreenActive)
         let shouldUsePhysicalNotchCompact = shouldUsePhysicalNotchCompact(isFullscreenActive: isFullscreenActive)
 
-        if shouldHideForFullscreenBrowser != isFullscreenBrowserHiddenActive {
-            isFullscreenBrowserHiddenActive = shouldHideForFullscreenBrowser
+        if shouldHideForFullscreenChrome != isFullscreenChromeHiddenActive {
+            isFullscreenChromeHiddenActive = shouldHideForFullscreenChrome
         }
 
         applyPhysicalNotchFullscreenState(shouldUsePhysicalNotchCompact)
@@ -436,7 +436,7 @@ class NotchViewModel: ObservableObject {
             }
         }
 
-        if shouldHideForFullscreenBrowser {
+        if shouldHideForFullscreenChrome {
             hoverTimer?.cancel()
             hoverTimer = nil
             isHovering = false
@@ -485,7 +485,7 @@ class NotchViewModel: ObservableObject {
         hideInFullscreenProvider()
             && hasPhysicalNotch
             && isFullscreenActive
-            && !isFullscreenBrowserHiddenActive
+            && !isFullscreenChromeHiddenActive
     }
 
     // MARK: - Event Handling
@@ -716,7 +716,7 @@ class NotchViewModel: ObservableObject {
         if presentationMode == .detached {
             return true
         }
-        if isFullscreenBrowserHiddenActive {
+        if isFullscreenChromeHiddenActive {
             return true
         }
         if isFullscreenEdgeRevealActive && status != .opened {
@@ -734,7 +734,7 @@ class NotchViewModel: ObservableObject {
 
     var shouldSuppressAutomaticPresentation: Bool {
         presentationMode == .detached
-            || isFullscreenBrowserHiddenActive
+            || isFullscreenChromeHiddenActive
             || (isFullscreenEdgeRevealActive && status != .opened)
     }
 

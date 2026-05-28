@@ -430,7 +430,7 @@ struct NotchView: View {
                     scheduleDetachmentHintPresentationIfNeeded(delay: Self.detachmentHintRetryDelay)
                 }
             }
-            .onChange(of: viewModel.isFullscreenBrowserHiddenActive) { _, isActive in
+            .onChange(of: viewModel.isFullscreenChromeHiddenActive) { _, isActive in
                 if isActive {
                     isVisible = false
                 } else {

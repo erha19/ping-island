@@ -318,7 +318,7 @@ final class NotchViewModelTests: XCTestCase {
         }
     }
 
-    func testFullscreenBrowserHidesWindowPresentationEvenOnPhysicalNotch() async {
+    func testFullscreenChromeHidesWindowPresentationEvenOnPhysicalNotch() async {
         let viewModel = await MainActor.run {
             NotchViewModel(
                 deviceNotchRect: CGRect(x: 0, y: 0, width: 220, height: 38),
@@ -328,12 +328,12 @@ final class NotchViewModelTests: XCTestCase {
                 enableEventMonitoring: false,
                 observeSystemEnvironment: false,
                 fullscreenActivityProvider: { _ in true },
-                fullscreenBrowserHiddenProvider: { _ in true }
+                fullscreenChromeHiddenProvider: { _ in true }
             )
         }
 
         await MainActor.run {
-            XCTAssertTrue(viewModel.isFullscreenBrowserHiddenActive)
+            XCTAssertTrue(viewModel.isFullscreenChromeHiddenActive)
             XCTAssertTrue(viewModel.shouldHideWindowPresentation)
             XCTAssertTrue(viewModel.shouldSuppressAutomaticPresentation)
         }

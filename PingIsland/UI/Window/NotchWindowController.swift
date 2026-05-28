@@ -80,7 +80,7 @@ class NotchWindowController: NSWindowController {
             }
             .store(in: &cancellables)
 
-        viewModel.$isFullscreenBrowserHiddenActive
+        viewModel.$isFullscreenChromeHiddenActive
             .receive(on: DispatchQueue.main)
             .sink { [weak self, weak notchWindow, weak viewModel] _ in
                 guard let self, let notchWindow, let viewModel else { return }
@@ -104,7 +104,7 @@ class NotchWindowController: NSWindowController {
             }
             .store(in: &cancellables)
 
-        viewModel.$isFullscreenBrowserHiddenActive
+        viewModel.$isFullscreenChromeHiddenActive
             .receive(on: DispatchQueue.main)
             .sink { [weak self, weak notchWindow, weak viewModel] _ in
                 guard let self, let notchWindow, let viewModel else { return }
