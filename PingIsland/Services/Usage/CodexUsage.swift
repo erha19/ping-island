@@ -20,7 +20,43 @@ struct CodexUsageSnapshot: Equatable, Codable, Sendable {
     let capturedAt: Date?
     let planType: String?
     let limitID: String?
+    let tokenUsage: CodexTokenUsage?
     let windows: [CodexUsageWindow]
+
+    nonisolated init(
+        sourceFilePath: String,
+        capturedAt: Date?,
+        planType: String?,
+        limitID: String?,
+        tokenUsage: CodexTokenUsage? = nil,
+        windows: [CodexUsageWindow]
+    ) {
+        self.sourceFilePath = sourceFilePath
+        self.capturedAt = capturedAt
+        self.planType = planType
+        self.limitID = limitID
+        self.tokenUsage = tokenUsage
+        self.windows = windows
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case sourceFilePath
+        case capturedAt
+        case planType
+        case limitID
+        case tokenUsage
+        case windows
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        sourceFilePath = try container.decode(String.self, forKey: .sourceFilePath)
+        capturedAt = try container.decodeIfPresent(Date.self, forKey: .capturedAt)
+        planType = try container.decodeIfPresent(String.self, forKey: .planType)
+        limitID = try container.decodeIfPresent(String.self, forKey: .limitID)
+        tokenUsage = try container.decodeIfPresent(CodexTokenUsage.self, forKey: .tokenUsage)
+        windows = try container.decode([CodexUsageWindow].self, forKey: .windows)
+    }
 
     nonisolated var threadID: String? {
         let stem = URL(fileURLWithPath: sourceFilePath).deletingPathExtension().lastPathComponent
@@ -140,6 +176,7 @@ enum CodexUsageLoader {
             capturedAt: timestamp(from: object["timestamp"]) ?? fallbackTimestamp,
             planType: string(from: rateLimits["plan_type"]),
             limitID: string(from: rateLimits["limit_id"]),
+            tokenUsage: tokenUsage(from: payload["info"]),
             windows: windows
         )
     }
@@ -250,5 +287,37 @@ enum CodexUsageLoader {
         default:
             return nil
         }
+    }
+
+    private nonisolated static func tokenUsage(from value: Any?) -> CodexTokenUsage? {
+        let usage: [String: Any]?
+        if let info = value as? [String: Any] {
+            usage = info["total_token_usage"] as? [String: Any]
+        } else {
+            usage = nil
+        }
+
+        guard let usage else {
+            return nil
+        }
+
+        let inputTokens = integer(from: usage["input_tokens"])
+            ?? integer(from: usage["prompt_tokens"])
+            ?? 0
+        let outputTokens = integer(from: usage["output_tokens"])
+            ?? integer(from: usage["completion_tokens"])
+            ?? 0
+        let totalTokens = integer(from: usage["total_tokens"])
+            ?? max(0, inputTokens + outputTokens)
+
+        guard inputTokens > 0 || outputTokens > 0 || totalTokens > 0 else {
+            return nil
+        }
+
+        return CodexTokenUsage(
+            inputTokens: inputTokens,
+            outputTokens: outputTokens,
+            totalTokens: totalTokens
+        )
     }
 }

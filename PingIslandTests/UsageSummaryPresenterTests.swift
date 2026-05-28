@@ -14,6 +14,7 @@ final class UsageSummaryPresenterTests: XCTestCase {
                 capturedAt: nil,
                 planType: "pro",
                 limitID: "codex",
+                tokenUsage: nil,
                 windows: [
                     CodexUsageWindow(
                         key: "primary",

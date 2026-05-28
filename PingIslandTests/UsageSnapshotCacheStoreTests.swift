@@ -35,6 +35,7 @@ final class UsageSnapshotCacheStoreTests: XCTestCase {
             capturedAt: Date(timeIntervalSince1970: 1_775_158_295),
             planType: "pro",
             limitID: "codex",
+            tokenUsage: CodexTokenUsage(inputTokens: 100, outputTokens: 50, totalTokens: 150),
             windows: [
                 CodexUsageWindow(
                     key: "primary",

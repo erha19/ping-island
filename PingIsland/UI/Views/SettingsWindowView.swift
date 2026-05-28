@@ -11,6 +11,7 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
     case display
     case mascot
     case sound
+    case analytics
     case integration
     case remote
     case labs
@@ -25,6 +26,7 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
         case .display: return "显示"
         case .mascot: return "宠物"
         case .sound: return "声音"
+        case .analytics: return "统计"
         case .integration: return "集成"
         case .remote: return "远程"
         case .labs: return "实验室"
@@ -39,6 +41,7 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
         case .display: return "显示器与位置"
         case .mascot: return "客户端宠物与动作"
         case .sound: return "通知与提示音"
+        case .analytics: return "Agent、Token 与工具"
         case .integration: return "Hooks 与 IDE 扩展"
         case .remote: return "SSH 主机与远程转发"
         case .labs: return "试验性特性"
@@ -53,6 +56,7 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
         case .display: return "rectangle.on.rectangle"
         case .mascot: return "face.smiling.fill"
         case .sound: return "speaker.wave.2.fill"
+        case .analytics: return "chart.bar.xaxis"
         case .integration: return "link.circle.fill"
         case .remote: return "network.badge.shield.half.filled"
         case .labs: return "flask.fill"
@@ -67,6 +71,7 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
         case .display: return Color(red: 0.46, green: 0.40, blue: 0.96)
         case .mascot: return Color(red: 0.91, green: 0.27, blue: 0.81)  // Pink
         case .sound: return Color(red: 0.22, green: 0.83, blue: 0.42)
+        case .analytics: return Color(red: 0.97, green: 0.70, blue: 0.22)
         case .integration: return Color(red: 0.16, green: 0.76, blue: 0.72)
         case .remote: return Color(red: 0.95, green: 0.54, blue: 0.20)
         case .labs: return Color(red: 0.82, green: 0.48, blue: 0.97)
@@ -261,7 +266,7 @@ final class SettingsPanelViewModel: ObservableObject {
             refreshCustomHookInstallations()
             refreshQoderCLIHookRefreshStatus()
             refreshBridgeHealthStatus()
-        case .general, .shortcuts, .mascot, .remote, .labs, .about:
+        case .general, .shortcuts, .mascot, .analytics, .remote, .labs, .about:
             break
         }
     }
@@ -848,6 +853,378 @@ private struct SoundSettingsContent: View {
     }
 }
 
+@MainActor
+private final class AgentUsageAnalyticsViewModel: ObservableObject {
+    @Published var selectedRange: AgentUsageRange = .sevenDays
+    @Published private(set) var snapshot = AgentUsageDashboardSnapshot.empty(range: .sevenDays)
+    @Published private(set) var isRefreshing = false
+
+    private var refreshTask: Task<Void, Never>?
+
+    func refresh() {
+        refreshTask?.cancel()
+        let range = selectedRange
+        isRefreshing = true
+        refreshTask = Task { [weak self] in
+            let nextSnapshot = await AgentUsageStore.shared.snapshot(range: range)
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                self?.snapshot = nextSnapshot
+                self?.isRefreshing = false
+            }
+        }
+    }
+
+    func selectRange(_ range: AgentUsageRange) {
+        guard selectedRange != range else { return }
+        selectedRange = range
+        refresh()
+    }
+
+    deinit {
+        refreshTask?.cancel()
+    }
+}
+
+private struct AgentUsageAnalyticsContent: View {
+    @StateObject private var viewModel = AgentUsageAnalyticsViewModel()
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            SettingsSectionCard(title: "本地统计") {
+                VStack(alignment: .leading, spacing: 14) {
+                    HStack(alignment: .center, spacing: 12) {
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text(appLocalized: "Agent 使用趋势")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(.white.opacity(0.90))
+                            Text(appLocalized: "统计仅保存在本机，来自 Hook、转录文件和 Codex token_count 快照。")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(.white.opacity(0.52))
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+
+                        Spacer(minLength: 12)
+
+                        Button(action: viewModel.refresh) {
+                            Image(systemName: viewModel.isRefreshing ? "arrow.triangle.2.circlepath" : "arrow.clockwise")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundColor(.white.opacity(0.72))
+                                .frame(width: 28, height: 28)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .help("刷新本地统计")
+                    }
+
+                    Picker("统计范围", selection: Binding(
+                        get: { viewModel.selectedRange },
+                        set: { viewModel.selectRange($0) }
+                    )) {
+                        ForEach(AgentUsageRange.allCases) { range in
+                            Text(appLocalized: range.title).tag(range)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .frame(width: 256)
+                }
+            }
+
+            SettingsSectionCard(title: "概览") {
+                VStack(spacing: 0) {
+                    AgentUsageMetricLine(
+                        title: "Agent 类型",
+                        value: "\(viewModel.snapshot.topAgents.count)",
+                        subtitle: "本周期出现的客户端类型"
+                    )
+                    SettingsLineDivider()
+                    AgentUsageMetricLine(
+                        title: "会话数",
+                        value: AgentUsageFormat.integer(viewModel.snapshot.sessionCount),
+                        subtitle: "按 agent 类型去重后的会话"
+                    )
+                    SettingsLineDivider()
+                    AgentUsageMetricLine(
+                        title: "工具使用",
+                        value: AgentUsageFormat.integer(viewModel.snapshot.toolUseCount),
+                        subtitle: "去重后的工具调用次数"
+                    )
+                    SettingsLineDivider()
+                    AgentUsageMetricLine(
+                        title: "Token 消耗",
+                        value: AgentUsageFormat.compactTokenCount(viewModel.snapshot.tokenTotals.resolvedTotal),
+                        subtitle: "Codex 累计快照的本地增量"
+                    )
+                    SettingsLineDivider()
+                    AgentUsageTokenSplitLine(totals: viewModel.snapshot.tokenTotals)
+                }
+            }
+
+            SettingsSectionCard(title: "Agent 类型排行") {
+                AgentUsageRankingList(
+                    items: viewModel.snapshot.topAgents,
+                    emptyTitle: "还没有可展示的 Agent 数据",
+                    tint: SettingsCategory.analytics.tint
+                )
+            }
+
+            SettingsSectionCard(title: "高频工具") {
+                AgentUsageRankingList(
+                    items: viewModel.snapshot.topTools,
+                    emptyTitle: "还没有可展示的工具调用",
+                    tint: TerminalColors.green
+                )
+            }
+
+            SettingsSectionCard(title: "活跃热力图") {
+                AgentUsageHeatmapView(days: viewModel.snapshot.heatmapDays)
+            }
+        }
+        .onAppear {
+            viewModel.refresh()
+        }
+    }
+}
+
+private struct AgentUsageMetricLine: View {
+    let title: String
+    let value: String
+    let subtitle: String
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 14) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(appLocalized: title)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.72))
+                Text(appLocalized: subtitle)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.white.opacity(0.42))
+                    .lineLimit(2)
+            }
+
+            Spacer(minLength: 12)
+
+            Text(verbatim: value)
+                .font(.system(size: 22, weight: .bold, design: .rounded))
+                .foregroundColor(.white.opacity(0.92))
+                .monospacedDigit()
+                .minimumScaleFactor(0.72)
+                .lineLimit(1)
+        }
+        .padding(.vertical, 11)
+    }
+}
+
+private struct AgentUsageTokenSplitLine: View {
+    let totals: AgentUsageTokenTotals
+
+    var body: some View {
+        HStack(spacing: 16) {
+            AgentUsageTokenPill(
+                title: "输入 Token",
+                value: AgentUsageFormat.compactTokenCount(totals.input),
+                tint: TerminalColors.blue
+            )
+            AgentUsageTokenPill(
+                title: "输出 Token",
+                value: AgentUsageFormat.compactTokenCount(totals.output),
+                tint: TerminalColors.amber
+            )
+        }
+        .padding(.vertical, 12)
+    }
+}
+
+private struct AgentUsageTokenPill: View {
+    let title: String
+    let value: String
+    let tint: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(appLocalized: title)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(.white.opacity(0.50))
+            Text(verbatim: value)
+                .font(.system(size: 16, weight: .bold, design: .rounded))
+                .foregroundColor(tint.opacity(0.95))
+                .monospacedDigit()
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct AgentUsageRankingList: View {
+    let items: [AgentUsageRankItem]
+    let emptyTitle: String
+    let tint: Color
+
+    var body: some View {
+        if items.isEmpty {
+            AgentUsageEmptyLine(title: emptyTitle)
+                .padding(.vertical, 16)
+        } else {
+            VStack(spacing: 0) {
+                ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                    AgentUsageRankingRow(index: index, item: item, tint: tint)
+                    if index < items.count - 1 {
+                        SettingsLineDivider()
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct AgentUsageRankingRow: View {
+    let index: Int
+    let item: AgentUsageRankItem
+    let tint: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                Text(verbatim: "#\(index + 1)")
+                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                    .foregroundColor(tint.opacity(0.86))
+                    .frame(width: 30, alignment: .leading)
+
+                Text(verbatim: item.name)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.88))
+                    .lineLimit(1)
+
+                Spacer(minLength: 8)
+
+                Text(verbatim: AgentUsageFormat.integer(item.count))
+                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.72))
+                    .monospacedDigit()
+            }
+
+            GeometryReader { proxy in
+                RoundedRectangle(cornerRadius: 3, style: .continuous)
+                    .fill(Color.white.opacity(0.07))
+                    .overlay(alignment: .leading) {
+                        RoundedRectangle(cornerRadius: 3, style: .continuous)
+                            .fill(tint.opacity(0.72))
+                            .frame(width: max(6, proxy.size.width * max(0.04, item.share)))
+                    }
+            }
+            .frame(height: 6)
+        }
+        .padding(.vertical, 10)
+    }
+}
+
+private struct AgentUsageHeatmapView: View {
+    let days: [AgentUsageHeatmapDay]
+
+    private let columns = Array(repeating: GridItem(.fixed(11), spacing: 4), count: 7)
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if days.allSatisfy({ $0.activityCount == 0 }) {
+                AgentUsageEmptyLine(title: "还没有活跃记录")
+            }
+
+            LazyVGrid(columns: columns, alignment: .leading, spacing: 4) {
+                ForEach(days) { day in
+                    RoundedRectangle(cornerRadius: 2, style: .continuous)
+                        .fill(color(for: day.activityCount))
+                        .frame(width: 11, height: 11)
+                        .help("\(AgentUsageFormat.shortDate(day.date)) · \(day.activityCount)")
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            HStack(spacing: 5) {
+                Text(appLocalized: "少")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundColor(.white.opacity(0.38))
+                ForEach(0..<5, id: \.self) { level in
+                    RoundedRectangle(cornerRadius: 2, style: .continuous)
+                        .fill(color(forLevel: level))
+                        .frame(width: 10, height: 10)
+                }
+                Text(appLocalized: "多")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundColor(.white.opacity(0.38))
+            }
+        }
+        .padding(.vertical, 12)
+    }
+
+    private func color(for count: Int) -> Color {
+        if count <= 0 { return color(forLevel: 0) }
+        if count < 3 { return color(forLevel: 1) }
+        if count < 8 { return color(forLevel: 2) }
+        if count < 16 { return color(forLevel: 3) }
+        return color(forLevel: 4)
+    }
+
+    private func color(forLevel level: Int) -> Color {
+        switch level {
+        case 0: return Color.white.opacity(0.08)
+        case 1: return TerminalColors.green.opacity(0.28)
+        case 2: return TerminalColors.green.opacity(0.46)
+        case 3: return TerminalColors.green.opacity(0.66)
+        default: return TerminalColors.green.opacity(0.92)
+        }
+    }
+}
+
+private struct AgentUsageEmptyLine: View {
+    let title: String
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "chart.xyaxis.line")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(.white.opacity(0.34))
+            Text(appLocalized: title)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(.white.opacity(0.46))
+            Spacer(minLength: 0)
+        }
+    }
+}
+
+private enum AgentUsageFormat {
+    private static let integerFormatter: NumberFormatter = {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        return formatter
+    }()
+
+    private static let shortDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "M/d"
+        return formatter
+    }()
+
+    static func integer(_ value: Int) -> String {
+        integerFormatter.string(from: NSNumber(value: value)) ?? "\(value)"
+    }
+
+    static func compactTokenCount(_ value: Int) -> String {
+        if value >= 1_000_000 {
+            return String(format: "%.1fM", Double(value) / 1_000_000)
+        }
+        if value >= 1_000 {
+            return String(format: "%.1fK", Double(value) / 1_000)
+        }
+        return integer(value)
+    }
+
+    static func shortDate(_ date: Date) -> String {
+        shortDateFormatter.string(from: date)
+    }
+}
+
 private struct SettingsCategoryLoadingView: View {
     let category: SettingsCategory
 
@@ -886,7 +1263,7 @@ private struct SettingsCategoryLoadingView: View {
             return AppLocalization.string("正在扫描可用声音主题包")
         case .integration:
             return AppLocalization.string("正在检查 Hooks、IDE 扩展与客户端安装状态")
-        case .general, .shortcuts, .mascot, .remote, .labs, .about:
+        case .general, .shortcuts, .mascot, .analytics, .remote, .labs, .about:
             return AppLocalization.string("马上就好")
         }
     }
@@ -1354,6 +1731,8 @@ private struct SettingsPanelContentView: View {
                         mascotContent
                     case .sound:
                         soundContent
+                    case .analytics:
+                        analyticsContent
                     case .integration:
                         integrationContent
                     case .remote:
@@ -1474,7 +1853,7 @@ private struct SettingsPanelContentView: View {
         switch category {
         case .display, .sound, .integration:
             return true
-        case .general, .shortcuts, .mascot, .remote, .labs, .about:
+        case .general, .shortcuts, .mascot, .analytics, .remote, .labs, .about:
             return false
         }
     }
@@ -1799,6 +2178,10 @@ private struct SettingsPanelContentView: View {
 
     private var soundContent: some View {
         SoundSettingsContent()
+    }
+
+    private var analyticsContent: some View {
+        AgentUsageAnalyticsContent()
     }
 
     private var integrationContent: some View {

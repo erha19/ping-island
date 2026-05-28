@@ -21,6 +21,8 @@ final class CodexUsageLoaderTests: XCTestCase {
                         "type": "token_count",
                         "info": [
                             "total_token_usage": [
+                                "input_tokens": 600_000,
+                                "output_tokens": 399_999,
                                 "total_tokens": 999_999,
                             ],
                         ],
@@ -47,6 +49,8 @@ final class CodexUsageLoaderTests: XCTestCase {
                         "type": "token_count",
                         "info": [
                             "total_token_usage": [
+                                "input_tokens": 800_000,
+                                "output_tokens": 434_567,
                                 "total_tokens": 1_234_567,
                             ],
                         ],
@@ -78,6 +82,7 @@ final class CodexUsageLoaderTests: XCTestCase {
         XCTAssertEqual(snapshot?.planType, "pro")
         XCTAssertEqual(snapshot?.windows.map(\.label), ["5h", "7d"])
         XCTAssertEqual(snapshot?.windows.map(\.roundedUsedPercentage), [13, 25])
+        XCTAssertEqual(snapshot?.tokenUsage, CodexTokenUsage(inputTokens: 800_000, outputTokens: 434_567, totalTokens: 1_234_567))
         XCTAssertEqual(snapshot?.windows.first?.leftPercentage ?? -1, 87, accuracy: 0.001)
         XCTAssertEqual(snapshot?.windows.first?.resetsAt, Date(timeIntervalSince1970: 1_775_158_295))
         XCTAssertEqual(snapshot?.capturedAt, isoDate("2026-04-03T01:50:35.000Z"))
@@ -200,6 +205,7 @@ final class CodexUsageLoaderTests: XCTestCase {
             capturedAt: nil,
             planType: nil,
             limitID: nil,
+            tokenUsage: nil,
             windows: []
         )
 
@@ -212,6 +218,7 @@ final class CodexUsageLoaderTests: XCTestCase {
             capturedAt: nil,
             planType: nil,
             limitID: nil,
+            tokenUsage: nil,
             windows: []
         )
 

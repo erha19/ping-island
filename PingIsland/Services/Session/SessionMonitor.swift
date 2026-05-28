@@ -321,6 +321,7 @@ class SessionMonitor: ObservableObject {
             }
             if let codexSnapshot {
                 UsageSnapshotCacheStore.saveCodex(codexSnapshot)
+                await AgentUsageStore.shared.recordCodexUsageSnapshot(codexSnapshot)
             }
 
             self.claudeUsageSnapshot = claudeSnapshot ?? cachedClaudeSnapshot
