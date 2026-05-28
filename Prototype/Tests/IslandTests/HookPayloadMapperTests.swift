@@ -1175,6 +1175,39 @@ func qoderCLIHooksExecutedInsideQoderIDEStayNotifyOnly() throws {
 }
 
 @Test
+func claudeHooksExecutedInsideQoderIDETerminalKeepClaudeApprovalOptions() throws {
+    let payload = """
+    {
+      "hook_event_name": "PermissionRequest",
+      "session_id": "claude-in-qoder-ide",
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "npm test"
+      }
+    }
+    """.data(using: .utf8)!
+
+    let envelope = HookPayloadMapper.makeEnvelope(
+        source: .claude,
+        arguments: ["island-bridge", "--source", "claude"],
+        environment: [
+            "TERM_PROGRAM": "vscode",
+            "__CFBundleIdentifier": "com.qoder.ide",
+            "VSCODE_GIT_IPC_HANDLE": "/Applications/Qoder.app/Contents/Resources/app/out/vs/workbench",
+            "PWD": "/tmp/demo"
+        ],
+        stdinData: payload
+    )
+
+    #expect(envelope.metadata["client_kind"] == nil)
+    #expect(envelope.metadata["terminal_bundle_id"] == "com.qoder.ide")
+    #expect(envelope.expectsResponse)
+    #expect(envelope.intervention?.kind == .approval)
+    #expect(envelope.intervention?.options.map(\.id) == ["approve", "approveForSession", "deny"])
+    #expect(HookPayloadMapper.shouldDeliverEnvelope(envelope))
+}
+
+@Test
 func qoderCLINonQuestionHooksExecutedInsideQoderIDESkipDelivery() throws {
     let payload = """
     {

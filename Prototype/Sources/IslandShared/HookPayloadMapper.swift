@@ -1209,13 +1209,25 @@ public enum HookPayloadMapper {
     }
 
     private static func normalizedClientKind(from metadata: [String: String]) -> String? {
-        let bundleIdentifier = metadata["client_bundle_id"]?
+        let explicitClientKind = metadata["client_kind"]?
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
-            ?? metadata["terminal_bundle_id"]?
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-                .lowercased()
-        switch bundleIdentifier {
+        if let explicitClientKind, !explicitClientKind.isEmpty {
+            if explicitClientKind == "qoder-cli",
+               metadataHasQoderIDEHost(metadata) {
+                return "qoder"
+            }
+            if explicitClientKind == "qoder",
+               metadataLooksLikeQoderCLI(metadata) {
+                return "qoder-cli"
+            }
+            return explicitClientKind
+        }
+
+        let clientBundleIdentifier = metadata["client_bundle_id"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        switch clientBundleIdentifier {
         case "com.qoder.work":
             return "qoderwork"
         case "com.qoder.ide":
@@ -1224,18 +1236,7 @@ public enum HookPayloadMapper {
             break
         }
 
-        if let explicitClientKind = metadata["client_kind"]?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased(),
-           !explicitClientKind.isEmpty {
-            if explicitClientKind == "qoder",
-               metadataLooksLikeQoderCLI(metadata) {
-                return "qoder-cli"
-            }
-            return explicitClientKind
-        }
-
-        switch bundleIdentifier {
+        switch clientBundleIdentifier {
         case "com.tencent.codebuddy", "com.codebuddy.app":
             return "codebuddy"
         case "com.workbuddy.workbuddy":
@@ -1247,7 +1248,7 @@ public enum HookPayloadMapper {
         let nameHint = metadata["client_name"]?
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
-            ?? metadata["client_originator"]?
+            ?? metadata["client"]?
                 .trimmingCharacters(in: .whitespacesAndNewlines)
                 .lowercased()
         if let nameHint {
@@ -1396,6 +1397,17 @@ public enum HookPayloadMapper {
 
         return normalizedOrigin == "cli"
             && nameHints.contains(where: { $0 == "qoder" || $0.contains("qoder ") })
+    }
+
+    private static func metadataHasQoderIDEHost(_ metadata: [String: String]) -> Bool {
+        [
+            metadata["terminal_bundle_id"],
+            metadata["ide_bundle_id"]
+        ].contains { value in
+            value?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased() == "com.qoder.ide"
+        }
     }
 
     private static func isCodeBuddyFamilyHookClient(_ clientKind: String?) -> Bool {

@@ -387,6 +387,42 @@ final class SessionStateTests: XCTestCase {
         XCTAssertTrue(session.supportsSessionScopedApproval)
     }
 
+    func testClaudeCodeHostedInQoderTerminalKeepsAutoApproveAction() {
+        let intervention = SessionIntervention(
+            id: "tool-1",
+            kind: .approval,
+            title: "Claude needs approval",
+            message: "Run Bash?",
+            options: [
+                SessionInterventionOption(id: "approve", title: "Allow Once", detail: nil),
+                SessionInterventionOption(id: "approveForSession", title: "Allow for Session", detail: nil),
+                SessionInterventionOption(id: "deny", title: "Deny", detail: nil)
+            ],
+            questions: [],
+            supportsSessionScope: false,
+            metadata: [:]
+        )
+        let session = SessionState(
+            sessionId: "claude-hosted-in-qoder",
+            cwd: "/tmp/project",
+            provider: .claude,
+            clientInfo: SessionClientInfo(
+                kind: .claudeCode,
+                name: "Claude Code",
+                originator: "Qoder",
+                terminalBundleIdentifier: "com.qoder.ide"
+            ),
+            intervention: intervention,
+            phase: .waitingForApproval(
+                PermissionContext(toolUseId: "tool-1", toolName: "Bash", toolInput: nil, receivedAt: Date())
+            )
+        )
+
+        XCTAssertEqual(session.scopedApprovalAction, .autoApprove)
+        XCTAssertTrue(session.supportsSessionScopedApproval)
+        XCTAssertEqual(session.clientInfo.ideHostBadgeLabel(for: .claude), "Qoder 终端")
+    }
+
     func testQoderWaitingForApprovalDoesNotExposeClaudeAutoApproveAction() {
         let session = SessionState(
             sessionId: "qoder-no-auto-approve",
