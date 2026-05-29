@@ -60,6 +60,9 @@ class ScreenSelector: ObservableObject {
 
     // MARK: - Private State
     private var savedIdentifier: ScreenIdentifier?
+    /// Screen chosen by cursor-follow in automatic mode.
+    /// Persists across refreshScreens() until the user explicitly changes mode.
+    private var cursorFollowScreen: NSScreen?
 
     private init() {
         loadPreferences()
@@ -78,6 +81,7 @@ class ScreenSelector: ObservableObject {
     func selectScreen(_ screen: NSScreen) {
         selectionMode = .specificScreen
         savedIdentifier = ScreenIdentifier(screen: screen)
+        cursorFollowScreen = nil
         selectedScreen = screen
         savePreferences()
     }
@@ -86,6 +90,7 @@ class ScreenSelector: ObservableObject {
     func selectAutomatic() {
         selectionMode = .automatic
         savedIdentifier = nil
+        cursorFollowScreen = nil
         selectedScreen = resolveSelectedScreen()
         savePreferences()
     }
@@ -94,6 +99,18 @@ class ScreenSelector: ObservableObject {
     func isSelected(_ screen: NSScreen) -> Bool {
         guard let selected = selectedScreen else { return false }
         return screenID(of: screen) == screenID(of: selected)
+    }
+
+    /// Find the screen containing a point in AppKit global coordinates.
+    func screenContaining(_ point: CGPoint) -> NSScreen? {
+        NSScreen.screens.first(where: { NSMouseInRect(point, $0.frame, false) })
+    }
+
+    /// Migrate the notch to the given screen (automatic mode cursor-follow).
+    func migrateToScreen(_ screen: NSScreen) {
+        guard selectionMode == .automatic else { return }
+        cursorFollowScreen = screen
+        selectedScreen = screen
     }
 
     /// Extra height needed when picker is expanded
@@ -105,13 +122,22 @@ class ScreenSelector: ObservableObject {
 
     // MARK: - Private Methods
 
-    private func screenID(of screen: NSScreen) -> CGDirectDisplayID? {
+    func screenID(of screen: NSScreen) -> CGDirectDisplayID? {
         screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID
     }
 
     private func resolveSelectedScreen() -> NSScreen? {
         switch selectionMode {
         case .automatic:
+            // Prefer cursor-followed screen, then cursor's current screen, then built-in, then main
+            if let cursor = cursorFollowScreen,
+               availableScreens.contains(where: { screenID(of: $0) == screenID(of: cursor) }) {
+                return cursor
+            }
+            if let cursorScreen = screenContaining(NSEvent.mouseLocation),
+               availableScreens.contains(where: { screenID(of: $0) == screenID(of: cursorScreen) }) {
+                return cursorScreen
+            }
             return NSScreen.builtin ?? NSScreen.main
 
         case .specificScreen:
