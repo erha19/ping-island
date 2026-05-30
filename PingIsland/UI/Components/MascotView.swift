@@ -506,26 +506,25 @@ struct MascotView: View {
         }
     }
 
-    /// Adaptive refresh rate based on animation complexity
-    /// Optimized for battery life while maintaining smooth visual feedback
+    /// Adaptive refresh rate based on animation complexity.
+    /// Visible pets need enough cadence for the time-based motion to read as animation.
     private func adaptiveInterval(for mode: MascotRenderMode) -> TimeInterval {
-        // Higher interval = lower FPS for better battery/thermal performance
         let baseInterval = switch mode {
         case .idle:
-            0.50  // 2 FPS for idle drift; lists and idle-visible states prefer static frames.
+            1.0 / 12.0
         case .working:
-            0.16  // ~6 FPS keeps activity legible without a constant render loop.
+            1.0 / 24.0
         case .warning:
-            0.20  // 5 FPS keeps attention visible without a constant render loop.
+            1.0 / 24.0
         case .dragging:
-            0.033  // ~30 FPS for direct manipulation responsiveness.
+            1.0 / 30.0
         }
 
         switch energyGovernor.policy.animationLevel {
         case .full:
             return baseInterval
         case .reduced:
-            return baseInterval * 2.5
+            return baseInterval * 1.6
         case .staticFrames:
             return baseInterval
         }

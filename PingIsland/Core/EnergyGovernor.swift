@@ -56,7 +56,7 @@ struct EnergyPolicy: Equatable {
                 codexThreadListRefreshInterval: .seconds(60),
                 sessionMaintenanceInterval: .seconds(5 * 60),
                 usageRefreshInterval: .seconds(5 * 60),
-                animationLevel: .staticFrames,
+                animationLevel: .reduced,
                 eventMonitoringLevel: .interactionOnly,
                 allowsSilentUpdates: true,
                 allowsFileWatcherRetry: true

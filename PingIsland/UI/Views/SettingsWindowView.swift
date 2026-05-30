@@ -920,39 +920,22 @@ private struct AgentUsageAnalyticsContent: View {
 
             overviewCard
 
-            ViewThatFits(in: .horizontal) {
-                HStack(alignment: .top, spacing: 18) {
-                    rankingCard(
-                        title: "Agent 类型排行",
-                        items: viewModel.snapshot.topAgents,
-                        emptyTitle: "还没有可展示的 Agent 数据",
-                        tint: SettingsCategory.analytics.tint
-                    )
-                    .frame(maxWidth: .infinity)
+            HStack(alignment: .top, spacing: 18) {
+                rankingCard(
+                    title: "Agent 类型排行",
+                    items: viewModel.snapshot.topAgents,
+                    emptyTitle: "还没有可展示的 Agent 数据",
+                    tint: SettingsCategory.analytics.tint
+                )
+                .frame(maxWidth: .infinity)
 
-                    rankingCard(
-                        title: "工具调用 Top 5",
-                        items: viewModel.snapshot.topTools,
-                        emptyTitle: "还没有可展示的工具调用",
-                        tint: TerminalColors.blue
-                    )
-                    .frame(maxWidth: .infinity)
-                }
-
-                VStack(alignment: .leading, spacing: 18) {
-                    rankingCard(
-                        title: "Agent 类型排行",
-                        items: viewModel.snapshot.topAgents,
-                        emptyTitle: "还没有可展示的 Agent 数据",
-                        tint: SettingsCategory.analytics.tint
-                    )
-                    rankingCard(
-                        title: "工具调用 Top 5",
-                        items: viewModel.snapshot.topTools,
-                        emptyTitle: "还没有可展示的工具调用",
-                        tint: TerminalColors.blue
-                    )
-                }
+                rankingCard(
+                    title: "工具调用 Top 5",
+                    items: viewModel.snapshot.topTools,
+                    emptyTitle: "还没有可展示的工具调用",
+                    tint: TerminalColors.blue
+                )
+                .frame(maxWidth: .infinity)
             }
         }
         .onAppear {
