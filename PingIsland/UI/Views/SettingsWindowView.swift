@@ -109,6 +109,7 @@ struct ClosedNotchUsageAvailability: Equatable {
     var hasClaudeSevenDay = false
     var hasCodexSevenDay = false
 
+    @MainActor
     static func current() -> ClosedNotchUsageAvailability {
         guard AppSettings.showUsage else {
             return ClosedNotchUsageAvailability()
