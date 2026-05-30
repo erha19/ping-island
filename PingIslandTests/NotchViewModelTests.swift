@@ -160,6 +160,35 @@ final class NotchViewModelTests: XCTestCase {
         }
     }
 
+    func testTemporaryNotchSleepUsesSmallClosedBarAndStillAllowsHoverOpen() async {
+        await MainActor.run {
+            let viewModel = NotchViewModel(
+                deviceNotchRect: CGRect(x: 0, y: 0, width: 220, height: 38),
+                screenRect: CGRect(x: 0, y: 0, width: 1512, height: 982),
+                windowHeight: 320,
+                hasPhysicalNotch: true,
+                enableEventMonitoring: false,
+                observeSystemEnvironment: false,
+                fullscreenActivityProvider: { _ in false },
+                temporaryNotchSleepProvider: { true }
+            )
+            let hoverPoint = CGPoint(x: viewModel.screenRect.midX, y: viewModel.screenRect.maxY - 4)
+
+            XCTAssertEqual(
+                viewModel.closedSize,
+                CGSize(width: NotchViewModel.temporarySleepClosedWidth, height: 38)
+            )
+            XCTAssertTrue(viewModel.shouldSuppressAutomaticPresentation)
+            XCTAssertTrue(viewModel.isPointInHoverTrigger(hoverPoint))
+
+            viewModel.isHovering = true
+            viewModel.performDeferredHoverOpenIfNeeded()
+
+            XCTAssertEqual(viewModel.status, .opened)
+            XCTAssertEqual(viewModel.openReason, .hover)
+        }
+    }
+
     func testScreenGeometryUpdateRefreshesClosedSizeAndPanelLimits() async {
         await MainActor.run {
             let viewModel = NotchViewModel(

@@ -29,6 +29,7 @@ struct OpenedPanelContentHeightPreferenceKey: PreferenceKey {
 
 struct NotchView: View {
     private static let temporaryReminderMuteDuration: TimeInterval = 10 * 60
+    private static let temporaryNotchSleepDuration: TimeInterval = 10 * 60
     private static let startupDetachmentHintDelay: TimeInterval = 1.8
     private static let detachmentHintRetryDelay: TimeInterval = 0.75
 
@@ -59,6 +60,7 @@ struct NotchView: View {
     @State private var isShowingDetachmentHint: Bool = false
     @State private var detachmentHintDismissWorkItem: DispatchWorkItem?
     @State private var detachmentHintPresentationWorkItem: DispatchWorkItem?
+    @State private var temporaryNotchSleepRestoreWorkItem: DispatchWorkItem?
 
     @Namespace private var activityNamespace
 
@@ -240,6 +242,14 @@ struct NotchView: View {
         settings.areNotificationsMutedTemporarily
     }
 
+    private var isTemporaryNotchSleepActive: Bool {
+        settings.isNotchSleepingTemporarily
+    }
+
+    private var isSleepingClosedPresentation: Bool {
+        isTemporaryNotchSleepActive && viewModel.status != .opened
+    }
+
     private var temporaryMuteButtonHelpText: String {
         guard let mutedUntil = settings.temporarilyMuteNotificationsUntil,
               AppSettings.isNotificationMuteActive(until: mutedUntil) else {
@@ -249,6 +259,18 @@ struct NotchView: View {
         return AppLocalization.format(
             "通知与声音已静音至 %@，点击恢复",
             formattedTemporaryMuteTime(mutedUntil)
+        )
+    }
+
+    private var temporaryNotchSleepButtonHelpText: String {
+        guard let sleepUntil = settings.temporarilySleepNotchUntil,
+              AppSettings.isNotchSleepActive(until: sleepUntil) else {
+            return AppLocalization.string("10 分钟休眠刘海屏")
+        }
+
+        return AppLocalization.format(
+            "刘海屏已休眠至 %@，点击恢复",
+            formattedTemporaryMuteTime(sleepUntil)
         )
     }
 
@@ -288,6 +310,12 @@ struct NotchView: View {
         viewModel.closedSize
     }
 
+    private var closedHeaderHeight: CGFloat {
+        isSleepingClosedPresentation
+            ? closedNotchSize.height
+            : max(24, closedNotchSize.height)
+    }
+
     private var notchSize: CGSize {
         switch viewModel.status {
         case .closed, .popping:
@@ -321,7 +349,11 @@ struct NotchView: View {
     }
 
     private var currentNotchShape: NotchShape {
-        NotchShape(
+        if isSleepingClosedPresentation {
+            return NotchShape(topCornerRadius: 4, bottomCornerRadius: 4)
+        }
+
+        return NotchShape(
             topCornerRadius: topCornerRadius,
             bottomCornerRadius: bottomCornerRadius
         )
@@ -356,10 +388,12 @@ struct NotchView: View {
                 viewModel.setManualAttentionActive(hasManualAttentionIndicator)
                 handleProcessingChange()
                 primeStartupPresentationState(sessionMonitor.instances)
+                scheduleTemporaryNotchSleepRestoreIfNeeded(until: settings.temporarilySleepNotchUntil)
                 scheduleDetachmentHintPresentationIfNeeded(delay: Self.startupDetachmentHintDelay)
             }
             .onDisappear {
                 cancelScheduledDetachmentHintPresentation()
+                cancelTemporaryNotchSleepRestore()
             }
             .onChange(of: viewModel.status) { oldStatus, newStatus in
                 handleStatusChange(from: oldStatus, to: newStatus)
@@ -390,6 +424,14 @@ struct NotchView: View {
             }
             .onChange(of: settings.temporarilyMuteNotificationsUntil) { _, mutedUntil in
                 guard AppSettings.isNotificationMuteActive(until: mutedUntil) else { return }
+                clearCompletionNotifications(keepPanelOpen: true)
+                if viewModel.openReason == .notification {
+                    viewModel.exitChat()
+                }
+            }
+            .onChange(of: settings.temporarilySleepNotchUntil) { _, sleepUntil in
+                scheduleTemporaryNotchSleepRestoreIfNeeded(until: sleepUntil)
+                guard AppSettings.isNotchSleepActive(until: sleepUntil) else { return }
                 clearCompletionNotifications(keepPanelOpen: true)
                 if viewModel.openReason == .notification {
                     viewModel.exitChat()
@@ -607,7 +649,7 @@ struct NotchView: View {
         VStack(alignment: .leading, spacing: 0) {
             // Header row - always present, contains pet and spinner that persist across states
             headerRow
-                .frame(height: max(24, closedNotchSize.height))
+                .frame(height: closedHeaderHeight)
                 .zIndex(1)
 
             // Main content only when opened
@@ -632,7 +674,11 @@ struct NotchView: View {
     @ViewBuilder
     private var headerRow: some View {
         Group {
-            if shouldHideClosedContent {
+            if isSleepingClosedPresentation {
+                Color.clear
+                    .frame(width: closedInnerWidth, height: closedNotchSize.height)
+                    .accessibilityLabel("刘海屏正在休眠")
+            } else if shouldHideClosedContent {
                 Color.clear
                     // Preserve the native-notch footprint without letting the
                     // empty closed state expand across the whole window.
@@ -761,6 +807,12 @@ struct NotchView: View {
                 isActive: areReminderNotificationsSuppressed,
                 action: activateTemporaryReminderMute,
                 helpText: temporaryMuteButtonHelpText
+            )
+
+            NotchTemporarySleepButton(
+                isActive: isTemporaryNotchSleepActive,
+                action: activateTemporaryNotchSleep,
+                helpText: temporaryNotchSleepButtonHelpText
             )
 
             NotchSettingsButton(
@@ -941,6 +993,31 @@ struct NotchView: View {
     private func cancelScheduledDetachmentHintPresentation() {
         detachmentHintPresentationWorkItem?.cancel()
         detachmentHintPresentationWorkItem = nil
+    }
+
+    private func scheduleTemporaryNotchSleepRestoreIfNeeded(until sleepUntil: Date?) {
+        temporaryNotchSleepRestoreWorkItem?.cancel()
+        temporaryNotchSleepRestoreWorkItem = nil
+
+        guard let sleepUntil else { return }
+        let remaining = sleepUntil.timeIntervalSinceNow
+        guard remaining > 0 else {
+            AppSettings.clearTemporaryNotchSleep()
+            return
+        }
+
+        let workItem = DispatchWorkItem {
+            guard AppSettings.temporarilySleepNotchUntil == sleepUntil,
+                  AppSettings.isNotchSleepActive(until: sleepUntil) else { return }
+            AppSettings.clearTemporaryNotchSleep()
+        }
+        temporaryNotchSleepRestoreWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + remaining, execute: workItem)
+    }
+
+    private func cancelTemporaryNotchSleepRestore() {
+        temporaryNotchSleepRestoreWorkItem?.cancel()
+        temporaryNotchSleepRestoreWorkItem = nil
     }
 
     private func handlePendingSessionsChange(_ sessions: [SessionState]) {
@@ -1442,6 +1519,20 @@ struct NotchView: View {
         }
     }
 
+    private func activateTemporaryNotchSleep() {
+        if isTemporaryNotchSleepActive {
+            AppSettings.clearTemporaryNotchSleep()
+            return
+        }
+
+        AppSettings.sleepNotch(for: Self.temporaryNotchSleepDuration)
+        clearCompletionNotifications(keepPanelOpen: true)
+
+        withAnimation(viewModel.animation) {
+            viewModel.notchClose()
+        }
+    }
+
     /// Determine if notification sound should play for the given sessions
     /// Returns true if ANY session is not actively focused
     private func shouldPlayNotificationSound(for sessions: [SessionState]) async -> Bool {
@@ -1576,11 +1667,42 @@ private struct NotchTemporaryMuteButton: View {
     let action: () -> Void
     let helpText: String
 
+    var body: some View {
+        NotchHeaderControlButton(
+            systemName: isActive ? "speaker.slash.fill" : "speaker.wave.2.fill",
+            isActive: isActive,
+            action: action,
+            helpText: helpText
+        )
+    }
+}
+
+private struct NotchTemporarySleepButton: View {
+    let isActive: Bool
+    let action: () -> Void
+    let helpText: String
+
+    var body: some View {
+        NotchHeaderControlButton(
+            systemName: "moon.fill",
+            isActive: isActive,
+            action: action,
+            helpText: helpText
+        )
+    }
+}
+
+private struct NotchHeaderControlButton: View {
+    let systemName: String
+    let isActive: Bool
+    let action: () -> Void
+    let helpText: String
+
     @State private var isHovering = false
 
     var body: some View {
         Button(action: action) {
-            Image(systemName: isActive ? "speaker.slash.fill" : "speaker.wave.2.fill")
+            Image(systemName: systemName)
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(iconForegroundStyle)
                 .frame(width: 28, height: 28)
