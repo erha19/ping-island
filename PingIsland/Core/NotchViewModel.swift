@@ -61,6 +61,7 @@ class NotchViewModel: ObservableObject {
 
     private static let defaultClosedHeight = ScreenNotchMetrics.fallbackClosedHeight
     private static let defaultClosedWidth: CGFloat = 266
+    static let temporarySleepClosedWidth: CGFloat = 30
     // Preserve the visible side rails that the default closed island has beyond
     // the physical camera housing, so mascot/count content never sits under it.
     private static let physicalNotchContentAllowance: CGFloat =
@@ -75,14 +76,20 @@ class NotchViewModel: ObservableObject {
     var screenRect: CGRect { geometry.screenRect }
     var windowHeight: CGFloat { geometry.windowHeight }
     var closedHeight: CGFloat {
-        usesPhysicalNotchClosedPresentation
+        return usesPhysicalNotchClosedPresentation
             ? deviceNotchRect.height
             : detectedClosedHeight
+    }
+    var isTemporaryNotchSleepActive: Bool {
+        temporaryNotchSleepProvider()
     }
     var usesPhysicalNotchClosedPresentation: Bool {
         hasPhysicalNotch && isFullscreenPhysicalNotchCompactActive
     }
     var closedSize: CGSize {
+        if isTemporaryNotchSleepActive {
+            return CGSize(width: Self.temporarySleepClosedWidth, height: closedHeight)
+        }
         if usesPhysicalNotchClosedPresentation {
             return deviceNotchRect.size
         }
@@ -280,6 +287,7 @@ class NotchViewModel: ObservableObject {
     private let fullscreenBrowserHiddenProvider: @MainActor (CGRect) -> Bool
     private let hideInFullscreenProvider: @MainActor () -> Bool
     private let autoHideWhenIdleProvider: @MainActor () -> Bool
+    private let temporaryNotchSleepProvider: @MainActor () -> Bool
     private var hoverTimer: DispatchWorkItem?
     // Keep hover previews feeling responsive without making incidental cursor
     // passes over the notch expand it too aggressively.
@@ -324,6 +332,7 @@ class NotchViewModel: ObservableObject {
         hideInFullscreenProvider: @escaping @MainActor () -> Bool = { AppSettings.hideInFullscreen },
         fullscreenBrowserHiddenProvider: @escaping @MainActor (CGRect) -> Bool = FullscreenAppDetector.isFullscreenBrowserActive,
         autoHideWhenIdleProvider: @escaping @MainActor () -> Bool = { AppSettings.autoHideWhenIdle },
+        temporaryNotchSleepProvider: @escaping @MainActor () -> Bool = { AppSettings.isNotchSleepingTemporarily },
         fullscreenStateSettleDelay: TimeInterval = 0.18
     ) {
         self.geometry = NotchGeometry(
@@ -341,6 +350,7 @@ class NotchViewModel: ObservableObject {
         self.fullscreenBrowserHiddenProvider = fullscreenBrowserHiddenProvider
         self.hideInFullscreenProvider = hideInFullscreenProvider
         self.autoHideWhenIdleProvider = autoHideWhenIdleProvider
+        self.temporaryNotchSleepProvider = temporaryNotchSleepProvider
         self.fullscreenStateSettleDelay = fullscreenStateSettleDelay
         if enableEventMonitoring {
             setupEventHandlers()
@@ -736,6 +746,7 @@ class NotchViewModel: ObservableObject {
         presentationMode == .detached
             || isFullscreenBrowserHiddenActive
             || (isFullscreenEdgeRevealActive && status != .opened)
+            || isTemporaryNotchSleepActive
     }
 
     var closedPresentationOffsetY: CGFloat {

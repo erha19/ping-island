@@ -358,6 +358,7 @@ final class AppSettingsStore: ObservableObject {
         static let soundEnabled = "soundEnabled"
         static let soundVolume = "soundVolume"
         static let temporarilyMuteNotificationsUntil = "temporarilyMuteNotificationsUntil"
+        static let temporarilySleepNotchUntil = "temporarilySleepNotchUntil"
         static let processingStartSound = "processingStartSound"
         static let attentionRequiredSound = "attentionRequiredSound"
         static let taskCompletedSound = "taskCompletedSound"
@@ -462,6 +463,21 @@ final class AppSettingsStore: ObservableObject {
                 )
             } else {
                 defaults.removeObject(forKey: Keys.temporarilyMuteNotificationsUntil)
+            }
+        }
+    }
+
+    @Published var temporarilySleepNotchUntil: Date? {
+        didSet {
+            guard !isBootstrapping else { return }
+
+            if let temporarilySleepNotchUntil {
+                defaults.set(
+                    temporarilySleepNotchUntil.timeIntervalSince1970,
+                    forKey: Keys.temporarilySleepNotchUntil
+                )
+            } else {
+                defaults.removeObject(forKey: Keys.temporarilySleepNotchUntil)
             }
         }
     }
@@ -1012,11 +1028,24 @@ final class AppSettingsStore: ObservableObject {
         Self.isNotificationMuteActive(until: temporarilyMuteNotificationsUntil)
     }
 
+    var isNotchSleepingTemporarily: Bool {
+        Self.isNotchSleepActive(until: temporarilySleepNotchUntil)
+    }
+
     func muteNotifications(for duration: TimeInterval, now: Date = Date()) {
         temporarilyMuteNotificationsUntil = now.addingTimeInterval(duration)
     }
 
+    func sleepNotch(for duration: TimeInterval, now: Date = Date()) {
+        temporarilySleepNotchUntil = now.addingTimeInterval(duration)
+    }
+
     nonisolated static func isNotificationMuteActive(until date: Date?, now: Date = Date()) -> Bool {
+        guard let date else { return false }
+        return date > now
+    }
+
+    nonisolated static func isNotchSleepActive(until date: Date?, now: Date = Date()) -> Bool {
         guard let date else { return false }
         return date > now
     }
@@ -1190,6 +1219,9 @@ final class AppSettingsStore: ObservableObject {
         let temporarilyMuteNotificationsUntilTimestamp = persistedKeys.contains(Keys.temporarilyMuteNotificationsUntil)
             ? defaults.double(forKey: Keys.temporarilyMuteNotificationsUntil)
             : nil
+        let temporarilySleepNotchUntilTimestamp = persistedKeys.contains(Keys.temporarilySleepNotchUntil)
+            ? defaults.double(forKey: Keys.temporarilySleepNotchUntil)
+            : nil
         let notchPetStyleRaw = defaults.string(forKey: Keys.notchPetStyle)
         let notchDisplayModeRaw = defaults.string(forKey: Keys.notchDisplayMode)
         let closedNotchTrailingContentModeRaw = defaults.string(forKey: Keys.closedNotchTrailingContentMode)
@@ -1213,9 +1245,16 @@ final class AppSettingsStore: ObservableObject {
         let temporarilyMuteNotificationsUntil = temporarilyMuteNotificationsUntilTimestamp.map {
             Date(timeIntervalSince1970: $0)
         }
+        let temporarilySleepNotchUntil = temporarilySleepNotchUntilTimestamp.map {
+            Date(timeIntervalSince1970: $0)
+        }
         let activeTemporaryMute =
             Self.isNotificationMuteActive(until: temporarilyMuteNotificationsUntil)
             ? temporarilyMuteNotificationsUntil
+            : nil
+        let activeTemporarySleep =
+            Self.isNotchSleepActive(until: temporarilySleepNotchUntil)
+            ? temporarilySleepNotchUntil
             : nil
 
         _appLanguage = Published(initialValue: AppLanguage(rawValue: appLanguageRaw ?? "") ?? .system)
@@ -1233,6 +1272,7 @@ final class AppSettingsStore: ObservableObject {
             default: 0.9
         ))
         _temporarilyMuteNotificationsUntil = Published(initialValue: activeTemporaryMute)
+        _temporarilySleepNotchUntil = Published(initialValue: activeTemporarySleep)
         _processingStartSound = Published(initialValue: NotificationSound(
             rawValue: defaults.string(forKey: Keys.processingStartSound) ?? ""
         ) ?? .tink)
@@ -1447,6 +1487,9 @@ final class AppSettingsStore: ObservableObject {
         if activeTemporaryMute == nil {
             defaults.removeObject(forKey: Keys.temporarilyMuteNotificationsUntil)
         }
+        if activeTemporarySleep == nil {
+            defaults.removeObject(forKey: Keys.temporarilySleepNotchUntil)
+        }
         if !persistedKeys.contains(Keys.processingStartSoundEnabled) {
             defaults.set(true, forKey: Keys.processingStartSoundEnabled)
         }
@@ -1510,8 +1553,17 @@ enum AppSettings {
         set { shared.temporarilyMuteNotificationsUntil = newValue }
     }
 
+    static var temporarilySleepNotchUntil: Date? {
+        get { shared.temporarilySleepNotchUntil }
+        set { shared.temporarilySleepNotchUntil = newValue }
+    }
+
     static var areReminderNotificationsSuppressed: Bool {
         shared.areNotificationsMutedTemporarily
+    }
+
+    static var isNotchSleepingTemporarily: Bool {
+        shared.isNotchSleepingTemporarily
     }
 
     static var soundThemeMode: SoundThemeMode {
@@ -1562,8 +1614,20 @@ enum AppSettings {
         shared.temporarilyMuteNotificationsUntil = nil
     }
 
+    static func sleepNotch(for duration: TimeInterval, now: Date = Date()) {
+        shared.sleepNotch(for: duration, now: now)
+    }
+
+    static func clearTemporaryNotchSleep() {
+        shared.temporarilySleepNotchUntil = nil
+    }
+
     nonisolated static func isNotificationMuteActive(until date: Date?, now: Date = Date()) -> Bool {
         AppSettingsStore.isNotificationMuteActive(until: date, now: now)
+    }
+
+    nonisolated static func isNotchSleepActive(until date: Date?, now: Date = Date()) -> Bool {
+        AppSettingsStore.isNotchSleepActive(until: date, now: now)
     }
 
     static var showAgentDetail: Bool {

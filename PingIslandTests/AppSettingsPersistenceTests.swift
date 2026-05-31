@@ -160,6 +160,36 @@ final class AppSettingsPersistenceTests: XCTestCase {
         XCTAssertEqual(defaults.object(forKey: "autoOpenCompactedNotificationPanel") as? Bool, false)
     }
 
+    func testTemporaryNotchSleepPersistsActiveExpiry() {
+        let defaults = makeDefaults()
+        let store = makeStore(defaults: defaults)
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+
+        store.sleepNotch(for: 600, now: now)
+
+        let reloadedStore = makeStore(defaults: defaults)
+        XCTAssertEqual(
+            reloadedStore.temporarilySleepNotchUntil?.timeIntervalSince1970 ?? 0,
+            now.addingTimeInterval(600).timeIntervalSince1970,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(
+            defaults.double(forKey: "temporarilySleepNotchUntil"),
+            now.addingTimeInterval(600).timeIntervalSince1970,
+            accuracy: 0.001
+        )
+    }
+
+    func testExpiredTemporaryNotchSleepIsClearedOnReload() {
+        let defaults = makeDefaults()
+        defaults.set(Date.distantPast.timeIntervalSince1970, forKey: "temporarilySleepNotchUntil")
+
+        let store = makeStore(defaults: defaults)
+
+        XCTAssertNil(store.temporarilySleepNotchUntil)
+        XCTAssertNil(defaults.object(forKey: "temporarilySleepNotchUntil"))
+    }
+
     func testAutomaticUpdateChecksEnabledPersists() {
         let defaults = makeDefaults()
         let store = makeStore(defaults: defaults)
