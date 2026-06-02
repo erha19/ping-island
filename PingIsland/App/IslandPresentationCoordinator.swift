@@ -90,7 +90,7 @@ final class IslandPresentationCoordinator {
         }
 
         DispatchQueue.main.async { [weak self] in
-            self?.detachedWindowController?.activateInteraction()
+            self?.detachedWindowController?.endWindowDrag()
             self?.persistCurrentFloatingPetAnchor()
         }
     }
@@ -116,6 +116,7 @@ final class IslandPresentationCoordinator {
         detachedWindowController = nil
         activeDetachmentPayload = nil
 
+        AppSettings.surfaceMode = .notch
         viewModel.redockAfterDetached()
         recreateDockedWindow(performBootAnimation: false)
     }
@@ -222,6 +223,9 @@ final class IslandPresentationCoordinator {
                 self?.persistFloatingPetAnchor(petAnchor)
             }
         )
+        detachedWindowController.onRedockRequested = { [weak self] in
+            self?.redockDetached()
+        }
         self.detachedWindowController = detachedWindowController
         return detachedWindowController
     }
