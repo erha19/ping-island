@@ -156,6 +156,7 @@ final class DetachedIslandWindowController: NSWindowController, NSWindowDelegate
     private let sessionMonitor: SessionMonitor
     private let onClose: () -> Void
     private let onPetAnchorChanged: (CGPoint) -> Void
+    var onRedockRequested: (() -> Void)?
     private let interactionModel = DetachedIslandInteractionModel()
     private let bubbleViewState = DetachedIslandBubbleViewState()
     private var manualAttentionTracker = SessionManualAttentionTracker()
@@ -176,6 +177,7 @@ final class DetachedIslandWindowController: NSWindowController, NSWindowDelegate
     private var petMouseDownPoint: CGPoint?
     private var petMouseDownScreenPoint: CGPoint?
     private var isPetDragActive = false
+    private var isPetInNotchZone = false
     private var isPetSecondaryClickArmed = false
     private var hasPrimedSoundTransitions = false
     private var previousProcessingIds = Set<String>()
@@ -436,6 +438,7 @@ final class DetachedIslandWindowController: NSWindowController, NSWindowDelegate
         )
         window.setFrameOrigin(origin)
         updateBubblePlacementForCurrentWindow()
+        isPetInNotchZone = isPetAnchorInNotchZone()
     }
 
     func beginFloatingDrag() {
@@ -461,13 +464,28 @@ final class DetachedIslandWindowController: NSWindowController, NSWindowDelegate
         )
         window.setFrameOrigin(origin)
         updateBubblePlacementForCurrentWindow()
+        isPetInNotchZone = isPetAnchorInNotchZone()
     }
 
     func endFloatingDrag() {
         floatingDragStartOrigin = nil
         interactionModel.setPetDragging(false)
+        if isPetInNotchZone {
+            isPetInNotchZone = false
+            onRedockRequested?()
+            return
+        }
         if let currentPetAnchor {
             onPetAnchorChanged(currentPetAnchor)
+        }
+        activateInteraction()
+    }
+
+    func endWindowDrag() {
+        if isPetInNotchZone {
+            isPetInNotchZone = false
+            onRedockRequested?()
+            return
         }
         activateInteraction()
     }
@@ -1072,11 +1090,27 @@ final class DetachedIslandWindowController: NSWindowController, NSWindowDelegate
     }
 
     private func screenPoint(for event: NSEvent) -> CGPoint {
-        // Window movement and hit-testing use AppKit screen coordinates (origin at bottom-left).
         MouseEventReplay.appKitScreenLocation(
             for: event,
             fallbackScreenLocation: NSEvent.mouseLocation
         )
+    }
+
+    private func isPetAnchorInNotchZone() -> Bool {
+        guard let petAnchor = currentPetAnchor else { return false }
+        let targetRect: CGRect
+        if viewModel.shouldHideWindowPresentation {
+            let screenRect = viewModel.screenRect
+            targetRect = CGRect(
+                x: screenRect.midX - 80,
+                y: screenRect.maxY - 60,
+                width: 160,
+                height: 60
+            )
+        } else {
+            targetRect = viewModel.closedScreenRect.insetBy(dx: -30, dy: -30)
+        }
+        return targetRect.contains(petAnchor)
     }
 
     private func syncBubblePresentation(to targetState: DetachedIslandBubbleState) {
