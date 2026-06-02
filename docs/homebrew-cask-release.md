@@ -1,68 +1,57 @@
-# Homebrew Cask Release Setup
+# Homebrew Cask Release Notes
 
-Ping Island distributes Homebrew installs from the same notarized DMG that the
-GitHub Release and Sparkle release flow already publish.
-
-## Tap
-
-Use a separate tap repository:
+Ping Island is published through the official Homebrew Cask repository. Users can
+install it directly without adding a custom tap:
 
 ```bash
-brew tap-new erha19/tap
-gh repo create erha19/homebrew-tap --public --source "$(brew --repository erha19/tap)" --push
-```
-
-Users can install from that tap with:
-
-```bash
-brew tap erha19/tap
 brew install --cask ping-island
 ```
 
-The seed cask lives at `packaging/homebrew/Casks/ping-island.rb`. The release
-automation writes the production cask into the external tap as
-`Casks/ping-island.rb`.
-
-## GitHub Actions Sync
-
-Set this secret on the main `ping-island` repository:
-
-| Secret | Purpose |
-| --- | --- |
-| `HOMEBREW_TAP_TOKEN` | GitHub token with write access to `erha19/homebrew-tap` |
-
-Optional repository variables:
-
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `HOMEBREW_TAP_REPO` | `erha19/homebrew-tap` | Tap repository to update |
-| `HOMEBREW_TAP_BRANCH` | `main` | Branch to push |
-
-The release workflow skips Homebrew sync when the GitHub Release is kept as a
-draft, marked as a prerelease, or when `HOMEBREW_TAP_TOKEN` is unset. This keeps
-the cask from pointing at a private draft asset.
-
-## Local Update
-
-To update a local tap checkout from a generated DMG:
+Machines that still have the legacy `erha19/tap` tap may resolve that tap before
+the official cask. Remove the old tap once before checking the official source:
 
 ```bash
-scripts/update-homebrew-cask.sh \
-  --version 0.9.2 \
-  --dmg releases/signed/PingIsland-0.9.2.dmg \
-  --tap-dir "$(brew --repository erha19/tap)" \
-  --no-commit
+brew untap erha19/tap
+brew install --cask ping-island
 ```
 
-To let the script clone, commit, and push the tap:
+The cask installs from the same notarized DMG that the GitHub Release and
+Sparkle release flow publish.
+
+## CI Release Flow
+
+The release workflow is intentionally limited to assets owned by this
+repository:
+
+1. Build and notarize the macOS app.
+2. Publish the signed DMG and ZIP to the matching GitHub Release.
+3. Publish Sparkle appcast assets when Sparkle signing secrets are configured.
+4. Publish the Linux `PingIslandBridge` assets for remote SSH bootstrap.
+
+The workflow no longer pushes to an external `homebrew-tap` repository. That
+keeps release CI focused on first-party build artifacts and avoids a second
+GitHub token with write access to a tap.
+
+## Release Verification
+
+After a stable GitHub Release is published, verify that Homebrew can see the
+official cask:
 
 ```bash
-export PING_ISLAND_HOMEBREW_TAP_TOKEN=...
-scripts/update-homebrew-cask.sh \
-  --version 0.9.2 \
-  --dmg releases/signed/PingIsland-0.9.2.dmg \
-  --push
+brew update
+brew info --cask ping-island
 ```
 
-The script computes the DMG SHA-256, renders the cask, checks Ruby syntax, and
-uses the Lore commit format for the tap commit.
+If `brew info` reports `From: https://github.com/erha19/homebrew-tap.git`, the
+local machine is still resolving the legacy tap. Run `brew untap erha19/tap` and
+check again.
+
+For a full install check on a clean macOS machine:
+
+```bash
+brew install --cask ping-island
+```
+
+If Homebrew has not picked up the latest version yet, update the official cask
+through Homebrew's normal cask contribution flow instead of changing this
+repository's release CI.

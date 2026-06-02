@@ -77,7 +77,13 @@
 ### 使用 Homebrew Cask 安装
 
 ```bash
-brew tap erha19/tap
+brew install --cask ping-island
+```
+
+如果你之前用过旧的 `erha19/tap` cask，请先移除旧 tap，避免 Homebrew 继续优先解析旧来源：
+
+```bash
+brew untap erha19/tap
 brew install --cask ping-island
 ```
 
@@ -114,7 +120,7 @@ xcodebuild -project PingIsland.xcodeproj -scheme PingIsland -configuration Relea
 
 默认会使用仓库里的 `docs/images/ping-island-dmg-installer-background.png` 作为 DMG 安装背景；如果你想在本地预览别的背景图，可以临时设置 `PING_ISLAND_DMG_BACKGROUND_SOURCE`。
 
-如果你想通过 GitHub Actions 产出带 `Developer ID` 签名并完成 notarization 的发布包，请先按 [docs/sparkle-release.md](docs/sparkle-release.md) 配好仓库 secrets，再运行 `.github/workflows/release-packages.yml`。Homebrew Cask 发布资源见 [docs/homebrew-cask-release.md](docs/homebrew-cask-release.md)。
+如果你想通过 GitHub Actions 产出带 `Developer ID` 签名并完成 notarization 的发布包，请先按 [docs/sparkle-release.md](docs/sparkle-release.md) 配好仓库 secrets，再运行 `.github/workflows/release-packages.yml`。官方 Homebrew Cask 发布说明见 [docs/homebrew-cask-release.md](docs/homebrew-cask-release.md)。
 
 完整的 Sparkle / notarization 发布流程见 [docs/sparkle-release.md](docs/sparkle-release.md)。
 

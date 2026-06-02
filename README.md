@@ -80,7 +80,14 @@ On notch-screen Macs, Ping Island expands from the notch with session context an
 ### Install with Homebrew Cask
 
 ```bash
-brew tap erha19/tap
+brew install --cask ping-island
+```
+
+If you previously installed from the old `erha19/tap` cask, remove that tap once
+so Homebrew resolves the official cask:
+
+```bash
+brew untap erha19/tap
 brew install --cask ping-island
 ```
 
@@ -119,7 +126,7 @@ The script re-signs the built app bundle with a consistent ad-hoc signature befo
 The generated files land in `releases/unsigned/` as `PingIsland-<version>.dmg` and `PingIsland-<version>.zip`.
 The DMG uses the repo-tracked installer artwork at `docs/images/ping-island-dmg-installer-background.png` by default; set `PING_ISLAND_DMG_BACKGROUND_SOURCE` if you want to preview a different background locally.
 
-To create signed and notarized release packages in GitHub Actions, configure the release secrets described in [docs/sparkle-release.md](docs/sparkle-release.md) and run `.github/workflows/release-packages.yml` against a `v*` tag or the manual workflow dispatch input. Homebrew Cask publishing is documented in [docs/homebrew-cask-release.md](docs/homebrew-cask-release.md).
+To create signed and notarized release packages in GitHub Actions, configure the release secrets described in [docs/sparkle-release.md](docs/sparkle-release.md) and run `.github/workflows/release-packages.yml` against a `v*` tag or the manual workflow dispatch input. Official Homebrew Cask release notes are documented in [docs/homebrew-cask-release.md](docs/homebrew-cask-release.md).
 
 The same workflow also publishes a Linux `PingIslandBridge` asset that Ping Island can download when bootstrapping Linux SSH hosts.
 

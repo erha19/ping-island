@@ -38,8 +38,6 @@ Optional secrets:
 | `SPARKLE_APPCAST_URL` | Feed URL compiled into the app for Sparkle update checks. Recommended: `https://github.com/<owner>/<repo>/releases/latest/download/appcast.xml` |
 | `SPARKLE_PUBLIC_ED_KEY` | Public EdDSA key compiled into the app for Sparkle validation |
 | `SPARKLE_PRIVATE_ED_KEY` | Private EdDSA key content used in CI to sign the generated `appcast.xml` and release note assets |
-| `HOMEBREW_TAP_TOKEN` | GitHub token with write access to the Homebrew tap when you want published releases to update the cask automatically |
-
 If you configure Sparkle updates in CI, set all three Sparkle secrets together. If you leave them unset, the workflow still produces signed `.dmg` / `.zip` packages, but it will skip appcast generation and upload.
 
 Important: when writing `SPARKLE_APPCAST_URL` into an `.xcconfig`, do not use a raw `https://...` literal. xcconfig treats `//` as the start of a comment, so compose the URL with a slash helper such as `_XC_SLASH = /`.
@@ -75,10 +73,10 @@ When Sparkle secrets are present, the same draft Release will also include:
 
 Use the GitHub Release assets as the canonical download surface so the DMG stays a direct `.dmg` file instead of an Actions artifact wrapped in an outer `.zip`.
 
-When `HOMEBREW_TAP_TOKEN` is configured and the release is published as a stable
-release, the workflow also updates the external Homebrew tap cask. See
-[homebrew-cask-release.md](homebrew-cask-release.md) for the tap setup and local
-sync commands.
+Ping Island is available from the official Homebrew Cask repository, so the
+release workflow only publishes the signed GitHub Release assets. See
+[homebrew-cask-release.md](homebrew-cask-release.md) for the Homebrew install and
+release verification notes.
 
 ## Local Sparkle release flow
 

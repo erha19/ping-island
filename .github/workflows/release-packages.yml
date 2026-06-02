@@ -507,35 +507,6 @@ jobs:
 
           gh release view "$RELEASE_TAG" --repo "$repo"
 
-      - name: Sync Homebrew Cask
-        shell: bash
-        env:
-          PING_ISLAND_HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          PING_ISLAND_HOMEBREW_TAP_REPO: ${{ vars.HOMEBREW_TAP_REPO }}
-          PING_ISLAND_HOMEBREW_TAP_BRANCH: ${{ vars.HOMEBREW_TAP_BRANCH }}
-        run: |
-          set -euo pipefail
-
-          if [ -z "${PING_ISLAND_HOMEBREW_TAP_TOKEN:-}" ]; then
-            echo "HOMEBREW_TAP_TOKEN is not configured; skipping Homebrew Cask sync."
-            exit 0
-          fi
-
-          if [ "$RELEASE_DRAFT" = "true" ]; then
-            echo "Release is still a draft; skipping Homebrew Cask sync."
-            exit 0
-          fi
-
-          if [ "$RELEASE_PRERELEASE" = "true" ]; then
-            echo "Release is a prerelease; skipping Homebrew Cask sync."
-            exit 0
-          fi
-
-          ./scripts/update-homebrew-cask.sh \
-            --version "${{ steps.meta.outputs.version }}" \
-            --dmg "${{ steps.meta.outputs.dmg_path }}" \
-            --push
-
       - name: Cleanup signing material
         if: ${{ always() }}
         shell: bash
