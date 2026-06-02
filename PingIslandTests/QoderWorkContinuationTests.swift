@@ -63,7 +63,8 @@ final class QoderWorkContinuationTests: XCTestCase {
                         id: "assistant-next",
                         role: .assistant,
                         timestamp: answeredAt.addingTimeInterval(1),
-                        content: [.text("继续处理后续任务")]
+                        content: [.text("继续处理后续任务")],
+                        usage: nil
                     )
                 ],
                 isIncremental: true,
@@ -196,7 +197,8 @@ final class QoderWorkContinuationTests: XCTestCase {
                         id: "assistant-next",
                         role: .assistant,
                         timestamp: Date(),
-                        content: [.text("继续处理后续任务")]
+                        content: [.text("继续处理后续任务")],
+                        usage: nil
                     )
                 ],
                 isIncremental: true,
@@ -241,7 +243,8 @@ final class QoderWorkContinuationTests: XCTestCase {
                         id: "assistant-next",
                         role: .assistant,
                         timestamp: Date(),
-                        content: [.text("继续处理后续任务")]
+                        content: [.text("继续处理后续任务")],
+                        usage: nil
                     )
                 ],
                 isIncremental: true,
@@ -286,7 +289,8 @@ final class QoderWorkContinuationTests: XCTestCase {
                         id: "assistant-next",
                         role: .assistant,
                         timestamp: Date(),
-                        content: [.text("继续处理后续任务")]
+                        content: [.text("继续处理后续任务")],
+                        usage: nil
                     )
                 ],
                 isIncremental: true,
@@ -334,7 +338,8 @@ final class QoderWorkContinuationTests: XCTestCase {
                         id: "assistant-existing",
                         role: .assistant,
                         timestamp: answeredAt.addingTimeInterval(-10),
-                        content: [.text("这是提交前就存在的旧消息")]
+                        content: [.text("这是提交前就存在的旧消息")],
+                        usage: nil
                     )
                 ],
                 isIncremental: false,

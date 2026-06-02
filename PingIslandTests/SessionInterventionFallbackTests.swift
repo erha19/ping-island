@@ -115,7 +115,8 @@ final class SessionInterventionFallbackTests: XCTestCase {
                                     """
                                 ]
                             ))
-                        ]
+                        ],
+                        usage: nil
                     )
                 ],
                 isIncremental: true,
@@ -181,7 +182,8 @@ final class SessionInterventionFallbackTests: XCTestCase {
                                     """
                                 ]
                             ))
-                        ]
+                        ],
+                        usage: nil
                     )
                 ],
                 isIncremental: true,

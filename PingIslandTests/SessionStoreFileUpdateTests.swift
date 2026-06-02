@@ -151,7 +151,8 @@ final class SessionStoreFileUpdateTests: XCTestCase {
                         id: "assistant-update",
                         role: .assistant,
                         timestamp: Date(),
-                        content: [.text("Continuing work")]
+                        content: [.text("Continuing work")],
+                        usage: nil
                     )
                 ],
                 isIncremental: true,
@@ -249,7 +250,8 @@ final class SessionStoreFileUpdateTests: XCTestCase {
                         id: "user-followup",
                         role: .user,
                         timestamp: Date(),
-                        content: [.text("One more thing")]
+                        content: [.text("One more thing")],
+                        usage: nil
                     )
                 ],
                 isIncremental: true,
@@ -337,7 +339,8 @@ final class SessionStoreFileUpdateTests: XCTestCase {
                         id: "assistant-final",
                         role: .assistant,
                         timestamp: Date(),
-                        content: [.text("Final answer")]
+                        content: [.text("Final answer")],
+                        usage: nil
                     )
                 ],
                 isIncremental: true,
@@ -491,7 +494,8 @@ final class SessionStoreFileUpdateTests: XCTestCase {
                         id: "assistant-followup",
                         role: .assistant,
                         timestamp: Date(),
-                        content: [.text("Fresh transcript output")]
+                        content: [.text("Fresh transcript output")],
+                        usage: nil
                     )
                 ],
                 isIncremental: true,

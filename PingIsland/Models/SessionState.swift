@@ -96,6 +96,10 @@ struct SessionState: Equatable, Identifiable, Sendable {
 
     var conversationInfo: ConversationInfo
 
+    // MARK: - Token Usage
+
+    var tokenUsage: SessionTokenUsage
+
     // MARK: - Clear Reconciliation
 
     /// When true, the next file update should reconcile chatItems with parser state
@@ -145,6 +149,7 @@ struct SessionState: Equatable, Identifiable, Sendable {
             summary: nil, lastMessage: nil, lastMessageRole: nil,
             lastToolName: nil, firstUserMessage: nil, lastUserMessageDate: nil
         ),
+        tokenUsage: SessionTokenUsage = .zero,
         needsClearReconciliation: Bool = false,
         lastActivity: Date = Date(),
         createdAt: Date = Date()
@@ -177,6 +182,7 @@ struct SessionState: Equatable, Identifiable, Sendable {
         self.completedErrorToolIDs = completedErrorToolIDs
         self.subagentState = subagentState
         self.conversationInfo = conversationInfo
+        self.tokenUsage = tokenUsage
         self.needsClearReconciliation = needsClearReconciliation
         self.lastActivity = lastActivity
         self.createdAt = createdAt

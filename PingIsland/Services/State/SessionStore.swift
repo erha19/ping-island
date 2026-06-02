@@ -1940,6 +1940,12 @@ actor SessionStore {
 
         session.toolTracker.lastSyncTime = Date()
 
+        for message in payload.messages {
+            if let usage = message.usage {
+                session.tokenUsage.accumulate(usage, timestamp: message.timestamp)
+            }
+        }
+
         await populateSubagentToolsFromAgentFiles(
             session: &session,
             cwd: payload.cwd,
@@ -2699,6 +2705,12 @@ actor SessionStore {
 
         // Sort by timestamp
         session.chatItems.sort { $0.timestamp < $1.timestamp }
+
+        for message in messages {
+            if let usage = message.usage {
+                session.tokenUsage.accumulate(usage, timestamp: message.timestamp)
+            }
+        }
 
         await applyQoderFallbackIntervention(to: &session)
         applyClaudeTranscriptQuestionFallback(to: &session)

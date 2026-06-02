@@ -908,7 +908,7 @@ actor ConversationParser {
         }
 
         guard !blocks.isEmpty else { return nil }
-        return ChatMessage(id: messageID, role: chatRole, timestamp: timestamp, content: blocks)
+        return ChatMessage(id: messageID, role: chatRole, timestamp: timestamp, content: blocks, usage: nil)
     }
 
     private func parseCodeBuddyHistoryToolMessage(
@@ -1704,11 +1704,29 @@ actor ConversationParser {
 
         let role: ChatRole = type == "user" ? .user : .assistant
 
+        let usage: MessageTokenUsage? = type == "assistant" ? Self.parseUsage(from: messageDict) : nil
+
         return ChatMessage(
             id: uuid,
             role: role,
             timestamp: timestamp,
-            content: blocks
+            content: blocks,
+            usage: usage
+        )
+    }
+
+    private nonisolated static func parseUsage(from messageDict: [String: Any]) -> MessageTokenUsage? {
+        guard let usageDict = messageDict["usage"] as? [String: Any] else { return nil }
+        let inputTokens = usageDict["input_tokens"] as? Int ?? 0
+        let outputTokens = usageDict["output_tokens"] as? Int ?? 0
+        let cacheCreation = usageDict["cache_creation_input_tokens"] as? Int ?? 0
+        let cacheRead = usageDict["cache_read_input_tokens"] as? Int ?? 0
+        guard inputTokens > 0 || outputTokens > 0 || cacheCreation > 0 || cacheRead > 0 else { return nil }
+        return MessageTokenUsage(
+            inputTokens: inputTokens,
+            outputTokens: outputTokens,
+            cacheCreationInputTokens: cacheCreation,
+            cacheReadInputTokens: cacheRead
         )
     }
 
@@ -1759,7 +1777,7 @@ actor ConversationParser {
         }
 
         guard !blocks.isEmpty else { return nil }
-        return ChatMessage(id: id, role: role, timestamp: timestamp, content: blocks)
+        return ChatMessage(id: id, role: role, timestamp: timestamp, content: blocks, usage: nil)
     }
 
     private func parseToolUse(_ block: [String: Any]) -> ToolUseBlock? {

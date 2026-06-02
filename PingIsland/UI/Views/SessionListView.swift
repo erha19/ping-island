@@ -767,6 +767,14 @@ struct InstanceRow: View {
                         if let primarySupplementaryBadge {
                             supplementaryBadgeView(primarySupplementaryBadge)
                         }
+                        if let tokenBadgeLabel {
+                            metaBadge(
+                                tokenBadgeLabel,
+                                tint: tokenBadgeTint,
+                                foreground: tokenBadgeForeground,
+                                fontDesign: .monospaced
+                            )
+                        }
                     }
 
                     trailingActions
@@ -989,6 +997,50 @@ struct InstanceRow: View {
 
     private var timeLabel: String {
         SessionPhaseHelpers.timeBadgeLabel(for: session.attentionRequestedAt ?? session.lastActivity)
+    }
+
+    private var tokenBadgeLabel: String? {
+        let usage = session.tokenUsage
+        guard usage.totalTokens > 0 else { return nil }
+        if let rate = usage.outputTokensPerSecond, rate > 0 {
+            return "\(formatTokenCount(usage.totalTokens)) · \(formatTokenRate(rate))/s"
+        }
+        return formatTokenCount(usage.totalTokens)
+    }
+
+    private var tokenBadgeTint: Color {
+        guard session.tokenUsage.totalTokens > 0 else { return Color.clear }
+        if let rate = session.tokenUsage.outputTokensPerSecond {
+            if rate >= 100 { return TerminalColors.green.opacity(0.18) }
+            if rate >= 30 { return TerminalColors.amber.opacity(0.18) }
+        }
+        return Color.white.opacity(0.08)
+    }
+
+    private var tokenBadgeForeground: Color {
+        guard session.tokenUsage.totalTokens > 0 else { return Color.clear }
+        if let rate = session.tokenUsage.outputTokensPerSecond {
+            if rate >= 100 { return TerminalColors.green }
+            if rate >= 30 { return TerminalColors.amber }
+        }
+        return .white.opacity(0.6)
+    }
+
+    private func formatTokenCount(_ count: Int) -> String {
+        if count >= 1_000_000 {
+            return String(format: "%.1fM", Double(count) / 1_000_000)
+        }
+        if count >= 1_000 {
+            return String(format: "%.1fk", Double(count) / 1_000)
+        }
+        return "\(count)"
+    }
+
+    private func formatTokenRate(_ rate: Double) -> String {
+        if rate >= 1_000 {
+            return String(format: "%.0fk", rate / 1_000)
+        }
+        return String(format: "%.0f", rate)
     }
 
     private var ideHostBadgeTint: Color {

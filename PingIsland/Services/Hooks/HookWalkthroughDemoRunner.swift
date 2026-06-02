@@ -71,7 +71,8 @@ final class HookWalkthroughDemoRunner {
                         id: "\(sessionId)-assistant-complete",
                         role: .assistant,
                         timestamp: now,
-                        content: [.text(AppLocalization.string("Hooks 审批演示完成：你刚刚体验了通知、审批提交、处理完成、以及完成提醒。顶部 Island 和独立悬浮宠物会共用这一套流程。"))]
+                        content: [.text(AppLocalization.string("Hooks 审批演示完成：你刚刚体验了通知、审批提交、处理完成、以及完成提醒。顶部 Island 和独立悬浮宠物会共用这一套流程。"))],
+                        usage: nil
                     )
                 ],
                 completedTools: [toolUseId],

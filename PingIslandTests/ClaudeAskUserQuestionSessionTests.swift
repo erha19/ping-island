@@ -394,7 +394,8 @@ final class ClaudeAskUserQuestionSessionTests: XCTestCase {
                                     ]
                                 )
                             )
-                        ]
+                        ],
+                        usage: nil
                     )
                 ],
                 completedTools: [],
@@ -456,7 +457,8 @@ final class ClaudeAskUserQuestionSessionTests: XCTestCase {
                                     ]
                                 )
                             )
-                        ]
+                        ],
+                        usage: nil
                     )
                 ],
                 completedTools: [],
