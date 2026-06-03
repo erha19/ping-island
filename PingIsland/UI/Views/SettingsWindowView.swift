@@ -869,8 +869,13 @@ private final class AgentUsageAnalyticsViewModel: ObservableObject {
     @Published var selectedRange: AgentUsageRange = .sevenDays
     @Published private(set) var snapshot = AgentUsageDashboardSnapshot.empty(range: .sevenDays)
     @Published private(set) var isRefreshing = false
+    @Published private(set) var hasLoadedSnapshot = false
 
     private var refreshTask: Task<Void, Never>?
+
+    var isInitialLoading: Bool {
+        isRefreshing && !hasLoadedSnapshot
+    }
 
     func refresh() {
         refreshTask?.cancel()
@@ -881,6 +886,7 @@ private final class AgentUsageAnalyticsViewModel: ObservableObject {
             guard !Task.isCancelled else { return }
             await MainActor.run {
                 self?.snapshot = nextSnapshot
+                self?.hasLoadedSnapshot = true
                 self?.isRefreshing = false
             }
         }
@@ -938,6 +944,13 @@ private struct AgentUsageAnalyticsContent: View {
                 .frame(maxWidth: .infinity)
             }
         }
+        .overlay {
+            if viewModel.isInitialLoading {
+                AgentUsageLoadingOverlay()
+                    .transition(.opacity)
+            }
+        }
+        .animation(.easeInOut(duration: 0.18), value: viewModel.isInitialLoading)
         .onAppear {
             viewModel.refresh()
         }
@@ -979,14 +992,14 @@ private struct AgentUsageAnalyticsContent: View {
                 AgentUsageOverviewLine(
                     icon: "bubble.left.and.bubble.right",
                     title: "会话数",
-                    value: AgentUsageFormat.integer(viewModel.snapshot.sessionCount),
+                    value: AgentUsageFormat.compactCount(viewModel.snapshot.sessionCount),
                     subtitle: "按 agent 类型去重后的会话"
                 )
                 AgentUsageInsetDivider()
                 AgentUsageOverviewLine(
                     icon: "wrench.and.screwdriver",
                     title: "工具使用",
-                    value: AgentUsageFormat.integer(viewModel.snapshot.toolUseCount),
+                    value: AgentUsageFormat.compactCount(viewModel.snapshot.toolUseCount),
                     subtitle: "去重后的工具调用次数"
                 )
                 AgentUsageInsetDivider()
@@ -1019,6 +1032,42 @@ private struct AgentUsageAnalyticsContent: View {
             .padding(.horizontal, 18)
             .padding(.vertical, 8)
         }
+    }
+}
+
+private struct AgentUsageLoadingOverlay: View {
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .fill(Color.black.opacity(0.22))
+                .background(
+                    SettingsGlassSurface(material: .hudWindow, blendingMode: .withinWindow)
+                        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+                        .opacity(0.90)
+                )
+
+            VStack(spacing: 10) {
+                ProgressView()
+                    .controlSize(.small)
+                    .tint(.white.opacity(0.84))
+
+                Text(appLocalized: "正在加载统计")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.72))
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 14)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(Color.white.opacity(0.08))
+                    .overlay(
+                        Capsule(style: .continuous)
+                            .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
+                    )
+            )
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .allowsHitTesting(true)
     }
 }
 
@@ -1128,7 +1177,7 @@ private struct AgentUsageSummaryCards: View {
         AgentUsageSummaryCard(
             icon: "wrench.and.screwdriver",
             title: "工具调用",
-            value: AgentUsageFormat.integer(snapshot.toolUseCount),
+            value: AgentUsageFormat.compactCount(snapshot.toolUseCount),
             subtitle: "去重后的工具调用次数",
             trendValues: snapshot.trendPoints.map(\.toolUseCount),
             tint: TerminalColors.amber
@@ -1139,7 +1188,7 @@ private struct AgentUsageSummaryCards: View {
         AgentUsageSummaryCard(
             icon: "bubble.left.and.bubble.right",
             title: "会话数",
-            value: AgentUsageFormat.integer(snapshot.sessionCount),
+            value: AgentUsageFormat.compactCount(snapshot.sessionCount),
             subtitle: "按 agent 类型去重后的会话",
             trendValues: snapshot.trendPoints.map(\.sessionCount),
             tint: TerminalColors.green
@@ -1181,14 +1230,16 @@ private struct AgentUsageSummaryCard: View {
                     .font(.system(size: 24, weight: .bold, design: .rounded))
                     .foregroundColor(.white.opacity(0.94))
                     .monospacedDigit()
-                    .minimumScaleFactor(0.72)
+                    .minimumScaleFactor(0.56)
                     .lineLimit(1)
+                    .help(value)
 
                 Text(appLocalized: subtitle)
                     .font(.system(size: 11, weight: .medium))
                     .foregroundColor(.white.opacity(0.42))
-                    .lineLimit(1)
+                    .lineLimit(2)
             }
+            .layoutPriority(1)
 
             Spacer(minLength: 0)
         }
@@ -1251,32 +1302,71 @@ private struct AgentUsageSpendPanel: View {
                 .frame(height: 104)
                 .padding(.top, 2)
 
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(verbatim: AppLocalization.format(
-                    "30 天：%@ Tokens",
-                    AgentUsageFormat.compactTokenCount(summary.thirtyDays.tokenTotals.resolvedTotal)
-                ))
-                    .font(.system(size: 12, weight: .bold, design: .rounded))
-                    .foregroundColor(.white.opacity(0.80))
-                    .monospacedDigit()
-
-                Text(verbatim: AppLocalization.format(
-                    "· %@ 预估",
-                    AgentUsageFormat.usd(summary.thirtyDays.estimatedUSD)
-                ))
-                    .font(.system(size: 12, weight: .bold, design: .rounded))
-                    .foregroundColor(TerminalColors.blue.opacity(0.92))
-                    .monospacedDigit()
-
-                Spacer(minLength: 8)
-
-                Text(appLocalized: AgentUsageCostEstimator.blendedCodexClaudePricing.label)
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(.white.opacity(0.42))
-                    .lineLimit(1)
-            }
+            AgentUsageSpendFooter(summary: summary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct AgentUsageSpendFooter: View {
+    let summary: AgentUsageSpendSummary
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            footerLine
+
+            VStack(alignment: .leading, spacing: 4) {
+                footerAmounts
+                pricingLabel
+            }
+        }
+    }
+
+    private var footerLine: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            footerAmounts
+            Spacer(minLength: 8)
+            pricingLabel
+        }
+    }
+
+    private var footerAmounts: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(verbatim: AppLocalization.format(
+                "30 天：%@ Tokens",
+                AgentUsageFormat.compactTokenCount(summary.thirtyDays.tokenTotals.resolvedTotal)
+            ))
+                .font(.system(size: 12, weight: .bold, design: .rounded))
+                .foregroundColor(.white.opacity(0.80))
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
+
+            Text(verbatim: AppLocalization.format(
+                "· %@ 预估",
+                AgentUsageFormat.compactUSD(summary.thirtyDays.estimatedUSD)
+            ))
+                .font(.system(size: 12, weight: .bold, design: .rounded))
+                .foregroundColor(TerminalColors.blue.opacity(0.92))
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
+        }
+        .help(exactSummaryHelp)
+    }
+
+    private var pricingLabel: some View {
+        Text(appLocalized: AgentUsageCostEstimator.blendedCodexClaudePricing.label)
+            .font(.system(size: 11, weight: .medium))
+            .foregroundColor(.white.opacity(0.42))
+            .lineLimit(1)
+            .truncationMode(.middle)
+    }
+
+    private var exactSummaryHelp: String {
+        let tokenText = AgentUsageFormat.integer(summary.thirtyDays.tokenTotals.resolvedTotal)
+        let costText = AppLocalization.format("· %@ 预估", AgentUsageFormat.usd(summary.thirtyDays.estimatedUSD))
+        return "\(tokenText) \(costText)"
     }
 }
 
@@ -1291,12 +1381,13 @@ private struct AgentUsageSpendMetricTile: View {
                 .foregroundColor(.white.opacity(0.58))
                 .lineLimit(1)
 
-            Text(verbatim: AgentUsageFormat.usd(metric.estimatedUSD))
+            Text(verbatim: AgentUsageFormat.compactUSD(metric.estimatedUSD))
                 .font(.system(size: 24, weight: .bold, design: .rounded))
                 .foregroundColor(.white.opacity(0.94))
                 .monospacedDigit()
-                .minimumScaleFactor(0.70)
+                .minimumScaleFactor(0.56)
                 .lineLimit(1)
+                .help(AgentUsageFormat.usd(metric.estimatedUSD))
 
             Text(verbatim: AppLocalization.format(
                 "%@ Tokens",
@@ -1305,6 +1396,8 @@ private struct AgentUsageSpendMetricTile: View {
                 .font(.system(size: 11, weight: .medium))
                 .foregroundColor(.white.opacity(0.42))
                 .lineLimit(1)
+                .minimumScaleFactor(0.72)
+                .help(AgentUsageFormat.integer(metric.tokenTotals.resolvedTotal))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -1490,6 +1583,7 @@ private struct AgentUsageOverviewLine: View {
                     .foregroundColor(.white.opacity(0.42))
                     .lineLimit(1)
             }
+            .layoutPriority(1)
 
             Spacer(minLength: 12)
 
@@ -1497,8 +1591,10 @@ private struct AgentUsageOverviewLine: View {
                 .font(.system(size: 22, weight: .bold, design: .rounded))
                 .foregroundColor(.white.opacity(0.92))
                 .monospacedDigit()
-                .minimumScaleFactor(0.72)
+                .minimumScaleFactor(0.56)
                 .lineLimit(1)
+                .frame(minWidth: 56, idealWidth: 86, alignment: .trailing)
+                .help(value)
         }
         .padding(.vertical, 10)
     }
@@ -1520,6 +1616,7 @@ private struct AgentUsageMetricLine: View {
                     .foregroundColor(.white.opacity(0.42))
                     .lineLimit(2)
             }
+            .layoutPriority(1)
 
             Spacer(minLength: 12)
 
@@ -1527,8 +1624,10 @@ private struct AgentUsageMetricLine: View {
                 .font(.system(size: 22, weight: .bold, design: .rounded))
                 .foregroundColor(.white.opacity(0.92))
                 .monospacedDigit()
-                .minimumScaleFactor(0.72)
+                .minimumScaleFactor(0.56)
                 .lineLimit(1)
+                .frame(minWidth: 56, idealWidth: 86, alignment: .trailing)
+                .help(value)
         }
         .padding(.vertical, 11)
     }
@@ -1569,6 +1668,8 @@ private struct AgentUsageTokenPill: View {
                 .foregroundColor(tint.opacity(0.95))
                 .monospacedDigit()
                 .lineLimit(1)
+                .minimumScaleFactor(0.62)
+                .help(value)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -1613,6 +1714,9 @@ private struct AgentUsageRankingRow: View {
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundColor(.white.opacity(0.88))
                     .lineLimit(1)
+                    .truncationMode(.middle)
+                    .layoutPriority(1)
+                    .help(item.name)
 
                 Spacer(minLength: 8)
 
@@ -1620,6 +1724,10 @@ private struct AgentUsageRankingRow: View {
                     .font(.system(size: 12, weight: .bold, design: .rounded))
                     .foregroundColor(.white.opacity(0.72))
                     .monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.62)
+                    .frame(minWidth: 46, idealWidth: 64, alignment: .trailing)
+                    .help(AgentUsageFormat.integer(item.count))
             }
 
             GeometryReader { proxy in
@@ -1987,14 +2095,14 @@ private enum AgentUsageFormat {
         integerFormatter.string(from: NSNumber(value: value)) ?? "\(value)"
     }
 
+    static func compactCount(_ value: Int) -> String {
+        compactMetric(Double(value), suffixes: [(1_000_000_000_000, "T"), (1_000_000_000, "B"), (1_000_000, "M"), (1_000, "K")]) {
+            integer(value)
+        }
+    }
+
     static func compactTokenCount(_ value: Int) -> String {
-        if value >= 1_000_000 {
-            return String(format: "%.1fM", Double(value) / 1_000_000)
-        }
-        if value >= 1_000 {
-            return String(format: "%.1fK", Double(value) / 1_000)
-        }
-        return integer(value)
+        compactCount(value)
     }
 
     static func usd(_ value: Double) -> String {
@@ -2004,12 +2112,39 @@ private enum AgentUsageFormat {
         return usdFormatter.string(from: NSNumber(value: value)) ?? String(format: "$%.2f", value)
     }
 
+    static func compactUSD(_ value: Double) -> String {
+        guard value >= 10_000 else {
+            return usd(value)
+        }
+
+        let compactValue = compactMetric(value, suffixes: [(1_000_000_000, "B"), (1_000_000, "M"), (1_000, "K")]) {
+            String(format: "%.0f", value)
+        }
+        return "$\(compactValue)"
+    }
+
     static func shortDate(_ date: Date) -> String {
         shortDateFormatter.string(from: date)
     }
 
     static func shortMonth(_ date: Date) -> String {
         shortMonthFormatter.string(from: date)
+    }
+
+    private static func compactMetric(
+        _ value: Double,
+        suffixes: [(threshold: Double, suffix: String)],
+        fallback: () -> String
+    ) -> String {
+        guard let scale = suffixes.first(where: { value >= $0.threshold }) else {
+            return fallback()
+        }
+
+        let scaledValue = value / scale.threshold
+        let formatted = scaledValue >= 100
+            ? String(format: "%.0f", scaledValue)
+            : String(format: "%.1f", scaledValue)
+        return "\(formatted)\(scale.suffix)"
     }
 }
 
