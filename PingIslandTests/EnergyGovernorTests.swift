@@ -6,6 +6,7 @@ final class EnergyGovernorTests: XCTestCase {
         let inputs = EnergyGovernorInputs(
             hasActiveSession: true,
             hasAttentionSession: false,
+            hasRecentSessionActivity: true,
             hasVisibleSession: true,
             isSystemSuspended: false,
             isWakeGraceActive: false,
@@ -27,6 +28,7 @@ final class EnergyGovernorTests: XCTestCase {
         let inputs = EnergyGovernorInputs(
             hasActiveSession: false,
             hasAttentionSession: false,
+            hasRecentSessionActivity: false,
             hasVisibleSession: false,
             isSystemSuspended: false,
             isWakeGraceActive: false,
@@ -43,10 +45,11 @@ final class EnergyGovernorTests: XCTestCase {
         XCTAssertEqual(policy.animationLevel, .staticFrames)
     }
 
-    func testVisibleIdleDropsMouseMoveMonitoringButKeepsReducedAnimation() {
+    func testRecentlyActiveVisibleIdleDropsMouseMoveMonitoringButKeepsReducedAnimation() {
         let inputs = EnergyGovernorInputs(
             hasActiveSession: false,
             hasAttentionSession: false,
+            hasRecentSessionActivity: true,
             hasVisibleSession: true,
             isSystemSuspended: false,
             isWakeGraceActive: false,
@@ -61,10 +64,31 @@ final class EnergyGovernorTests: XCTestCase {
         XCTAssertEqual(policy.animationLevel, .reduced)
     }
 
+    func testSettledVisibleIdleUsesStaticFramesAfterGracePeriod() {
+        let inputs = EnergyGovernorInputs(
+            hasActiveSession: false,
+            hasAttentionSession: false,
+            hasRecentSessionActivity: false,
+            hasVisibleSession: true,
+            isSystemSuspended: false,
+            isWakeGraceActive: false,
+            isLowPowerModeEnabled: false
+        )
+
+        let mode = EnergyGovernor.resolvedMode(for: inputs)
+        let policy = EnergyPolicy.policy(for: mode)
+
+        XCTAssertEqual(mode, .quietBackground)
+        XCTAssertEqual(policy.eventMonitoringLevel, .interactionOnly)
+        XCTAssertEqual(policy.animationLevel, .staticFrames)
+        XCTAssertEqual(EnergyGovernor.idleVisibleAnimationGraceDuration, 10 * 60)
+    }
+
     func testSuspendedModePausesBackgroundPolling() {
         let inputs = EnergyGovernorInputs(
             hasActiveSession: true,
             hasAttentionSession: true,
+            hasRecentSessionActivity: true,
             hasVisibleSession: true,
             isSystemSuspended: true,
             isWakeGraceActive: false,
@@ -86,6 +110,7 @@ final class EnergyGovernorTests: XCTestCase {
         let inputs = EnergyGovernorInputs(
             hasActiveSession: false,
             hasAttentionSession: false,
+            hasRecentSessionActivity: true,
             hasVisibleSession: true,
             isSystemSuspended: false,
             isWakeGraceActive: false,

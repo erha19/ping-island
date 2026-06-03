@@ -98,6 +98,7 @@ struct EnergyPolicy: Equatable {
 struct EnergyGovernorInputs: Equatable {
     var hasActiveSession: Bool
     var hasAttentionSession: Bool
+    var hasRecentSessionActivity: Bool
     var hasVisibleSession: Bool
     var isSystemSuspended: Bool
     var isWakeGraceActive: Bool
@@ -106,6 +107,7 @@ struct EnergyGovernorInputs: Equatable {
     static let empty = EnergyGovernorInputs(
         hasActiveSession: false,
         hasAttentionSession: false,
+        hasRecentSessionActivity: false,
         hasVisibleSession: false,
         isSystemSuspended: false,
         isWakeGraceActive: false,
@@ -116,6 +118,7 @@ struct EnergyGovernorInputs: Equatable {
 @MainActor
 final class EnergyGovernor: ObservableObject {
     static let shared = EnergyGovernor()
+    nonisolated static let idleVisibleAnimationGraceDuration: TimeInterval = 10 * 60
 
     @Published private(set) var mode: EnergyMode = .quietBackground
     @Published private(set) var policy: EnergyPolicy = EnergyPolicy.policy(for: .quietBackground)
@@ -161,7 +164,7 @@ final class EnergyGovernor: ObservableObject {
         if inputs.isWakeGraceActive {
             return .wakeGrace
         }
-        if inputs.hasVisibleSession && !inputs.isLowPowerModeEnabled {
+        if inputs.hasVisibleSession && inputs.hasRecentSessionActivity && !inputs.isLowPowerModeEnabled {
             return .idleVisible
         }
         return .quietBackground
@@ -205,9 +208,14 @@ final class EnergyGovernor: ObservableObject {
     }
 
     private func updateSessions(_ sessions: [SessionState]) {
+        let now = Date()
         let next = EnergyGovernorInputs(
             hasActiveSession: sessions.contains { $0.phase.isActive },
             hasAttentionSession: sessions.contains { $0.needsAttention },
+            hasRecentSessionActivity: sessions.contains {
+                !$0.shouldHideFromPrimaryUI &&
+                now.timeIntervalSince($0.lastActivity) <= Self.idleVisibleAnimationGraceDuration
+            },
             hasVisibleSession: sessions.contains { !$0.shouldHideFromPrimaryUI },
             isSystemSuspended: inputs.isSystemSuspended,
             isWakeGraceActive: inputs.isWakeGraceActive,
