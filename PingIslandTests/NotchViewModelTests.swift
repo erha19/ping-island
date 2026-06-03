@@ -261,7 +261,8 @@ final class NotchViewModelTests: XCTestCase {
                 hasPhysicalNotch: true,
                 enableEventMonitoring: false,
                 observeSystemEnvironment: false,
-                fullscreenActivityProvider: { _ in false }
+                fullscreenActivityProvider: { _ in false },
+                notchModuleWidthProvider: { 398 }
             )
 
             viewModel.updateOpenedMeasuredHeight(260)
