@@ -50,6 +50,7 @@ class NotchViewModel: ObservableObject {
     @Published private(set) var isFullscreenPhysicalNotchCompactActive = false
     @Published private(set) var isFullscreenBrowserHiddenActive = false
     @Published private(set) var isIdleAutoHiddenActive = false
+    @Published private(set) var isQuietBackgroundPresentationActive = false
     @Published private(set) var isSettingsPopoverPresented = false
     @Published private(set) var isInlineTextInputActive = false
 
@@ -715,6 +716,9 @@ class NotchViewModel: ObservableObject {
         if isIdleAutoHiddenActive && status != .opened {
             return true
         }
+        if isQuietBackgroundPresentationActive && status != .opened {
+            return true
+        }
         return false
     }
 
@@ -748,6 +752,11 @@ class NotchViewModel: ObservableObject {
         if shouldHide != isIdleAutoHiddenActive {
             isIdleAutoHiddenActive = shouldHide
         }
+    }
+
+    func updateQuietBackgroundPresentationState(isActive: Bool) {
+        guard isQuietBackgroundPresentationActive != isActive else { return }
+        isQuietBackgroundPresentationActive = isActive
     }
 
     private var fullscreenRevealTriggerRect: CGRect {

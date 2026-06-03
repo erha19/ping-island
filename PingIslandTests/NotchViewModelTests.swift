@@ -456,6 +456,35 @@ final class NotchViewModelTests: XCTestCase {
         }
     }
 
+    func testQuietBackgroundHidesClosedDockedPresentationButPreservesOpenedPanel() async {
+        let viewModel = await MainActor.run {
+            NotchViewModel(
+                deviceNotchRect: .zero,
+                screenRect: CGRect(x: 0, y: 0, width: 1440, height: 900),
+                windowHeight: 320,
+                hasPhysicalNotch: false,
+                enableEventMonitoring: false,
+                observeSystemEnvironment: false
+            )
+        }
+
+        await MainActor.run {
+            viewModel.updateQuietBackgroundPresentationState(isActive: true)
+
+            XCTAssertTrue(viewModel.isQuietBackgroundPresentationActive)
+            XCTAssertTrue(viewModel.shouldHideWindowPresentation)
+
+            viewModel.notchOpen(reason: .click)
+            XCTAssertFalse(viewModel.shouldHideWindowPresentation)
+
+            viewModel.notchClose()
+            XCTAssertTrue(viewModel.shouldHideWindowPresentation)
+
+            viewModel.updateQuietBackgroundPresentationState(isActive: false)
+            XCTAssertFalse(viewModel.shouldHideWindowPresentation)
+        }
+    }
+
     func testToggleChatClosesWhenSameSessionIsAlreadyVisible() async {
         await MainActor.run {
             let viewModel = makeViewModel()

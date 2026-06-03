@@ -96,6 +96,14 @@ class NotchWindowController: NSWindowController {
             }
             .store(in: &cancellables)
 
+        viewModel.$isQuietBackgroundPresentationActive
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self, weak notchWindow, weak viewModel] _ in
+                guard let self, let notchWindow, let viewModel else { return }
+                self.updateWindowPresentation(window: notchWindow, viewModel: viewModel)
+            }
+            .store(in: &cancellables)
+
         viewModel.$presentationMode
             .receive(on: DispatchQueue.main)
             .sink { [weak self, weak notchWindow, weak viewModel] _ in
@@ -116,6 +124,15 @@ class NotchWindowController: NSWindowController {
             .receive(on: DispatchQueue.main)
             .sink { [weak self, weak notchWindow, weak viewModel] _ in
                 guard let self, let notchWindow, let viewModel else { return }
+                self.updateWindowPresentation(window: notchWindow, viewModel: viewModel)
+            }
+            .store(in: &cancellables)
+
+        EnergyGovernor.shared.$mode
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self, weak notchWindow, weak viewModel] mode in
+                guard let self, let notchWindow, let viewModel else { return }
+                viewModel.updateQuietBackgroundPresentationState(isActive: mode == .quietBackground)
                 self.updateWindowPresentation(window: notchWindow, viewModel: viewModel)
             }
             .store(in: &cancellables)

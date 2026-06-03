@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import SwiftUI
 import XCTest
 @testable import Ping_Island
@@ -93,6 +94,42 @@ final class DetachedIslandWindowControllerTests: XCTestCase {
         XCTAssertTrue(window.collectionBehavior.contains(.canJoinAllSpaces))
         XCTAssertTrue(window.collectionBehavior.contains(.fullScreenAuxiliary))
         XCTAssertTrue(window.collectionBehavior.contains(.ignoresCycle))
+    }
+
+    func testQuietBackgroundDimsDetachedPetUntilBubbleInteraction() throws {
+        let viewModel = makeViewModel()
+        let sessionMonitor = makeSessionMonitor()
+        sessionMonitor.instances = [
+            makeSession(id: "active", phase: .processing)
+        ]
+
+        let controller = DetachedIslandWindowController(
+            viewModel: viewModel,
+            sessionMonitor: sessionMonitor,
+            onClose: {},
+            energyModePublisher: Empty<EnergyMode, Never>(completeImmediately: false).eraseToAnyPublisher()
+        )
+        defer { controller.dismiss() }
+
+        controller.present(atPetAnchor: CGPoint(x: 1260, y: 180), activatesApplication: false)
+        controller.applyEnergyModeForTesting(.quietBackground)
+
+        XCTAssertEqual(try XCTUnwrap(controller.windowAlphaForTesting), 0.38, accuracy: 0.01)
+        XCTAssertTrue(try XCTUnwrap(controller.window).isVisible)
+
+        controller.presentHoverBubbleForTesting()
+        controller.applyEnergyModeForTesting(.quietBackground)
+
+        XCTAssertEqual(try XCTUnwrap(controller.windowAlphaForTesting), 1, accuracy: 0.01)
+
+        controller.hideBubbleForTesting()
+        waitForBubbleHidden(controller)
+        controller.applyEnergyModeForTesting(.quietBackground)
+
+        XCTAssertEqual(try XCTUnwrap(controller.windowAlphaForTesting), 0.38, accuracy: 0.01)
+
+        controller.applyEnergyModeForTesting(.active)
+        XCTAssertEqual(try XCTUnwrap(controller.windowAlphaForTesting), 1, accuracy: 0.01)
     }
 
     func testPetInteractionFrameConvertsTopAnchoredLayoutIntoWindowCoordinates() {
