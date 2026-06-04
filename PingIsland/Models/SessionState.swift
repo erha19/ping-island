@@ -1070,6 +1070,12 @@ struct SessionState: Equatable, Identifiable, Sendable {
         return Date().timeIntervalSince(lastActivity) >= Self.autoArchiveDelay
     }
 
+    /// Whether this session recently completed and should still appear in hover previews.
+    nonisolated var isRecentlyCompleted: Bool {
+        guard phase == .ended || phase == .idle else { return false }
+        return Date().timeIntervalSince(lastActivity) < Self.minimalCompactDelay
+    }
+
     /// Older background sessions collapse to a header-only presentation in compact surfaces.
     nonisolated var shouldUseMinimalCompactPresentation: Bool {
         if shouldAutoArchiveFromPrimaryUI {

@@ -81,7 +81,9 @@ enum IslandExpandedRouteResolver {
     }
 
     nonisolated static func activePreviewSessions(from sessions: [SessionState]) -> [SessionState] {
-        orderedSessions(from: sessions).filter(\.phase.isActive)
+        orderedSessions(from: sessions).filter {
+            $0.phase.isActive || $0.phase == .waitingForInput || $0.isRecentlyCompleted
+        }
     }
 
     nonisolated static func highestPriorityAttentionSession(from sessions: [SessionState]) -> SessionState? {
