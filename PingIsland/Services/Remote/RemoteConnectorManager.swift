@@ -1545,6 +1545,7 @@ final class RemoteConnectorManager: ObservableObject {
             "claude-hooks",
             "codex-hooks",
             "hermes-hooks",
+            "pi-hooks",
             "qwen-code-hooks",
             "openclaw-hooks",
             "codebuddy-cli-hooks",

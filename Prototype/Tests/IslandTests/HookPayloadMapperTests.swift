@@ -1018,6 +1018,110 @@ func codeBuddyCLIPermissionRequestAskUserQuestionBecomesInlineQuestion() throws 
 }
 
 @Test
+func piAgentClientMetadataCanBeInjectedFromBridgeArguments() throws {
+    let payload = """
+    {
+      "hook_event_name": "UserPromptSubmit",
+      "session_id": "pi-session-123",
+      "prompt": "Map the repo and suggest the next edit."
+    }
+    """.data(using: .utf8)!
+
+    let envelope = HookPayloadMapper.makeEnvelope(
+        source: .claude,
+        arguments: [
+            "island-bridge", "--source", "claude",
+            "--client-kind", "pi",
+            "--client-name", "Pi Agent",
+            "--client-origin", "cli",
+            "--client-originator", "Pi",
+            "--thread-source", "pi-extension"
+        ],
+        environment: ["PWD": "/tmp/demo"],
+        stdinData: payload
+    )
+
+    #expect(envelope.provider == .claude)
+    #expect(envelope.eventType == "UserPromptSubmit")
+    #expect(envelope.sessionKey == "claude:pi-session-123")
+    #expect(envelope.preview == "Map the repo and suggest the next edit.")
+    #expect(envelope.metadata["client_kind"] == "pi")
+    #expect(envelope.metadata["client_name"] == "Pi Agent")
+    #expect(envelope.metadata["client_origin"] == "cli")
+    #expect(envelope.metadata["client_originator"] == "Pi")
+    #expect(envelope.metadata["thread_source"] == "pi-extension")
+}
+
+@Test
+func piAgentPreToolUseMapsToolPayload() throws {
+    let payload = """
+    {
+      "hook_event_name": "PreToolUse",
+      "session_id": "pi-tool",
+      "tool_name": "Write",
+      "tool_input": {
+        "file_path": "/tmp/demo.txt",
+        "content": "hello"
+      }
+    }
+    """.data(using: .utf8)!
+
+    let envelope = HookPayloadMapper.makeEnvelope(
+        source: .claude,
+        arguments: [
+            "island-bridge", "--source", "claude",
+            "--client-kind", "pi",
+            "--client-name", "Pi Agent",
+            "--client-origin", "cli",
+            "--client-originator", "Pi",
+            "--thread-source", "pi-extension"
+        ],
+        environment: ["PWD": "/tmp/demo"],
+        stdinData: payload
+    )
+
+    #expect(envelope.eventType == "PreToolUse")
+    #expect(envelope.status?.kind == .runningTool)
+    #expect(envelope.metadata["tool_name"] == "Write")
+    #expect(envelope.metadata["tool_input_json"]?.contains("/tmp/demo.txt") == true)
+}
+
+@Test
+func piAgentPermissionRequestUsesPiApprovalTitle() throws {
+    let payload = """
+    {
+      "hook_event_name": "PermissionRequest",
+      "session_id": "pi-permission",
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "sudo make install"
+      }
+    }
+    """.data(using: .utf8)!
+
+    let envelope = HookPayloadMapper.makeEnvelope(
+        source: .claude,
+        arguments: [
+            "island-bridge", "--source", "claude",
+            "--client-kind", "pi",
+            "--client-name", "Pi Agent",
+            "--client-origin", "cli",
+            "--client-originator", "Pi",
+            "--thread-source", "pi-extension"
+        ],
+        environment: ["PWD": "/tmp/demo"],
+        stdinData: payload
+    )
+
+    #expect(envelope.eventType == "PermissionRequest")
+    #expect(envelope.status?.kind == .waitingForApproval)
+    #expect(envelope.expectsResponse == true)
+    #expect(envelope.intervention?.kind == .approval)
+    #expect(envelope.intervention?.title == "Pi Agent needs approval")
+    #expect(envelope.intervention?.message == "Bash")
+}
+
+@Test
 func qoderCLIExitPlanModePreToolUseBecomesBlockingApproval() throws {
     let payload = """
     {

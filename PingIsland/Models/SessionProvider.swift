@@ -261,6 +261,15 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
             || originator?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "hermes agent"
     }
 
+    nonisolated var isPiClient: Bool {
+        profileID == "pi"
+            || threadSource?.lowercased() == "pi-extension"
+            || name?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "pi agent"
+            || name?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "pi-agent"
+            || originator?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "pi"
+            || originator?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "pi agent"
+    }
+
     nonisolated var isGeminiClient: Bool {
         profileID == "gemini"
             || threadSource?.lowercased() == "gemini-hooks"
@@ -558,6 +567,15 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
             || normalizedOriginator == "openclaw"
             || normalizedSessionFilePath?.contains("/.openclaw/") == true {
             return "openclaw"
+        }
+
+        if normalizedThreadSource == "pi-extension"
+            || normalizedName == "pi agent"
+            || normalizedName == "pi-agent"
+            || normalizedOriginator == "pi"
+            || normalizedOriginator == "pi agent"
+            || normalizedSessionFilePath?.contains("/.pi/agent/") == true {
+            return "pi"
         }
 
         return nil

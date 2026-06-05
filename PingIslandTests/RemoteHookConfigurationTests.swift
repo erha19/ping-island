@@ -114,6 +114,7 @@ final class RemoteHookConfigurationTests: XCTestCase {
             "claude-hooks",
             "codex-hooks",
             "hermes-hooks",
+            "pi-hooks",
             "qwen-code-hooks",
             "openclaw-hooks",
             "codebuddy-cli-hooks",
@@ -133,6 +134,8 @@ final class RemoteHookConfigurationTests: XCTestCase {
         XCTAssertTrue(directories.contains("/root/.codex"))
         XCTAssertTrue(directories.contains("/root/.hermes/plugins"))
         XCTAssertTrue(directories.contains("/root/.hermes/plugins/ping_island"))
+        XCTAssertTrue(directories.contains("/root/.pi/agent/extensions"))
+        XCTAssertTrue(directories.contains("/root/.pi/agent/extensions/ping_island"))
         XCTAssertTrue(directories.contains("/root/.qwen"))
         XCTAssertTrue(directories.contains("/root/.openclaw"))
         XCTAssertTrue(directories.contains("/root/.openclaw/hooks"))
@@ -152,6 +155,22 @@ final class RemoteHookConfigurationTests: XCTestCase {
         XCTAssertEqual(directories, ["/root/.hermes/plugins", "/root/.hermes/plugins/ping_island"])
     }
 
+    func testPiRemoteManagedHookDirectoryPathUsesExtensionDirectory() throws {
+        let profile = try XCTUnwrap(ClientProfileRegistry.managedHookProfile(id: "pi-hooks"))
+        let directories = RemoteConnectorManager.remoteManagedHookDirectoryPaths(
+            for: profile,
+            homeDirectory: "/root"
+        )
+
+        XCTAssertEqual(
+            directories,
+            [
+                "/root/.pi/agent/extensions",
+                "/root/.pi/agent/extensions/ping_island"
+            ]
+        )
+    }
+
     func testHermesManagedPluginDirectoryFilesContainPluginManifestAndModule() throws {
         let profile = try XCTUnwrap(ClientProfileRegistry.managedHookProfile(id: "hermes-hooks"))
         let files = HookInstaller.managedPluginDirectoryFiles(for: profile)
@@ -159,6 +178,15 @@ final class RemoteHookConfigurationTests: XCTestCase {
         XCTAssertEqual(Set(files.keys), ["plugin.yaml", "__init__.py"])
         XCTAssertTrue(files["plugin.yaml"]?.contains("name: ping_island") == true)
         XCTAssertTrue(files["__init__.py"]?.contains("ctx.register_hook(\"pre_llm_call\"") == true)
+    }
+
+    func testPiManagedPluginDirectoryFilesContainExtensionModule() throws {
+        let profile = try XCTUnwrap(ClientProfileRegistry.managedHookProfile(id: "pi-hooks"))
+        let files = HookInstaller.managedPluginDirectoryFiles(for: profile)
+
+        XCTAssertEqual(Set(files.keys), ["index.ts"])
+        XCTAssertTrue(files["index.ts"]?.contains("pi.on(\"session_start\"") == true)
+        XCTAssertTrue(files["index.ts"]?.contains("hook_event_name: \"PermissionRequest\"") == true)
     }
 
     func testRemoteConfigurationPathResolvesRelativeHomePaths() {

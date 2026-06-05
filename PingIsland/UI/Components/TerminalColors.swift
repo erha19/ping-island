@@ -16,6 +16,7 @@ struct TerminalColors {
     static let blue = Color(red: 0.4, green: 0.6, blue: 1.0)
     static let gemini = Color(red: 0.26, green: 0.52, blue: 0.96)
     static let hermes = Color(red: 0.95, green: 0.68, blue: 0.20)
+    static let pi = Color(red: 0.34, green: 0.66, blue: 1.0)
     static let qwen = Color(red: 0.14, green: 0.72, blue: 0.88)
     static let magenta = Color(red: 0.8, green: 0.4, blue: 0.8)
     static let codebuddy = Color(red: 0.68, green: 0.45, blue: 0.98)
@@ -58,6 +59,8 @@ extension SessionClientBrand {
             return TerminalColors.gemini
         case .hermes:
             return TerminalColors.hermes
+        case .pi:
+            return TerminalColors.pi
         case .qwen:
             return TerminalColors.qwen
         case .opencode:

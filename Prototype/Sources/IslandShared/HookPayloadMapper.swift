@@ -803,7 +803,7 @@ public enum HookPayloadMapper {
             return InterventionRequest(
                 sessionID: sessionKey,
                 kind: .question,
-                title: "\(provider.displayName) needs input",
+                title: "\(interventionDisplayName(provider: provider, clientKind: clientKind)) needs input",
                 message: (questions.first?["question"] as? String)
                     ?? (questions.first?["title"] as? String)
                     ?? "Answer required",
@@ -868,7 +868,7 @@ public enum HookPayloadMapper {
         return InterventionRequest(
             sessionID: sessionKey,
             kind: .approval,
-            title: "\(provider.displayName) needs approval",
+            title: "\(interventionDisplayName(provider: provider, clientKind: clientKind)) needs approval",
             message: message,
             options: [
                 InterventionOption(id: "approve", title: "Allow Once"),
@@ -1436,6 +1436,15 @@ public enum HookPayloadMapper {
             return "WorkBuddy"
         default:
             return "CodeBuddy"
+        }
+    }
+
+    private static func interventionDisplayName(provider: AgentProvider, clientKind: String?) -> String {
+        switch clientKind {
+        case "pi":
+            return "Pi Agent"
+        default:
+            return provider.displayName
         }
     }
 

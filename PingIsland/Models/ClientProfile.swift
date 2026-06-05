@@ -26,6 +26,7 @@ enum SessionClientBrand: String, Codable, Equatable, Sendable {
     case codex
     case gemini
     case hermes
+    case pi
     case qwen
     case opencode
     case qoder
@@ -649,6 +650,28 @@ enum ClientProfileRegistry {
             events: []
         ),
         ManagedHookClientProfile(
+            id: "pi-hooks",
+            title: "Pi Agent",
+            subtitle: "管理 ~/.pi/agent/extensions/ping_island，按 Pi 官方 extension 机制接入 Island",
+            installationKind: .pluginDirectory,
+            alwaysVisibleInSettings: true,
+            logoAssetName: "PiLogo",
+            prefersBundledLogoOverAppIcon: true,
+            iconSymbolName: "terminal.fill",
+            configurationRelativePath: ".pi/agent/extensions/ping_island",
+            bridgeSource: "claude",
+            bridgeExtraArguments: [
+                "--client-kind", "pi",
+                "--client-name", "Pi Agent",
+                "--client-origin", "cli",
+                "--client-originator", "Pi",
+                "--thread-source", "pi-extension"
+            ],
+            defaultEnabled: false,
+            brand: .pi,
+            events: []
+        ),
+        ManagedHookClientProfile(
             id: "qwen-code-hooks",
             title: "Qwen Code",
             subtitle: "管理 ~/.qwen/settings.json，按 Qwen Code 官方 hooks 协议接入 Island",
@@ -1156,6 +1179,21 @@ enum ClientProfileRegistry {
             recognizedKinds: ["hermes", "hermes-agent", "hermes_agent", "hermes agent"],
             exactAliases: ["hermes", "hermes-agent", "hermes agent"],
             keywordAliases: ["hermes", "hermes agent"],
+            bundleIdentifiers: []
+        ),
+        SessionClientProfile(
+            id: "pi",
+            provider: .claude,
+            family: .claudeHooks,
+            kind: .custom,
+            displayName: "Pi Agent",
+            assistantLabelMode: .badgeLabel,
+            brand: .pi,
+            defaultBundleIdentifier: nil,
+            defaultOrigin: "cli",
+            recognizedKinds: ["pi", "pi-agent", "pi_agent", "pi agent"],
+            exactAliases: ["pi", "pi-agent", "pi agent"],
+            keywordAliases: ["pi", "pi agent"],
             bundleIdentifiers: []
         ),
         SessionClientProfile(
