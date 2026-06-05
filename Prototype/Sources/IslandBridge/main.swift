@@ -439,6 +439,8 @@ private enum BridgeDebugLogger {
             return "codebuddy-hooks"
         case "hermes", "hermes-agent", "hermes_agent", "hermes agent":
             return "hermes-hooks"
+        case "pi", "pi-agent", "pi_agent", "pi agent":
+            return "pi-hooks"
         case "openclaw":
             return "openclaw-hooks"
         case "qoder", "qoderwork":
