@@ -526,8 +526,9 @@ struct ChatView: View {
                 Spacer(minLength: 0)
             }
 
-            if !shouldSuppressPromptControls,
-               intervention.awaitsExternalContinuation,
+            if shouldSuppressPromptControls {
+                terminalRoutedPromptNotice
+            } else if intervention.awaitsExternalContinuation,
                session.clientInfo.prefersAnsweredQuestionFollowupAction {
                 VStack(alignment: .leading, spacing: 10) {
                     SessionQuestionForm(
@@ -547,8 +548,7 @@ struct ChatView: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
-            } else if !shouldSuppressPromptControls,
-                      intervention.metadata["responseMode"] == "external_only" {
+            } else if intervention.metadata["responseMode"] == "external_only" {
                 HStack(spacing: 8) {
                     Button {
                         Task {
@@ -565,8 +565,7 @@ struct ChatView: View {
                     .padding(.vertical, 9)
                     .background(Capsule().fill(Color.white.opacity(0.9)))
                 }
-            } else if !shouldSuppressPromptControls,
-                      intervention.supportsInlineResponse {
+            } else if intervention.supportsInlineResponse {
                 let secondaryActionTitle: String? = if session.clientInfo.prefersAnsweredQuestionFollowupAction {
                     AppLocalization.format("打开 %@", session.interactionDisplayName)
                 } else if session.isInTmux {
@@ -610,7 +609,7 @@ struct ChatView: View {
                     secondaryActionTitle: secondaryActionTitle,
                     onSecondaryAction: onSecondaryAction
                 )
-            } else if !shouldSuppressPromptControls {
+            } else {
                 HStack(spacing: 8) {
                     Button {
                         openClientApplication()
