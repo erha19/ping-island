@@ -7,6 +7,7 @@ final class RemoteHookConfigurationTests: XCTestCase {
             installRoot: "/root/.ping-island",
             controlSocketPath: "/root/.ping-island/run/agent-control.sock",
             hookSocketPath: "/root/.ping-island/run/agent-hook.sock",
+            homeDirectory: "/root",
             configDirectoryPaths: ["/root/.codex", "/root/.qoder"]
         )
 
@@ -15,6 +16,19 @@ final class RemoteHookConfigurationTests: XCTestCase {
         XCTAssertTrue(command.contains("PingIslandBridge"))
         XCTAssertTrue(command.contains("rm -f "))
         XCTAssertTrue(command.contains("PingIslandBridge.tmp"))
+    }
+
+    func testRemoteBootstrapPrepareCommandResolvesClaudeDirectoryAgainstHome() {
+        let command = RemoteConnectorManager.remoteBootstrapPrepareCommand(
+            installRoot: "/home/dev/.ping-island",
+            controlSocketPath: "/home/dev/.ping-island/run/agent-control.sock",
+            hookSocketPath: "/home/dev/.ping-island/run/agent-hook.sock",
+            homeDirectory: "/home/dev",
+            configDirectoryPaths: ["/home/dev/.codex"]
+        )
+
+        XCTAssertTrue(command.contains("'/home/dev/.claude'"))
+        XCTAssertFalse(command.contains("$HOME"))
     }
 
     func testRemoteBootstrapInstallCommandPromotesStagedBridgeAtomically() {

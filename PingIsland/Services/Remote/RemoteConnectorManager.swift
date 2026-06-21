@@ -708,6 +708,7 @@ final class RemoteConnectorManager: ObservableObject {
                 installRoot: endpoint.remoteInstallRoot,
                 controlSocketPath: endpoint.remoteControlSocketPath,
                 hookSocketPath: endpoint.remoteHookSocketPath,
+                homeDirectory: probe.homeDirectory,
                 configDirectoryPaths: Self.remoteManagedHookConfigDirectoryPaths(
                     homeDirectory: probe.homeDirectory,
                     profiles: remoteHookProfiles
@@ -1454,10 +1455,12 @@ final class RemoteConnectorManager: ObservableObject {
         installRoot: String,
         controlSocketPath: String,
         hookSocketPath: String,
+        homeDirectory: String,
         configDirectoryPaths: [String]
     ) -> String {
         let agentPattern = "\(installRoot)/bin/[P]ingIslandBridge --mode remote-agent-service"
-        let directoryList = ([ "\(installRoot)/bin", "\(installRoot)/run", "\(installRoot)/logs", "$HOME/.claude" ] + configDirectoryPaths)
+        let claudeDirectory = remoteConfigurationPath(relativePath: ".claude", homeDirectory: homeDirectory)
+        let directoryList = ([ "\(installRoot)/bin", "\(installRoot)/run", "\(installRoot)/logs", claudeDirectory ] + configDirectoryPaths)
             .uniquedPreservingOrder()
             .map(shellQuote)
             .joined(separator: " ")
