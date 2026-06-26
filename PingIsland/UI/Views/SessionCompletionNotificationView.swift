@@ -209,6 +209,7 @@ enum SessionCompletionNotificationPolicy {
         }
 
         return now.timeIntervalSince(session.createdAt) <= untrackedSessionNotificationWindow
+            && now.timeIntervalSince(session.lastActivity) <= untrackedSessionNotificationWindow
     }
 }
 

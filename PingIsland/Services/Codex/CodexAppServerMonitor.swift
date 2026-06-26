@@ -932,6 +932,7 @@ actor CodexAppServerMonitor {
             intervention: pendingRequestsByThread[threadId]?.intervention
         )
         let diagnostics = Self.makeThreadDiagnosticsSnapshot(from: thread)
+        let lifecycleDates = Self.threadLifecycleDates(from: thread)
         recordThreadDiagnostics(diagnostics)
         let pathPresent = (thread["path"] as? String)?.isEmpty == false
 
@@ -950,7 +951,8 @@ actor CodexAppServerMonitor {
             phase: phase,
             intervention: pendingRequestsByThread[threadId]?.intervention,
             clientInfo: clientInfo,
-            activityAt: diagnostics.updatedAt
+            createdAt: lifecycleDates.createdAt,
+            activityAt: lifecycleDates.updatedAt
         )
     }
 
@@ -976,19 +978,6 @@ actor CodexAppServerMonitor {
             return collapsed.isEmpty ? nil : collapsed
         }
 
-        func date(from rawValue: Any?) -> Date? {
-            if let value = rawValue as? NSNumber {
-                return Date(timeIntervalSince1970: value.doubleValue)
-            }
-            if let value = rawValue as? Double {
-                return Date(timeIntervalSince1970: value)
-            }
-            if let value = rawValue as? Int {
-                return Date(timeIntervalSince1970: TimeInterval(value))
-            }
-            return nil
-        }
-
         let threadId = thread["id"] as? String ?? "unknown"
         let name = normalize(thread["name"] as? String)
         let preview = normalize(thread["preview"] as? String)
@@ -996,7 +985,7 @@ actor CodexAppServerMonitor {
         let path = normalize(thread["path"] as? String)
         let statusType = (thread["status"] as? [String: Any])?["type"] as? String
         let isEphemeral = thread["ephemeral"] as? Bool ?? false
-        let updatedAt = date(from: thread["updatedAt"])
+        let updatedAt = Self.threadLifecycleDates(from: thread).updatedAt
         let placeholderCandidate =
             !isEphemeral
             && (name?.isEmpty != false)
@@ -1030,8 +1019,9 @@ actor CodexAppServerMonitor {
             threadApprovalModes[threadId] = mode
         }
 
-        let createdAt = date(fromUnixTimestamp: thread["createdAt"]) ?? Date()
-        let updatedAt = date(fromUnixTimestamp: thread["updatedAt"]) ?? createdAt
+        let lifecycleDates = Self.threadLifecycleDates(from: thread)
+        let createdAt = lifecycleDates.createdAt ?? Date()
+        let updatedAt = lifecycleDates.updatedAt ?? createdAt
         let status = thread["status"] as? [String: Any]
         let snapshotClientInfo = makeClientInfo(from: thread, threadId: threadId)
         let phase = phaseFromCodexStatus(
@@ -1510,7 +1500,14 @@ actor CodexAppServerMonitor {
         return collapsed.isEmpty ? nil : collapsed
     }
 
-    private func date(fromUnixTimestamp rawValue: Any?) -> Date? {
+    static func threadLifecycleDates(from thread: [String: Any]) -> (createdAt: Date?, updatedAt: Date?) {
+        (
+            createdAt: date(fromUnixTimestamp: thread["createdAt"]),
+            updatedAt: date(fromUnixTimestamp: thread["updatedAt"])
+        )
+    }
+
+    private static func date(fromUnixTimestamp rawValue: Any?) -> Date? {
         if let value = rawValue as? NSNumber {
             return Date(timeIntervalSince1970: value.doubleValue)
         }
@@ -1617,4 +1614,3 @@ actor CodexAppServerMonitor {
     }
 
 }
-

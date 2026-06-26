@@ -1974,6 +1974,7 @@ actor SessionStore {
         publishState()
 
         await AgentUsageStore.shared.recordFileUpdate(session: session, payload: payload)
+        await recordClaudeFamilyTranscriptUsageIfAvailable(for: session)
 
         await emitToolCompletionEvents(
             sessionId: payload.sessionId,
@@ -2068,6 +2069,13 @@ actor SessionStore {
     ) -> Date {
         guard let currentValue else { return newValue }
         return max(currentValue, newValue)
+    }
+
+    private func mergedCreatedAt(
+        existing currentValue: Date,
+        incoming newValue: Date
+    ) -> Date {
+        min(currentValue, newValue)
     }
 
     private func processTimedOutExternalContinuations(now: Date) async {
@@ -2726,6 +2734,51 @@ actor SessionStore {
                 structuredResults: structuredResults
             )
         )
+        await recordClaudeFamilyTranscriptUsageIfAvailable(for: session)
+    }
+
+    private func recordClaudeFamilyTranscriptUsageIfAvailable(sessionId: String) async {
+        guard let session = sessions[sessionId] else { return }
+        await recordClaudeFamilyTranscriptUsageIfAvailable(for: session)
+    }
+
+    private func recordClaudeFamilyTranscriptUsageIfAvailable(for session: SessionState) async {
+        guard shouldRecordClaudeFamilyTranscriptUsage(for: session),
+              let transcriptPath = session.clientInfo.sessionFilePath?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !transcriptPath.isEmpty,
+              let snapshot = try? ClaudeTranscriptUsageLoader.load(from: URL(fileURLWithPath: transcriptPath)) else {
+            return
+        }
+
+        await AgentUsageStore.shared.recordTokenUsage(
+            provider: session.provider,
+            clientInfo: session.clientInfo,
+            sessionID: session.sessionId,
+            sourceKey: transcriptUsageSourceKey(session: session, sourceFilePath: snapshot.sourceFilePath),
+            totals: snapshot.tokenTotals,
+            capturedAt: snapshot.capturedAt ?? Date(),
+            sourceFileSize: snapshot.fileSize,
+            sourceContentHash: snapshot.contentHash,
+            recordInitialSnapshot: true
+        )
+    }
+
+    private nonisolated func shouldRecordClaudeFamilyTranscriptUsage(for session: SessionState) -> Bool {
+        switch session.clientInfo.brand {
+        case .claude, .qoder:
+            return true
+        default:
+            return session.provider == .claude && session.clientInfo.kind == .claudeCode
+        }
+    }
+
+    private nonisolated func transcriptUsageSourceKey(session: SessionState, sourceFilePath: String) -> String {
+        [
+            "transcript",
+            session.provider.rawValue,
+            session.sessionId,
+            URL(fileURLWithPath: sourceFilePath).resolvingSymlinksInPath().path,
+        ].joined(separator: "|")
     }
 
     // MARK: - File Sync Scheduling
@@ -2749,6 +2802,8 @@ actor SessionStore {
             if result.clearDetected {
                 await self?.process(.clearDetected(sessionId: sessionId))
             }
+
+            await self?.recordClaudeFamilyTranscriptUsageIfAvailable(sessionId: sessionId)
 
             let hasPendingCompletedToolResult = await self?.hasPendingCompletedToolResult(
                 sessionId: sessionId,
@@ -3264,9 +3319,11 @@ actor SessionStore {
         phase: SessionPhase,
         intervention: SessionIntervention?,
         clientInfo: SessionClientInfo? = nil,
+        createdAt: Date? = nil,
         activityAt: Date? = nil,
         metadata: [String: String] = [:]
     ) {
+        let incomingActivityAt = activityAt ?? Date()
         let resolvedSessionId = resolveOrAdoptCodexSession(
             incomingSessionId: sessionId,
             name: name,
@@ -3282,7 +3339,8 @@ actor SessionStore {
                 firstUserMessage: nil,
                 lastUserMessageDate: nil
             ),
-            activityAt: activityAt ?? Date(),
+            activityAt: incomingActivityAt,
+            createdAt: createdAt,
             ingress: .codexAppServer
         )
         let restoredAssociation = persistedAssociation(for: .codex, sessionId: resolvedSessionId)
@@ -3306,8 +3364,13 @@ actor SessionStore {
             sessionName: name ?? restoredAssociation?.sessionName,
             previewText: preview,
             intervention: intervention,
-            phase: phase
+            phase: phase,
+            lastActivity: incomingActivityAt,
+            createdAt: createdAt ?? Date()
         )
+        if let createdAt {
+            session.createdAt = mergedCreatedAt(existing: session.createdAt, incoming: createdAt)
+        }
 
         session.provider = .codex
         session.clientInfo = normalizedClientInfo(
@@ -3343,7 +3406,7 @@ actor SessionStore {
         } else if shouldPreserveActivePhaseDuringApparentIdle(
             session: session,
             incomingPhase: phase,
-            referenceDate: activityAt ?? Date(),
+            referenceDate: incomingActivityAt,
             previousLastActivity: existingLastActivity
         ) {
             // Keep the fresher active state until a stronger non-idle signal arrives.
@@ -3351,7 +3414,7 @@ actor SessionStore {
             currentPhase: session.phase,
             incomingPhase: phase,
             currentLastActivity: existingLastActivity,
-            incomingActivityAt: activityAt ?? Date()
+            incomingActivityAt: incomingActivityAt
         ) {
             // Keep the fresher active state until Codex catches up with a newer snapshot.
         } else if session.phase.canTransition(to: phase) || session.phase == phase {
@@ -3373,14 +3436,14 @@ actor SessionStore {
         if shouldPreserveActivePhaseDuringApparentIdle(
             session: session,
             incomingPhase: phase,
-            referenceDate: activityAt ?? Date(),
+            referenceDate: incomingActivityAt,
             previousLastActivity: existingLastActivity
         ) {
-            session.lastActivity = existingLastActivity ?? (activityAt ?? Date())
+            session.lastActivity = existingLastActivity ?? incomingActivityAt
         } else {
             session.lastActivity = mergedLastActivity(
                 existing: existingLastActivity,
-                incoming: activityAt ?? Date()
+                incoming: incomingActivityAt
             )
         }
 
@@ -3447,6 +3510,7 @@ actor SessionStore {
                 clientInfo: snapshot.clientInfo,
                 conversationInfo: snapshot.conversationInfo,
                 activityAt: snapshot.updatedAt,
+                createdAt: snapshot.createdAt,
                 ingress: ingress
             )
             : resolveCodexSessionAlias(snapshot.threadId)
@@ -3473,8 +3537,11 @@ actor SessionStore {
             ingress: .codexAppServer,
             sessionName: snapshot.name ?? restoredAssociation?.sessionName,
             previewText: snapshot.preview,
-            phase: snapshot.phase
+            phase: snapshot.phase,
+            lastActivity: snapshot.updatedAt,
+            createdAt: snapshot.createdAt
         )
+        session.createdAt = mergedCreatedAt(existing: session.createdAt, incoming: snapshot.createdAt)
         let snapshotPhase = resolvedCodexSnapshotPhase(snapshot, currentSession: session)
 
         session.provider = .codex
@@ -4247,6 +4314,7 @@ actor SessionStore {
         clientInfo: SessionClientInfo?,
         conversationInfo: ConversationInfo,
         activityAt: Date,
+        createdAt: Date?,
         ingress: SessionIngress
     ) -> String {
         let resolvedIncomingId = resolveCodexSessionAlias(incomingSessionId)
@@ -4280,7 +4348,8 @@ actor SessionStore {
             previewText: preview,
             phase: phase,
             conversationInfo: conversationInfo,
-            lastActivity: activityAt
+            lastActivity: activityAt,
+            createdAt: createdAt ?? Date()
         )
 
         guard let existingSession = sessions.values

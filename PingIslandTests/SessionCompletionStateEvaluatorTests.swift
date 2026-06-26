@@ -211,6 +211,31 @@ final class SessionCompletionStateEvaluatorTests: XCTestCase {
         )
     }
 
+    func testCompletionNotificationPolicyRejectsFakeNewUntrackedCompletedSessionWithOldActivity() {
+        let now = Date()
+        let session = SessionState(
+            sessionId: "fake-new-completed",
+            cwd: "/tmp/project",
+            provider: .codex,
+            clientInfo: SessionClientInfo.codexApp(threadId: "fake-new-completed"),
+            phase: .idle,
+            chatItems: [
+                ChatHistoryItem(id: "assistant", type: .assistant("Done earlier"), timestamp: now.addingTimeInterval(-3_600))
+            ],
+            lastActivity: now.addingTimeInterval(-3_600),
+            createdAt: now.addingTimeInterval(-5)
+        )
+
+        XCTAssertFalse(
+            SessionCompletionNotificationPolicy.shouldQueueCompletedNotification(
+                for: session,
+                previousPhase: nil,
+                isEnabled: true,
+                now: now
+            )
+        )
+    }
+
     func testCompletionNotificationPolicyAllowsTrackedEndedTransition() {
         let session = SessionState(
             sessionId: "tracked-ended",

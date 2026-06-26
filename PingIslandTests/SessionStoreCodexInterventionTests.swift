@@ -2,6 +2,38 @@ import XCTest
 @testable import Ping_Island
 
 final class SessionStoreCodexInterventionTests: XCTestCase {
+    func testHistoricalCodexThreadListCreatedAtIsPreserved() async throws {
+        let sessionId = "codex-historical-thread-\(UUID().uuidString)"
+        let store = SessionStore.shared
+        let createdTimestamp: TimeInterval = 1_700_000_000
+        let updatedTimestamp: TimeInterval = 1_700_003_600
+        let lifecycleDates = CodexAppServerMonitor.threadLifecycleDates(from: [
+            "id": sessionId,
+            "createdAt": createdTimestamp,
+            "updatedAt": updatedTimestamp
+        ])
+        let createdAt = try XCTUnwrap(lifecycleDates.createdAt)
+        let updatedAt = try XCTUnwrap(lifecycleDates.updatedAt)
+
+        await store.upsertCodexSession(
+            sessionId: sessionId,
+            name: "Historical thread",
+            preview: "Earlier assistant reply",
+            cwd: "/tmp/project",
+            phase: .idle,
+            intervention: nil,
+            clientInfo: SessionClientInfo.codexApp(threadId: sessionId),
+            createdAt: createdAt,
+            activityAt: updatedAt
+        )
+
+        let session = await store.session(for: sessionId)
+        XCTAssertEqual(session?.createdAt, createdAt)
+        XCTAssertEqual(session?.lastActivity, updatedAt)
+
+        await store.process(.sessionArchived(sessionId: sessionId))
+    }
+
     func testCodexAppServerIdleRefreshDoesNotClearExternalOnlyIntervention() async {
         let sessionId = "codex-external-\(UUID().uuidString)"
         let store = SessionStore.shared
@@ -292,6 +324,7 @@ final class SessionStoreCodexInterventionTests: XCTestCase {
 
         let session = await store.session(for: sessionId)
         XCTAssertEqual(session?.phase, .waitingForInput)
+        XCTAssertEqual(session?.createdAt, startedAt)
         XCTAssertNil(session?.intervention)
         XCTAssertTrue(session.map(SessionCompletionStateEvaluator.isCompletedReadySession) ?? false)
 
