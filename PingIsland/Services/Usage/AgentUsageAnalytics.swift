@@ -53,6 +53,26 @@ struct AgentUsageTokenTotals: Codable, Equatable, Sendable {
         }
         return input + output
     }
+
+    nonisolated var hasTokens: Bool {
+        input > 0 || output > 0 || total > 0
+    }
+}
+
+struct AgentUsageTokenSourceBaseline: Codable, Equatable, Sendable {
+    var totals: AgentUsageTokenTotals
+    var fileSize: UInt64?
+    var contentHash: String?
+
+    nonisolated init(
+        totals: AgentUsageTokenTotals,
+        fileSize: UInt64? = nil,
+        contentHash: String? = nil
+    ) {
+        self.totals = totals
+        self.fileSize = fileSize
+        self.contentHash = contentHash
+    }
 }
 
 struct AgentUsageRankItem: Equatable, Identifiable, Sendable {
@@ -106,6 +126,29 @@ struct AgentUsageSpendSummary: Equatable, Sendable {
     nonisolated var metrics: [AgentUsageCostMetric] {
         [today, sevenDays, thirtyDays]
     }
+}
+
+struct AgentUsageDiagnosticsRangeSummary: Equatable, Sendable {
+    let range: String
+    let sessionCount: Int
+    let toolUseCount: Int
+    let tokenTotals: AgentUsageTokenTotals
+}
+
+struct AgentUsageDiagnosticsDailyBucket: Equatable, Sendable {
+    let day: String
+    let agentCount: Int
+    let sessionCount: Int
+    let toolUseCount: Int
+    let tokenTotals: AgentUsageTokenTotals
+    let activityCount: Int
+}
+
+struct AgentUsageDiagnosticsSnapshot: Equatable, Sendable {
+    let generatedAt: Date
+    let tokenSourceCount: Int
+    let ranges: [AgentUsageDiagnosticsRangeSummary]
+    let recentBuckets: [AgentUsageDiagnosticsDailyBucket]
 }
 
 struct AgentUsageTokenPricing: Equatable, Sendable {
@@ -334,15 +377,61 @@ struct AgentUsageDocument: Codable, Equatable, Sendable {
     var buckets: [String: AgentUsageDailyBucket]
     var seenToolEventIDs: Set<String>
     var codexTokenBaselines: [String: CodexTokenUsage]
+    var tokenBaselines: [String: AgentUsageTokenSourceBaseline]
 
     nonisolated init(
         buckets: [String: AgentUsageDailyBucket] = [:],
         seenToolEventIDs: Set<String> = [],
-        codexTokenBaselines: [String: CodexTokenUsage] = [:]
+        codexTokenBaselines: [String: CodexTokenUsage] = [:],
+        tokenBaselines: [String: AgentUsageTokenSourceBaseline] = [:]
     ) {
         self.buckets = buckets
         self.seenToolEventIDs = seenToolEventIDs
         self.codexTokenBaselines = codexTokenBaselines
+        self.tokenBaselines = tokenBaselines
+        for (sourceKey, usage) in codexTokenBaselines {
+            let migratedKey = Self.codexTokenSourceKey(sourceKey)
+            if !self.tokenBaselines.keys.contains(migratedKey) {
+                self.tokenBaselines[migratedKey] = AgentUsageTokenSourceBaseline(totals: usage.totals)
+            }
+        }
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case buckets
+        case seenToolEventIDs
+        case codexTokenBaselines
+        case tokenBaselines
+    }
+
+    nonisolated init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        buckets = try container.decodeIfPresent([String: AgentUsageDailyBucket].self, forKey: .buckets) ?? [:]
+        seenToolEventIDs = try container.decodeIfPresent(Set<String>.self, forKey: .seenToolEventIDs) ?? []
+        codexTokenBaselines = try container.decodeIfPresent([String: CodexTokenUsage].self, forKey: .codexTokenBaselines) ?? [:]
+        tokenBaselines = try container.decodeIfPresent(
+            [String: AgentUsageTokenSourceBaseline].self,
+            forKey: .tokenBaselines
+        ) ?? [:]
+
+        for (sourceKey, usage) in codexTokenBaselines {
+            let migratedKey = Self.codexTokenSourceKey(sourceKey)
+            if !tokenBaselines.keys.contains(migratedKey) {
+                tokenBaselines[migratedKey] = AgentUsageTokenSourceBaseline(totals: usage.totals)
+            }
+        }
+    }
+
+    nonisolated func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(buckets, forKey: .buckets)
+        try container.encode(seenToolEventIDs, forKey: .seenToolEventIDs)
+        try container.encode(codexTokenBaselines, forKey: .codexTokenBaselines)
+        try container.encode(tokenBaselines, forKey: .tokenBaselines)
+    }
+
+    nonisolated static func codexTokenSourceKey(_ sourceKey: String) -> String {
+        "codex|\(sourceKey)"
     }
 }
 
@@ -469,35 +558,81 @@ actor AgentUsageStore {
             return
         }
 
-        var document = await loadDocument()
         let sourceKey = snapshot.threadID ?? snapshot.sourceFilePath
-        let previous = document.codexTokenBaselines[sourceKey]
-        document.codexTokenBaselines[sourceKey] = currentUsage
-
-        guard let previous else {
-            self.document = document
-            scheduleSave()
-            return
-        }
-
-        let delta = CodexTokenUsage(
-            inputTokens: max(0, currentUsage.inputTokens - previous.inputTokens),
-            outputTokens: max(0, currentUsage.outputTokens - previous.outputTokens),
-            totalTokens: max(0, currentUsage.totalTokens - previous.totalTokens)
+        await recordTokenUsage(
+            provider: .codex,
+            clientInfo: .codexCLI(),
+            sessionID: snapshot.threadID,
+            sourceKey: AgentUsageDocument.codexTokenSourceKey(sourceKey),
+            totals: currentUsage.totals,
+            capturedAt: snapshot.capturedAt ?? now,
+            recordInitialSnapshot: false
         )
-        guard delta.totalTokens > 0 || delta.inputTokens > 0 || delta.outputTokens > 0 else {
+
+        var document = await loadDocument()
+        document.codexTokenBaselines[sourceKey] = currentUsage
+        self.document = document
+        scheduleSave()
+    }
+
+    func recordTokenUsage(
+        provider: SessionProvider,
+        clientInfo: SessionClientInfo,
+        sessionID: String?,
+        sourceKey: String,
+        totals currentTotals: AgentUsageTokenTotals,
+        capturedAt: Date,
+        sourceFileSize: UInt64? = nil,
+        sourceContentHash: String? = nil,
+        recordInitialSnapshot: Bool = true,
+        now: Date = Date()
+    ) async {
+        guard currentTotals.hasTokens else {
+            return
+        }
+
+        var document = await loadDocument()
+        let previous = document.tokenBaselines[sourceKey]
+        let didReset = didTokenSourceReset(
+            previous: previous,
+            currentFileSize: sourceFileSize
+        )
+        document.tokenBaselines[sourceKey] = AgentUsageTokenSourceBaseline(
+            totals: currentTotals,
+            fileSize: sourceFileSize,
+            contentHash: sourceContentHash
+        )
+
+        let delta: AgentUsageTokenTotals
+        if let previous, !didReset {
+            delta = AgentUsageTokenTotals(
+                input: max(0, currentTotals.input - previous.totals.input),
+                output: max(0, currentTotals.output - previous.totals.output),
+                total: max(0, currentTotals.total - previous.totals.total)
+            )
+        } else if recordInitialSnapshot {
+            delta = currentTotals
+        } else {
             self.document = document
             scheduleSave()
             return
         }
 
-        let captureDate = snapshot.capturedAt ?? now
-        let day = Self.dayKey(for: captureDate, calendar: calendar)
-        var bucket = document.buckets[day] ?? AgentUsageDailyBucket(day: day)
-        if let threadID = snapshot.threadID {
-            bucket.recordSession(agent: "Codex", sessionID: threadID)
+        guard delta.hasTokens else {
+            self.document = document
+            scheduleSave()
+            return
         }
-        bucket.recordTokens(delta.totals)
+
+        let day = Self.dayKey(for: capturedAt, calendar: calendar)
+        var bucket = document.buckets[day] ?? AgentUsageDailyBucket(day: day)
+        if let sessionID = nonEmpty(sessionID) {
+            bucket.recordSession(
+                agent: agentLabel(provider: provider, clientInfo: clientInfo),
+                sessionID: sessionID
+            )
+        }
+        bucket.recordTokens(delta)
         document.buckets[day] = bucket
         pruneDocument(&document, now: now)
         self.document = document
@@ -512,6 +647,74 @@ actor AgentUsageStore {
             now: now,
             calendar: calendar
         )
+    }
+
+    func diagnosticsSnapshot(now: Date = Date()) async -> AgentUsageDiagnosticsSnapshot {
+        let document = await loadDocument()
+        let ranges = AgentUsageRange.allCases.map { range in
+            let snapshot = Self.makeSnapshot(
+                range: range,
+                document: document,
+                now: now,
+                calendar: calendar
+            )
+            return AgentUsageDiagnosticsRangeSummary(
+                range: range.rawValue,
+                sessionCount: snapshot.sessionCount,
+                toolUseCount: snapshot.toolUseCount,
+                tokenTotals: snapshot.tokenTotals
+            )
+        }
+
+        let recentBuckets = document.buckets
+            .sorted { $0.key > $1.key }
+            .prefix(30)
+            .map { day, bucket in
+                AgentUsageDiagnosticsDailyBucket(
+                    day: day,
+                    agentCount: bucket.sessionIDsByAgent.count,
+                    sessionCount: bucket.sessionIDsByAgent.values.reduce(0) { $0 + $1.count },
+                    toolUseCount: bucket.toolCounts.values.reduce(0, +),
+                    tokenTotals: bucket.tokenTotals,
+                    activityCount: bucket.activityCount
+                )
+            }
+
+        return AgentUsageDiagnosticsSnapshot(
+            generatedAt: now,
+            tokenSourceCount: document.tokenBaselines.count,
+            ranges: ranges,
+            recentBuckets: Array(recentBuckets)
+        )
+    }
+
+    func diagnosticsSnapshotData(now: Date = Date()) async throws -> Data {
+        let snapshot = await diagnosticsSnapshot(now: now)
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let object: [String: Any] = [
+            "generatedAt": formatter.string(from: snapshot.generatedAt),
+            "tokenSourceCount": snapshot.tokenSourceCount,
+            "ranges": snapshot.ranges.map { range in
+                [
+                    "range": range.range,
+                    "sessionCount": range.sessionCount,
+                    "toolUseCount": range.toolUseCount,
+                    "tokenTotals": tokenTotalsJSONObject(range.tokenTotals),
+                ] as [String: Any]
+            },
+            "recentBuckets": snapshot.recentBuckets.map { bucket in
+                [
+                    "day": bucket.day,
+                    "agentCount": bucket.agentCount,
+                    "sessionCount": bucket.sessionCount,
+                    "toolUseCount": bucket.toolUseCount,
+                    "tokenTotals": tokenTotalsJSONObject(bucket.tokenTotals),
+                    "activityCount": bucket.activityCount,
+                ] as [String: Any]
+            },
+        ]
+        return try JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys])
     }
 
     func flush() async {
@@ -657,6 +860,28 @@ actor AgentUsageStore {
         if document.seenToolEventIDs.count > 50_000 {
             document.seenToolEventIDs.removeAll(keepingCapacity: true)
         }
+    }
+
+    private nonisolated func didTokenSourceReset(
+        previous: AgentUsageTokenSourceBaseline?,
+        currentFileSize: UInt64?
+    ) -> Bool {
+        guard let previous else { return false }
+        if let previousFileSize = previous.fileSize,
+           let currentFileSize,
+           currentFileSize < previousFileSize {
+            return true
+        }
+        return false
+    }
+
+    private nonisolated func tokenTotalsJSONObject(_ totals: AgentUsageTokenTotals) -> [String: Int] {
+        [
+            "input": totals.input,
+            "output": totals.output,
+            "total": totals.total,
+            "resolvedTotal": totals.resolvedTotal,
+        ]
     }
 
     private nonisolated func agentLabel(provider: SessionProvider, clientInfo: SessionClientInfo) -> String {

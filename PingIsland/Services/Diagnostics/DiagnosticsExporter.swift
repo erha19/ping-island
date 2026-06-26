@@ -820,6 +820,7 @@ actor DiagnosticsExporter {
 
         let sessionSnapshots = await SessionStore.shared.diagnosticsSnapshot()
         let codexThreadSnapshots = await CodexAppServerMonitor.shared.diagnosticsSnapshot()
+        let agentUsageSnapshotData = try await AgentUsageStore.shared.diagnosticsSnapshotData()
         let remoteEndpointSnapshots = await MainActor.run {
             RemoteConnectorManager.shared.diagnosticsSnapshot()
         }
@@ -831,6 +832,10 @@ actor DiagnosticsExporter {
         let codexThreadsURL = rootURL.appendingPathComponent("state/codex-thread-list.json")
         try fileManager.createDirectory(at: codexThreadsURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         try encoder.encode(codexThreadSnapshots).write(to: codexThreadsURL, options: .atomic)
+
+        let agentUsageURL = rootURL.appendingPathComponent("state/agent-usage-summary.json")
+        try fileManager.createDirectory(at: agentUsageURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try agentUsageSnapshotData.write(to: agentUsageURL, options: .atomic)
 
         let remoteEndpointsURL = rootURL.appendingPathComponent("state/remote-endpoints.json")
         try fileManager.createDirectory(at: remoteEndpointsURL.deletingLastPathComponent(), withIntermediateDirectories: true)
