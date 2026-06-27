@@ -394,6 +394,8 @@ struct SessionQuestionForm: View {
                 set: { answers[question.id] = normalizedAnswers(from: $0) }
             ))
             .textFieldStyle(.plain)
+            .foregroundColor(.white)
+            .tint(TerminalColors.blue)
             .focused($focusedQuestionID, equals: question.id)
             .submitLabel(.send)
             .onSubmit {
@@ -406,16 +408,17 @@ struct SessionQuestionForm: View {
                     .strokeBorder(Color.white.opacity(0.14), lineWidth: 1)
             )
         } else {
-            TextField("Answer", text: Binding(
-                get: { answers[question.id]?.first ?? "" },
-                set: { answers[question.id] = normalizedAnswers(from: $0) }
-            ))
-            .textFieldStyle(.plain)
-            .focused($focusedQuestionID, equals: question.id)
-            .submitLabel(.send)
-            .onSubmit {
-                submitCurrentAnswers()
-            }
+            IslandTextField(
+                placeholder: AppLocalization.string("Answer"),
+                text: Binding(
+                    get: { answers[question.id]?.first ?? "" },
+                    set: { answers[question.id] = normalizedAnswers(from: $0) }
+                ),
+                isFocused: focusedQuestionID == question.id,
+                isEditable: isEditable,
+                onFocusChanged: { setFocused($0, for: question) },
+                onSubmit: { submitCurrentAnswers() }
+            )
             .padding(10)
             .disabled(!isEditable)
             .overlay(
@@ -434,16 +437,17 @@ struct SessionQuestionForm: View {
                 .foregroundColor(.white.opacity(0.5))
                 .frame(width: 18)
 
-            TextField("", text: Binding(
-                get: { otherAnswers[question.id] ?? "" },
-                set: { setCustomAnswer($0, for: question) }
-            ), prompt: Text(appLocalized: "Type Something ..."))
-            .textFieldStyle(.plain)
-            .focused($focusedQuestionID, equals: question.id)
-            .submitLabel(.send)
-            .onSubmit {
-                submitCurrentAnswers()
-            }
+            IslandTextField(
+                placeholder: AppLocalization.string("Type Something ..."),
+                text: Binding(
+                    get: { otherAnswers[question.id] ?? "" },
+                    set: { setCustomAnswer($0, for: question) }
+                ),
+                isFocused: isFocused,
+                isEditable: isEditable,
+                onFocusChanged: { setFocused($0, for: question) },
+                onSubmit: { submitCurrentAnswers() }
+            )
         }
         .padding(10)
         .disabled(!isEditable)
@@ -510,6 +514,14 @@ struct SessionQuestionForm: View {
         if !question.allowsMultiple,
            !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             answers[question.id] = []
+        }
+    }
+
+    private func setFocused(_ isFocused: Bool, for question: SessionInterventionQuestion) {
+        if isFocused {
+            focusedQuestionID = question.id
+        } else if focusedQuestionID == question.id {
+            focusedQuestionID = nil
         }
     }
 
