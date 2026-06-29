@@ -61,6 +61,7 @@ public enum HookPayloadMapper {
         let expectsResponse = runtimeConfig.routePromptsToTerminal
             ? false
             : detectExpectsResponse(
+                provider: source,
                 eventType: eventType,
                 payload: payload,
                 clientKind: clientKind,
@@ -462,6 +463,7 @@ public enum HookPayloadMapper {
     }
 
     private static func detectExpectsResponse(
+        provider: AgentProvider,
         eventType: String,
         payload: [String: Any],
         clientKind: String?,
@@ -481,6 +483,7 @@ public enum HookPayloadMapper {
                 return true
             case .question:
                 return shouldSurfaceQuestionIntervention(
+                    provider: provider,
                     eventType: eventType,
                     payload: payload,
                     clientKind: clientKind
@@ -768,6 +771,7 @@ public enum HookPayloadMapper {
 
         if let questions = questionPayloads(from: payload), !questions.isEmpty {
             guard shouldSurfaceQuestionIntervention(
+                provider: provider,
                 eventType: eventType,
                 payload: payload,
                 clientKind: clientKind
@@ -1602,6 +1606,7 @@ public enum HookPayloadMapper {
     }
 
     private static func shouldSurfaceQuestionIntervention(
+        provider: AgentProvider,
         eventType: String,
         payload: [String: Any],
         clientKind: String?
@@ -1621,7 +1626,12 @@ public enum HookPayloadMapper {
         }
 
         if clientKind == nil {
-            return eventType == "PermissionRequest" || eventType == "UserInputRequest"
+            if provider == .claude {
+                return eventType == "PermissionRequest" || eventType == "UserInputRequest"
+            }
+            return eventType == "PreToolUse"
+                || eventType == "PermissionRequest"
+                || eventType == "UserInputRequest"
         }
 
         return eventType == "PreToolUse" || eventType == "UserInputRequest"
