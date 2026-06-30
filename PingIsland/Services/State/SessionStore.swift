@@ -4779,13 +4779,10 @@ actor SessionStore {
                 ?? normalizedClientInfo.bundleIdentifier
         )?.lowercased()
         if profileID == "qoder"
-            || bundleIdentifier == "com.qoder.ide" {
-            return false
-        }
-
-        if profileID == "qoderwork"
+            || profileID == "qoderwork"
+            || bundleIdentifier == "com.qoder.ide"
             || bundleIdentifier == "com.qoder.work" {
-            return true
+            return false
         }
 
         return normalizedTool == "askuserquestion"

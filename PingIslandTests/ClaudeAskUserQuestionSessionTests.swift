@@ -133,7 +133,7 @@ final class ClaudeAskUserQuestionSessionTests: XCTestCase {
         await store.process(.sessionArchived(sessionId: sessionId))
     }
 
-    func testQoderWorkPermissionRequestStaysNotifyOnly() async {
+    func testQoderWorkPermissionRequestQuestionSurfacesIntervention() async {
         let sessionId = "qoderwork-permission-\(UUID().uuidString)"
         let store = SessionStore.shared
 
@@ -146,8 +146,13 @@ final class ClaudeAskUserQuestionSessionTests: XCTestCase {
         await store.process(.hookReceived(makeQoderWorkPermissionRequest(sessionId: sessionId)))
 
         let session = await store.session(for: sessionId)
-        XCTAssertNil(session?.intervention)
-        XCTAssertEqual(session?.phase, .processing)
+        XCTAssertEqual(session?.intervention?.kind, .question)
+        XCTAssertEqual(session?.intervention?.resolvedQuestions.first?.prompt, "先选一个主题")
+        XCTAssertEqual(session?.intervention?.resolvedQuestions.first?.options.map(\.title), ["A 方案", "B 方案"])
+        XCTAssertEqual(session?.intervention?.metadata["responseMode"], "external_only")
+        XCTAssertFalse(session?.intervention?.supportsInlineResponse ?? true)
+        XCTAssertEqual(session?.phase, .waitingForInput)
+        XCTAssertTrue(session?.needsQuestionResponse ?? false)
         XCTAssertFalse(session?.needsApprovalResponse ?? true)
 
         await store.process(.sessionArchived(sessionId: sessionId))

@@ -29,7 +29,7 @@ actor SessionStore {
         session.updatedAt = envelope.sentAt
         session.terminalContext = envelope.terminalContext
         session.metadata.merge(envelope.metadata) { _, new in new }
-        session.intervention = envelope.intervention
+        session.intervention = envelope.expectsResponse ? envelope.intervention : nil
         sessions[envelope.sessionKey] = session
 
         if selectedSessionID == nil {

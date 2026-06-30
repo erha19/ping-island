@@ -82,13 +82,14 @@ struct HookEvent: Sendable {
     let message: String?
     let ingress: SessionIngress
     let bridgeIntervention: SessionIntervention?
+    let bridgeExpectsResponse: Bool?
     let suppressInAppPrompt: Bool
     /// True when Codex fires a PermissionRequest hook with `permission_mode=bypassPermissions`,
     /// meaning Codex has already auto-approved the tool call internally.  Island should
     /// respond to the hook immediately without showing an approval card.
     let codexBypassPermissions: Bool
 
-    init(
+    nonisolated init(
         sessionId: String,
         cwd: String,
         event: String,
@@ -104,6 +105,7 @@ struct HookEvent: Sendable {
         message: String?,
         ingress: SessionIngress = .hookBridge,
         bridgeIntervention: SessionIntervention? = nil,
+        bridgeExpectsResponse: Bool? = nil,
         suppressInAppPrompt: Bool = false,
         codexBypassPermissions: Bool = false
     ) {
@@ -122,6 +124,7 @@ struct HookEvent: Sendable {
         self.message = message
         self.ingress = ingress
         self.bridgeIntervention = bridgeIntervention
+        self.bridgeExpectsResponse = bridgeExpectsResponse
         self.suppressInAppPrompt = suppressInAppPrompt
         self.codexBypassPermissions = codexBypassPermissions
     }
@@ -129,6 +132,11 @@ struct HookEvent: Sendable {
     nonisolated var sessionPhase: SessionPhase {
         if event == "PreCompact" {
             return .compacting
+        }
+
+        if isQoderWorkNonResponsiveToolEvent,
+           status == "waiting_for_approval" {
+            return .processing
         }
 
         switch status {
@@ -151,6 +159,10 @@ struct HookEvent: Sendable {
     }
 
     nonisolated var expectsResponse: Bool {
+        if isQoderWorkNonResponsiveToolEvent {
+            return false
+        }
+
         if isQoderIDENotifyOnlyClient {
             return false
         }
@@ -184,6 +196,29 @@ struct HookEvent: Sendable {
                     && normalizedTool == "exitplanmode"
                     && clientInfo.normalizedForClaudeRouting().profileID == "qoder-cli"
             )
+    }
+
+    nonisolated var isQoderWorkNonResponsiveToolEvent: Bool {
+        guard bridgeExpectsResponse == false else { return false }
+        guard event == "PreToolUse" || event == "PostToolUse" || event == "PermissionRequest" else {
+            return false
+        }
+
+        let normalizedClientInfo = clientInfo.normalizedForClaudeRouting()
+        if normalizedClientInfo.profileID == "qoderwork" {
+            return true
+        }
+
+        return [
+            normalizedClientInfo.terminalBundleIdentifier,
+            normalizedClientInfo.bundleIdentifier,
+            clientInfo.terminalBundleIdentifier,
+            clientInfo.bundleIdentifier
+        ].contains { value in
+            value?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased() == "com.qoder.work"
+        }
     }
 
     private nonisolated var isCodeBuddyCLIAskUserQuestionNotification: Bool {
@@ -236,6 +271,7 @@ extension HookEvent {
             message: message,
             ingress: ingress,
             bridgeIntervention: bridgeIntervention?.withResolvedToolUseId(toolUseId),
+            bridgeExpectsResponse: bridgeExpectsResponse,
             suppressInAppPrompt: suppressInAppPrompt,
             codexBypassPermissions: codexBypassPermissions
         )
@@ -258,6 +294,7 @@ extension HookEvent {
             message: message,
             ingress: ingress,
             bridgeIntervention: bridgeIntervention,
+            bridgeExpectsResponse: bridgeExpectsResponse,
             suppressInAppPrompt: suppressInAppPrompt,
             codexBypassPermissions: codexBypassPermissions
         )
@@ -626,6 +663,7 @@ private extension BridgeEnvelope {
                 fallbackID: metadata["tool_use_id"],
                 metadata: metadata
             ),
+            bridgeExpectsResponse: expectsResponse,
             suppressInAppPrompt: (metadata["suppress_in_app_prompt"] == "true"),
             codexBypassPermissions: (
                 eventType == "PermissionRequest"

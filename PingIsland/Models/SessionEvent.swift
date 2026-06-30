@@ -327,7 +327,7 @@ extension HookEvent {
     }
 
     nonisolated var intervention: SessionIntervention? {
-        if suppressInAppPrompt {
+        if suppressInAppPrompt || isQoderWorkNonResponsiveToolEvent {
             return nil
         }
         if let bridgeIntervention,
@@ -596,6 +596,11 @@ extension HookEvent {
 
         if isAskUserQuestionRequest {
             return .waitingForInput
+        }
+
+        if isQoderWorkNonResponsiveToolEvent,
+           status == "waiting_for_approval" {
+            return .processing
         }
 
         // Permission request creates waitingForApproval state

@@ -2,6 +2,54 @@ import XCTest
 @testable import Ping_Island
 
 final class QoderWorkHookEventTimingTests: XCTestCase {
+    func testQoderWorkNonResponsiveToolUseDoesNotSurfaceApproval() {
+        let bridgeIntervention = SessionIntervention(
+            id: "call_todo",
+            kind: .approval,
+            title: "QoderWork needs approval",
+            message: "TodoWrite",
+            options: [],
+            questions: [],
+            supportsSessionScope: false,
+            metadata: ["tool_name": "TodoWrite"]
+        )
+        let event = HookEvent(
+            sessionId: "qoderwork-session",
+            cwd: "/tmp/project",
+            event: "PreToolUse",
+            status: "waiting_for_approval",
+            provider: .claude,
+            clientInfo: SessionClientInfo(
+                kind: .qoder,
+                profileID: "qoderwork",
+                name: "QoderWork",
+                bundleIdentifier: "com.qoder.work",
+                terminalBundleIdentifier: "com.qoder.work"
+            ),
+            pid: nil,
+            tty: nil,
+            tool: "TodoWrite",
+            toolInput: [
+                "todos": AnyCodable([
+                    [
+                        "description": "Search recent AI news",
+                        "status": "in_progress"
+                    ]
+                ])
+            ],
+            toolUseId: "call_todo",
+            notificationType: nil,
+            message: nil,
+            bridgeIntervention: bridgeIntervention,
+            bridgeExpectsResponse: false
+        )
+
+        XCTAssertFalse(event.expectsResponse)
+        XCTAssertNil(event.intervention)
+        XCTAssertEqual(event.determinePhase(), .processing)
+        XCTAssertEqual(event.sessionPhase, .processing)
+    }
+
     func testQoderWorkPreToolUseQuestionSurfacesIntervention() {
         let event = HookEvent(
             sessionId: "qoderwork-session",
