@@ -770,15 +770,13 @@ public enum HookPayloadMapper {
             )
         }
 
-        if let questions = questionPayloads(from: payload), !questions.isEmpty {
-            guard shouldSurfaceQuestionIntervention(
+        if let questions = questionPayloads(from: payload), !questions.isEmpty,
+           shouldSurfaceQuestionIntervention(
                 provider: provider,
                 eventType: eventType,
                 payload: payload,
                 clientKind: clientKind
-            ) else {
-                return nil
-            }
+           ) {
             if clientKind == "qoder",
                isQoderQuestionToolEvent(eventType: eventType, payload: payload) {
                 return nil
@@ -1628,10 +1626,11 @@ public enum HookPayloadMapper {
 
         if clientKind == nil {
             if provider == .claude {
-                return eventType == "PermissionRequest" || eventType == "UserInputRequest"
+                return eventType == "UserInputRequest"
+                    || isQoderWorkPermissionQuestionEvent(eventType: eventType, payload: payload)
             }
-            return eventType == "PreToolUse"
-                || eventType == "PermissionRequest"
+            return isQoderWorkPreToolQuestionEvent(eventType: eventType, payload: payload)
+                || isQoderWorkPermissionQuestionEvent(eventType: eventType, payload: payload)
                 || eventType == "UserInputRequest"
         }
 

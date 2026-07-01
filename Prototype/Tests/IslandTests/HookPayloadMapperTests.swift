@@ -2153,6 +2153,34 @@ func claudeCodePermissionRequestAskUserQuestionSurfacesAnswerableQuestion() thro
 }
 
 @Test
+func claudeCodePermissionRequestWithNonQuestionToolQuestionsStaysApproval() throws {
+    let payload = """
+    {
+      "hook_event_name": "PermissionRequest",
+      "tool_name": "SurveyTool",
+      "tool_input": {
+        "questions": [
+          {"id": "q1", "question": "Internal tool argument", "options": [{"label": "A"}, {"label": "B"}]}
+        ]
+      },
+      "reason": "SurveyTool needs approval",
+      "session_id": "claude-approval"
+    }
+    """.data(using: .utf8)!
+
+    let envelope = HookPayloadMapper.makeEnvelope(
+        source: .claude,
+        arguments: ["island-bridge", "--source", "claude"],
+        environment: ["PWD": "/tmp/demo"],
+        stdinData: payload
+    )
+
+    #expect(envelope.eventType == "PermissionRequest")
+    #expect(envelope.expectsResponse)
+    #expect(envelope.intervention?.kind == .approval)
+}
+
+@Test
 func codexPreToolUseAskUserQuestionStillSurfacesQuestion() throws {
     let payload = """
     {
