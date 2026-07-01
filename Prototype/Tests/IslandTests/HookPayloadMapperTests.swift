@@ -2098,6 +2098,116 @@ func claudePostToolUseResolvedQuestionDoesNotKeepSocketOpen() throws {
 }
 
 @Test
+func claudeCodePreToolUseAskUserQuestionIsNonBlocking() throws {
+    let payload = """
+    {
+      "hook_event_name": "PreToolUse",
+      "tool_name": "AskUserQuestion",
+      "tool_input": {
+        "questions": [
+          {"id": "q1", "question": "Pick one", "options": [{"label": "A"}, {"label": "B"}]}
+        ]
+      },
+      "session_id": "claude-aq"
+    }
+    """.data(using: .utf8)!
+
+    let envelope = HookPayloadMapper.makeEnvelope(
+        source: .claude,
+        arguments: ["island-bridge", "--source", "claude"],
+        environment: ["PWD": "/tmp/demo"],
+        stdinData: payload
+    )
+
+    #expect(envelope.eventType == "PreToolUse")
+    #expect(envelope.status?.kind == .runningTool)
+    #expect(envelope.expectsResponse == false)
+    #expect(envelope.intervention == nil)
+}
+
+@Test
+func claudeCodePermissionRequestAskUserQuestionSurfacesAnswerableQuestion() throws {
+    let payload = """
+    {
+      "hook_event_name": "PermissionRequest",
+      "tool_name": "AskUserQuestion",
+      "tool_input": {
+        "questions": [
+          {"id": "q1", "header": "Scope", "question": "Pick one", "options": [{"label": "A"}, {"label": "B"}]}
+        ]
+      },
+      "session_id": "claude-aq"
+    }
+    """.data(using: .utf8)!
+
+    let envelope = HookPayloadMapper.makeEnvelope(
+        source: .claude,
+        arguments: ["island-bridge", "--source", "claude"],
+        environment: ["PWD": "/tmp/demo"],
+        stdinData: payload
+    )
+
+    #expect(envelope.eventType == "PermissionRequest")
+    #expect(envelope.expectsResponse)
+    #expect(envelope.intervention?.kind == .question)
+}
+
+@Test
+func claudeCodePermissionRequestWithNonQuestionToolQuestionsStaysApproval() throws {
+    let payload = """
+    {
+      "hook_event_name": "PermissionRequest",
+      "tool_name": "SurveyTool",
+      "tool_input": {
+        "questions": [
+          {"id": "q1", "question": "Internal tool argument", "options": [{"label": "A"}, {"label": "B"}]}
+        ]
+      },
+      "reason": "SurveyTool needs approval",
+      "session_id": "claude-approval"
+    }
+    """.data(using: .utf8)!
+
+    let envelope = HookPayloadMapper.makeEnvelope(
+        source: .claude,
+        arguments: ["island-bridge", "--source", "claude"],
+        environment: ["PWD": "/tmp/demo"],
+        stdinData: payload
+    )
+
+    #expect(envelope.eventType == "PermissionRequest")
+    #expect(envelope.expectsResponse)
+    #expect(envelope.intervention?.kind == .approval)
+}
+
+@Test
+func codexPreToolUseAskUserQuestionStillSurfacesQuestion() throws {
+    let payload = """
+    {
+      "hook_event_name": "PreToolUse",
+      "tool_name": "AskUserQuestion",
+      "tool_input": {
+        "questions": [
+          {"id": "q1", "question": "Pick one", "options": [{"label": "A"}, {"label": "B"}]}
+        ]
+      },
+      "session_id": "codex-aq"
+    }
+    """.data(using: .utf8)!
+
+    let envelope = HookPayloadMapper.makeEnvelope(
+        source: .codex,
+        arguments: ["island-bridge", "--source", "codex"],
+        environment: ["PWD": "/tmp/demo"],
+        stdinData: payload
+    )
+
+    #expect(envelope.eventType == "PreToolUse")
+    #expect(envelope.expectsResponse)
+    #expect(envelope.intervention?.kind == .question)
+}
+
+@Test
 func qoderWorkPermissionRequestQuestionStillMapsToQuestionIntervention() throws {
     let payload = """
     {

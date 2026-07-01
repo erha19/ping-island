@@ -61,6 +61,7 @@ public enum HookPayloadMapper {
         let expectsResponse = runtimeConfig.routePromptsToTerminal
             ? false
             : detectExpectsResponse(
+                provider: source,
                 eventType: eventType,
                 payload: payload,
                 clientKind: clientKind,
@@ -399,7 +400,8 @@ public enum HookPayloadMapper {
         if isQoderWorkNotifyOnlyPermissionRequest(eventType: eventType, payload: payload, clientKind: clientKind) {
             return SessionStatus(kind: .active)
         }
-        if isQoderQuestionToolEvent(eventType: eventType, payload: payload) {
+        if clientKind != nil,
+           isQoderQuestionToolEvent(eventType: eventType, payload: payload) {
             return SessionStatus(kind: .waitingForInput)
         }
         if clientKind == "codebuddy-cli",
@@ -462,6 +464,7 @@ public enum HookPayloadMapper {
     }
 
     private static func detectExpectsResponse(
+        provider: AgentProvider,
         eventType: String,
         payload: [String: Any],
         clientKind: String?,
@@ -481,6 +484,7 @@ public enum HookPayloadMapper {
                 return true
             case .question:
                 return shouldSurfaceQuestionIntervention(
+                    provider: provider,
                     eventType: eventType,
                     payload: payload,
                     clientKind: clientKind
@@ -766,14 +770,24 @@ public enum HookPayloadMapper {
             )
         }
 
-        if let questions = questionPayloads(from: payload), !questions.isEmpty {
-            guard shouldSurfaceQuestionIntervention(
+        if questionPayloads(from: payload)?.isEmpty == false,
+           questionToolNames.contains(normalizedToolName(from: payload) ?? ""),
+           !shouldSurfaceQuestionIntervention(
+                provider: provider,
                 eventType: eventType,
                 payload: payload,
                 clientKind: clientKind
-            ) else {
-                return nil
-            }
+           ) {
+            return nil
+        }
+
+        if let questions = questionPayloads(from: payload), !questions.isEmpty,
+           shouldSurfaceQuestionIntervention(
+                provider: provider,
+                eventType: eventType,
+                payload: payload,
+                clientKind: clientKind
+           ) {
             if clientKind == "qoder",
                isQoderQuestionToolEvent(eventType: eventType, payload: payload) {
                 return nil
@@ -1602,6 +1616,7 @@ public enum HookPayloadMapper {
     }
 
     private static func shouldSurfaceQuestionIntervention(
+        provider: AgentProvider,
         eventType: String,
         payload: [String: Any],
         clientKind: String?
@@ -1618,6 +1633,16 @@ public enum HookPayloadMapper {
         if clientKind == "codebuddy-cli" {
             return isQoderWorkPreToolQuestionEvent(eventType: eventType, payload: payload)
                 || isQoderWorkPermissionQuestionEvent(eventType: eventType, payload: payload)
+        }
+
+        if clientKind == nil {
+            if provider == .claude {
+                return eventType == "UserInputRequest"
+                    || isQoderWorkPermissionQuestionEvent(eventType: eventType, payload: payload)
+            }
+            return isQoderWorkPreToolQuestionEvent(eventType: eventType, payload: payload)
+                || isQoderWorkPermissionQuestionEvent(eventType: eventType, payload: payload)
+                || eventType == "UserInputRequest"
         }
 
         return eventType == "PreToolUse" || eventType == "UserInputRequest"

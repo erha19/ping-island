@@ -2,7 +2,7 @@ import XCTest
 @testable import Ping_Island
 
 final class ClaudeAskUserQuestionSessionTests: XCTestCase {
-    func testPreToolUseQuestionImmediatelyEntersWaitingForInput() async {
+    func testPermissionRequestQuestionImmediatelyEntersWaitingForInput() async {
         let sessionId = "claude-question-\(UUID().uuidString)"
         let store = SessionStore.shared
 
@@ -15,6 +15,13 @@ final class ClaudeAskUserQuestionSessionTests: XCTestCase {
         XCTAssertTrue(session?.intervention?.resolvedQuestions.first?.allowsOther ?? false)
 
         await store.process(.sessionArchived(sessionId: sessionId))
+    }
+
+    func testPreToolUseQuestionDoesNotBlockPlainClaudeCode() {
+        let event = makeClaudePreToolUseQuestionEvent(sessionId: "claude-pretool-\(UUID().uuidString)")
+
+        XCTAssertFalse(event.expectsResponse)
+        XCTAssertFalse(event.isAskUserQuestionRequest)
     }
 
     func testDuplicatePermissionRequestKeepsClaudeQuestionInWaitingForInput() async {
@@ -494,8 +501,8 @@ final class ClaudeAskUserQuestionSessionTests: XCTestCase {
         HookEvent(
             sessionId: sessionId,
             cwd: "/tmp/project",
-            event: "PreToolUse",
-            status: "waiting_for_input",
+            event: "PermissionRequest",
+            status: "waiting_for_approval",
             provider: .claude,
             clientInfo: SessionClientInfo(
                 kind: .claudeCode,
@@ -520,6 +527,41 @@ final class ClaudeAskUserQuestionSessionTests: XCTestCase {
                 ])
             ],
             toolUseId: toolUseId ?? "toolu_\(sessionId)",
+            notificationType: nil,
+            message: nil
+        )
+    }
+
+    private func makeClaudePreToolUseQuestionEvent(sessionId: String) -> HookEvent {
+        HookEvent(
+            sessionId: sessionId,
+            cwd: "/tmp/project",
+            event: "PreToolUse",
+            status: "waiting_for_input",
+            provider: .claude,
+            clientInfo: SessionClientInfo(
+                kind: .claudeCode,
+                profileID: "claude_code",
+                name: "Claude Code",
+                bundleIdentifier: "com.anthropic.claudecode"
+            ),
+            pid: nil,
+            tty: nil,
+            tool: "AskUserQuestion",
+            toolInput: [
+                "questions": AnyCodable([
+                    [
+                        "id": "project",
+                        "header": "方向",
+                        "question": "你想先处理哪个模块？",
+                        "options": [
+                            ["label": "会话层"],
+                            ["label": "UI 层"]
+                        ]
+                    ]
+                ])
+            ],
+            toolUseId: "toolu_\(sessionId)",
             notificationType: nil,
             message: nil
         )

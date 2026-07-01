@@ -281,6 +281,12 @@ extension HookEvent {
                 && !(questionPayloads?.isEmpty ?? true)
         }
 
+        if clientInfo.isPlainClaudeCodeRouting, ingress != .nativeRuntime {
+            return event == "PermissionRequest"
+                && Self.questionToolNames.contains(normalizedToolNameForIntervention ?? "")
+                && !(questionPayloads?.isEmpty ?? true)
+        }
+
         return event == "PreToolUse"
             && Self.questionToolNames.contains(normalizedToolNameForIntervention ?? "")
             && !(questionPayloads?.isEmpty ?? true)

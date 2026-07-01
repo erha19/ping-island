@@ -63,6 +63,7 @@ actor SessionStore {
     private var codexRolloutParsesInFlight: Set<String> = []
     private var codexSessionAliases: [String: String] = [:]
     private var ignoredCodexAuxiliaryHookSessionIds: Set<String> = []
+    private var recentlyResolvedClaudeQuestionKeys: [String: Date] = [:]
 
     /// Sync debounce interval (100ms)
     private let syncDebounceNs: UInt64 = 100_000_000
@@ -82,6 +83,7 @@ actor SessionStore {
     private let codeBuddyCLIQuestionPollIntervalNs: UInt64 = 150_000_000
     private let codeBuddyCLIQuestionPollTimeoutNs: UInt64 = 5_000_000_000
     private let codeBuddyCLIQuestionQuietPollIntervalNs: UInt64 = 1_000_000_000
+    private let recentlyResolvedClaudeQuestionTTL: TimeInterval = 30
 
     /// Persisted session associations used to restore client routing across relaunches.
     private var persistedAssociations: [String: PersistedSessionAssociation] = [:]
@@ -428,6 +430,8 @@ actor SessionStore {
         }
 
         let tree = (event.pid != nil || event.tty != nil) ? ProcessTreeBuilder.shared.buildTree() : [:]
+        let hadActiveClaudeQuestion = session.intervention?.kind == .question
+            && session.clientInfo.isPlainClaudeCodeRouting
 
         session.provider = event.provider
         session.clientInfo = session.clientInfo.merged(with: event.clientInfo)
@@ -513,7 +517,8 @@ actor SessionStore {
             cancelOrphanedPendingHookResponse(
                 previousPendingHookResponse,
                 in: &session,
-                reason: event.event
+                reason: event.event,
+                preserveClaudeQuestion: false
             )
             sessions[sessionId] = session
             syncLinkedQoderChildSessions(for: session)
@@ -569,11 +574,13 @@ actor SessionStore {
             for: event,
             session: session
         )
-        let shouldClearCurrentIntervention = shouldClearIntervention(
-            for: event,
-            newPhase: newPhase,
-            currentIntervention: session.intervention
-        )
+        let shouldClearCurrentIntervention = (hadActiveClaudeQuestion && event.event == "Notification")
+            ? false
+            : shouldClearIntervention(
+                for: event,
+                newPhase: newPhase,
+                currentIntervention: session.intervention
+            )
         let hasIncomingIntervention: Bool
         if case .some = intervention {
             hasIncomingIntervention = true
@@ -679,7 +686,8 @@ actor SessionStore {
         cancelOrphanedPendingHookResponse(
             previousPendingHookResponse,
             in: &session,
-            reason: event.event
+            reason: event.event,
+            preserveClaudeQuestion: hadActiveClaudeQuestion
         )
 
         sessions[sessionId] = session
@@ -1313,10 +1321,15 @@ actor SessionStore {
     private func cancelOrphanedPendingHookResponse(
         _ previous: PendingHookResponse?,
         in session: inout SessionState,
-        reason: String
+        reason: String,
+        preserveClaudeQuestion: Bool
     ) {
         guard let previous,
               !isPendingHookResponseVisible(previous, in: session) else {
+            return
+        }
+
+        if reason == "Notification", preserveClaudeQuestion {
             return
         }
 
@@ -1782,6 +1795,9 @@ actor SessionStore {
         submittedAnswers: [String: [String]]?
     ) async {
         guard var session = sessions[sessionId] else { return }
+        if let intervention = session.intervention {
+            recordRecentlyResolvedClaudeQuestion(intervention, in: session)
+        }
         if let intervention = session.intervention,
            shouldAwaitExternalContinuationAfterResolving(intervention, in: session) {
             removePendingIntervention(intervention, from: &session)
@@ -1810,6 +1826,57 @@ actor SessionStore {
             return true
         }
         return intervention.id.hasPrefix("qoder-question-")
+    }
+
+    private func recordRecentlyResolvedClaudeQuestion(
+        _ intervention: SessionIntervention,
+        in session: SessionState
+    ) {
+        guard intervention.kind == .question,
+              intervention.supportsInlineResponse,
+              session.clientInfo.isPlainClaudeCodeRouting,
+              let key = recentlyResolvedClaudeQuestionKey(
+                sessionId: session.sessionId,
+                toolUseId: pendingHookResponseToolUseId(for: intervention)
+              ) else {
+            return
+        }
+
+        pruneRecentlyResolvedClaudeQuestions()
+        recentlyResolvedClaudeQuestionKeys[key] = Date()
+    }
+
+    private func shouldIgnoreRecentlyResolvedClaudeQuestion(_ event: HookEvent) -> Bool {
+        guard event.provider == .claude,
+              event.event == "PermissionRequest",
+              event.clientInfo.isPlainClaudeCodeRouting,
+              event.isAskUserQuestionRequest,
+              let key = recentlyResolvedClaudeQuestionKey(
+                sessionId: event.sessionId,
+                toolUseId: event.toolUseId
+              ) else {
+            return false
+        }
+
+        pruneRecentlyResolvedClaudeQuestions()
+        return recentlyResolvedClaudeQuestionKeys[key] != nil
+    }
+
+    private nonisolated func recentlyResolvedClaudeQuestionKey(
+        sessionId: String,
+        toolUseId: String?
+    ) -> String? {
+        guard let toolUseId = toolUseId?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !toolUseId.isEmpty else {
+            return nil
+        }
+        return "\(sessionId)|\(toolUseId)"
+    }
+
+    private func pruneRecentlyResolvedClaudeQuestions(now: Date = Date()) {
+        recentlyResolvedClaudeQuestionKeys = recentlyResolvedClaudeQuestionKeys.filter { _, resolvedAt in
+            now.timeIntervalSince(resolvedAt) <= recentlyResolvedClaudeQuestionTTL
+        }
     }
 
     // MARK: - File Update Processing
@@ -4764,6 +4831,10 @@ actor SessionStore {
 
         let normalizedClientInfo = event.clientInfo.normalizedForClaudeRouting()
         let profileID = normalizedClientInfo.profileID?.lowercased()
+        if normalizedClientInfo.isPlainClaudeCodeRouting {
+            return shouldIgnoreRecentlyResolvedClaudeQuestion(event)
+        }
+
         if profileID == "qoder-cli"
             || profileID == "codebuddy-cli"
             || profileID == "qwen-code"
