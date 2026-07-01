@@ -400,7 +400,8 @@ public enum HookPayloadMapper {
         if isQoderWorkNotifyOnlyPermissionRequest(eventType: eventType, payload: payload, clientKind: clientKind) {
             return SessionStatus(kind: .active)
         }
-        if isQoderQuestionToolEvent(eventType: eventType, payload: payload) {
+        if clientKind != nil,
+           isQoderQuestionToolEvent(eventType: eventType, payload: payload) {
             return SessionStatus(kind: .waitingForInput)
         }
         if clientKind == "codebuddy-cli",

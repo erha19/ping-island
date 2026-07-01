@@ -2120,6 +2120,7 @@ func claudeCodePreToolUseAskUserQuestionIsNonBlocking() throws {
     )
 
     #expect(envelope.eventType == "PreToolUse")
+    #expect(envelope.status?.kind == .runningTool)
     #expect(envelope.expectsResponse == false)
     #expect(envelope.intervention == nil)
 }
