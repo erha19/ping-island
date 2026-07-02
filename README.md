@@ -170,6 +170,8 @@ Ping Island focuses on the moments that actually interrupt coding flow, then kee
 | CodeBuddy / WorkBuddy | Managed hook profiles plus optional VS Code-compatible focus extension | App windows, terminal, and supported IDE extension paths | Claude-family session tracking, client-aware jump-back, follow-up visibility |
 | GitHub Copilot | Copilot hook protocol | Compatible terminal hosts | Copilot CLI / agent hook event status |
 
+Hermes plugins that provide specialized context, such as [Hermes Tweet](https://github.com/Xquik-dev/hermes-tweet) for X/Twitter account, post, and trend context, stay inside the normal Hermes CLI session. Ping Island tracks that enclosing Hermes session through the same official plugin-hook ingress.
+
 ## Testing
 
 The fastest full-repo regression path is:
