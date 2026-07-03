@@ -161,6 +161,7 @@ struct ManagedHookClientProfile: Identifiable, Sendable {
     let bridgeSource: String
     let bridgeExtraArguments: [String]
     let defaultEnabled: Bool
+    let autoInstallOnFirstRun: Bool
     let brand: SessionClientBrand
     let events: [HookInstallEventDescriptor]
 
@@ -220,6 +221,7 @@ struct ManagedHookClientProfile: Identifiable, Sendable {
         bridgeSource: String,
         bridgeExtraArguments: [String],
         defaultEnabled: Bool,
+        autoInstallOnFirstRun: Bool = true,
         brand: SessionClientBrand,
         events: [HookInstallEventDescriptor]
     ) {
@@ -238,6 +240,7 @@ struct ManagedHookClientProfile: Identifiable, Sendable {
         self.bridgeSource = bridgeSource
         self.bridgeExtraArguments = bridgeExtraArguments
         self.defaultEnabled = defaultEnabled
+        self.autoInstallOnFirstRun = autoInstallOnFirstRun
         self.brand = brand
         self.events = events
     }
@@ -587,6 +590,7 @@ enum ClientProfileRegistry {
             bridgeSource: "codex",
             bridgeExtraArguments: [],
             defaultEnabled: true,
+            autoInstallOnFirstRun: false,
             brand: .codex,
             events: [
                 HookInstallEventDescriptor(name: "SessionStart", templates: [.matcher("*")]),
@@ -726,6 +730,7 @@ enum ClientProfileRegistry {
                 "--thread-source", "openclaw-hooks"
             ],
             defaultEnabled: false,
+            autoInstallOnFirstRun: false,
             brand: .neutral,
             events: [
                 HookInstallEventDescriptor(name: "command:new", templates: []),
@@ -867,6 +872,7 @@ enum ClientProfileRegistry {
             bridgeSource: "claude",
             bridgeExtraArguments: ["--client-kind", "qoder"],
             defaultEnabled: true,
+            autoInstallOnFirstRun: false,
             brand: .qoder,
             events: [
                 HookInstallEventDescriptor(name: "UserPromptSubmit", templates: [.plain]),
@@ -923,6 +929,7 @@ enum ClientProfileRegistry {
                 "--client-name", "QoderWork"
             ],
             defaultEnabled: true,
+            autoInstallOnFirstRun: false,
             brand: .qoder,
             events: [
                 HookInstallEventDescriptor(name: "UserPromptSubmit", templates: [.plain]),

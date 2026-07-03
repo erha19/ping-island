@@ -406,7 +406,7 @@ struct HookInstaller {
     private static var defaultPreferredTargets: Set<String> {
         Set(
             ClientProfileRegistry.managedHookProfiles
-                .filter { $0.defaultEnabled && canManage($0) }
+                .filter { $0.defaultEnabled && $0.autoInstallOnFirstRun && canManage($0) }
                 .map(\.id)
         )
     }
@@ -470,11 +470,13 @@ struct HookInstaller {
 #endif
     }
 
-    /// Run the default first-run install for every defaultEnabled profile.
+    /// Run the default first-run install for every auto-installable profile.
     static func performFirstRunDefaultInstall() {
         let qoderCLISupportsClaudeHooks = qoderCLIUsesClaudeCompatibleHooks()
         installBridgeLauncherIfNeeded()
-        for profile in ClientProfileRegistry.managedHookProfiles where profile.defaultEnabled {
+        for profile in ClientProfileRegistry.managedHookProfiles
+            where profile.defaultEnabled && profile.autoInstallOnFirstRun
+        {
             let canManageProfile = canManage(profile)
                 || (profile.id == "qoder-cli-hooks" && qoderCLISupportsClaudeHooks)
             guard canManageProfile else { continue }
@@ -653,7 +655,7 @@ struct HookInstaller {
     static func defaultEnabledManageableProfiles() -> [ManagedHookClientProfile] {
         let qoderCLISupportsClaudeHooks = qoderCLIUsesClaudeCompatibleHooks()
         return ClientProfileRegistry.managedHookProfiles.filter { profile in
-            guard profile.defaultEnabled else { return false }
+            guard profile.defaultEnabled && profile.autoInstallOnFirstRun else { return false }
             return canManage(profile)
                 || (profile.id == "qoder-cli-hooks" && qoderCLISupportsClaudeHooks)
         }
@@ -1116,12 +1118,16 @@ struct HookInstaller {
             UserDefaults.standard.set(true, forKey: qoderWorkMigrationDefaultsKey)
         }
 
-        return targets.isEmpty ? [] : targets
+        return targets
     }
 
     private static func persistPreferredTargets(_ targets: Set<String>) {
         let values = targets.sorted()
         UserDefaults.standard.set(values, forKey: preferredTargetsDefaultsKey)
+    }
+
+    static func clearPreferredTargets() {
+        UserDefaults.standard.set([], forKey: preferredTargetsDefaultsKey)
     }
 
     private static func installationTargets(for profile: ManagedHookClientProfile) -> [URL] {

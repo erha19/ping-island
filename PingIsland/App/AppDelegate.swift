@@ -125,16 +125,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 #endif
             case .customize:
 #if APP_STORE
+                HookInstaller.clearPreferredTargets()
                 AppSettings.hookInstallOnboardingPending = true
                 self.shouldRunHookWalkthroughAfterOnboarding = false
                 SettingsWindowController.shared.present(category: .integration)
 #else
-                HookInstaller.performFirstRunDefaultInstall()
+                HookInstaller.clearPreferredTargets()
                 AppSettings.hookInstallOnboardingPending = false
                 self.shouldRunHookWalkthroughAfterOnboarding = false
                 SettingsWindowController.shared.present()
 #endif
             case .skip:
+                HookInstaller.clearPreferredTargets()
                 AppSettings.hookInstallOnboardingPending = false
                 self.startHookWalkthroughAfterOnboardingIfNeeded()
             }
