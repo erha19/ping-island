@@ -181,6 +181,7 @@ struct ManagedHookClientProfile: Identifiable, Sendable {
         bridgeSource: String,
         bridgeExtraArguments: [String],
         defaultEnabled: Bool,
+        autoInstallOnFirstRun: Bool = true,
         brand: SessionClientBrand,
         events: [HookInstallEventDescriptor]
     ) {
@@ -200,6 +201,7 @@ struct ManagedHookClientProfile: Identifiable, Sendable {
             bridgeSource: bridgeSource,
             bridgeExtraArguments: bridgeExtraArguments,
             defaultEnabled: defaultEnabled,
+            autoInstallOnFirstRun: autoInstallOnFirstRun,
             brand: brand,
             events: events
         )
