@@ -163,6 +163,10 @@ struct HookEvent: Sendable {
             return false
         }
 
+        if isQoderCLIAnsweredQuestionPermissionRequest {
+            return true
+        }
+
         if isQoderWorkNotifyOnlyPermissionRequest {
             return false
         }
@@ -266,6 +270,14 @@ struct HookEvent: Sendable {
             || normalizedMessage.contains("askfollowupquestion")
             || normalizedMessage.contains("ask followup question")
             || normalizedMessage.contains("ask_followup_question")
+    }
+
+    private nonisolated var isQoderCLIAnsweredQuestionPermissionRequest: Bool {
+        event == "PermissionRequest"
+            && clientInfo.profileID?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased() == "qoder-cli"
+            && isAnsweredAskUserQuestionEvent
     }
 
     private nonisolated var isQoderIDENotifyOnlyClient: Bool {

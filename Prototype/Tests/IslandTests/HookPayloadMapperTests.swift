@@ -1279,6 +1279,56 @@ func qoderCLIHooksExecutedInsideQoderIDEStayNotifyOnly() throws {
 }
 
 @Test
+func qoderCLIAnsweredPermissionRequestKeepsBridgeResponseOpenForReplay() throws {
+    let payload = """
+    {
+      "hook_event_name": "PermissionRequest",
+      "session_id": "qoder-cli-answered",
+      "tool_name": "AskUserQuestion",
+      "tool_input": {
+        "questions": [
+          {
+            "header": "Task type",
+            "question": "What would you like to work on today?",
+            "options": [
+              {"label": "Write new code"},
+              {"label": "Debug or fix a bug"}
+            ]
+          }
+        ],
+        "answers": {
+          "What would you like to work on today?": "Write new code"
+        }
+      }
+    }
+    """.data(using: .utf8)!
+
+    let envelope = HookPayloadMapper.makeEnvelope(
+        source: .claude,
+        arguments: [
+            "island-bridge",
+            "--source", "claude",
+            "--client-kind", "qoder-cli",
+            "--client-name", "Qoder CLI",
+            "--client-origin", "cli",
+            "--client-originator", "Qoder"
+        ],
+        environment: [
+            "TERM_PROGRAM": "vscode",
+            "__CFBundleIdentifier": "com.qoder.ide",
+            "PWD": "/tmp/demo"
+        ],
+        stdinData: payload
+    )
+
+    #expect(envelope.eventType == "PermissionRequest")
+    #expect(envelope.status?.kind == .active)
+    #expect(envelope.expectsResponse == true)
+    #expect(envelope.intervention == nil)
+    #expect(HookPayloadMapper.shouldDeliverEnvelope(envelope))
+}
+
+@Test
 func claudeHooksExecutedInsideQoderIDETerminalKeepClaudeApprovalOptions() throws {
     let payload = """
     {

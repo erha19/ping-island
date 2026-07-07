@@ -38,6 +38,9 @@ public enum HookPayloadMapper {
             // this event. Keeps the envelope flowing for status updates only.
             metadata["suppress_in_app_prompt"] = "true"
         }
+        let explicitClientKind = metadata["client_kind"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
         let clientKind = normalizedClientKind(from: metadata)
         let detectedIntervention = detectIntervention(
             provider: source,
@@ -65,6 +68,7 @@ public enum HookPayloadMapper {
                 eventType: eventType,
                 payload: payload,
                 clientKind: clientKind,
+                explicitClientKind: explicitClientKind,
                 intervention: intervention
             )
 
@@ -468,6 +472,7 @@ public enum HookPayloadMapper {
         eventType: String,
         payload: [String: Any],
         clientKind: String?,
+        explicitClientKind: String?,
         intervention: InterventionRequest?
     ) -> Bool {
         if isGeminiHookClient(clientKind) {
@@ -475,7 +480,11 @@ public enum HookPayloadMapper {
         }
 
         if hasAnsweredQuestionPayload(payload) {
-            return false
+            return isQoderCLIAnsweredQuestionPermissionRequest(
+                eventType: eventType,
+                clientKind: clientKind,
+                explicitClientKind: explicitClientKind
+            )
         }
 
         if let intervention {
@@ -1556,6 +1565,15 @@ public enum HookPayloadMapper {
             return !answers.isEmpty
         }
         return false
+    }
+
+    private static func isQoderCLIAnsweredQuestionPermissionRequest(
+        eventType: String,
+        clientKind: String?,
+        explicitClientKind: String?
+    ) -> Bool {
+        eventType == "PermissionRequest"
+            && (clientKind == "qoder-cli" || explicitClientKind == "qoder-cli")
     }
 
     private static func answeredQuestionStatus(eventType: String) -> SessionStatus {

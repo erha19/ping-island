@@ -223,6 +223,97 @@ final class RecentInterventionResponseStoreTests: XCTestCase {
         XCTAssertEqual(replay?.updatedInput?["answers"]?.value as? [String: String], ["project": "会话层"])
     }
 
+    func testQoderCLIAnswerCanReplayToAnsweredPermissionRequestInsideQoderIDE() {
+        var store = RecentInterventionResponseStore(ttl: 30)
+        let clientInfo = SessionClientInfo(
+            kind: .qoder,
+            profileID: "qoder-cli",
+            name: "Qoder CLI",
+            origin: "cli",
+            terminalBundleIdentifier: "com.qoder.ide"
+        )
+
+        let questionEvent = HookEvent(
+            sessionId: "qoder-cli-session",
+            cwd: "/tmp/project",
+            event: "PreToolUse",
+            status: "waiting_for_input",
+            provider: .claude,
+            clientInfo: clientInfo,
+            pid: nil,
+            tty: nil,
+            tool: "AskUserQuestion",
+            toolInput: [
+                "questions": AnyCodable([
+                    [
+                        "header": "Task type",
+                        "question": "What would you like to work on today?",
+                        "options": [
+                            ["label": "Write new code"],
+                            ["label": "Debug or fix a bug"]
+                        ]
+                    ]
+                ])
+            ],
+            toolUseId: "call_123",
+            notificationType: nil,
+            message: nil
+        )
+
+        let answeredPermissionEvent = HookEvent(
+            sessionId: "qoder-cli-session",
+            cwd: "/tmp/project",
+            event: "PermissionRequest",
+            status: "processing",
+            provider: .claude,
+            clientInfo: clientInfo,
+            pid: nil,
+            tty: nil,
+            tool: "AskUserQuestion",
+            toolInput: [
+                "questions": AnyCodable([
+                    [
+                        "header": "Task type",
+                        "question": "What would you like to work on today?",
+                        "options": [
+                            ["label": "Write new code"],
+                            ["label": "Debug or fix a bug"]
+                        ]
+                    ]
+                ]),
+                "answers": AnyCodable([
+                    "What would you like to work on today?": "Write new code"
+                ])
+            ],
+            toolUseId: nil,
+            notificationType: nil,
+            message: nil
+        )
+
+        store.record(
+            event: questionEvent,
+            decision: "answer",
+            reason: nil,
+            updatedInput: [
+                "answers": AnyCodable([
+                    "What would you like to work on today?": "Write new code"
+                ])
+            ],
+            now: Date(timeIntervalSince1970: 100)
+        )
+
+        let replay = store.response(
+            for: answeredPermissionEvent,
+            now: Date(timeIntervalSince1970: 101)
+        )
+
+        XCTAssertEqual(replay?.decision, "answer")
+        XCTAssertEqual(
+            replay?.updatedInput?["answers"]?.value as? [String: String],
+            ["What would you like to work on today?": "Write new code"]
+        )
+    }
+
     func testCodeBuddyCLINotificationAnswerCanReplayToPermissionRequest() {
         var store = RecentInterventionResponseStore(ttl: 30)
 
