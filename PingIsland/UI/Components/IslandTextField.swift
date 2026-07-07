@@ -22,7 +22,7 @@ struct IslandTextField: NSViewRepresentable {
         textField.cell?.wraps = false
         textField.cell?.isScrollable = true
         textField.target = context.coordinator
-        textField.action = #selector(Coordinator.submit)
+        textField.action = #selector(Coordinator.submit(_:))
         textField.configureTextAppearance()
         textField.focusHandler = { [weak textField, weak coordinator = context.coordinator] in
             guard let textField else { return }
@@ -34,9 +34,7 @@ struct IslandTextField: NSViewRepresentable {
     func updateNSView(_ textField: IslandNSTextField, context: Context) {
         context.coordinator.parent = self
 
-        if textField.stringValue != text {
-            textField.stringValue = text
-        }
+        context.coordinator.syncText(text, for: textField)
 
         textField.placeholderString = placeholder
         textField.isEditable = isEditable
@@ -57,6 +55,13 @@ struct IslandTextField: NSViewRepresentable {
 
         init(parent: IslandTextField) {
             self.parent = parent
+        }
+
+        func syncText(_ text: String, for textField: IslandNSTextField) {
+            guard !textField.hasActiveMarkedText else { return }
+            if textField.stringValue != text {
+                textField.stringValue = text
+            }
         }
 
         func syncFocus(for textField: IslandNSTextField) {
@@ -80,14 +85,20 @@ struct IslandTextField: NSViewRepresentable {
 
         func controlTextDidChange(_ notification: Notification) {
             guard let textField = notification.object as? NSTextField else { return }
+            guard !textField.hasActiveMarkedText else { return }
             parent.text = textField.stringValue
         }
 
         func controlTextDidEndEditing(_ notification: Notification) {
+            if let textField = notification.object as? NSTextField {
+                parent.text = textField.stringValue
+            }
             parent.onFocusChanged(false)
         }
 
-        @objc func submit() {
+        @objc func submit(_ sender: NSTextField) {
+            guard !sender.hasActiveMarkedText else { return }
+            parent.text = sender.stringValue
             parent.onSubmit()
         }
 
@@ -139,5 +150,11 @@ final class IslandNSTextField: NSTextField {
 
     func configureEditorAppearance() {
         (currentEditor() as? NSTextView)?.insertionPointColor = .controlAccentColor
+    }
+}
+
+private extension NSTextField {
+    var hasActiveMarkedText: Bool {
+        (currentEditor() as? NSTextView)?.hasMarkedText() == true
     }
 }
