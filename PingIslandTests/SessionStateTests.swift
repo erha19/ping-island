@@ -2013,6 +2013,53 @@ final class SessionStateTests: XCTestCase {
         )
     }
 
+    func testQoderCLIHostedInQoderIDEDoesNotFallBackToQoderAppNavigation() {
+        let qoderCLIHostedInIDE = SessionClientInfo(
+            kind: .qoder,
+            profileID: "qoder-cli",
+            name: "Qoder CLI",
+            origin: "cli",
+            originator: "Qoder",
+            terminalBundleIdentifier: "com.qoder.ide",
+            terminalProgram: "vscode",
+            terminalSessionIdentifier: "qoder-terminal-1"
+        )
+
+        XCTAssertTrue(
+            SessionLauncher.isTerminalHostedQoderCLISession(
+                provider: .claude,
+                clientInfo: qoderCLIHostedInIDE
+            )
+        )
+        XCTAssertTrue(
+            SessionLauncher.isQoderCLIHostedInIDE(
+                provider: .claude,
+                clientInfo: qoderCLIHostedInIDE
+            )
+        )
+        XCTAssertFalse(
+            SessionLauncher.allowsAppFallback(
+                provider: .claude,
+                clientInfo: qoderCLIHostedInIDE
+            )
+        )
+
+        let qoderIDE = SessionClientInfo(
+            kind: .qoder,
+            profileID: "qoder",
+            name: "Qoder",
+            terminalBundleIdentifier: "com.qoder.ide",
+            terminalProgram: "vscode"
+        )
+
+        XCTAssertFalse(
+            SessionLauncher.isTerminalHostedQoderCLISession(
+                provider: .claude,
+                clientInfo: qoderIDE
+            )
+        )
+    }
+
     func testNativeCodexAppStillAllowsAppNavigation() {
         let codexApp = SessionClientInfo.codexApp(threadId: "thread-123")
 

@@ -102,7 +102,8 @@ actor SessionLauncher {
             return true
         }
 
-        if let terminalBundleIdentifier = session.clientInfo.terminalBundleIdentifier {
+        if !Self.isQoderCLIHostedInIDE(provider: session.provider, clientInfo: session.clientInfo),
+           let terminalBundleIdentifier = session.clientInfo.terminalBundleIdentifier {
             let canReportFallbackSuccess = Self.shouldUseProcessActivationForTerminalFallback(
                 bundleIdentifier: terminalBundleIdentifier
             )
@@ -314,7 +315,9 @@ actor SessionLauncher {
     }
 
     private func shouldPrioritizeIDEChatSession(for session: SessionState) -> Bool {
-        session.clientInfo.isQoderFamily && session.clientInfo.isHostedInIDE
+        session.clientInfo.isQoderFamily
+            && session.clientInfo.isHostedInIDE
+            && !Self.isQoderCLIHostedInIDE(provider: session.provider, clientInfo: session.clientInfo)
     }
 
     nonisolated static func allowsAppFallback(
@@ -352,15 +355,42 @@ actor SessionLauncher {
             || TerminalAppRegistry.isIDEBundle(normalizedBundleIdentifier)
     }
 
+    private nonisolated static func isExplicitQoderCLIClient(_ clientInfo: SessionClientInfo) -> Bool {
+        let profileID = clientInfo.profileID?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        let name = clientInfo.name?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        let origin = clientInfo.origin?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+
+        return profileID == "qoder-cli"
+            || name == "qoder cli"
+            || name == "qoder-cli"
+            || (
+                origin == "cli"
+                    && (
+                        name?.contains("qoder") == true
+                            || clientInfo.originator?
+                                .trimmingCharacters(in: .whitespacesAndNewlines)
+                                .lowercased()
+                                .contains("qoder") == true
+                    )
+            )
+    }
+
     nonisolated static func isTerminalHostedQoderCLISession(
         provider: SessionProvider,
         clientInfo: SessionClientInfo
     ) -> Bool {
         guard provider == .claude else { return false }
 
+        let isExplicitQoderCLI = Self.isExplicitQoderCLIClient(clientInfo)
         let normalizedClientInfo = clientInfo.normalizedForClaudeRouting()
-        guard normalizedClientInfo.profileID == "qoder-cli",
-              let terminalBundleIdentifier = normalizedClientInfo.terminalBundleIdentifier?
+        guard (isExplicitQoderCLI || normalizedClientInfo.profileID == "qoder-cli"),
+              let terminalBundleIdentifier = (clientInfo.terminalBundleIdentifier ?? normalizedClientInfo.terminalBundleIdentifier)?
                 .trimmingCharacters(in: .whitespacesAndNewlines),
               !terminalBundleIdentifier.isEmpty else {
             return false
@@ -369,15 +399,34 @@ actor SessionLauncher {
         let normalizedBundleIdentifier = TerminalAppRegistry.normalizedHostBundleIdentifier(
             for: terminalBundleIdentifier
         )
-        guard !TerminalAppRegistry.isIDEBundle(normalizedBundleIdentifier) else {
+        guard normalizedBundleIdentifier != "com.qoder.work" else {
             return false
         }
 
         return TerminalAppRegistry.isTerminalBundle(normalizedBundleIdentifier)
+            || TerminalAppRegistry.isIDEBundle(normalizedBundleIdentifier)
+    }
+
+    nonisolated static func isQoderCLIHostedInIDE(
+        provider: SessionProvider,
+        clientInfo: SessionClientInfo
+    ) -> Bool {
+        guard isTerminalHostedQoderCLISession(provider: provider, clientInfo: clientInfo),
+              let terminalBundleIdentifier = clientInfo.terminalBundleIdentifier?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+              !terminalBundleIdentifier.isEmpty else {
+            return false
+        }
+
+        let normalizedBundleIdentifier = TerminalAppRegistry.normalizedHostBundleIdentifier(
+            for: terminalBundleIdentifier
+        )
+        return TerminalAppRegistry.isIDEBundle(normalizedBundleIdentifier)
     }
 
     private func activateHostedIDEFallback(for session: SessionState) async -> Bool {
         guard session.clientInfo.isHostedInIDE,
+              !Self.isQoderCLIHostedInIDE(provider: session.provider, clientInfo: session.clientInfo),
               let ideProfile = session.clientInfo.ideHostProfile else {
             return false
         }
