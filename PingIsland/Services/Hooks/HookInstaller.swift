@@ -351,12 +351,14 @@ struct HookInstaller {
     private static let preferredTargetsDefaultsKey = "HookInstaller.preferredTargets.v1"
     private static let eventSelectionsDefaultsKey = "HookInstaller.eventSelections.v1"
     private static let qoderMigrationDefaultsKey = "HookInstaller.preferredTargets.qoder-default.v1"
+    private static let qoderCNMigrationDefaultsKey = "HookInstaller.preferredTargets.qoder-cn-default.v1"
     private static let qoderWorkMigrationDefaultsKey = "HookInstaller.preferredTargets.qoderwork-default.v1"
     private static let installedVersionDefaultsKey = "HookInstaller.installedVersion.v1"
     private static let firstLaunchDefaultsKey = "HookInstaller.isFirstLaunch.v1"
     private static let versionMetadataDefaultsKey = "HookInstaller.versionMetadata.v1"
     private static let qoderCLIClaudeHooksMinimumVersion = "0.2.5"
     private static let qoderCLIExecutableRelativePath = ".local/bin/qodercli"
+    private static let qoderCNCLIExecutableRelativePath = ".local/bin/qoderclicn"
     private static let supportDirectoryName = ".ping-island"
     private static let bridgeLauncherName = "ping-island-bridge"
     private static let bridgeBinaryName = "PingIslandBridge"
@@ -433,10 +435,16 @@ struct HookInstaller {
         return
 #else
         let qoderCLISupportsClaudeHooks = qoderCLIUsesClaudeCompatibleHooks()
+        let qoderCNCLIInstalled = qoderCNCLIUsesClaudeCompatibleHooks()
         var preferredTargets = preferredTargets()
         if qoderCLISupportsClaudeHooks,
            let qoderCLIProfile = ClientProfileRegistry.managedHookProfile(id: "qoder-cli-hooks") {
             preferredTargets.insert(qoderCLIProfile.id)
+            persistPreferredTargets(preferredTargets)
+        }
+        if qoderCNCLIInstalled,
+           let qoderCNCLIProfile = ClientProfileRegistry.managedHookProfile(id: "qoder-cn-cli-hooks") {
+            preferredTargets.insert(qoderCNCLIProfile.id)
             persistPreferredTargets(preferredTargets)
         }
 
@@ -458,6 +466,7 @@ struct HookInstaller {
         for profile in ClientProfileRegistry.managedHookProfiles {
             let canManageProfile = canManage(profile)
                 || (profile.id == "qoder-cli-hooks" && qoderCLISupportsClaudeHooks)
+                || (profile.id == "qoder-cn-cli-hooks" && qoderCNCLIInstalled)
             if preferredTargets.contains(profile.id) && canManageProfile {
                 install(profile, persistPreference: false, bypassAvailabilityCheck: !canManage(profile))
             } else {
@@ -473,10 +482,12 @@ struct HookInstaller {
     /// Run the default first-run install for every defaultEnabled profile.
     static func performFirstRunDefaultInstall() {
         let qoderCLISupportsClaudeHooks = qoderCLIUsesClaudeCompatibleHooks()
+        let qoderCNCLIInstalled = qoderCNCLIUsesClaudeCompatibleHooks()
         installBridgeLauncherIfNeeded()
         for profile in ClientProfileRegistry.managedHookProfiles where profile.defaultEnabled {
             let canManageProfile = canManage(profile)
                 || (profile.id == "qoder-cli-hooks" && qoderCLISupportsClaudeHooks)
+                || (profile.id == "qoder-cn-cli-hooks" && qoderCNCLIInstalled)
             guard canManageProfile else { continue }
             install(profile, persistPreference: true, bypassAvailabilityCheck: !canManage(profile))
         }
@@ -652,10 +663,12 @@ struct HookInstaller {
 
     static func defaultEnabledManageableProfiles() -> [ManagedHookClientProfile] {
         let qoderCLISupportsClaudeHooks = qoderCLIUsesClaudeCompatibleHooks()
+        let qoderCNCLIInstalled = qoderCNCLIUsesClaudeCompatibleHooks()
         return ClientProfileRegistry.managedHookProfiles.filter { profile in
             guard profile.defaultEnabled else { return false }
             return canManage(profile)
                 || (profile.id == "qoder-cli-hooks" && qoderCLISupportsClaudeHooks)
+                || (profile.id == "qoder-cn-cli-hooks" && qoderCNCLIInstalled)
         }
     }
 
@@ -975,6 +988,10 @@ struct HookInstaller {
             return qoderCLIUsesClaudeCompatibleHooks()
         }
 
+        if profile.id == "qoder-cn-cli-hooks" {
+            return qoderCNCLIUsesClaudeCompatibleHooks()
+        }
+
         return profile.alwaysVisibleInSettings
             || ClientAppLocator.isInstalled(bundleIdentifiers: profile.localAppBundleIdentifiers)
     }
@@ -1013,6 +1030,17 @@ struct HookInstaller {
         homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
     ) -> URL? {
         homeDirectory.appendingPathComponent(qoderCLIExecutableRelativePath, isDirectory: false)
+    }
+
+    private static func qoderCNCLIUsesClaudeCompatibleHooks() -> Bool {
+        guard let executableURL = qoderCNCLIExecutableURL() else { return false }
+        return FileManager.default.isExecutableFile(atPath: executableURL.path)
+    }
+
+    static func qoderCNCLIExecutableURL(
+        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
+    ) -> URL? {
+        homeDirectory.appendingPathComponent(qoderCNCLIExecutableRelativePath, isDirectory: false)
     }
 
     private static func runProcessOutput(
@@ -1114,6 +1142,15 @@ struct HookInstaller {
                 persistPreferredTargets(targets)
             }
             UserDefaults.standard.set(true, forKey: qoderWorkMigrationDefaultsKey)
+        }
+
+        if !UserDefaults.standard.bool(forKey: qoderCNMigrationDefaultsKey) {
+            if let qoderCNProfile = ClientProfileRegistry.managedHookProfile(id: "qoder-cn-hooks"),
+               canManage(qoderCNProfile) {
+                targets.insert(qoderCNProfile.id)
+                persistPreferredTargets(targets)
+            }
+            UserDefaults.standard.set(true, forKey: qoderCNMigrationDefaultsKey)
         }
 
         return targets.isEmpty ? [] : targets
@@ -1708,6 +1745,7 @@ struct HookInstaller {
 
         let command = bridgeCommand(source: profile.bridgeSource, extraArguments: profile.bridgeExtraArguments)
         let preferredFirst = profile.id == "qoder-cli-hooks"
+            || profile.id == "qoder-cn-cli-hooks"
             || profile.id == "codebuddy-cli-hooks"
 
         var hooks = removingIslandManagedHooks(from: json["hooks"] as? [String: Any] ?? [:], profile: profile)
@@ -2002,6 +2040,10 @@ struct HookInstaller {
             return hookCommand(command, hasClientKind: "qoder")
         case "qoder-cli-hooks":
             return hookCommand(command, hasClientKind: "qoder-cli")
+        case "qoder-cn-hooks":
+            return hookCommand(command, hasClientKind: "qoder-cn")
+        case "qoder-cn-cli-hooks":
+            return hookCommand(command, hasClientKind: "qoder-cn-cli")
         case "qoderwork-hooks":
             return hookCommand(command, hasClientKind: "qoderwork")
         default:
@@ -3776,6 +3818,7 @@ struct HookInstaller {
             if installing {
                 hooks = removingIslandManagedHooks(from: hooks, profile: profile)
                 let preferredFirst = profile.id == "qoder-cli-hooks"
+                    || profile.id == "qoder-cn-cli-hooks"
                     || profile.id == "codebuddy-cli-hooks"
                 for event in profile.events {
                     let existingEvent = sanitizedHookEntries(

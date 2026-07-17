@@ -475,3 +475,33 @@ func installerAddsCopilotHooksUsingGitHubFormat() throws {
     let preToolUseCommands = preToolUse.compactMap { $0["bash"] as? String }
     #expect(preToolUseCommands.contains { $0.contains("/.ping-island/bin/ping-island-bridge --source copilot --event preToolUse") })
 }
+
+@Test
+func installerKeepsQoderCNDesktopAndCLIHooksSeparateInSharedSettings() throws {
+    let root = URL(fileURLWithPath: NSTemporaryDirectory()).appending(path: UUID().uuidString, directoryHint: .isDirectory)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    let settingsURL = root.appending(path: ".qoder-cn/settings.json")
+    try FileManager.default.createDirectory(at: settingsURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try Data(#"{"theme":"dark"}"#.utf8).write(to: settingsURL)
+
+    let installer = HookInstaller(homeDirectory: root)
+    try installer.installQoderCNAssets()
+    try installer.installQoderCNCLIAssets()
+
+    let data = try Data(contentsOf: settingsURL)
+    let json = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+    #expect(json["theme"] as? String == "dark")
+
+    let hooks = try #require(json["hooks"] as? [String: Any])
+    let preToolUse = try #require(hooks["PreToolUse"] as? [[String: Any]])
+    let commands = preToolUse.compactMap { entry in
+        (entry["hooks"] as? [[String: Any]])?.first?["command"] as? String
+    }
+    #expect(commands.first?.contains("--client-kind qoder-cn-cli") == true)
+    #expect(commands.contains { $0.contains("--client-kind qoder-cn --client-name 'Qoder CN'") })
+
+    let cliHook = try #require((preToolUse.first?["hooks"] as? [[String: Any]])?.first)
+    #expect(cliHook["timeout"] as? Int == 86_400)
+}

@@ -2448,7 +2448,7 @@ actor SessionStore {
         guard currentIntervention?.kind == .question,
               event.provider == .claude,
               event.event == "PostToolUse",
-              event.clientInfo.normalizedForClaudeRouting().profileID == "qoder-cli" else {
+              event.clientInfo.normalizedForClaudeRouting().isQoderCLIClient else {
             return false
         }
 
@@ -4062,7 +4062,7 @@ actor SessionStore {
     private func applyClaudeTranscriptQuestionFallback(to session: inout SessionState) {
         guard session.provider == .claude,
               (session.clientInfo.brand == .claude
-                || session.clientInfo.normalizedForClaudeRouting().profileID == "qoder-cli"),
+                || session.clientInfo.normalizedForClaudeRouting().isQoderCLIClient),
               session.ingress != .remoteBridge else { return }
 
         let fallbackSource = "claudeTranscriptQuestion"
@@ -4841,6 +4841,7 @@ actor SessionStore {
         }
 
         if profileID == "qoder-cli"
+            || profileID == "qoder-cn-cli"
             || profileID == "codebuddy-cli"
             || profileID == "qwen-code"
             || normalizedClientInfo.isQwenCodeClient {
@@ -4862,8 +4863,10 @@ actor SessionStore {
                 ?? normalizedClientInfo.bundleIdentifier
         )?.lowercased()
         if profileID == "qoder"
+            || profileID == "qoder-cn"
             || profileID == "qoderwork"
             || bundleIdentifier == "com.qoder.ide"
+            || bundleIdentifier == "com.aliyun.lingma.ide"
             || bundleIdentifier == "com.qoder.work" {
             return false
         }

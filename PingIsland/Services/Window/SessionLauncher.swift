@@ -367,8 +367,11 @@ actor SessionLauncher {
             .lowercased()
 
         return profileID == "qoder-cli"
+            || profileID == "qoder-cn-cli"
             || name == "qoder cli"
             || name == "qoder-cli"
+            || name == "qoder cn cli"
+            || name == "qoderclicn"
             || (
                 origin == "cli"
                     && (
@@ -389,7 +392,7 @@ actor SessionLauncher {
 
         let isExplicitQoderCLI = Self.isExplicitQoderCLIClient(clientInfo)
         let normalizedClientInfo = clientInfo.normalizedForClaudeRouting()
-        guard (isExplicitQoderCLI || normalizedClientInfo.profileID == "qoder-cli"),
+        guard (isExplicitQoderCLI || normalizedClientInfo.isQoderCLIClient),
               let terminalBundleIdentifier = (clientInfo.terminalBundleIdentifier ?? normalizedClientInfo.terminalBundleIdentifier)?
                 .trimmingCharacters(in: .whitespacesAndNewlines),
               !terminalBundleIdentifier.isEmpty else {

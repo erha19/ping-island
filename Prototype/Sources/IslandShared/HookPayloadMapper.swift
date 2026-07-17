@@ -114,7 +114,7 @@ public enum HookPayloadMapper {
         switch provider {
         case .claude, .gemini:
             let clientKind = normalizedClientKind(from: metadata)
-            if clientKind == "qoder-cli",
+            if isQoderCLIClientKind(clientKind),
                isQoderCLIPlanExitApproval(
                    eventType: eventType,
                    toolName: metadata["tool_name"]
@@ -147,7 +147,7 @@ public enum HookPayloadMapper {
                 {"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"deny","message":"Denied from Island"}}}
                 """#
             case .answer(let answers):
-                if clientKind == "qoder-cli" {
+                if isQoderCLIClientKind(clientKind) {
                     return qoderCLIAnswerPayload(
                         response: response,
                         eventType: eventType,
@@ -680,6 +680,12 @@ public enum HookPayloadMapper {
             || environment.keys.contains(where: { $0.hasPrefix("QODERWORK_") }) {
             return ("QoderWork", "com.qoder.work")
         }
+        if bundleIdentifier == "com.aliyun.lingma.ide"
+            || hints.contains("qoder cn.app")
+            || hints.contains("com.aliyun.lingma.ide")
+            || environment.keys.contains(where: { $0.hasPrefix("QODERCN_") || $0.hasPrefix("QODER_CN_") }) {
+            return ("Qoder CN", "com.aliyun.lingma.ide")
+        }
         if bundleIdentifier == "com.qoder.ide"
             || hints.contains("qoder.app")
             || hints.contains("com.qoder.ide")
@@ -764,12 +770,14 @@ public enum HookPayloadMapper {
             return nil
         }
 
-        if clientKind == "qoder-cli",
+        if isQoderCLIClientKind(clientKind),
            isQoderCLIPlanExitApproval(eventType: eventType, payload: payload) {
             return InterventionRequest(
                 sessionID: sessionKey,
                 kind: .approval,
-                title: "Qoder CLI needs plan approval",
+                title: clientKind == "qoder-cn-cli"
+                    ? "Qoder CN CLI needs plan approval"
+                    : "Qoder CLI needs plan approval",
                 message: qoderCLIPlanApprovalMessage(from: payload),
                 options: [
                     InterventionOption(id: "approve", title: "Allow Once"),
@@ -797,7 +805,7 @@ public enum HookPayloadMapper {
                 payload: payload,
                 clientKind: clientKind
            ) {
-            if clientKind == "qoder",
+            if clientKind == "qoder" || clientKind == "qoder-cn",
                isQoderQuestionToolEvent(eventType: eventType, payload: payload) {
                 return nil
             }
@@ -1256,12 +1264,20 @@ public enum HookPayloadMapper {
             .lowercased()
         if let explicitClientKind, !explicitClientKind.isEmpty {
             if explicitClientKind == "qoder-cli",
-               metadataHasQoderIDEHost(metadata) {
+               metadataHasQoderIDEHost(metadata, bundleIdentifier: "com.qoder.ide") {
                 return "qoder"
+            }
+            if explicitClientKind == "qoder-cn-cli",
+               metadataHasQoderIDEHost(metadata, bundleIdentifier: "com.aliyun.lingma.ide") {
+                return "qoder-cn"
             }
             if explicitClientKind == "qoder",
                metadataLooksLikeQoderCLI(metadata) {
                 return "qoder-cli"
+            }
+            if explicitClientKind == "qoder-cn",
+               metadataLooksLikeQoderCLI(metadata) {
+                return "qoder-cn-cli"
             }
             return explicitClientKind
         }
@@ -1274,6 +1290,8 @@ public enum HookPayloadMapper {
             return "qoderwork"
         case "com.qoder.ide":
             return "qoder"
+        case "com.aliyun.lingma.ide":
+            return "qoder-cn"
         default:
             break
         }
@@ -1294,6 +1312,14 @@ public enum HookPayloadMapper {
                 .trimmingCharacters(in: .whitespacesAndNewlines)
                 .lowercased()
         if let nameHint {
+            if nameHint.contains("qoder cn cli")
+                || nameHint.contains("qoder-cn-cli")
+                || nameHint.contains("qoderclicn") {
+                return "qoder-cn-cli"
+            }
+            if nameHint.contains("qoder cn") || nameHint.contains("qoder-cn") {
+                return "qoder-cn"
+            }
             if nameHint.contains("qoder cli") || nameHint.contains("qoder-cli") {
                 return "qoder-cli"
             }
@@ -1324,7 +1350,10 @@ public enum HookPayloadMapper {
         let clientKind = envelope.metadata["client_kind"]?
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
-        guard clientKind == "qoder" || clientKind == "qoder-cli" else {
+        guard clientKind == "qoder"
+            || clientKind == "qoder-cli"
+            || clientKind == "qoder-cn"
+            || clientKind == "qoder-cn-cli" else {
             return false
         }
 
@@ -1334,9 +1363,11 @@ public enum HookPayloadMapper {
             envelope.metadata["terminal_bundle_id"],
             envelope.metadata["client_bundle_id"]
         ].contains { value in
-            value?
+            let normalizedBundleIdentifier = value?
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-                .lowercased() == "com.qoder.ide"
+                .lowercased()
+            return normalizedBundleIdentifier == "com.qoder.ide"
+                || normalizedBundleIdentifier == "com.aliyun.lingma.ide"
         }
     }
 
@@ -1421,6 +1452,7 @@ public enum HookPayloadMapper {
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
         if normalizedBundleIdentifier == "com.qoder.ide"
+            || normalizedBundleIdentifier == "com.aliyun.lingma.ide"
             || normalizedBundleIdentifier == "com.qoder.work" {
             return false
         }
@@ -1433,7 +1465,13 @@ public enum HookPayloadMapper {
             $0?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         }
 
-        if nameHints.contains(where: { $0.contains("qoder cli") || $0.contains("qoder-cli") }) {
+        if nameHints.contains(where: {
+            $0.contains("qoder cli")
+                || $0.contains("qoder-cli")
+                || $0.contains("qoder cn cli")
+                || $0.contains("qoder-cn-cli")
+                || $0.contains("qoderclicn")
+        }) {
             return true
         }
 
@@ -1441,15 +1479,22 @@ public enum HookPayloadMapper {
             && nameHints.contains(where: { $0 == "qoder" || $0.contains("qoder ") })
     }
 
-    private static func metadataHasQoderIDEHost(_ metadata: [String: String]) -> Bool {
+    private static func metadataHasQoderIDEHost(
+        _ metadata: [String: String],
+        bundleIdentifier: String
+    ) -> Bool {
         [
             metadata["terminal_bundle_id"],
             metadata["ide_bundle_id"]
         ].contains { value in
             value?
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-                .lowercased() == "com.qoder.ide"
+                .lowercased() == bundleIdentifier
         }
+    }
+
+    private static func isQoderCLIClientKind(_ clientKind: String?) -> Bool {
+        clientKind == "qoder-cli" || clientKind == "qoder-cn-cli"
     }
 
     private static func isCodeBuddyFamilyHookClient(_ clientKind: String?) -> Bool {
@@ -1573,7 +1618,7 @@ public enum HookPayloadMapper {
         explicitClientKind: String?
     ) -> Bool {
         eventType == "PermissionRequest"
-            && (clientKind == "qoder-cli" || explicitClientKind == "qoder-cli")
+            && (isQoderCLIClientKind(clientKind) || isQoderCLIClientKind(explicitClientKind))
     }
 
     private static func answeredQuestionStatus(eventType: String) -> SessionStatus {

@@ -815,6 +815,16 @@ final class SessionStateTests: XCTestCase {
         )
     }
 
+    func testQoderCNLaunchURLUsesIndependentScheme() {
+        XCTAssertEqual(
+            SessionClientInfo.appLaunchURL(
+                bundleIdentifier: "com.aliyun.lingma.ide",
+                workspacePath: "/tmp/project"
+            ),
+            "qoder-cn://file/tmp/project"
+        )
+    }
+
     func testCodexAppNormalizationUpgradesLegacyLocalDeepLinks() {
         let threadID = "019d6163-2ee9-7ae2-8c45-5f7a16209149"
         let normalized = SessionClientInfo(
@@ -1530,6 +1540,33 @@ final class SessionStateTests: XCTestCase {
         XCTAssertEqual(normalized.interactionLabel(for: .claude), "Qoder")
     }
 
+    func testQoderCNDesktopAndCLINormalizeToIndependentProfiles() {
+        let desktop = SessionClientInfo(
+            kind: .qoder,
+            profileID: "qoder-cn",
+            name: "Qoder CN",
+            terminalBundleIdentifier: "com.aliyun.lingma.ide"
+        ).normalizedForClaudeRouting()
+        let cli = SessionClientInfo(
+            kind: .qoder,
+            profileID: "qoder-cn-cli",
+            name: "Qoder CN CLI",
+            origin: "cli",
+            originator: "Qoder CN",
+            terminalBundleIdentifier: "com.googlecode.iterm2"
+        ).normalizedForClaudeRouting()
+
+        XCTAssertEqual(desktop.profileID, "qoder-cn")
+        XCTAssertEqual(desktop.name, "Qoder CN")
+        XCTAssertEqual(desktop.ideHostProfile?.id, "qoder-cn-extension")
+        XCTAssertTrue(desktop.isQoderNotifyOnlyIDEClient)
+        XCTAssertFalse(desktop.isQoderCLIClient)
+        XCTAssertEqual(cli.profileID, "qoder-cn-cli")
+        XCTAssertEqual(cli.name, "Qoder CN CLI")
+        XCTAssertTrue(cli.isQoderCLIClient)
+        XCTAssertTrue(cli.supportsCustomAskUserQuestionInput)
+    }
+
     func testQoderWorkDoesNotResolveToIDEExtensionHost() {
         let normalized = SessionClientInfo(
             kind: .qoder,
@@ -2058,6 +2095,26 @@ final class SessionStateTests: XCTestCase {
                 clientInfo: qoderIDE
             )
         )
+    }
+
+    func testTerminalHostedQoderCNCLIUsesTerminalRouting() {
+        let clientInfo = SessionClientInfo(
+            kind: .qoder,
+            profileID: "qoder-cn-cli",
+            name: "Qoder CN CLI",
+            origin: "cli",
+            originator: "Qoder CN",
+            terminalBundleIdentifier: "com.googlecode.iterm2",
+            terminalProgram: "iTerm.app"
+        )
+
+        XCTAssertTrue(
+            SessionLauncher.isTerminalHostedQoderCLISession(
+                provider: .claude,
+                clientInfo: clientInfo
+            )
+        )
+        XCTAssertFalse(SessionLauncher.allowsAppFallback(provider: .claude, clientInfo: clientInfo))
     }
 
     func testNativeCodexAppStillAllowsAppNavigation() {

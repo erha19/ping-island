@@ -235,12 +235,14 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
         }
 
         if profileIDs.contains("qoder-cli")
+            || profileIDs.contains("qoder-cn-cli")
             || profileIDs.contains("codebuddy-cli")
             || profileIDs.contains("codebuddy-cli-hooks") {
             return true
         }
 
         if profileIDs.contains("qoder")
+            || profileIDs.contains("qoder-cn")
             || profileIDs.contains("qoderwork")
             || profileIDs.contains("codebuddy")
             || profileIDs.contains("workbuddy")
@@ -390,11 +392,53 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
         brand == .qoder
     }
 
+    nonisolated var isQoderCLIClient: Bool {
+        let rawProfileID = profileID?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        if rawProfileID == "qoder-cli" || rawProfileID == "qoder-cn-cli" {
+            return true
+        }
+
+        let rawName = name?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if rawName == "qoder cli" || rawName == "qoder-cn-cli" || rawName == "qoder cn cli" || rawName == "qoderclicn" {
+            return true
+        }
+
+        let normalizedProfileID = normalizedForClaudeRouting().profileID?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        return normalizedProfileID == "qoder-cli" || normalizedProfileID == "qoder-cn-cli"
+    }
+
+    nonisolated var isQoderNotifyOnlyIDEClient: Bool {
+        let normalized = normalizedForClaudeRouting()
+        let profileID = normalized.profileID?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        guard profileID == "qoder" || profileID == "qoder-cn" else { return false }
+
+        return [
+            normalized.terminalBundleIdentifier,
+            normalized.bundleIdentifier,
+            terminalBundleIdentifier,
+            bundleIdentifier
+        ].contains { value in
+            switch value?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+            case "com.qoder.ide", "com.aliyun.lingma.ide":
+                return true
+            default:
+                return false
+            }
+        }
+    }
+
     nonisolated var prefersAnsweredQuestionFollowupAction: Bool {
         let normalizedProfileID = profileID?
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
         if normalizedProfileID == "qoder"
+            || normalizedProfileID == "qoder-cn"
             || normalizedProfileID == "qoderwork"
             || normalizedProfileID == "codebuddy"
             || normalizedProfileID == "workbuddy" {
@@ -405,7 +449,7 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
         switch normalizedHostBundleIdentifier {
-        case "com.qoder.ide", "com.qoder.work", "com.tencent.codebuddy", "com.codebuddy.app", "com.workbuddy.workbuddy":
+        case "com.qoder.ide", "com.aliyun.lingma.ide", "com.qoder.work", "com.tencent.codebuddy", "com.codebuddy.app", "com.workbuddy.workbuddy":
             return true
         default:
             return false
@@ -633,15 +677,38 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
             || normalizedProfileID == "qoderwork"
             || normalizedName == "qoderwork"
             || normalizedName == "qoder work"
+        let normalizedOriginator = normalized.originator?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        let isQoderCNClient =
+            normalizedProfileID == "qoder-cn"
+            || normalizedProfileID == "qoder-cn-cli"
+            || normalizedName == "qoder cn"
+            || normalizedName == "qoder cn cli"
+            || normalizedName == "qoderclicn"
+            || normalizedOriginator == "qoder cn"
+        let isQoderCNCLI =
+            normalizedProfileID == "qoder-cn-cli"
+            || normalizedName == "qoder cn cli"
+            || normalizedName == "qoderclicn"
+            || (isQoderCNClient && normalizedOrigin == "cli")
         let isExplicitQoderCLI =
             normalizedProfileID == "qoder-cli"
+            || normalizedProfileID == "qoder-cn-cli"
             || normalizedName == "qoder cli"
+            || normalizedName == "qoder cn cli"
             || normalizedOrigin == "cli"
         let isIDEBundle = hostBundleIdentifier.map { TerminalAppRegistry.isIDEBundle($0) } ?? false
         let isTerminalHosted =
             (hostBundleIdentifier.map { TerminalAppRegistry.isTerminalBundle($0) } ?? false)
             && !isIDEBundle
             && !isQoderWorkHosted
+        let isQoderCNIDEHosted =
+            hostBundleIdentifier == "com.aliyun.lingma.ide"
+            || normalized.terminalBundleIdentifier?.lowercased() == "com.aliyun.lingma.ide"
+            || normalized.bundleIdentifier?.lowercased() == "com.aliyun.lingma.ide"
+            || normalized.ideHostProfile?.id == "qoder-cn-extension"
+            || (normalizedProfileID == "qoder-cn" && !isQoderCNCLI)
         let hasQoderIDEHostEvidence =
             hostBundleIdentifier == "com.qoder.ide"
             || normalized.terminalBundleIdentifier?.lowercased() == "com.qoder.ide"
@@ -667,9 +734,16 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
         } else if isQoderWorkHosted {
             normalized.profileID = "qoderwork"
             normalized.name = "QoderWork"
+        } else if isQoderCNIDEHosted {
+            normalized.profileID = "qoder-cn"
+            normalized.name = "Qoder CN"
         } else if isQoderIDEHosted {
             normalized.profileID = "qoder"
             normalized.name = "Qoder"
+        } else if isQoderCNCLI || (isTerminalHosted && isQoderCNClient) {
+            normalized.profileID = "qoder-cn-cli"
+            normalized.name = "Qoder CN CLI"
+            normalized.origin = "cli"
         } else if isTerminalHosted {
             normalized.profileID = "qoder-cli"
             normalized.name = "Qoder CLI"
@@ -844,6 +918,8 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
             return workspacePath.flatMap { workspaceURL(scheme: "qoder-work", path: $0) }
         case "com.qoder.ide":
             return workspacePath.flatMap { workspaceURL(scheme: "qoder", path: $0) }
+        case "com.aliyun.lingma.ide":
+            return workspacePath.flatMap { workspaceURL(scheme: "qoder-cn", path: $0) }
         case "com.workbuddy.workbuddy":
             return workspacePath.flatMap { workspaceURL(scheme: "workbuddy", path: $0) }
         default:

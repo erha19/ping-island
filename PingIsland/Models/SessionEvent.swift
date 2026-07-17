@@ -216,20 +216,7 @@ extension HookEvent {
     }
 
     private nonisolated var isQoderIDEQuestionNotificationClient: Bool {
-        let normalizedClientInfo = clientInfo.normalizedForClaudeRouting()
-        let bundleIdentifiers = [
-            normalizedClientInfo.terminalBundleIdentifier,
-            normalizedClientInfo.bundleIdentifier,
-            clientInfo.terminalBundleIdentifier,
-            clientInfo.bundleIdentifier
-        ]
-        let isQoderIDEHosted = bundleIdentifiers.contains { value in
-            value?
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-                .lowercased() == "com.qoder.ide"
-        }
-
-        return normalizedClientInfo.profileID == "qoder" && isQoderIDEHosted
+        clientInfo.isQoderNotifyOnlyIDEClient
     }
 
     private nonisolated var externalClientQuestionInterventionID: String? {
