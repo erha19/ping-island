@@ -463,6 +463,10 @@ private enum BridgeDebugLogger {
             return "qoder-hooks"
         case "qoder-cli":
             return "qoder-cli-hooks"
+        case "qoder-cn":
+            return "qoder-cn-hooks"
+        case "qoder-cn-cli":
+            return "qoder-cn-cli-hooks"
         case "kimi":
             return "kimi-hooks"
         case "gemini":

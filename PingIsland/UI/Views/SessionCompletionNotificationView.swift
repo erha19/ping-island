@@ -135,7 +135,7 @@ enum SessionCompletionStateEvaluator {
         guard session.intervention == nil else { return false }
         // Qoder CLI and Kimi both use "Stop" for turn-end (goes to .waitingForInput)
         // and "SessionEnd" for actual session closure.
-        return session.clientInfo.normalizedForClaudeRouting().profileID == "qoder-cli"
+        return session.clientInfo.isQoderCLIClient
             || session.clientInfo.isKimiClient
     }
 

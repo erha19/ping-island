@@ -15,6 +15,8 @@ final class ClientProfileIconTests: XCTestCase {
             "cursor-hooks": "CursorLogo",
             "qoder-hooks": "QoderLogo",
             "qoder-cli-hooks": "QoderLogo",
+            "qoder-cn-hooks": "QoderLogo",
+            "qoder-cn-cli-hooks": "QoderLogo",
             "qoderwork-hooks": "QoderWorkLogo",
             "copilot-hooks": "CopilotLogo",
             "opencode-hooks": "OpenCodeLogo",
@@ -37,6 +39,7 @@ final class ClientProfileIconTests: XCTestCase {
             "codebuddy-extension": "CodeBuddyLogo",
             "workbuddy-extension": "WorkBuddyLogo",
             "qoder-extension": "QoderLogo",
+            "qoder-cn-extension": "QoderLogo",
         ]
 
         for (profileID, assetName) in expectedAssets {
@@ -83,6 +86,32 @@ final class ClientProfileIconTests: XCTestCase {
         XCTAssertFalse(qoderEvents.contains("SessionStart"))
         XCTAssertNil(qoderProfile.events.first { $0.name == "PermissionRequest" }?.timeout)
         XCTAssertEqual(qoderProfile.bridgeExtraArguments, ["--client-kind", "qoder"])
+    }
+
+    func testQoderCNProfilesUseIndependentIdentityAndSharedConfiguration() throws {
+        let desktopProfile = try XCTUnwrap(ClientProfileRegistry.managedHookProfile(id: "qoder-cn-hooks"))
+        let cliProfile = try XCTUnwrap(ClientProfileRegistry.managedHookProfile(id: "qoder-cn-cli-hooks"))
+        let extensionProfile = try XCTUnwrap(ClientProfileRegistry.ideExtensionProfile(id: "qoder-cn-extension"))
+
+        XCTAssertEqual(desktopProfile.configurationRelativePaths, [".qoder-cn/settings.json"])
+        XCTAssertEqual(cliProfile.configurationRelativePaths, desktopProfile.configurationRelativePaths)
+        XCTAssertEqual(desktopProfile.localAppBundleIdentifiers, ["com.aliyun.lingma.ide"])
+        XCTAssertEqual(extensionProfile.localAppBundleIdentifiers, ["com.aliyun.lingma.ide"])
+        XCTAssertEqual(extensionProfile.uriScheme, "qoder-cn")
+        XCTAssertEqual(extensionProfile.extensionRootRelativePaths, [".qoder-cn/extensions"])
+        XCTAssertEqual(
+            cliProfile.bridgeExtraArguments,
+            [
+                "--client-kind", "qoder-cn-cli",
+                "--client-name", "Qoder CN CLI",
+                "--client-origin", "cli",
+                "--client-originator", "Qoder CN"
+            ]
+        )
+        XCTAssertEqual(cliProfile.events.first { $0.name == "PreToolUse" }?.timeout, 86_400)
+        XCTAssertEqual(cliProfile.events.first { $0.name == "PermissionRequest" }?.timeout, 86_400)
+        XCTAssertTrue(cliProfile.events.contains { $0.name == "PostToolUseFailure" })
+        XCTAssertTrue(cliProfile.events.contains { $0.name == "SubagentStart" })
     }
 
     func testCodeBuddyCLIHookProfileUsesIndependentClaudeCompatibleHooks() throws {

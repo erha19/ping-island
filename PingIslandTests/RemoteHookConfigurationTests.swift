@@ -134,6 +134,8 @@ final class RemoteHookConfigurationTests: XCTestCase {
             "codebuddy-cli-hooks",
             "qoder-hooks",
             "qoder-cli-hooks",
+            "qoder-cn-hooks",
+            "qoder-cn-cli-hooks",
             "qoderwork-hooks",
         ])
     }
@@ -156,6 +158,7 @@ final class RemoteHookConfigurationTests: XCTestCase {
         XCTAssertTrue(directories.contains("/root/.openclaw/hooks/ping-island-openclaw"))
         XCTAssertTrue(directories.contains("/root/.codebuddy"))
         XCTAssertTrue(directories.contains("/root/.qoder"))
+        XCTAssertTrue(directories.contains("/root/.qoder-cn"))
         XCTAssertTrue(directories.contains("/root/.qoderwork"))
     }
 

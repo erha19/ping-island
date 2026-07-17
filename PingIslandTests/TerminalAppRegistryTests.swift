@@ -32,4 +32,12 @@ final class TerminalAppRegistryTests: XCTestCase {
             "com.googlecode.iterm2"
         )
     }
+
+    func testQoderCNDesktopIsRegisteredAsIDEHost() {
+        XCTAssertTrue(TerminalAppRegistry.isIDEBundle("com.aliyun.lingma.ide"))
+        XCTAssertEqual(
+            TerminalAppRegistry.normalizedHostBundleIdentifier(for: "com.aliyun.lingma.ide.helper"),
+            "com.aliyun.lingma.ide"
+        )
+    }
 }

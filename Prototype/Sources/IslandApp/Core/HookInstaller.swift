@@ -311,6 +311,28 @@ struct HookInstaller {
         )
     }
 
+    func installQoderCNAssets() throws {
+        try installQoderCompatibleAssets(
+            relativePath: ".qoder-cn/settings.json",
+            clientKind: "qoder-cn",
+            clientName: "Qoder CN",
+            clientOrigin: nil,
+            clientOriginator: "Qoder CN",
+            preToolUseTimeout: nil
+        )
+    }
+
+    func installQoderCNCLIAssets() throws {
+        try installQoderCompatibleAssets(
+            relativePath: ".qoder-cn/settings.json",
+            clientKind: "qoder-cn-cli",
+            clientName: "Qoder CN CLI",
+            clientOrigin: "cli",
+            clientOriginator: "Qoder CN",
+            preToolUseTimeout: 86_400
+        )
+    }
+
     func installQoderWorkAssets() throws {
         try installQoderCompatibleAssets(
             relativePath: ".qoderwork/settings.json",
@@ -336,7 +358,7 @@ struct HookInstaller {
         var updated = current
         var hooks = removingIslandManagedHooks(from: current["hooks"] as? [String: Any] ?? [:], clientKind: clientKind)
 
-        let isQoderCLI = clientKind == "qoder-cli"
+        let isQoderCLI = clientKind == "qoder-cli" || clientKind == "qoder-cn-cli"
         let permissionRequestTimeout = isQoderCLI ? 86_400 : nil
         let plainEvents = isQoderCLI
             ? ["UserPromptSubmit", "Stop", "SubagentStop", "SessionStart", "SessionEnd"]

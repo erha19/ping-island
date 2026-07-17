@@ -997,7 +997,7 @@ class SessionMonitor: ObservableObject {
         let profileID = normalizedClientInfo?.profileID?.lowercased()
         let bundleIdentifier = normalizedClientInfo?.bundleIdentifier?.lowercased()
 
-        if profileID == "qoder-cli" {
+        if profileID == "qoder-cli" || profileID == "qoder-cn-cli" {
             return .qoderCLI
         }
 
@@ -1006,10 +1006,12 @@ class SessionMonitor: ObservableObject {
         }
 
         if profileID == "qoder"
+            || profileID == "qoder-cn"
             || profileID == "qoderwork"
             || profileID == "codebuddy"
             || profileID == "workbuddy"
             || bundleIdentifier == "com.qoder.ide"
+            || bundleIdentifier == "com.aliyun.lingma.ide"
             || bundleIdentifier == "com.qoder.work"
             || bundleIdentifier == "com.tencent.codebuddy"
             || bundleIdentifier == "com.codebuddy.app"
@@ -1142,11 +1144,13 @@ class SessionMonitor: ObservableObject {
         let normalizedClientInfo = event.clientInfo.normalizedForClaudeRouting()
         let isManagedQuestion =
             normalizedClientInfo.profileID == "qoder"
+            || normalizedClientInfo.profileID == "qoder-cn"
             || normalizedClientInfo.profileID == "qoderwork"
             || normalizedClientInfo.profileID == "codebuddy"
             || normalizedClientInfo.profileID == "codebuddy-cli"
             || normalizedClientInfo.profileID == "workbuddy"
             || normalizedClientInfo.bundleIdentifier == "com.qoder.ide"
+            || normalizedClientInfo.bundleIdentifier == "com.aliyun.lingma.ide"
             || normalizedClientInfo.bundleIdentifier == "com.qoder.work"
             || normalizedClientInfo.bundleIdentifier == "com.tencent.codebuddy"
             || normalizedClientInfo.bundleIdentifier == "com.codebuddy.app"

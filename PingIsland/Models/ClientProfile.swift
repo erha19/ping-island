@@ -508,7 +508,7 @@ struct ManagedIDEExtensionProfile: Identifiable, Sendable {
 
     nonisolated var prefersWorkspaceWindowRouting: Bool {
         switch uriScheme {
-        case "vscode", "cursor", "trae", "codebuddy", "qoder", "qoder-work":
+        case "vscode", "cursor", "trae", "codebuddy", "qoder", "qoder-cn", "qoder-work":
             return true
         default:
             return false
@@ -516,7 +516,7 @@ struct ManagedIDEExtensionProfile: Identifiable, Sendable {
     }
 
     nonisolated var prefersWorkspaceURLRouting: Bool {
-        uriScheme == "qoder" || uriScheme == "qoder-work"
+        uriScheme == "qoder" || uriScheme == "qoder-cn" || uriScheme == "qoder-work"
     }
 
     nonisolated var extensionRootURLs: [URL] {
@@ -909,6 +909,66 @@ enum ClientProfileRegistry {
             ]
         ),
         ManagedHookClientProfile(
+            id: "qoder-cn-hooks",
+            title: "Qoder CN",
+            subtitle: "管理 ~/.qoder-cn/settings.json，支持 Qoder CN IDE 会话、提问与权限提醒事件",
+            logoAssetName: "QoderLogo",
+            prefersBundledLogoOverAppIcon: true,
+            localAppBundleIdentifiers: ["com.aliyun.lingma.ide"],
+            iconSymbolName: "bolt.horizontal.circle.fill",
+            configurationRelativePath: ".qoder-cn/settings.json",
+            bridgeSource: "claude",
+            bridgeExtraArguments: [
+                "--client-kind", "qoder-cn",
+                "--client-name", "Qoder CN",
+                "--client-originator", "Qoder CN"
+            ],
+            defaultEnabled: true,
+            brand: .qoder,
+            events: [
+                HookInstallEventDescriptor(name: "UserPromptSubmit", templates: [.plain]),
+                HookInstallEventDescriptor(name: "PreToolUse", templates: [.matcher("*")]),
+                HookInstallEventDescriptor(name: "PostToolUse", templates: [.matcher("*")]),
+                HookInstallEventDescriptor(name: "PostToolUseFailure", templates: [.matcher("*")]),
+                HookInstallEventDescriptor(name: "PermissionRequest", templates: [.matcher("*")]),
+                HookInstallEventDescriptor(name: "Notification", templates: [.matcher("*")]),
+                HookInstallEventDescriptor(name: "Stop", templates: [.plain]),
+            ]
+        ),
+        ManagedHookClientProfile(
+            id: "qoder-cn-cli-hooks",
+            title: "Qoder CN CLI",
+            subtitle: "管理 ~/.qoder-cn/settings.json，按 Claude Code hooks 协议接入 qoderclicn",
+            alwaysVisibleInSettings: true,
+            logoAssetName: "QoderLogo",
+            prefersBundledLogoOverAppIcon: true,
+            iconSymbolName: "bolt.horizontal.circle.fill",
+            configurationRelativePath: ".qoder-cn/settings.json",
+            bridgeSource: "claude",
+            bridgeExtraArguments: [
+                "--client-kind", "qoder-cn-cli",
+                "--client-name", "Qoder CN CLI",
+                "--client-origin", "cli",
+                "--client-originator", "Qoder CN"
+            ],
+            defaultEnabled: false,
+            brand: .qoder,
+            events: [
+                HookInstallEventDescriptor(name: "UserPromptSubmit", templates: [.plain]),
+                HookInstallEventDescriptor(name: "PreToolUse", templates: [.matcher("*")], timeout: 86_400),
+                HookInstallEventDescriptor(name: "PostToolUse", templates: [.matcher("*")]),
+                HookInstallEventDescriptor(name: "PostToolUseFailure", templates: [.matcher("*")]),
+                HookInstallEventDescriptor(name: "PermissionRequest", templates: [.matcher("*")], timeout: 86_400),
+                HookInstallEventDescriptor(name: "Notification", templates: [.matcher("*")]),
+                HookInstallEventDescriptor(name: "Stop", templates: [.plain]),
+                HookInstallEventDescriptor(name: "SubagentStart", templates: [.plain]),
+                HookInstallEventDescriptor(name: "SubagentStop", templates: [.plain]),
+                HookInstallEventDescriptor(name: "SessionStart", templates: [.plain]),
+                HookInstallEventDescriptor(name: "SessionEnd", templates: [.plain]),
+                HookInstallEventDescriptor(name: "PreCompact", templates: [.matcher("auto"), .matcher("manual")]),
+            ]
+        ),
+        ManagedHookClientProfile(
             id: "qoderwork-hooks",
             title: "QoderWork",
             subtitle: "管理 ~/.qoderwork/settings.json，按 Qoder CLI 同款 Claude Hooks 协议接入 Island",
@@ -1074,6 +1134,36 @@ enum ClientProfileRegistry {
             recognizedKinds: ["qoder-cli", "qoder_cli", "qoder cli"],
             exactAliases: ["qoder-cli", "qoder cli"],
             keywordAliases: ["qoder cli"],
+            bundleIdentifiers: []
+        ),
+        SessionClientProfile(
+            id: "qoder-cn",
+            provider: .claude,
+            family: .claudeHooks,
+            kind: .qoder,
+            displayName: "Qoder CN",
+            assistantLabelMode: .badgeLabel,
+            brand: .qoder,
+            defaultBundleIdentifier: "com.aliyun.lingma.ide",
+            defaultOrigin: nil,
+            recognizedKinds: ["qoder-cn", "qoder_cn", "qoder cn", "qodercn", "qoder_cn_client"],
+            exactAliases: ["qoder-cn", "qoder cn", "qodercn"],
+            keywordAliases: ["qoder cn", "qodercn"],
+            bundleIdentifiers: ["com.aliyun.lingma.ide"]
+        ),
+        SessionClientProfile(
+            id: "qoder-cn-cli",
+            provider: .claude,
+            family: .claudeHooks,
+            kind: .qoder,
+            displayName: "Qoder CN CLI",
+            assistantLabelMode: .badgeLabel,
+            brand: .qoder,
+            defaultBundleIdentifier: nil,
+            defaultOrigin: "cli",
+            recognizedKinds: ["qoder-cn-cli", "qoder_cn_cli", "qoder cn cli", "qoderclicn", "qoder_cli_cn"],
+            exactAliases: ["qoder-cn-cli", "qoder cn cli", "qoderclicn", "qoder cli cn"],
+            keywordAliases: ["qoder cn cli", "qoderclicn", "qoder cli cn"],
             bundleIdentifiers: []
         ),
         SessionClientProfile(
@@ -1416,6 +1506,22 @@ enum ClientProfileRegistry {
             exactBundleIdentifiers: ["com.qoder.ide"],
             bundleIdentifierKeywords: ["qoder.ide"],
             appNameKeywords: ["qoder"]
+        ),
+        ManagedIDEExtensionProfile(
+            id: "qoder-cn-extension",
+            title: "Qoder CN",
+            subtitle: "安装 Ping Island，支持会话跳转与终端精准聚焦",
+            logoAssetName: "QoderLogo",
+            prefersBundledLogoOverAppIcon: true,
+            sessionFocusStrategy: .qoderChatHistory,
+            localAppBundleIdentifiers: ["com.aliyun.lingma.ide"],
+            iconSymbolName: "bolt.horizontal.circle.fill",
+            extensionRootRelativePath: ".qoder-cn/extensions",
+            extensionRegistryRelativePath: ".qoder-cn/extensions/extensions.json",
+            uriScheme: "qoder-cn",
+            exactBundleIdentifiers: ["com.aliyun.lingma.ide"],
+            bundleIdentifierKeywords: ["aliyun.lingma.ide"],
+            appNameKeywords: ["qoder cn", "qodercn"]
         ),
     ]
 

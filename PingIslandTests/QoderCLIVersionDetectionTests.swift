@@ -31,6 +31,14 @@ final class QoderCLIVersionDetectionTests: XCTestCase {
         XCTAssertEqual(url.path, "/Users/example/.local/bin/qodercli")
     }
 
+    func testQoderCNCLIExecutableURLUsesOfficialCommandName() throws {
+        let home = URL(fileURLWithPath: "/Users/example")
+
+        let url = try XCTUnwrap(HookInstaller.qoderCNCLIExecutableURL(homeDirectory: home))
+
+        XCTAssertEqual(url.path, "/Users/example/.local/bin/qoderclicn")
+    }
+
     func testQoderHookRefreshPreservesUnrelatedSettings() throws {
         let qoderIDEProfile = try XCTUnwrap(ClientProfileRegistry.managedHookProfile(id: "qoder-hooks"))
         let qoderCLIProfile = try XCTUnwrap(ClientProfileRegistry.managedHookProfile(id: "qoder-cli-hooks"))
@@ -95,6 +103,52 @@ final class QoderCLIVersionDetectionTests: XCTestCase {
         )
         let managedPreToolUseHook = try XCTUnwrap((preToolUse.first?["hooks"] as? [[String: Any]])?.first)
         XCTAssertEqual(managedPreToolUseHook["timeout"] as? Int, 86_400)
+    }
+
+    func testQoderCNSharedSettingsKeepDesktopAndCLIHooksIndependent() throws {
+        let desktopProfile = try XCTUnwrap(ClientProfileRegistry.managedHookProfile(id: "qoder-cn-hooks"))
+        let cliProfile = try XCTUnwrap(ClientProfileRegistry.managedHookProfile(id: "qoder-cn-cli-hooks"))
+        let desktopCommand = "/Users/test/.ping-island/bin/ping-island-bridge --source claude --client-kind qoder-cn --client-name 'Qoder CN' --client-originator 'Qoder CN'"
+        let cliCommand = "/Users/test/.ping-island/bin/ping-island-bridge --source claude --client-kind qoder-cn-cli --client-name 'Qoder CN CLI' --client-origin cli --client-originator 'Qoder CN'"
+
+        let desktopData = HookInstaller.updatedConfigurationData(
+            existingData: #"{"theme":"dark"}"#.data(using: .utf8),
+            profile: desktopProfile,
+            customCommand: desktopCommand,
+            installing: true
+        )
+        let combinedData = HookInstaller.updatedConfigurationData(
+            existingData: desktopData,
+            profile: cliProfile,
+            customCommand: cliCommand,
+            installing: true
+        )
+        let combinedJSON = try XCTUnwrap(JSONSerialization.jsonObject(with: combinedData) as? [String: Any])
+        let combinedHooks = try XCTUnwrap(combinedJSON["hooks"] as? [String: Any])
+        let combinedPreToolUse = try XCTUnwrap(combinedHooks["PreToolUse"] as? [[String: Any]])
+        let combinedCommands = combinedPreToolUse.compactMap { entry in
+            (entry["hooks"] as? [[String: Any]])?.first?["command"] as? String
+        }
+
+        XCTAssertEqual(combinedJSON["theme"] as? String, "dark")
+        XCTAssertTrue(combinedCommands.first?.contains("--client-kind qoder-cn-cli") == true)
+        XCTAssertTrue(combinedCommands.contains { $0.contains("--client-kind qoder-cn ") })
+
+        let cliOnlyData = HookInstaller.updatedConfigurationData(
+            existingData: combinedData,
+            profile: desktopProfile,
+            customCommand: desktopCommand,
+            installing: false
+        )
+        let cliOnlyJSON = try XCTUnwrap(JSONSerialization.jsonObject(with: cliOnlyData) as? [String: Any])
+        let cliOnlyHooks = try XCTUnwrap(cliOnlyJSON["hooks"] as? [String: Any])
+        let cliOnlyPreToolUse = try XCTUnwrap(cliOnlyHooks["PreToolUse"] as? [[String: Any]])
+        let cliOnlyCommands = cliOnlyPreToolUse.compactMap { entry in
+            (entry["hooks"] as? [[String: Any]])?.first?["command"] as? String
+        }
+
+        XCTAssertFalse(cliOnlyCommands.contains { $0.contains("--client-kind qoder-cn ") })
+        XCTAssertTrue(cliOnlyCommands.contains { $0.contains("--client-kind qoder-cn-cli") })
     }
 
     func testCodeBuddyCLIHookRefreshPreservesCodeBuddyIDEHooks() throws {

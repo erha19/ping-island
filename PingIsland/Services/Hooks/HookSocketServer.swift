@@ -215,7 +215,7 @@ struct HookEvent: Sendable {
             || (
                 event == "PreToolUse"
                     && normalizedTool == "exitplanmode"
-                    && clientInfo.normalizedForClaudeRouting().profileID == "qoder-cli"
+                    && clientInfo.normalizedForClaudeRouting().isQoderCLIClient
             )
     }
 
@@ -274,15 +274,14 @@ struct HookEvent: Sendable {
 
     private nonisolated var isQoderCLIAnsweredQuestionPermissionRequest: Bool {
         event == "PermissionRequest"
-            && clientInfo.profileID?
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-                .lowercased() == "qoder-cli"
+            && clientInfo.isQoderCLIClient
             && isAnsweredAskUserQuestionEvent
     }
 
     private nonisolated var isQoderIDENotifyOnlyClient: Bool {
         let normalizedClientInfo = clientInfo.normalizedForClaudeRouting()
-        if normalizedClientInfo.profileID == "qoder" {
+        if normalizedClientInfo.profileID == "qoder"
+            || normalizedClientInfo.profileID == "qoder-cn" {
             return true
         }
 
@@ -292,9 +291,11 @@ struct HookEvent: Sendable {
             clientInfo.terminalBundleIdentifier,
             clientInfo.bundleIdentifier
         ].contains { value in
-            value?
+            let normalizedBundleIdentifier = value?
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-                .lowercased() == "com.qoder.ide"
+                .lowercased()
+            return normalizedBundleIdentifier == "com.qoder.ide"
+                || normalizedBundleIdentifier == "com.aliyun.lingma.ide"
         }
     }
 }
@@ -876,6 +877,9 @@ private extension BridgeEnvelope {
         case "com.qoder.ide":
             effectiveExplicitKind = "qoder"
             effectiveExplicitName = "Qoder"
+        case "com.aliyun.lingma.ide":
+            effectiveExplicitKind = "qoder-cn"
+            effectiveExplicitName = "Qoder CN"
         case "com.qoder.work":
             effectiveExplicitKind = "qoderwork"
             effectiveExplicitName = "QoderWork"
@@ -2007,7 +2011,10 @@ class HookSocketServer {
         let clientKind = envelope.metadata["client_kind"]?
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
-        guard clientKind == "qoder" || clientKind == "qoder-cli" else {
+        guard clientKind == "qoder"
+            || clientKind == "qoder-cli"
+            || clientKind == "qoder-cn"
+            || clientKind == "qoder-cn-cli" else {
             return false
         }
 
@@ -2018,9 +2025,11 @@ class HookSocketServer {
             envelope.metadata["client_bundle_id"]
         ]
         let isQoderIDEHosted = bundleIdentifiers.contains { value in
-            value?
+            let normalizedBundleIdentifier = value?
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-                .lowercased() == "com.qoder.ide"
+                .lowercased()
+            return normalizedBundleIdentifier == "com.qoder.ide"
+                || normalizedBundleIdentifier == "com.aliyun.lingma.ide"
         }
         guard isQoderIDEHosted else {
             return false
