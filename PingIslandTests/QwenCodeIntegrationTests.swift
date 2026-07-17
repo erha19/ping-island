@@ -2,6 +2,58 @@ import XCTest
 @testable import Ping_Island
 
 final class QwenCodeIntegrationTests: XCTestCase {
+    func testConcurrentQwenSessionsInSameWorkspaceRemainIndependent() async {
+        let firstSessionId = "qwen-concurrent-first-\(UUID().uuidString)"
+        let secondSessionId = "qwen-concurrent-second-\(UUID().uuidString)"
+        let workspace = "/tmp/qwen-concurrent-workspace-\(UUID().uuidString)"
+        let store = SessionStore.shared
+        let clientInfo = SessionClientInfo(
+            kind: .custom,
+            profileID: "qwen-code",
+            name: "Qwen Code",
+            origin: "cli",
+            originator: "Qwen Code",
+            threadSource: "qwen-code-hooks"
+        )
+
+        func promptEvent(sessionId: String, message: String) -> HookEvent {
+            HookEvent(
+                sessionId: sessionId,
+                cwd: workspace,
+                event: "UserPromptSubmit",
+                status: "processing",
+                provider: .claude,
+                clientInfo: clientInfo,
+                pid: nil,
+                tty: nil,
+                tool: nil,
+                toolInput: nil,
+                toolUseId: nil,
+                notificationType: nil,
+                message: message
+            )
+        }
+
+        await store.process(.hookReceived(promptEvent(
+            sessionId: firstSessionId,
+            message: "First concurrent request"
+        )))
+        await store.process(.hookReceived(promptEvent(
+            sessionId: secondSessionId,
+            message: "Second concurrent request"
+        )))
+
+        let firstSession = await store.session(for: firstSessionId)
+        let secondSession = await store.session(for: secondSessionId)
+        XCTAssertNotNil(firstSession)
+        XCTAssertNotNil(secondSession)
+        XCTAssertEqual(firstSession?.latestHookMessage, "First concurrent request")
+        XCTAssertEqual(secondSession?.latestHookMessage, "Second concurrent request")
+
+        await store.process(.sessionArchived(sessionId: firstSessionId))
+        await store.process(.sessionArchived(sessionId: secondSessionId))
+    }
+
     func testQwenStopBridgeMessageFallsBackToLastAssistantMessage() {
         XCTAssertEqual(
             HookSocketServer.resolvedBridgeMessage(

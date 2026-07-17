@@ -2604,6 +2604,11 @@ actor SessionStore {
         guard !cwd.isEmpty else { return }
         guard provider == .claude else { return }
         guard session.ingress != .nativeRuntime else { return }
+        // Qwen command hooks do not expose the owning CLI PID, while their stable
+        // session IDs explicitly support multiple sessions in the same workspace.
+        // Treating a second Qwen session as restart evidence would evict the first
+        // legitimate session as soon as both emit hooks.
+        guard !session.clientInfo.isQwenCodeClient else { return }
 
         var idsToArchive: [String] = []
         for (existingId, existing) in sessions {
