@@ -65,10 +65,7 @@ struct IslandBridgeMain {
 
                 let response: BridgeResponse?
                 do {
-                    response = try sendEnvelopeIfPossible(
-                        envelope: envelope,
-                        socketPath: socketPath
-                    )
+                    response = try SocketClient.send(envelope: envelope, socketPath: socketPath)
                     try? BridgeDebugLogger.logDeliveryIfNeeded(
                         envelope: envelope,
                         environment: environment,
@@ -84,7 +81,10 @@ struct IslandBridgeMain {
                         outcome: "connection_failed",
                         policy: runtimeConfig.debugLogPolicy
                     )
-                    throw BridgeError.connectionFailed
+                    if envelope.expectsResponse {
+                        throw BridgeError.connectionFailed
+                    }
+                    response = nil
                 }
 
                 if let response, response.decision != nil {
@@ -266,18 +266,6 @@ struct IslandBridgeMain {
             }
 
             return .failed
-        }
-    }
-
-    private static func sendEnvelopeIfPossible(
-        envelope: BridgeEnvelope,
-        socketPath: String
-    ) throws -> BridgeResponse? {
-        do {
-            return try SocketClient.send(envelope: envelope, socketPath: socketPath)
-        } catch BridgeError.connectionFailed where !envelope.expectsResponse {
-            // State-only hooks should not fail the calling CLI when Island is unavailable.
-            return nil
         }
     }
 
@@ -666,6 +654,19 @@ private enum SocketClient {
         }
         defer { close(fd) }
 
+        #if canImport(Darwin)
+        var noSignal: Int32 = 1
+        guard setsockopt(
+            fd,
+            SOL_SOCKET,
+            SO_NOSIGPIPE,
+            &noSignal,
+            socklen_t(MemoryLayout<Int32>.size)
+        ) == 0 else {
+            throw BridgeError.connectionFailed
+        }
+        #endif
+
         var address = sockaddr_un()
         address.sun_family = sa_family_t(AF_UNIX)
         let utf8 = socketPath.utf8CString.map(UInt8.init(bitPattern:))
@@ -686,17 +687,61 @@ private enum SocketClient {
         }
 
         let data = try BridgeCodec.encodeEnvelope(envelope)
-        _ = data.withUnsafeBytes { buffer in
-            write(fd, buffer.baseAddress, buffer.count)
+        try writeAll(data, to: fd)
+        guard shutdown(fd, islandShutdownWrite) == 0 else {
+            throw BridgeError.connectionFailed
         }
-        shutdown(fd, islandShutdownWrite)
 
-        var buffer = [UInt8](repeating: 0, count: 4096)
-        let count = read(fd, &buffer, buffer.count)
-        guard count > 0 else {
-            return BridgeResponse(requestID: envelope.id)
+        let responseData = try readAll(from: fd)
+        guard !responseData.isEmpty else {
+            throw BridgeError.connectionFailed
         }
-        return try BridgeCodec.decodeResponse(Data(buffer.prefix(count)))
+        guard let response = try? BridgeCodec.decodeResponse(responseData),
+              response.requestID == envelope.id else {
+            throw BridgeError.connectionFailed
+        }
+        return response
+    }
+
+    private static func writeAll(_ data: Data, to fd: Int32) throws {
+        var offset = 0
+        while offset < data.count {
+            let written = data.withUnsafeBytes { buffer in
+                write(
+                    fd,
+                    buffer.baseAddress?.advanced(by: offset),
+                    data.count - offset
+                )
+            }
+            if written > 0 {
+                offset += written
+                continue
+            }
+            if written < 0, errno == EINTR {
+                continue
+            }
+            throw BridgeError.connectionFailed
+        }
+    }
+
+    private static func readAll(from fd: Int32) throws -> Data {
+        var data = Data()
+        var buffer = [UInt8](repeating: 0, count: 4096)
+
+        while true {
+            let count = read(fd, &buffer, buffer.count)
+            if count > 0 {
+                data.append(buffer, count: count)
+                continue
+            }
+            if count == 0 {
+                return data
+            }
+            if errno == EINTR {
+                continue
+            }
+            throw BridgeError.connectionFailed
+        }
     }
 
     static func sendHealthCheck(socketPath: String) throws {
