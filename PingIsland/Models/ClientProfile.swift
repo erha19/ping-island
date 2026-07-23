@@ -1046,13 +1046,16 @@ enum ClientProfileRegistry {
         ManagedHookClientProfile(
             id: "kimi-hooks",
             title: "Kimi CLI",
-            subtitle: "管理 ~/.kimi/config.toml，按 Kimi CLI 官方 hooks 协议接入 Island",
+            subtitle: "管理 ~/.kimi-code/config.toml，按 Kimi CLI 官方 hooks 协议接入 Island",
             installationKind: .tomlHooks,
             alwaysVisibleInSettings: true,
             logoAssetName: "KimiLogo",
             prefersBundledLogoOverAppIcon: true,
             iconSymbolName: "moon.stars.fill",
-            configurationRelativePath: ".kimi/config.toml",
+            configurationRelativePaths: [
+                ".kimi-code/config.toml",
+                ".kimi/config.toml"
+            ],
             bridgeSource: "kimi",
             bridgeExtraArguments: [
                 "--client-kind", "kimi",
