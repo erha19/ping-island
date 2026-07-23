@@ -419,11 +419,43 @@ struct SessionState: Equatable, Identifiable, Sendable {
             return true
         }
 
+        if isLikelyEmptyClaudeHookSessionForUI {
+            return true
+        }
+
         if isLikelyCodexAuxiliaryThreadForUI {
             return true
         }
 
         return isLikelyEmptyCodexPlaceholderForUI
+    }
+
+    /// Claude Code extensions can emit SessionStart when an idle panel is restored even though
+    /// no conversation or transcript exists. Do not let that provisional hook row outrank a
+    /// real session from another provider in the same workspace.
+    nonisolated var isLikelyEmptyClaudeHookSessionForUI: Bool {
+        guard provider == .claude else { return false }
+        guard ingress == .hookBridge else { return false }
+        guard clientInfo.isPlainClaudeCodeRouting else { return false }
+        guard phase == .idle || phase == .waitingForInput else { return false }
+        guard chatItems.isEmpty else { return false }
+        guard case nil = intervention else { return false }
+        guard compactHookMessage == nil else { return false }
+        guard previewText?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false else {
+            return false
+        }
+        guard conversationInfo.summary?.isEmpty != false,
+              conversationInfo.firstUserMessage?.isEmpty != false,
+              conversationInfo.lastMessage?.isEmpty != false else {
+            return false
+        }
+
+        guard let transcriptPath = clientInfo.sessionFilePath?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+              !transcriptPath.isEmpty else {
+            return true
+        }
+        return !FileManager.default.fileExists(atPath: transcriptPath)
     }
 
     /// Codex may write helper threads for app-side suggestions or selection filters into the

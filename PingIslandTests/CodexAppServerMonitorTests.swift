@@ -85,4 +85,49 @@ final class CodexAppServerMonitorTests: XCTestCase {
         XCTAssertEqual(questions.first?.options.map(\.title), ["Tests", "UI"])
         XCTAssertTrue(questions.first?.allowsOther ?? false)
     }
+
+    func testRecentIdleThreadRequestsRolloutRecoveryAfterReconnect() {
+        let referenceDate = Date(timeIntervalSince1970: 1_784_481_907)
+        let recentUpdate = referenceDate.addingTimeInterval(-93).timeIntervalSince1970
+        let rolloutPath = "/tmp/ping-island-tests/rollout-thread-with-recent-activity.jsonl"
+        let thread: [String: Any] = [
+            "id": "thread-with-recent-activity",
+            "updatedAt": recentUpdate,
+            "status": ["type": "idle"],
+            "path": rolloutPath
+        ]
+
+        XCTAssertTrue(CodexAppServerMonitor.shouldRecoverRolloutSnapshot(
+            from: thread,
+            referenceDate: referenceDate
+        ))
+        XCTAssertEqual(CodexAppServerMonitor.rolloutPath(from: thread), rolloutPath)
+    }
+
+    func testActiveThreadRequestsRolloutRecoveryDespiteStaleTimestamp() {
+        let referenceDate = Date(timeIntervalSince1970: 1_784_481_907)
+
+        XCTAssertTrue(CodexAppServerMonitor.shouldRecoverRolloutSnapshot(
+            from: [
+                "id": "active-thread",
+                "updatedAt": referenceDate.addingTimeInterval(-(60 * 60)).timeIntervalSince1970,
+                "status": ["type": "active"]
+            ],
+            referenceDate: referenceDate
+        ))
+    }
+
+    func testStaleIdleThreadDoesNotRequestRolloutRecovery() {
+        let referenceDate = Date(timeIntervalSince1970: 1_784_481_907)
+        let staleUpdate = referenceDate.addingTimeInterval(-(31 * 60)).timeIntervalSince1970
+
+        XCTAssertFalse(CodexAppServerMonitor.shouldRecoverRolloutSnapshot(
+            from: [
+                "id": "stale-thread",
+                "updatedAt": staleUpdate,
+                "status": ["type": "idle"]
+            ],
+            referenceDate: referenceDate
+        ))
+    }
 }
