@@ -52,29 +52,43 @@ func islandBridgeHealthCheckFailsWhenSocketIsUnavailable() throws {
 }
 
 @Test
-func islandBridgeAllowsStateOnlyEventsWhenAppIsUnavailable() throws {
-    let executable = try TestRuntime.executableURL(named: "PingIslandBridge")
-    let process = try RunningProcess(
-        executableURL: executable,
-        arguments: ["--source", "codex"],
-        environment: bridgeTestEnvironment([
-            "ISLAND_SOCKET_PATH": "/tmp/ping-island-missing-\(UUID().uuidString).sock",
-            "PWD": "/tmp/codex-demo"
-        ]),
-        stdin: """
-        {
-          "event": "PostToolUse",
-          "thread_id": "codex-e2e",
-          "tool_name": "Read"
-        }
-        """
-    )
+func islandBridgeAllowsStateOnlyEventsWhenAppIsUnavailable() async throws {
+    try await withTemporaryDirectory { directory in
+        let executable = try TestRuntime.executableURL(named: "PingIslandBridge")
+        let debugDirectory = directory.appending(path: "codex-hook-debug", directoryHint: .isDirectory)
+        let process = try RunningProcess(
+            executableURL: executable,
+            arguments: ["--source", "codex"],
+            environment: bridgeTestEnvironment([
+                "ISLAND_SOCKET_PATH": "/tmp/ping-island-missing-\(UUID().uuidString).sock",
+                "PING_ISLAND_CODEX_HOOK_DEBUG_DIR": debugDirectory.path(),
+                "PWD": "/tmp/codex-demo"
+            ]),
+            stdin: """
+            {
+              "event": "PostToolUse",
+              "thread_id": "codex-e2e",
+              "tool_name": "Read"
+            }
+            """
+        )
 
-    let result = process.waitForExit()
+        let result = process.waitForExit()
 
-    #expect(result.terminationStatus == 0)
-    #expect(result.stdout.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-    #expect(result.stderr.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        #expect(result.terminationStatus == 0)
+        #expect(result.stdout.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        #expect(result.stderr.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+        let logURL = try #require(
+            try FileManager.default.contentsOfDirectory(
+                at: debugDirectory,
+                includingPropertiesForKeys: nil
+            ).first(where: { $0.pathExtension == "jsonl" })
+        )
+        let log = try String(contentsOf: logURL, encoding: .utf8)
+        #expect(log.contains(#""deliveryOutcome":"connection_failed""#))
+        #expect(!log.contains(#""deliveryOutcome":"delivered""#))
+    }
 }
 
 @Test
@@ -215,6 +229,61 @@ func islandBridgeRoundTripsApprovalRequestsThroughSocketServer() async throws {
             #expect(session.title == "Bash")
             #expect(session.preview == "Bash")
             #expect(session.cwd == "/tmp/e2e-demo")
+        }
+    }
+}
+
+@Test
+func islandBridgeDeliversClaudeDesktopToolEventsThroughSocketServer() async throws {
+    try await withTemporaryDirectory { directory in
+        let recorder = await MainActor.run { SnapshotRecorder() }
+        let store = SessionStore { snapshot in
+            recorder.snapshot = snapshot
+        }
+        let coordinator = ApprovalCoordinator()
+        let socketPath = directory.appending(path: "island.sock").path()
+
+        try await withRunningSocketServer(
+            socketPath: socketPath,
+            sessionStore: store,
+            approvalCoordinator: coordinator
+        ) { _ in
+            let executable = try TestRuntime.executableURL(named: "PingIslandBridge")
+            let process = try RunningProcess(
+                executableURL: executable,
+                arguments: ["--source", "claude"],
+                environment: bridgeTestEnvironment([
+                    "ISLAND_SOCKET_PATH": socketPath,
+                    "PWD": "/tmp/claude-desktop-demo",
+                    "TERM_PROGRAM": "",
+                    "__CFBundleIdentifier": "com.anthropic.claudefordesktop"
+                ]),
+                stdin: """
+                {
+                  "hook_event_name": "PreToolUse",
+                  "session_id": "claude-desktop-e2e",
+                  "tool_name": "Read",
+                  "tool_input": {
+                    "file_path": "/tmp/claude-desktop-demo/README.md"
+                  }
+                }
+                """
+            )
+
+            let result = process.waitForExit()
+
+            #expect(result.terminationStatus == 0)
+            #expect(result.stderr.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+            try await waitUntil(description: "Claude Desktop tool event should reach the session store") {
+                await MainActor.run {
+                    recorder.sessions.contains(where: { session in
+                        session.id == "claude:claude-desktop-e2e"
+                            && session.status.kind == .runningTool
+                            && session.terminalContext.terminalBundleID == "com.anthropic.claudefordesktop"
+                    })
+                }
+            }
         }
     }
 }

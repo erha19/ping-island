@@ -1845,6 +1845,7 @@ class HookSocketServer {
         }
 
         guard !allData.isEmpty else {
+            logger.warning("Rejected empty bridge socket payload")
             close(clientSocket)
             return
         }
@@ -1855,9 +1856,13 @@ class HookSocketServer {
             return
         }
 
-        let decoder = JSONDecoder()
-        guard let envelope = try? decoder.decode(BridgeEnvelope.self, from: allData) else {
-            logger.warning("Failed to parse bridge envelope: \(String(data: allData, encoding: .utf8) ?? "?", privacy: .public)")
+        let envelope: BridgeEnvelope
+        do {
+            envelope = try JSONDecoder().decode(BridgeEnvelope.self, from: allData)
+        } catch {
+            logger.error(
+                "Rejected bridge envelope bytes=\(allData.count, privacy: .public) error=\(error.localizedDescription, privacy: .public)"
+            )
             close(clientSocket)
             return
         }
@@ -1869,7 +1874,7 @@ class HookSocketServer {
             logger.debug(
                 "Filtering QoderWork non-responsive hook event=\(envelope.eventType, privacy: .public) session=\(event.sessionId.prefix(8), privacy: .public)"
             )
-            close(clientSocket)
+            sendAcknowledgement(for: envelope.id, to: clientSocket)
             return
         }
 
@@ -1887,7 +1892,7 @@ class HookSocketServer {
             logger.debug(
                 "Ignoring auxiliary Codex hook event=\(envelope.eventType, privacy: .public) session=\(envelope.resolvedSessionID.prefix(8), privacy: .public)"
             )
-            close(clientSocket)
+            sendAcknowledgement(for: envelope.id, to: clientSocket)
             return
         }
 
@@ -1895,7 +1900,7 @@ class HookSocketServer {
             logger.debug(
                 "Skipping Qoder IDE hook event=\(envelope.eventType, privacy: .public) session=\(envelope.resolvedSessionID.prefix(8), privacy: .public)"
             )
-            close(clientSocket)
+            sendAcknowledgement(for: envelope.id, to: clientSocket)
             return
         }
 
@@ -1994,15 +1999,40 @@ class HookSocketServer {
             return
         }
 
-        close(clientSocket)
-        eventHandler?(event)
+        guard let eventHandler else {
+            logger.error(
+                "Rejected bridge envelope because no event handler is registered request=\(envelope.id.uuidString, privacy: .public)"
+            )
+            close(clientSocket)
+            return
+        }
+        eventHandler(event)
+        sendAcknowledgement(for: envelope.id, to: clientSocket)
     }
 
     private func sendHealthCheckResponse(to clientSocket: Int32) {
         let data = Data(Self.healthCheckResponse.utf8)
-        data.withUnsafeBytes { buffer in
-            guard let baseAddress = buffer.baseAddress else { return }
-            _ = write(clientSocket, baseAddress, data.count)
+        if !writeAll(data, to: clientSocket) {
+            logger.error("Failed to write bridge health-check response")
+        }
+        close(clientSocket)
+    }
+
+    private func sendAcknowledgement(for requestID: UUID, to clientSocket: Int32) {
+        let response = BridgeResponse(
+            requestID: requestID,
+            decision: nil,
+            reason: nil,
+            updatedInput: nil,
+            errorMessage: nil
+        )
+        guard let data = try? JSONEncoder().encode(response) else {
+            logger.error("Failed to encode bridge acknowledgement request=\(requestID.uuidString, privacy: .public)")
+            close(clientSocket)
+            return
+        }
+        if !writeAll(data, to: clientSocket) {
+            logger.error("Failed to write bridge acknowledgement request=\(requestID.uuidString, privacy: .public)")
         }
         close(clientSocket)
     }
@@ -2210,19 +2240,11 @@ class HookSocketServer {
         let age = Date().timeIntervalSince(receivedAt)
         logger.info("Sending bridge response: \(decision, privacy: .public) for \(sessionId.prefix(8), privacy: .public) tool:\(toolUseId.prefix(12), privacy: .public) (age: \(String(format: "%.1f", age), privacy: .public)s)")
 
-        var writeSuccess = false
-        data.withUnsafeBytes { bytes in
-            guard let baseAddress = bytes.baseAddress else {
-                logger.error("Failed to get data buffer address")
-                return
-            }
-            let result = write(clientSocket, baseAddress, data.count)
-            if result < 0 {
-                logger.error("Write failed with errno: \(errno)")
-            } else {
-                logger.debug("Write succeeded: \(result) bytes")
-                writeSuccess = true
-            }
+        let writeSuccess = writeAll(data, to: clientSocket)
+        if writeSuccess {
+            logger.debug("Write succeeded: \(data.count) bytes")
+        } else {
+            logger.error("Write failed with errno: \(errno)")
         }
 
         close(clientSocket)
@@ -2230,6 +2252,44 @@ class HookSocketServer {
         if !writeSuccess {
             permissionFailureHandler?(sessionId, toolUseId)
         }
+    }
+
+    private func writeAll(_ data: Data, to clientSocket: Int32) -> Bool {
+        var offset = 0
+        while offset < data.count {
+            let written = data.withUnsafeBytes { bytes in
+                write(
+                    clientSocket,
+                    bytes.baseAddress?.advanced(by: offset),
+                    data.count - offset
+                )
+            }
+            if written > 0 {
+                offset += written
+                continue
+            }
+            if written < 0, errno == EINTR {
+                continue
+            }
+            if written < 0, errno == EAGAIN || errno == EWOULDBLOCK {
+                var descriptor = pollfd(
+                    fd: clientSocket,
+                    events: Int16(POLLOUT),
+                    revents: 0
+                )
+                var pollResult: Int32
+                repeat {
+                    pollResult = poll(&descriptor, 1, 500)
+                } while pollResult < 0 && errno == EINTR
+                guard pollResult > 0,
+                      (descriptor.revents & Int16(POLLOUT)) != 0 else {
+                    return false
+                }
+                continue
+            }
+            return false
+        }
+        return true
     }
 }
 
