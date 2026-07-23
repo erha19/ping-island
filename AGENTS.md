@@ -4,7 +4,7 @@ This file is a routing layer for coding agents working in this repo. Keep it sho
 
 ## Mission
 
-- `PingIsland` is a macOS menu bar app that surfaces Dynamic Island-style status for Claude Code, Codex, Gemini CLI, Hermes Agent, Qwen Code, Kimi CLI, and compatible hook-driven agent sessions.
+- `PingIsland` is a macOS menu bar app that surfaces Dynamic Island-style status for Claude Code, Codex, Gemini CLI, Antigravity CLI, Hermes Agent, Qwen Code, Kimi CLI, and compatible hook-driven agent sessions.
 - The main runtime path is:
   - hook or app-server events
   - monitoring and service layers
@@ -81,6 +81,7 @@ This file is a routing layer for coding agents working in this repo. Keep it sho
 - If you change provider/client detection or click-through behavior, trace through `HookSocketServer`, `SessionStore`, `SessionState`, `SessionLauncher`, and the session list / hover UI so labels and launch targets stay in sync.
 - If you add a Claude-compatible hook client, start in `PingIsland/Models/ClientProfile.swift` and wire any truly client-specific behavior from there before adding new ad-hoc switches elsewhere.
   - Gemini CLI hooks are managed through `~/.gemini/settings.json`; its `BeforeTool` / `AfterTool` matchers are regex-based, so use `.*` rather than Claude-style `*`.
+  - Antigravity CLI is managed as a generated native plugin under `~/.gemini/antigravity-cli/plugins/ping-island/`, with `plugin.json` plus namespaced `hooks.json`. Its camelCase hook payloads use `conversationId`, `workspacePaths`, and `toolCall`; keep those normalized at the bridge boundary. Ping Island's observational `PreToolUse` hook must return `ask` so Antigravity's native permission engine remains authoritative, including when the Island socket is unavailable.
   - Hermes Agent CLI integration must use plugin hooks under `~/.hermes/plugins/ping_island/`; `~/.hermes/hooks/` is gateway-only and will not fire in the Hermes CLI, so keep Ping Island on `ctx.register_hook()`-based plugin registration instead of gateway hook directories.
   - Qwen Code hooks are managed through `~/.qwen/settings.json`; follow the official Qwen Code hook event names (`PreToolUse`, `PostToolUseFailure`, `Notification`, `Stop`, etc.) and remember that `Notification` matcher values are exact notification types such as `permission_prompt`, `idle_prompt`, and `auth_success`.
   - OpenClaw hooks are managed as a generated internal hook directory under `~/.openclaw/hooks/<hook-name>/` and require the paired enablement entry in `~/.openclaw/openclaw.json`; treat it as a directory-discovery integration, not a JSON hook list.

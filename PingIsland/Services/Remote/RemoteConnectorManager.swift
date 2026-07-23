@@ -875,7 +875,16 @@ final class RemoteConnectorManager: ObservableObject {
                     relativePath: profile.configurationRelativePaths[0],
                     homeDirectory: probe.homeDirectory
                 )
-                let remoteFiles = HookInstaller.managedPluginDirectoryFiles(for: profile)
+                let remoteFiles = HookInstaller.managedPluginDirectoryFiles(
+                    for: profile,
+                    bridgeArguments: Self.remoteManagedBridgeArguments(
+                        for: profile,
+                        installRoot: endpoint.remoteInstallRoot
+                    ),
+                    bridgeEnvironment: Self.remoteManagedBridgeEnvironment(
+                        hookSocketPath: endpoint.remoteHookSocketPath
+                    )
+                )
                 logger.debug(
                     "Remote bootstrap preparing plugin directory endpoint=\(endpoint.id.uuidString, privacy: .public) profile=\(profile.id, privacy: .public) remotePath=\(remoteDirectoryPath, privacy: .public) fileCount=\(remoteFiles.count, privacy: .public)"
                 )
@@ -1552,6 +1561,7 @@ final class RemoteConnectorManager: ObservableObject {
         let supportedProfileIDs: Set<String> = [
             "claude-hooks",
             "codex-hooks",
+            "antigravity-hooks",
             "hermes-hooks",
             "pi-hooks",
             "qwen-code-hooks",

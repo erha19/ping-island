@@ -1857,6 +1857,8 @@ struct HookInstaller {
         let marker = managedMarker(for: profile)
         let candidates = [
             url.appendingPathComponent("plugin.yaml"),
+            url.appendingPathComponent("plugin.json"),
+            url.appendingPathComponent("hooks.json"),
             url.appendingPathComponent("__init__.py"),
             url.appendingPathComponent("index.ts")
         ]
@@ -2637,7 +2639,19 @@ struct HookInstaller {
         """
     }
 
-    static func managedPluginDirectoryFiles(for profile: ManagedHookClientProfile) -> [String: String] {
+    static func managedPluginDirectoryFiles(
+        for profile: ManagedHookClientProfile,
+        bridgeArguments: [String]? = nil,
+        bridgeEnvironment: [String: String] = [:]
+    ) -> [String: String] {
+        if profile.id == "antigravity-hooks" {
+            return managedAntigravityPluginFiles(
+                for: profile,
+                bridgeArguments: bridgeArguments,
+                bridgeEnvironment: bridgeEnvironment
+            )
+        }
+
         if profile.id == "pi-hooks" {
             return ["index.ts": managedPiExtensionSource(for: profile)]
         }
@@ -3071,6 +3085,49 @@ struct HookInstaller {
         return [
             "plugin.yaml": pluginYAML,
             "__init__.py": initPy,
+        ]
+    }
+
+    private static func managedAntigravityPluginFiles(
+        for profile: ManagedHookClientProfile,
+        bridgeArguments: [String]?,
+        bridgeEnvironment: [String: String]
+    ) -> [String: String] {
+        let marker = managedMarker(for: profile)
+        let resolvedBridgeArguments = bridgeArguments ?? bridgeCommandArguments(for: profile)
+        let environmentPrefix = bridgeEnvironment
+            .sorted { $0.key < $1.key }
+            .map { "\($0.key)=\(shellQuoted($0.value))" }
+
+        var eventHooks: [String: Any] = [:]
+        for event in profile.events {
+            let command = (
+                environmentPrefix
+                + (resolvedBridgeArguments + ["--event", event.name]).map(shellQuotedIfNeeded)
+            ).joined(separator: " ")
+            eventHooks[event.name] = makeHookEntries(command: command, event: event)
+        }
+
+        let manifest: [String: Any] = [
+            "$schema": "https://antigravity.google/schemas/v1/plugin.json",
+            "name": "ping-island",
+            "description": "\(marker). Forward Antigravity CLI activity to Ping Island."
+        ]
+        let hooks: [String: Any] = ["ping-island": eventHooks]
+
+        func jsonString(_ object: Any) -> String {
+            guard let data = try? JSONSerialization.data(
+                withJSONObject: object,
+                options: [.prettyPrinted, .sortedKeys]
+            ) else {
+                return "{}"
+            }
+            return String(data: data, encoding: .utf8) ?? "{}"
+        }
+
+        return [
+            "plugin.json": jsonString(manifest),
+            "hooks.json": jsonString(hooks),
         ]
     }
 
@@ -3938,6 +3995,22 @@ struct HookInstaller {
         case .tomlHooks:
             return baseDirectory.appendingPathComponent(profile.primaryConfigurationURL.lastPathComponent)
         case .pluginDirectory:
+            if profile.id == "antigravity-hooks" {
+                if baseDirectory.lastPathComponent == "antigravity-cli" {
+                    return baseDirectory
+                        .appendingPathComponent("plugins", isDirectory: true)
+                        .appendingPathComponent(
+                            profile.primaryConfigurationURL.lastPathComponent,
+                            isDirectory: true
+                        )
+                }
+                if baseDirectory.lastPathComponent == "plugins" {
+                    return baseDirectory.appendingPathComponent(
+                        profile.primaryConfigurationURL.lastPathComponent,
+                        isDirectory: true
+                    )
+                }
+            }
             if baseDirectory.lastPathComponent == ".hermes" {
                 return baseDirectory
                     .appendingPathComponent("plugins", isDirectory: true)

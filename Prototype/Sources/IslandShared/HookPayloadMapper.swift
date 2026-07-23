@@ -114,6 +114,9 @@ public enum HookPayloadMapper {
         switch provider {
         case .claude, .gemini:
             let clientKind = normalizedClientKind(from: metadata)
+            if isAntigravityHookClient(clientKind) {
+                return antigravityStdoutPayload(response: response, decision: decision)
+            }
             if isQoderCLIClientKind(clientKind),
                isQoderCLIPlanExitApproval(
                    eventType: eventType,
@@ -260,6 +263,45 @@ public enum HookPayloadMapper {
                 }
                 return String(data: data, encoding: .utf8) ?? #"{"permissionDecision":"allow"}"#
             }
+        }
+    }
+
+    public static func fallbackStdoutPayload(
+        eventType: String,
+        metadata: [String: String]
+    ) -> String? {
+        let clientKind = normalizedClientKind(from: metadata)
+        guard isAntigravityHookClient(clientKind) else {
+            return nil
+        }
+
+        switch eventType.lowercased() {
+        case "pretooluse":
+            // Preserve Antigravity's native permission evaluation instead of
+            // allowing an observational Ping Island hook to auto-approve tools.
+            return #"{"decision":"ask"}"#
+        case "stop":
+            // Any value other than "continue" allows Antigravity to stop.
+            return #"{"decision":"stop"}"#
+        default:
+            return "{}"
+        }
+    }
+
+    private static func antigravityStdoutPayload(
+        response: BridgeResponse,
+        decision: InterventionDecision
+    ) -> String {
+        switch decision {
+        case .approve, .approveForSession:
+            return #"{"decision":"allow"}"#
+        case .deny, .cancel:
+            let reason = BridgeCodec.jsonString(
+                for: response.reason ?? "Denied from Ping Island"
+            ) ?? #""Denied from Ping Island""#
+            return #"{"decision":"deny","reason":\#(reason)}"#
+        case .answer:
+            return #"{"decision":"ask"}"#
         }
     }
 
@@ -1024,11 +1066,36 @@ public enum HookPayloadMapper {
         var normalized = payload
 
         if source == .gemini {
+            if normalized["session_id"] == nil,
+               let conversationID = payload["conversationId"] as? String {
+                normalized["session_id"] = conversationID
+            }
+            if normalized["cwd"] == nil,
+               let workspacePaths = payload["workspacePaths"] as? [String],
+               let workspacePath = workspacePaths.first {
+                normalized["cwd"] = workspacePath
+            }
+            if normalized["transcript_path"] == nil,
+               let transcriptPath = payload["transcriptPath"] as? String {
+                normalized["transcript_path"] = transcriptPath
+            }
+            if let toolCall = payload["toolCall"] as? [String: Any] {
+                if normalized["tool_name"] == nil {
+                    normalized["tool_name"] = toolCall["name"]
+                }
+                if normalized["tool_input"] == nil {
+                    normalized["tool_input"] = toolCall["args"]
+                }
+            }
             if normalized["message"] == nil {
                 if let promptResponse = payload["prompt_response"] as? String {
                     normalized["message"] = promptResponse
                 } else if let prompt = payload["prompt"] as? String {
                     normalized["message"] = prompt
+                } else if let error = payload["error"] as? String, !error.isEmpty {
+                    normalized["message"] = error
+                } else if let terminationReason = payload["terminationReason"] as? String {
+                    normalized["message"] = terminationReason
                 }
             }
             if normalized["last_assistant_message"] == nil, let promptResponse = payload["prompt_response"] as? String {
@@ -1530,7 +1597,18 @@ public enum HookPayloadMapper {
     private static func isGeminiHookClient(_ clientKind: String?) -> Bool {
         guard let clientKind else { return false }
         switch clientKind {
-        case "gemini", "gemini-cli", "gemini_cli", "gemini cli":
+        case "gemini", "gemini-cli", "gemini_cli", "gemini cli",
+             "antigravity", "antigravity-cli", "antigravity_cli", "antigravity cli", "agy":
+            return true
+        default:
+            return false
+        }
+    }
+
+    private static func isAntigravityHookClient(_ clientKind: String?) -> Bool {
+        guard let clientKind else { return false }
+        switch clientKind {
+        case "antigravity", "antigravity-cli", "antigravity_cli", "antigravity cli", "agy":
             return true
         default:
             return false
@@ -1542,17 +1620,27 @@ public enum HookPayloadMapper {
         payload: [String: Any]
     ) -> SessionStatus {
         switch eventType.lowercased() {
-        case "beforetool":
+        case "beforetool", "pretooluse":
             return SessionStatus(kind: .runningTool)
-        case "aftertool":
+        case "aftertool", "posttooluse":
+            if let error = payload["error"] as? String, !error.isEmpty {
+                return SessionStatus(kind: .error)
+            }
             if let toolResponse = payload["tool_response"] as? [String: Any],
                toolResponse["error"] != nil {
                 return SessionStatus(kind: .error)
             }
             return SessionStatus(kind: .active)
-        case "beforeagent", "beforetoolselection":
+        case "beforeagent", "beforetoolselection", "preinvocation":
             return SessionStatus(kind: .thinking)
         case "afteragent", "aftermodel":
+            return SessionStatus(kind: .waitingForInput)
+        case "postinvocation":
+            return SessionStatus(kind: .active)
+        case "stop":
+            if let error = payload["error"] as? String, !error.isEmpty {
+                return SessionStatus(kind: .error)
+            }
             return SessionStatus(kind: .waitingForInput)
         case "sessionstart":
             return SessionStatus(kind: .waitingForInput)
