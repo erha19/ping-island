@@ -50,9 +50,12 @@ actor CodexAppServerMonitor {
     private var pendingResponses: [String: CheckedContinuation<[String: Any], Error>] = [:]
     private var pendingRequestsByThread: [String: PendingRequest] = [:]
     private var threadApprovalModes: [String: String] = [:]  // threadId → approvalMode
+    private var rolloutRecoveryVersions: [String: String] = [:]
     private var resolvedClientBundleIdentifier: String?
     private var resolvedClientName: String?
     private var lastThreadDiagnostics: [ThreadDiagnosticsSnapshot] = []
+
+    private nonisolated static let rolloutRecoveryWindow: TimeInterval = 30 * 60
 
     private init() {}
 
@@ -110,6 +113,7 @@ actor CodexAppServerMonitor {
         process = nil
         pendingRequestsByThread.removeAll()
         threadApprovalModes.removeAll()
+        rolloutRecoveryVersions.removeAll()
         lastThreadDiagnostics.removeAll()
 
         for (_, continuation) in pendingResponses {
@@ -611,6 +615,7 @@ actor CodexAppServerMonitor {
         case "thread/archived":
             guard let threadId = params["threadId"] as? String else { return }
             logger.info("Codex thread archived thread=\(threadId, privacy: .public)")
+            rolloutRecoveryVersions.removeValue(forKey: threadId)
             removeThreadDiagnostics(threadId: threadId)
             await SessionStore.shared.process(.sessionEnded(sessionId: threadId))
 
@@ -964,6 +969,61 @@ actor CodexAppServerMonitor {
             activityAt: lifecycleDates.updatedAt,
             allowSyntheticActivityTimestamp: false
         )
+
+        if Self.shouldRecoverRolloutSnapshot(from: thread),
+           let recoveryVersion = Self.rolloutRecoveryVersion(from: thread),
+           rolloutRecoveryVersions[threadId] != recoveryVersion {
+            rolloutRecoveryVersions[threadId] = recoveryVersion
+            await SessionStore.shared.requestFileSync(for: threadId)
+        }
+    }
+
+    nonisolated static func shouldRecoverRolloutSnapshot(
+        from thread: [String: Any],
+        referenceDate: Date = Date()
+    ) -> Bool {
+        let statusType = (thread["status"] as? [String: Any])?["type"] as? String
+        if statusType == "active" {
+            return true
+        }
+
+        let dates = threadLifecycleDates(from: thread)
+        if let updatedAt = dates.updatedAt,
+           referenceDate.timeIntervalSince(updatedAt) <= rolloutRecoveryWindow {
+            return true
+        }
+
+        guard let rolloutPath = rolloutPath(from: thread),
+              let attributes = try? FileManager.default.attributesOfItem(atPath: rolloutPath),
+              let modificationDate = attributes[.modificationDate] as? Date else {
+            return false
+        }
+        return referenceDate.timeIntervalSince(modificationDate) <= rolloutRecoveryWindow
+    }
+
+    private nonisolated static func rolloutRecoveryVersion(from thread: [String: Any]) -> String? {
+        let updatedAt = threadLifecycleDates(from: thread).updatedAt?.timeIntervalSince1970 ?? -1
+        let statusType = (thread["status"] as? [String: Any])?["type"] as? String ?? "unknown"
+        let rolloutPath = rolloutPath(from: thread)
+        let modificationDate = rolloutPath.flatMap { path in
+            (try? FileManager.default.attributesOfItem(atPath: path)[.modificationDate]) as? Date
+        }
+
+        guard updatedAt >= 0 || modificationDate != nil || statusType == "active" else {
+            return nil
+        }
+        return "\(updatedAt)|\(modificationDate?.timeIntervalSince1970 ?? -1)|\(statusType)"
+    }
+
+    nonisolated static func rolloutPath(from thread: [String: Any]) -> String? {
+        [
+            thread["rolloutPath"] as? String,
+            thread["sessionFilePath"] as? String,
+            thread["rollout_path"] as? String,
+            thread["path"] as? String
+        ]
+        .compactMap(sanitizedThreadText(_:))
+        .first(where: { $0.hasSuffix(".jsonl") })
     }
 
     private func recordThreadDiagnostics(_ snapshot: ThreadDiagnosticsSnapshot) {
@@ -1415,9 +1475,7 @@ actor CodexAppServerMonitor {
         let threadSource = sanitizedText(thread["threadSource"] as? String)
             ?? sanitizedText(thread["source"] as? String)
             ?? sanitizedText(thread["sessionStartSource"] as? String)
-        let sessionFilePath = sanitizedText(thread["rolloutPath"] as? String)
-            ?? sanitizedText(thread["sessionFilePath"] as? String)
-            ?? sanitizedText(thread["rollout_path"] as? String)
+        let sessionFilePath = Self.rolloutPath(from: thread)
 
         let resolvedOrigin = origin ?? "desktop"
 

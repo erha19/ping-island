@@ -613,6 +613,44 @@ final class SessionStateTests: XCTestCase {
         XCTAssertFalse(session.shouldHideFromPrimaryUI)
     }
 
+    func testEmptyLocalClaudeHookSessionWithoutTranscriptHidesFromPrimaryUI() {
+        let session = SessionState(
+            sessionId: "claude-empty-hook",
+            cwd: "/tmp/ping-island-tests/shared-workspace",
+            provider: .claude,
+            clientInfo: SessionClientInfo(
+                kind: .claudeCode,
+                name: "Claude Code",
+                sessionFilePath: "/tmp/ping-island-tests/missing-claude-transcript.jsonl"
+            ),
+            ingress: .hookBridge,
+            phase: .waitingForInput,
+            lastActivity: Date()
+        )
+
+        XCTAssertTrue(session.isLikelyEmptyClaudeHookSessionForUI)
+        XCTAssertTrue(session.shouldHideFromPrimaryUI)
+    }
+
+    func testClaudeHookSessionWithRealActivityStaysVisible() {
+        let session = SessionState(
+            sessionId: "claude-active-hook",
+            cwd: "/tmp/ping-island-tests/shared-workspace",
+            provider: .claude,
+            clientInfo: SessionClientInfo(
+                kind: .claudeCode,
+                name: "Claude Code"
+            ),
+            ingress: .hookBridge,
+            latestHookMessage: "Implement the session routing fix",
+            phase: .processing,
+            lastActivity: Date()
+        )
+
+        XCTAssertFalse(session.isLikelyEmptyClaudeHookSessionForUI)
+        XCTAssertFalse(session.shouldHideFromPrimaryUI)
+    }
+
     func testCodexAuxiliaryExcludeThreadHidesFromPrimaryUI() {
         let message = #"{"exclude":[]}"#
         let session = SessionState(
