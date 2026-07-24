@@ -628,6 +628,34 @@ enum ClientProfileRegistry {
             ]
         ),
         ManagedHookClientProfile(
+            id: "antigravity-hooks",
+            title: "Antigravity CLI",
+            subtitle: "管理 ~/.gemini/antigravity-cli/plugins/ping-island，按 Antigravity 官方 plugin hooks 协议接入 Island",
+            installationKind: .pluginDirectory,
+            alwaysVisibleInSettings: true,
+            logoAssetName: "GeminiLogo",
+            prefersBundledLogoOverAppIcon: true,
+            iconSymbolName: "sparkles",
+            configurationRelativePath: ".gemini/antigravity-cli/plugins/ping-island",
+            bridgeSource: "gemini",
+            bridgeExtraArguments: [
+                "--client-kind", "antigravity",
+                "--client-name", "Antigravity CLI",
+                "--client-origin", "cli",
+                "--client-originator", "Antigravity CLI",
+                "--thread-source", "antigravity-hooks"
+            ],
+            defaultEnabled: false,
+            brand: .gemini,
+            events: [
+                HookInstallEventDescriptor(name: "PreToolUse", templates: [.matcher(".*")]),
+                HookInstallEventDescriptor(name: "PostToolUse", templates: [.matcher(".*")]),
+                HookInstallEventDescriptor(name: "PreInvocation", templates: [.direct]),
+                HookInstallEventDescriptor(name: "PostInvocation", templates: [.direct]),
+                HookInstallEventDescriptor(name: "Stop", templates: [.direct]),
+            ]
+        ),
+        ManagedHookClientProfile(
             id: "hermes-hooks",
             title: "Hermes",
             subtitle: "管理 ~/.hermes/plugins/ping_island，按 Hermes 官方 plugin hooks 协议接入 Island",
@@ -1344,6 +1372,21 @@ enum ClientProfileRegistry {
             recognizedKinds: ["gemini", "gemini-cli", "gemini_cli", "gemini cli"],
             exactAliases: ["gemini", "gemini-cli", "gemini cli"],
             keywordAliases: ["gemini", "gemini cli"],
+            bundleIdentifiers: []
+        ),
+        SessionClientProfile(
+            id: "antigravity",
+            provider: .gemini,
+            family: .geminiHooks,
+            kind: .custom,
+            displayName: "Antigravity CLI",
+            assistantLabelMode: .badgeLabel,
+            brand: .gemini,
+            defaultBundleIdentifier: nil,
+            defaultOrigin: "cli",
+            recognizedKinds: ["antigravity", "antigravity-cli", "antigravity_cli", "antigravity cli", "agy"],
+            exactAliases: ["antigravity", "antigravity-cli", "antigravity cli", "agy"],
+            keywordAliases: ["antigravity", "antigravity cli"],
             bundleIdentifiers: []
         ),
         SessionClientProfile(

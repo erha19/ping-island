@@ -163,6 +163,7 @@
 "管理 ~/.claude/settings.json，使用统一 PingIslandBridge hooks 入口" = "管理 ~/.claude/settings.json，使用统一 PingIslandBridge hooks 入口";
 "管理 ~/.codex/hooks.json" = "管理 ~/.codex/hooks.json";
 "管理 ~/.gemini/settings.json，按 Gemini CLI 官方 hooks 协议接入 Island" = "管理 ~/.gemini/settings.json，按 Gemini CLI 官方 hooks 协议接入 Island";
+"管理 ~/.gemini/antigravity-cli/plugins/ping-island，按 Antigravity 官方 plugin hooks 协议接入 Island" = "管理 ~/.gemini/antigravity-cli/plugins/ping-island，按 Antigravity 官方 plugin hooks 协议接入 Island";
 "管理 ~/.codebuddy/settings.json，按 CodeBuddy Hooks 协议接入 Island" = "管理 ~/.codebuddy/settings.json，按 CodeBuddy Hooks 协议接入 Island";
 "管理 ~/.codebuddy/settings.json，支持 CodeBuddy IDE hooks" = "管理 ~/.codebuddy/settings.json，支持 CodeBuddy IDE hooks";
 "管理 ~/.codebuddy/settings.json，按 CodeBuddy CLI Claude-compatible hooks 协议接入 Island" = "管理 ~/.codebuddy/settings.json，按 CodeBuddy CLI Claude-compatible hooks 协议接入 Island";

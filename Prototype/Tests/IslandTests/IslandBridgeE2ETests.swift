@@ -78,6 +78,45 @@ func islandBridgeAllowsStateOnlyEventsWhenAppIsUnavailable() throws {
 }
 
 @Test
+func islandBridgePreservesAntigravityPermissionFlowWhenAppIsUnavailable() throws {
+    let executable = try TestRuntime.executableURL(named: "PingIslandBridge")
+    let process = try RunningProcess(
+        executableURL: executable,
+        arguments: [
+            "--source", "gemini",
+            "--client-kind", "antigravity",
+            "--event", "PreToolUse",
+        ],
+        environment: bridgeTestEnvironment([
+            "ISLAND_SOCKET_PATH": "/tmp/ping-island-missing-\(UUID().uuidString).sock",
+        ]),
+        stdin: """
+        {
+          "conversationId": "antigravity-e2e",
+          "workspacePaths": ["/tmp/antigravity-demo"],
+          "toolCall": {
+            "name": "run_shell_command",
+            "args": {
+              "command": "swift test"
+            }
+          }
+        }
+        """
+    )
+
+    let result = process.waitForExit()
+
+    #expect(result.terminationStatus == 0)
+    #expect(result.stderr.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+    let stdoutData = Data(result.stdout.utf8)
+    let stdout = try #require(
+        JSONSerialization.jsonObject(with: stdoutData) as? [String: String]
+    )
+    #expect(stdout == ["decision": "ask"])
+}
+
+@Test
 func islandBridgeDoesNotWaitForStdinEOFWhenPayloadAlreadyArrived() async throws {
     let executable = try TestRuntime.executableURL(named: "PingIslandBridge")
     let process = try RunningProcess(

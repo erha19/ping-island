@@ -7,6 +7,7 @@ final class ClientProfileIconTests: XCTestCase {
             "claude-hooks": "ClaudeLogo",
             "codex-hooks": "CodexLogo",
             "gemini-hooks": "GeminiLogo",
+            "antigravity-hooks": "GeminiLogo",
             "openclaw-hooks": "OpenClawLogo",
             "pi-hooks": "PiLogo",
             "codebuddy-hooks": "CodeBuddyLogo",
