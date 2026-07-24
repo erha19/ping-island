@@ -42,7 +42,7 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
         case .mascot: return "客户端宠物与动作"
         case .sound: return "通知与提示音"
         case .analytics: return "Agent、Token 与工具"
-        case .integration: return "Hooks 与 IDE 扩展"
+        case .integration: return "Hooks、IDE 扩展与 AI-COS"
         case .remote: return "SSH 主机与远程转发"
         case .labs: return "试验性特性"
         case .about: return "版本与更新"
@@ -193,6 +193,10 @@ final class SettingsPanelViewModel: ObservableObject {
         isHealthy: false,
         message: AppLocalization.string("Bridge 链路尚未检测")
     )
+    @Published private(set) var aicosProtocolRootPath = AICOSProtocolCatalog.resolvedProtocolRoot().path
+    @Published private(set) var aicosProtocolRootConfigured = AICOSProtocolCatalog.protocolRootExists()
+    @Published private(set) var aicosLaunchTargetProfileID: String = ""
+    @Published private(set) var aicosInstalledLaunchProfiles: [ManagedHookClientProfile] = []
 
     private var hookFeedbackClearTasks: [String: Task<Void, Never>] = [:]
     private let qoderCLIHookRefreshStatusProvider: @MainActor () -> HookInstaller.QoderCLIHookRefreshStatus?
@@ -271,6 +275,7 @@ final class SettingsPanelViewModel: ObservableObject {
             refreshCustomHookInstallations()
             refreshQoderCLIHookRefreshStatus()
             refreshBridgeHealthStatus()
+            refreshAICOSProtocolRootState()
         case .general, .shortcuts, .mascot, .analytics, .remote, .labs, .about:
             break
         }
@@ -317,6 +322,63 @@ final class SettingsPanelViewModel: ObservableObject {
 
     func refreshBridgeHealthStatus() {
         bridgeHealthStatus = HookInstaller.bridgeHealthStatus()
+    }
+
+    func refreshAICOSProtocolRootState() {
+        aicosProtocolRootPath = AICOSProtocolCatalog.resolvedProtocolRoot().path
+        aicosProtocolRootConfigured = AICOSProtocolCatalog.protocolRootExists()
+    }
+
+    func refreshAICOSLaunchTargetState() {
+        let installed = AICOSLaunchTargetResolver.installedProfiles { isHookInstalled($0) }
+        aicosInstalledLaunchProfiles = installed
+
+        if let resolved = AICOSLaunchTargetResolver.resolve(
+            storedProfileID: AICOSLaunchTargetResolver.loadStoredProfileID(),
+            installed: installed
+        ) {
+            aicosLaunchTargetProfileID = resolved.id
+            if AICOSLaunchTargetResolver.loadStoredProfileID() != resolved.id {
+                AICOSLaunchTargetResolver.setStoredProfileID(resolved.id)
+            }
+        } else {
+            aicosLaunchTargetProfileID = ""
+            AICOSLaunchTargetResolver.setStoredProfileID(nil)
+        }
+    }
+
+    func setAICOSLaunchTargetProfileID(_ profileID: String) {
+        AICOSLaunchTargetResolver.setStoredProfileID(profileID)
+        refreshAICOSLaunchTargetState()
+    }
+
+    func chooseAICOSProtocolRoot() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.showsHiddenFiles = true
+        panel.message = AppLocalization.string("选择 AI-COS 协议包根目录（需包含 PROTOCOL.md）")
+        panel.prompt = AppLocalization.string("选择")
+        let starting = AICOSProtocolCatalog.resolvedProtocolRoot()
+        if FileManager.default.fileExists(atPath: starting.path) {
+            panel.directoryURL = starting
+        }
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        AICOSProtocolCatalog.setProtocolRootPath(url.path)
+        refreshAICOSProtocolRootState()
+    }
+
+    func openAICOSProtocolRoot() {
+        let url = AICOSProtocolCatalog.resolvedProtocolRoot()
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    func resetAICOSProtocolRoot() {
+        AICOSProtocolCatalog.setProtocolRootPath("")
+        refreshAICOSProtocolRootState()
     }
 
     func setLaunchAtLogin(_ enabled: Bool) {
@@ -626,6 +688,7 @@ final class SettingsPanelViewModel: ObservableObject {
         hookInstallationStates = ClientProfileRegistry.managedHookProfiles.reduce(into: [:]) { result, profile in
             result[profile.id] = HookInstaller.isInstalled(profile)
         }
+        refreshAICOSLaunchTargetState()
     }
 
     private func refreshIDEExtensionInstallationStates() {
@@ -3217,6 +3280,24 @@ private struct SettingsPanelContentView: View {
                 .opacity(settings.hookDebugLoggingEnabled ? 1 : 0.45)
             }
 
+            SettingsSectionCard(title: "AI-COS") {
+                AICOSProtocolRootLine(
+                    path: viewModel.aicosProtocolRootPath,
+                    isConfigured: viewModel.aicosProtocolRootConfigured,
+                    chooseAction: { viewModel.chooseAICOSProtocolRoot() },
+                    openAction: { viewModel.openAICOSProtocolRoot() },
+                    resetAction: { viewModel.resetAICOSProtocolRoot() }
+                )
+                SettingsLineDivider()
+                AICOSLaunchTargetLine(
+                    profiles: viewModel.aicosInstalledLaunchProfiles,
+                    selection: Binding(
+                        get: { viewModel.aicosLaunchTargetProfileID },
+                        set: { viewModel.setAICOSLaunchTargetProfileID($0) }
+                    )
+                )
+            }
+
 #if APP_STORE
             SettingsSectionCard(title: "App Store 沙箱") {
                 SettingsInfoLine(
@@ -3993,6 +4074,136 @@ private struct SettingsLineDivider: View {
     }
 }
 
+private struct AICOSProtocolRootLine: View {
+    let path: String
+    let isConfigured: Bool
+    let chooseAction: () -> Void
+    let openAction: () -> Void
+    let resetAction: () -> Void
+
+    private let tint = Color(red: 0.45, green: 0.62, blue: 1.0)
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .center, spacing: 14) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(tint.opacity(0.18))
+                        .frame(width: 40, height: 40)
+                    Image(systemName: "flag.checkered")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(tint)
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(appLocalized: "AI-COS 技能路径")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.white)
+
+                    Text(appLocalized: "Mission 启动词会引用此目录下的 PROTOCOL.md 与默认阅读材料")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(.white.opacity(0.58))
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Text(verbatim: path)
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.45))
+                        .lineLimit(2)
+                        .padding(.top, 2)
+                }
+
+                Spacer(minLength: 12)
+
+                Text(appLocalized: isConfigured ? "已配置" : "未找到 PROTOCOL.md")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundColor(isConfigured ? tint : TerminalColors.amber)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(
+                        Capsule(style: .continuous)
+                            .fill((isConfigured ? tint : TerminalColors.amber).opacity(0.18))
+                    )
+                    .overlay(
+                        Capsule(style: .continuous)
+                            .strokeBorder((isConfigured ? tint : TerminalColors.amber).opacity(0.28), lineWidth: 1)
+                    )
+            }
+
+            HStack(spacing: 10) {
+                HookManagementButton(
+                    title: "选择目录",
+                    tint: tint,
+                    action: chooseAction
+                )
+                HookManagementButton(
+                    title: "打开目录",
+                    tint: TerminalColors.blue,
+                    action: openAction
+                )
+                HookManagementButton(
+                    title: "恢复默认",
+                    tint: TerminalColors.amber,
+                    action: resetAction
+                )
+            }
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 16)
+    }
+}
+
+private struct AICOSLaunchTargetLine: View {
+    let profiles: [ManagedHookClientProfile]
+    @Binding var selection: String
+
+    private let tint = Color(red: 0.45, green: 0.62, blue: 1.0)
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 14) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(tint.opacity(0.18))
+                    .frame(width: 40, height: 40)
+                Image(systemName: "arrow.up.forward.app")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(tint)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(appLocalized: "AI-COS 启动目标")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.white)
+
+                Text(appLocalized: "从已安装的集成 Agent 中选择，Mission 复制协议后打开该应用")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.white.opacity(0.58))
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if profiles.isEmpty {
+                    Text(appLocalized: "请先在上方安装至少一个 Agent")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundColor(TerminalColors.amber)
+                        .padding(.top, 2)
+                }
+            }
+
+            Spacer(minLength: 12)
+
+            Picker("", selection: $selection) {
+                ForEach(profiles) {
+                    Text(verbatim: $0.title).tag($0.id)
+                }
+            }
+            .labelsHidden()
+            .accessibilityLabel(Text(appLocalized: "AI-COS 启动目标"))
+            .settingsMenuPicker(width: 168)
+            .disabled(profiles.isEmpty)
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 16)
+    }
+}
+
 private struct HookManagementLine: View {
     let profile: ManagedHookClientProfile
     let isInstalled: Bool
@@ -4351,6 +4562,10 @@ private struct CustomHookInstallSheet: View {
             return "例如 /path/to/.claude"
         }
 
+        if profile.id == "zcode-hooks" {
+            return "例如 /path/to/.zcode 或 /path/to/.zcode/cli"
+        }
+
         switch profile.installationKind {
         case .jsonHooks, .tomlHooks:
             return "例如 /path/to/.claude"
@@ -4366,6 +4581,9 @@ private struct CustomHookInstallSheet: View {
     private var installHint: String? {
         guard let profile = ClientProfileRegistry.managedHookProfile(id: selectedProfileID) else {
             return nil
+        }
+        if profile.id == "zcode-hooks" {
+            return AppLocalization.string("ZCode 可选择 ~/.zcode 根目录，或 ~/.zcode/cli 目录。")
         }
         switch profile.installationKind {
         case .hookDirectory:
@@ -4386,7 +4604,19 @@ private struct CustomHookInstallSheet: View {
         let targetURL: URL
         switch profile.installationKind {
         case .jsonHooks, .pluginFile, .tomlHooks:
-            targetURL = baseURL.appendingPathComponent(resolvedFileName)
+            if profile.id == "zcode-hooks" {
+                if baseURL.lastPathComponent == ".zcode" {
+                    targetURL = baseURL
+                        .appendingPathComponent("cli", isDirectory: true)
+                        .appendingPathComponent("config.json")
+                } else if baseURL.lastPathComponent == "cli" {
+                    targetURL = baseURL.appendingPathComponent("config.json")
+                } else {
+                    targetURL = baseURL.appendingPathComponent(resolvedFileName)
+                }
+            } else {
+                targetURL = baseURL.appendingPathComponent(resolvedFileName)
+            }
         case .pluginDirectory:
             if baseURL.lastPathComponent == ".hermes" {
                 targetURL = baseURL

@@ -37,6 +37,8 @@ This file is a routing layer for coding agents working in this repo. Keep it sho
   - `PingIslandBridge` is the unified Claude/Codex hook entrypoint and is responsible for terminal, tmux, SSH-remote, and IDE terminal context capture before envelopes hit Swift code
 - Codex ingress: `PingIsland/Services/Codex/`, `PingIsland/UI/Views/CodexSessionView.swift`
   - Hook-less fallback parsing for Codex sessions lives in `PingIsland/Services/Codex/CodexRolloutParser.swift`
+- AI-COS Mission Pack (protocol → selected Integration agent launch): `docs/ai-cos-mission-pack.md`, `PingIsland/Models/AICOSMissionModels.swift`, `PingIsland/Services/AICOS/`, `PingIsland/UI/Views/AICOSMissionPanelView.swift` (header flag in `NotchView`; skills path and launch target in Settings → Integration)
+  - Pure text-shape reference for Prototype tests: `Prototype/Sources/IslandShared/AICOSMissionPack.swift`
 - Terminal and focus control: `PingIsland/Services/Tmux/`, `PingIsland/Services/Window/`, `PingIsland/Utilities/TerminalVisibilityDetector.swift`
   - Terminal focus flows currently cover iTerm2, Ghostty, Terminal.app, tmux, and IDE-hosted terminals
 - Remote SSH forwarding and remote-host management: `PingIsland/Services/Remote/`
@@ -59,6 +61,7 @@ This file is a routing layer for coding agents working in this repo. Keep it sho
 - `PingIsland/Services`: ingestion, socket handling, state management, tmux, windows, updates
 - `PingIsland/Services/Usage`: Claude status-line quota cache readers, Claude-family transcript token parsing, and Codex rollout quota readers for UI usage summaries
 - `PingIsland/Services/Runtime`: isolated native Claude/Codex runtime work. This path should coexist with the current implementation behind feature flags until parity is proven.
+- `PingIsland/Services/AICOS`: AI-COS Mission Pack builder, protocol catalog, launch-target resolver, selected-agent activator, and recent-mission persistence
 - `PingIsland/Services/Remote`: remote endpoint persistence, SSH bootstrap / attach, and remote hook forwarding
   - Remote bootstrap currently covers JSON hook configs, managed hook directories, and managed plugin directories (for example remote Hermes installs under `~/.hermes/plugins/ping_island`)
 - `PingIsland/Services/Update`: Sparkle updater bridge, appcast/release-notes loading, update state publishing
@@ -89,6 +92,7 @@ This file is a routing layer for coding agents working in this repo. Keep it sho
   - Qoder CN is a separate product identity: its desktop app uses bundle identifier `com.aliyun.lingma.ide`, URI scheme `qoder-cn`, and `.qoder-cn` data root, while its CLI executable is `~/.local/bin/qoderclicn`. Keep `qoder-cn` and `qoder-cn-cli` separate from the international Qoder profiles even though the CN desktop and CLI share `~/.qoder-cn/settings.json`; the desktop remains notify-only while the CLI uses blocking Claude-compatible responses.
   - CodeBuddy-family hook installs currently cover CodeBuddy IDE and CodeBuddy CLI as separate profiles that share `~/.codebuddy/settings.json`, plus WorkBuddy under `~/.workbuddy/settings.json`. Keep CodeBuddy IDE and CodeBuddy CLI hook semantics independent even though they share a file; CodeBuddy CLI uses its Claude-compatible hook response shape and must preserve CodeBuddy IDE hooks plus unrelated JSON settings.
   - OpenCode is managed as a generated plugin file under `~/.config/opencode/plugins/ping-island.js`; treat it as a plugin-based integration, not a JSON hooks file.
+  - ZCode hooks are managed through `~/.zcode/cli/config.json`. Event entries live under `hooks.events` (not a flat Claude-style `hooks` map); install must set `hooks.enabled` to `true`. Matchers use `.*`. ZCode does not use `SessionEnd` in the v1 managed event set.
   - Kimi CLI hooks are managed through `~/.kimi/config.toml`; use `[[hooks]]` array-of-tables syntax. The installer preserves all non-Island TOML content (providers, models, loop_control, etc.) and only manipulates the `[[hooks]]` sections. Event names follow the Claude Code convention (`SessionStart`, `SessionEnd`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PermissionRequest`, `Notification`, `Stop`).
   - Pi Agent is managed as a generated TypeScript extension under `~/.pi/agent/extensions/ping_island/index.ts`; treat it as an official Pi extension integration that forwards events through the Claude-compatible bridge with `client-kind=pi`, not as JSON/RPC polling or process scanning. Pi has a dedicated `MascotKind.pi`, so trace mascot changes through `ClientProfile`, `SessionProvider`, `MascotView`, and mascot settings together.
   - `QoderWork` should not be added to `ideExtensionProfiles` unless it actually ships VS Code-compatible extension support in the future.
@@ -109,6 +113,12 @@ This file is a routing layer for coding agents working in this repo. Keep it sho
 - If you change IDE terminal jump behavior, inspect both `TerminalSessionFocuser` and `IDEExtensionInstaller`, plus the integration settings UI so install state and URI schemes stay aligned.
 - If you change Codex behavior, verify both the monitor layer under `PingIsland/Services/Codex/` and the UI under `PingIsland/UI/Views/CodexSessionView.swift`.
   - Long Codex/subagent prompts, results, tool details, and transcript rows must keep full data in `SessionStore` / snapshots and apply bounded display text only at SwiftUI rendering boundaries. Prefer `SessionTextSanitizer.boundedDisplayText` for inline `Text` / Markdown content, add or preserve tests for truncation behavior, and avoid passing unbounded transcripts directly into expanded Island detail views.
+- If you change AI-COS Mission Pack shape or selected-agent launch flow, update these together:
+  - `PingIsland/Models/AICOSMissionModels.swift`
+  - `PingIsland/Services/AICOS/`
+  - `PingIsland/UI/Views/NotchView.swift` (header entry) / `AICOSMissionPanelView.swift` / `SessionListView.swift` / Settings Integration AI-COS path in `SettingsWindowView.swift`
+  - `Prototype/Sources/IslandShared/AICOSMissionPack.swift` plus `PingIslandTests/AICOSMissionPackBuilderTests.swift` / Prototype AICOS tests
+  - `docs/ai-cos-mission-pack.md`
 - If you change app updates or release notes, trace through `PingIsland/Services/Update/`, `PingIsland/Info.plist`, the settings UI, and `scripts/create-release.sh` so appcast assets, runtime config, and update messaging stay aligned.
 - If you change Sparkle configuration keys or hosting assumptions, update `Config/App.xcconfig`, `Config/LocalSecrets.example.xcconfig`, `scripts/generate-keys.sh`, and `docs/sparkle-release.md` together.
 - If you change App Store distribution behavior, keep the `PingIslandAppStore` target isolated from the regular `PingIsland` Developer ID/Sparkle lane, and update `docs/mac-app-store-submission.md` plus `scripts/build-app-store.sh` together.
@@ -118,6 +128,8 @@ This file is a routing layer for coding agents working in this repo. Keep it sho
 
 - Full repo regression:
   - `./scripts/test.sh`
+- App debug build + launch:
+  - `./scripts/run-debug.sh`
 - App debug build:
   - `xcodebuild -project PingIsland.xcodeproj -scheme PingIsland -configuration Debug build`
 - App release build:

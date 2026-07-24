@@ -498,7 +498,10 @@ struct MascotView: View {
     }
 
     private func workingScene(time: TimeInterval?) -> some View {
-        canvasScene(interval: adaptiveInterval(for: .working), mode: .working, time: time)
+        ZStack {
+            WorkingActivityHalo(tint: Color(red: 0.32, green: 0.92, blue: 0.42), size: size, time: time)
+            canvasScene(interval: adaptiveInterval(for: .working), mode: .working, time: time)
+        }
     }
 
     private func warningScene(time: TimeInterval?) -> some View {
@@ -753,7 +756,7 @@ struct MascotView: View {
                 y: 12.9,
                 base: Color(red: 0.12, green: 0.11, blue: 0.08),
                 key: Color(red: 0.28, green: 0.27, blue: 0.23),
-                highlight: light,
+                highlight: TerminalColors.green,
                 flashIndex: keyboardFlashIndex(time: time)
             )
         }
@@ -795,7 +798,7 @@ struct MascotView: View {
         slash.addLine(to: space.point(12.0 + motion.shake, 7.2 + motion.vertical))
         slash.addLine(to: space.point(8.4 + motion.shake, 9.4 + motion.vertical))
         slash.closeSubpath()
-        context.fill(slash, with: .color(light.opacity(mode == .working ? 0.95 : 0.82)))
+        context.fill(slash, with: .color(light.opacity(mode == .working ? 0.98 : 0.82)))
 
         var outline = Path()
         outline.move(to: top)
@@ -805,7 +808,8 @@ struct MascotView: View {
         outline.addLine(to: bottomLeft)
         outline.addLine(to: topLeft)
         outline.closeSubpath()
-        context.stroke(outline, with: .color(light.opacity(0.32)), lineWidth: max(1, space.pixel * 0.45))
+        let outlineOpacity: CGFloat = mode == .working ? 0.72 : 0.32
+        context.stroke(outline, with: .color(light.opacity(outlineOpacity)), lineWidth: max(1, space.pixel * (mode == .working ? 0.65 : 0.45)))
 
         let eyeHeight: CGFloat = mode == .idle ? 0.45 : (mode == .warning ? 1.2 : blinkHeight(time: time, closedHeight: 0.25, openHeight: 1.2))
         context.fill(Path(space.rect(5.0 + motion.shake, 9.0 + motion.vertical, 1.1, eyeHeight)), with: .color(light))
@@ -1997,10 +2001,11 @@ struct MascotView: View {
             )
         case .working:
             let bounce = CGFloat(sin(time * .pi * 5) * 0.9)
+            let shake = CGFloat(sin(time * 18) * 0.35)
             return MascotMotion(
                 vertical: bounce,
                 bounce: bounce,
-                shake: 0,
+                shake: shake,
                 squashX: 1,
                 squashY: 1
             )
@@ -2292,6 +2297,57 @@ private struct AlertHalo: View {
             .fill(tint.opacity(0.10 + pulse * 0.12))
             .frame(width: size * (0.78 + pulse * 0.10))
             .blur(radius: size * 0.07)
+    }
+}
+
+/// Stronger green pulse for working status so dark mascots stay readable on the black closed notch.
+private struct WorkingActivityHalo: View {
+    let tint: Color
+    let size: CGFloat
+    var time: TimeInterval?
+
+    @ObservedObject private var energyGovernor = EnergyGovernor.shared
+
+    private static let updateInterval: TimeInterval = 0.10
+
+    var body: some View {
+        if let time {
+            haloBody(time: time)
+        } else if energyGovernor.policy.animationLevel == .staticFrames {
+            haloBody(time: 0)
+        } else {
+            TimelineView(.periodic(from: .now, by: effectiveUpdateInterval)) { context in
+                haloBody(time: context.date.timeIntervalSinceReferenceDate)
+            }
+        }
+    }
+
+    private var effectiveUpdateInterval: TimeInterval {
+        switch energyGovernor.policy.animationLevel {
+        case .full:
+            Self.updateInterval
+        case .reduced:
+            Self.updateInterval * 2.5
+        case .staticFrames:
+            Self.updateInterval
+        }
+    }
+
+    private func haloBody(time: TimeInterval) -> some View {
+        let pulse = CGFloat(sin(time * 5.5) * 0.5 + 0.5)
+        let diameter = size * (1.28 + pulse * 0.36)
+
+        return ZStack {
+            Circle()
+                .fill(tint.opacity(0.42 + pulse * 0.38))
+                .frame(width: diameter, height: diameter)
+                .blur(radius: size * 0.18)
+
+            Circle()
+                .strokeBorder(tint.opacity(0.55 + pulse * 0.35), lineWidth: max(1.2, size * 0.08))
+                .frame(width: size * (1.05 + pulse * 0.12), height: size * (1.05 + pulse * 0.12))
+        }
+        .allowsHitTesting(false)
     }
 }
 

@@ -53,6 +53,11 @@ class NotchViewModel: ObservableObject {
     @Published private(set) var isQuietBackgroundPresentationActive = false
     @Published private(set) var isSettingsPopoverPresented = false
     @Published private(set) var isInlineTextInputActive = false
+    /// AI-COS Mission composer. Kept on the view model so the panel survives
+    /// SessionListView identity churn and can be toggled from the opened header.
+    @Published var showAICOSMissionPanel = false
+    /// True while a system file panel is up so hover-leave does not dismiss Island.
+    @Published private(set) var isBlockingFilePanelPresented = false
 
     // MARK: - Geometry
 
@@ -814,11 +819,36 @@ class NotchViewModel: ObservableObject {
     }
 
     func notchClose() {
+        // Keep Island open while a system open panel is modal; otherwise choosing a
+        // workspace path looks like the AI-COS panel "vanished".
+        if isBlockingFilePanelPresented {
+            return
+        }
+
         status = .closed
         currentChatSession = nil
         contentType = .instances
         openedMeasuredHeight = nil
         isInlineTextInputActive = false
+        // Intentionally keep `showAICOSMissionPanel` so reopening restores the composer.
+    }
+
+    func beginBlockingFilePanel() {
+        isBlockingFilePanelPresented = true
+        hoverTimer?.cancel()
+        hoverTimer = nil
+    }
+
+    func endBlockingFilePanel() {
+        guard isBlockingFilePanelPresented else { return }
+        isBlockingFilePanelPresented = false
+
+        if showAICOSMissionPanel {
+            contentType = .instances
+            openReason = .click
+            status = .opened
+            updateOpenedMeasuredHeight(closedHeight + 220)
+        }
     }
 
     func beginDetachedPresentation(contentType: NotchContentType, playSound: Bool = true) {
@@ -955,6 +985,28 @@ class NotchViewModel: ObservableObject {
 
         guard sanitized != openedMeasuredHeight else { return }
         openedMeasuredHeight = sanitized
+    }
+
+    /// Opens or closes the AI-COS Mission composer from the header icon.
+    func toggleAICOSMissionPanel() {
+        setAICOSMissionPanelVisible(!showAICOSMissionPanel)
+    }
+
+    func setAICOSMissionPanelVisible(_ visible: Bool) {
+        showAICOSMissionPanel = visible
+        guard visible else {
+            openedMeasuredHeight = nil
+            return
+        }
+
+        contentType = .instances
+        currentChatSession = nil
+        openReason = .click
+        if status != .opened {
+            status = .opened
+        }
+        // Expand immediately; GeometryReader preference refines the height next.
+        updateOpenedMeasuredHeight(closedHeight + 220)
     }
 
     func setManualAttentionActive(_ isActive: Bool) {

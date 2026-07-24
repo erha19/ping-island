@@ -631,3 +631,24 @@
 "低" = "Low";
 "高" = "High";
 "%@ · %@ 条活跃记录" = "%@ · %@ active records";
+
+"AI-COS Mission" = "AI-COS Mission";
+"协议" = "Protocol";
+"关闭" = "Close";
+"打开集成设置" = "Open Integration Settings";
+"未找到 PROTOCOL.md。请先在 设置 → 集成 中配置 AI-COS 技能路径。" = "PROTOCOL.md was not found. Configure the AI-COS skills path in Settings → Integration first.";
+"启动中…" = "Starting…";
+"复制协议并启动 Codex" = "Copy Protocol & Launch Codex";
+"将复制 AI-COS %@ 启动词并打开 Codex。粘贴一次即可应用协议。" = "Copies an AI-COS %@ start prompt and opens Codex. Paste once to apply the protocol.";
+"请先在 设置 → 集成 中配置 AI-COS 技能路径。" = "Configure the AI-COS skills path in Settings → Integration first.";
+"已复制 AI-COS %@ 启动词。Codex 已前置 — 粘贴即可开始。" = "AI-COS %@ prompt copied. Codex is frontmost — paste to start.";
+"启动词已复制，但未能打开 Codex。请手动启动 Codex 后粘贴。" = "Prompt copied, but Codex could not be opened. Launch Codex manually and paste.";
+"复制协议并打开 %@" = "Copy Protocol & Open %@";
+"复制协议并打开 Agent" = "Copy Protocol & Open Agent";
+"将复制 AI-COS %@ 启动词并打开 %@。粘贴一次即可应用协议。" = "Will copy the AI-COS %@ launch prompt and open %@. Paste once to apply the protocol.";
+"已复制 AI-COS %@ 启动词。%@ 已前置 — 粘贴即可开始。" = "Copied AI-COS %@ launch prompt. %@ is frontmost — paste to start.";
+"启动词已复制，但未能打开 %@。请手动启动后粘贴。" = "Launch prompt copied, but %@ could not be opened. Start it manually and paste.";
+"AI-COS 启动目标" = "AI-COS Launch Target";
+"从已安装的集成 Agent 中选择，Mission 复制协议后打开该应用" = "Choose an installed Integration agent; Mission Pack opens it after copying the protocol";
+"请先在上方安装至少一个 Agent" = "Install at least one agent above first";
+"未选择可启动的 Agent" = "No launchable agent selected";

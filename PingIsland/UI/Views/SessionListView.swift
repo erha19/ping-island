@@ -20,9 +20,21 @@ struct SessionListView: View {
     @State private var keyEventMonitor: Any?
     @State private var isYabaiAvailable = false
 
+    private var showAICOSMissionPanel: Bool {
+        viewModel.showAICOSMissionPanel
+    }
+
     var body: some View {
         Group {
-            if sessionMonitor.instances.isEmpty {
+            if showAICOSMissionPanel {
+                AICOSMissionPanelView(
+                    sessionMonitor: sessionMonitor,
+                    viewModel: viewModel,
+                    onClose: { viewModel.setAICOSMissionPanelVisible(false) }
+                )
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+                .background(openedContentHeightReader(minimum: 200))
+            } else if sessionMonitor.instances.isEmpty {
                 emptyState
             } else {
                 instancesList
@@ -31,6 +43,16 @@ struct SessionListView: View {
         .task {
             isYabaiAvailable = await WindowFinder.shared.isYabaiAvailable()
         }
+    }
+
+    private func openedContentHeightReader(minimum: CGFloat) -> some View {
+        GeometryReader { geometry in
+            Color.clear.preference(
+                key: OpenedPanelContentHeightPreferenceKey.self,
+                value: max(geometry.size.height, minimum)
+            )
+        }
+        .allowsHitTesting(false)
     }
 
     // MARK: - Empty State
@@ -44,6 +66,11 @@ struct SessionListView: View {
             Text("Run Claude Code, Codex CLI, or Codex App")
                 .font(.system(size: 11))
                 .foregroundColor(.white.opacity(0.25))
+
+            Text("Or tap the mission flag next to mute to start AI-COS")
+                .font(.system(size: 11))
+                .foregroundColor(.white.opacity(0.32))
+                .padding(.top, 2)
 
             if FeatureFlags.nativeClaudeRuntime || FeatureFlags.nativeCodexRuntime {
                 HStack(spacing: 8) {
@@ -77,14 +104,7 @@ struct SessionListView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(
-            GeometryReader { geometry in
-                Color.clear.preference(
-                    key: OpenedPanelContentHeightPreferenceKey.self,
-                    value: geometry.size.height
-                )
-            }
-        )
+        .background(openedContentHeightReader(minimum: 120))
     }
 
     // MARK: - Instances List
@@ -376,16 +396,12 @@ struct SessionListView: View {
     }
 
     private func launchNativeRuntime(_ provider: SessionProvider) {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.allowsMultipleSelection = false
-        panel.showsHiddenFiles = true
-        panel.directoryURL = FileManager.default.homeDirectoryForCurrentUser
-        panel.message = "选择 \(provider.displayName) Native Runtime 工作目录"
-        panel.prompt = "启动"
-
-        guard panel.runModal() == .OK, let url = panel.url else { return }
+        guard let url = IslandOpenPanelPresenter.chooseDirectory(
+            prompt: "启动",
+            message: "选择 \(provider.displayName) Native Runtime 工作目录",
+            startingDirectory: FileManager.default.homeDirectoryForCurrentUser,
+            showsHiddenFiles: true
+        ) else { return }
         sessionMonitor.startNativeSession(provider: provider, cwd: url.path)
     }
 
@@ -675,9 +691,6 @@ struct InstanceRow: View {
 
     @State private var isHovered = false
     @ObservedObject private var settings = AppSettings.shared
-    @ObservedObject private var energyGovernor = EnergyGovernor.shared
-
-    private let spinnerSymbols = ["·", "✢", "✳", "∗", "✻", "✽"]
 
     /// Whether we're showing the approval UI
     private var isWaitingForApproval: Bool {
@@ -921,30 +934,48 @@ struct InstanceRow: View {
 
     @ViewBuilder
     private var avatarView: some View {
+        let avatarSide: CGFloat = usesSingleLineCompactLayout ? 30 : 34
+        let mascotSize: CGFloat = usesSingleLineCompactLayout ? 16 : 18
+
         ZStack(alignment: .bottomTrailing) {
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Color.white.opacity(0.04))
+                .fill(avatarBackgroundFill)
 
             MascotView(
                 kind: settings.mascotKind(for: session.mascotClient),
                 status: MascotStatus(session: session),
-                size: usesSingleLineCompactLayout ? 16 : 18,
-                animationTime: 0
+                size: mascotSize
             )
             .padding(6)
 
             avatarStatusBadge
                 .offset(x: 2, y: 2)
         }
-        .frame(width: usesSingleLineCompactLayout ? 30 : 34, height: usesSingleLineCompactLayout ? 30 : 34)
+        .frame(width: avatarSide, height: avatarSide)
+    }
+
+    /// Active processing rows get a brighter green tile so dark/gray mascots stay readable.
+    /// Working pulse halo lives in `MascotView.workingScene` (also covers closed notch).
+    private var showsWorkingAvatarChrome: Bool {
+        switch session.phase {
+        case .processing, .compacting:
+            return true
+        case .idle, .waitingForInput, .waitingForApproval, .ended:
+            return false
+        }
+    }
+
+    private var avatarBackgroundFill: Color {
+        if showsWorkingAvatarChrome {
+            return TerminalColors.green.opacity(0.26)
+        }
+        return Color.white.opacity(0.04)
     }
 
     @ViewBuilder
     private var avatarStatusBadge: some View {
         switch session.phase {
-        case .processing, .compacting, .waitingForApproval:
-            animatedStatusBadge
-        case .waitingForInput:
+        case .processing, .compacting, .waitingForApproval, .waitingForInput:
             Circle()
                 .fill(statusAccentColor)
                 .frame(width: 10, height: 10)
@@ -954,42 +985,6 @@ struct InstanceRow: View {
                 )
         case .idle, .ended:
             EmptyView()
-        }
-    }
-
-    @ViewBuilder
-    private var animatedStatusBadge: some View {
-        if energyGovernor.policy.animationLevel == .staticFrames {
-            statusBadge(symbol: spinnerSymbols[0])
-        } else {
-            TimelineView(.periodic(from: .now, by: statusBadgeInterval)) { context in
-                let phase = Int(context.date.timeIntervalSinceReferenceDate / statusBadgeInterval)
-                statusBadge(symbol: spinnerSymbols[phase % spinnerSymbols.count])
-            }
-        }
-    }
-
-    private func statusBadge(symbol: String) -> some View {
-        Text(symbol)
-            .font(.system(size: 8, weight: .black))
-            .foregroundColor(statusAccentColor)
-            .frame(width: 14, height: 14)
-            .background(Color.black.opacity(0.92))
-            .clipShape(Circle())
-            .overlay(
-                Circle()
-                    .strokeBorder(statusAccentColor.opacity(0.35), lineWidth: 1)
-            )
-    }
-
-    private var statusBadgeInterval: TimeInterval {
-        switch energyGovernor.policy.animationLevel {
-        case .full:
-            0.15
-        case .reduced:
-            0.375
-        case .staticFrames:
-            0.15
         }
     }
 

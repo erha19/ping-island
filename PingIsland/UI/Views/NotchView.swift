@@ -798,6 +798,15 @@ struct NotchView: View {
 
             Spacer(minLength: 0)
 
+            NotchAICOSMissionButton(
+                isActive: viewModel.showAICOSMissionPanel,
+                action: {
+                    withAnimation(viewModel.animation) {
+                        viewModel.toggleAICOSMissionPanel()
+                    }
+                }
+            )
+
             NotchTemporaryMuteButton(
                 isActive: areReminderNotificationsSuppressed,
                 action: activateTemporaryReminderMute,
@@ -1658,6 +1667,60 @@ private struct StraightDetachHintArrow: Shape {
         path.addLine(to: CGPoint(x: end.x + 6, y: end.y + 11))
 
         return path
+    }
+}
+
+private struct NotchAICOSMissionButton: View {
+    let isActive: Bool
+    let action: () -> Void
+
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "flag.checkered")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(iconForegroundStyle)
+                .frame(width: 28, height: 28)
+                .background(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(backgroundFillColor)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(borderColor, lineWidth: isActive ? 1 : 0)
+                )
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(isActive ? "关闭 AI-COS Mission" : "AI-COS Mission")
+        .accessibilityLabel(isActive ? "关闭 AI-COS Mission" : "打开 AI-COS Mission")
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: 0.12)) {
+                isHovering = hovering
+            }
+        }
+    }
+
+    private var iconForegroundStyle: AnyShapeStyle {
+        if isActive {
+            return AnyShapeStyle(isHovering ? Color.black : Color.white.opacity(0.96))
+        }
+        return AnyShapeStyle(isHovering ? Color.black : Color.white.opacity(0.92))
+    }
+
+    private var backgroundFillColor: Color {
+        if isActive {
+            return isHovering ? Color.white.opacity(0.95) : Color.accentColor.opacity(0.42)
+        }
+        return isHovering ? Color.white.opacity(0.95) : Color.white.opacity(0.1)
+    }
+
+    private var borderColor: Color {
+        if isActive {
+            return Color.white.opacity(isHovering ? 0.28 : 0.18)
+        }
+        return .clear
     }
 }
 
