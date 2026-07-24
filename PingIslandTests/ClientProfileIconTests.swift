@@ -148,4 +148,29 @@ final class ClientProfileIconTests: XCTestCase {
         XCTAssertNil(qoderWorkProfile.events.first { $0.name == "PreToolUse" }?.timeout)
         XCTAssertNil(qoderWorkProfile.events.first { $0.name == "PermissionRequest" }?.timeout)
     }
+
+    func testZCodeHookProfileUsesNestedCLIConfigPath() throws {
+        let profile = try XCTUnwrap(ClientProfileRegistry.managedHookProfile(id: "zcode-hooks"))
+
+        XCTAssertEqual(profile.title, "ZCode")
+        XCTAssertEqual(profile.configurationRelativePaths, [".zcode/cli/config.json"])
+        XCTAssertTrue(profile.alwaysVisibleInSettings)
+        XCTAssertFalse(profile.defaultEnabled)
+        XCTAssertEqual(profile.bridgeSource, "claude")
+        XCTAssertEqual(
+            profile.bridgeExtraArguments,
+            [
+                "--client-kind", "zcode",
+                "--client-name", "ZCode",
+                "--client-originator", "ZCode"
+            ]
+        )
+        XCTAssertEqual(profile.brand, .claude)
+        XCTAssertEqual(Set(profile.events.map(\.name)), [
+            "SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse",
+            "PostToolUseFailure", "PermissionRequest", "Stop"
+        ])
+        XCTAssertFalse(profile.events.contains { $0.name == "SessionEnd" })
+        XCTAssertEqual(profile.events.first { $0.name == "PermissionRequest" }?.timeout, 86_400)
+    }
 }

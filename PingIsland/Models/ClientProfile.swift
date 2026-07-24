@@ -1044,6 +1044,31 @@ enum ClientProfileRegistry {
             events: []
         ),
         ManagedHookClientProfile(
+            id: "zcode-hooks",
+            title: "ZCode",
+            subtitle: "管理 ~/.zcode/cli/config.json，按 ZCode hooks.events 协议接入 Island",
+            alwaysVisibleInSettings: true,
+            iconSymbolName: "z.square.fill",
+            configurationRelativePath: ".zcode/cli/config.json",
+            bridgeSource: "claude",
+            bridgeExtraArguments: [
+                "--client-kind", "zcode",
+                "--client-name", "ZCode",
+                "--client-originator", "ZCode"
+            ],
+            defaultEnabled: false,
+            brand: .claude,
+            events: [
+                HookInstallEventDescriptor(name: "SessionStart", templates: [.matcher(".*")]),
+                HookInstallEventDescriptor(name: "UserPromptSubmit", templates: [.matcher(".*")]),
+                HookInstallEventDescriptor(name: "PreToolUse", templates: [.matcher(".*")]),
+                HookInstallEventDescriptor(name: "PostToolUse", templates: [.matcher(".*")]),
+                HookInstallEventDescriptor(name: "PostToolUseFailure", templates: [.matcher(".*")]),
+                HookInstallEventDescriptor(name: "PermissionRequest", templates: [.matcher(".*")], timeout: 86_400),
+                HookInstallEventDescriptor(name: "Stop", templates: [.matcher(".*")]),
+            ]
+        ),
+        ManagedHookClientProfile(
             id: "kimi-hooks",
             title: "Kimi CLI",
             subtitle: "管理 ~/.kimi/config.toml，按 Kimi CLI 官方 hooks 协议接入 Island",
