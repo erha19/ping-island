@@ -3969,6 +3969,7 @@ actor SessionStore {
             ".cursor",
             ".gemini",
             ".kimi",
+            ".kimi-code",
             ".openclaw",
             ".qoder",
             ".qwen",
