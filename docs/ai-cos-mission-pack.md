@@ -3,8 +3,8 @@
 Ping Island can hand an **AI-COS protocol prompt** to an installed Integration agent:
 
 1. Configure the protocol root under **Settings → Integration → AI-COS 技能路径**.
-2. Choose an installed Integration agent under **AI-COS 启动目标**.
-3. Open the Island, tap the **flag** icon to the left of mute in the opened header, choose **L1 / L2 / L3**, then click **Copy Protocol & Open [agent]**.
+2. Choose an installed Integration agent under **AI-COS 启动目标** (Settings and/or the Mission panel; both write `AICOS.launchTargetProfileID.v1`).
+3. Open the Island, tap the **flag** icon to the left of mute in the opened header, choose **L1 / L2 / L3** and confirm the agent, then click **Copy Protocol & Open [agent]**.
 
 Island then:
 

@@ -15,6 +15,7 @@ struct AICOSMissionPanelView: View {
     var onClose: (() -> Void)? = nil
 
     @State private var level: AICOSExecutionLevel = .l2
+    @State private var selectedLaunchTargetID = ""
     @State private var statusMessage: String?
     @State private var isLaunching = false
     @State private var showProtocolRootMissing = false
@@ -23,13 +24,30 @@ struct AICOSMissionPanelView: View {
         settings.appLanguage.resolvedLanguageCode()
     }
 
+    private var installedLaunchProfiles: [ManagedHookClientProfile] {
+        AICOSLaunchTargetResolver.installedProfiles { HookInstaller.isInstalled($0) }
+    }
+
     private var launchTarget: ManagedHookClientProfile? {
-        AICOSLaunchTargetResolver.resolvedProfile()
+        AICOSLaunchTargetResolver.resolve(
+            storedProfileID: selectedLaunchTargetID.isEmpty ? nil : selectedLaunchTargetID,
+            installed: installedLaunchProfiles
+        )
     }
 
     private var launchTargetTitle: String {
         launchTarget?.title
             ?? AppLocalization.string("未选择可启动的 Agent")
+    }
+
+    private var launchTargetSelection: Binding<String> {
+        Binding(
+            get: { selectedLaunchTargetID },
+            set: { newValue in
+                selectedLaunchTargetID = newValue
+                AICOSLaunchTargetResolver.setStoredProfileID(newValue.isEmpty ? nil : newValue)
+            }
+        )
     }
 
     var body: some View {
@@ -62,6 +80,31 @@ struct AICOSMissionPanelView: View {
                 .foregroundColor(.white.opacity(0.55))
                 .fixedSize(horizontal: false, vertical: true)
                 .id("\(languageCode)-\(level.rawValue)-summary")
+
+            labeledField(AppLocalization.string("AI-COS 启动目标")) {
+                if installedLaunchProfiles.isEmpty {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(appLocalized: "请先在 设置 → 集成 中安装至少一个 Agent")
+                            .font(.system(size: 10))
+                            .foregroundColor(.orange.opacity(0.9))
+                            .fixedSize(horizontal: false, vertical: true)
+                        Button(AppLocalization.string("打开集成设置")) {
+                            SettingsWindowController.shared.present(category: .integration)
+                        }
+                        .buttonStyle(.plain)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.85))
+                    }
+                } else {
+                    Picker(AppLocalization.string("AI-COS 启动目标"), selection: launchTargetSelection) {
+                        ForEach(installedLaunchProfiles) { profile in
+                            Text(verbatim: profile.title).tag(profile.id)
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                }
+            }
 
             if showProtocolRootMissing {
                 VStack(alignment: .leading, spacing: 8) {
@@ -159,10 +202,27 @@ struct AICOSMissionPanelView: View {
             level = recent.level
         }
         refreshProtocolRootAvailability()
+        refreshLaunchTargetSelection()
     }
 
     private func refreshProtocolRootAvailability() {
         showProtocolRootMissing = !AICOSProtocolCatalog.protocolRootExists()
+    }
+
+    private func refreshLaunchTargetSelection() {
+        let installed = installedLaunchProfiles
+        if let resolved = AICOSLaunchTargetResolver.resolve(
+            storedProfileID: AICOSLaunchTargetResolver.loadStoredProfileID(),
+            installed: installed
+        ) {
+            selectedLaunchTargetID = resolved.id
+            if AICOSLaunchTargetResolver.loadStoredProfileID() != resolved.id {
+                AICOSLaunchTargetResolver.setStoredProfileID(resolved.id)
+            }
+        } else {
+            selectedLaunchTargetID = ""
+            AICOSLaunchTargetResolver.setStoredProfileID(nil)
+        }
     }
 
     private func launchMission() {

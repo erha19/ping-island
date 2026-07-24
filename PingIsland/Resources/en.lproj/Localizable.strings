@@ -651,4 +651,5 @@
 "AI-COS 启动目标" = "AI-COS Launch Target";
 "从已安装的集成 Agent 中选择，Mission 复制协议后打开该应用" = "Choose an installed Integration agent; Mission Pack opens it after copying the protocol";
 "请先在上方安装至少一个 Agent" = "Install at least one agent above first";
+"请先在 设置 → 集成 中安装至少一个 Agent" = "Install at least one agent in Settings → Integration first";
 "未选择可启动的 Agent" = "No launchable agent selected";
