@@ -1281,25 +1281,34 @@ struct HookInstaller {
     private static func removeManagedHooks(at url: URL, profile: ManagedHookClientProfile? = nil) {
         guard let data = try? Data(contentsOf: url),
               var json = HookConfigParser.parseJSONObject(from: data),
-              var hooks = json["hooks"] as? [String: Any] else {
+              let existingHooks = json["hooks"] as? [String: Any] else {
             return
         }
 
-        for (event, value) in hooks {
+        var events = eventEntriesMap(fromHooksObject: existingHooks, profile: profile)
+        for (event, value) in events {
             if var entries = value as? [[String: Any]] {
                 entries.removeAll { entry in
                     isIslandManagedHookEntry(entry, for: profile)
                 }
 
                 if entries.isEmpty {
-                    hooks.removeValue(forKey: event)
+                    events.removeValue(forKey: event)
                 } else {
-                    hooks[event] = entries
+                    events[event] = entries
                 }
             }
         }
 
-        if hooks.isEmpty {
+        let hooks = hooksObject(
+            embeddingEventEntries: events,
+            intoExistingHooks: existingHooks,
+            profile: profile,
+            setEnabledTrue: false
+        )
+        if usesNestedEventsHooksLayout(profile: profile, hooks: existingHooks) {
+            json["hooks"] = hooks
+        } else if events.isEmpty {
             json.removeValue(forKey: "hooks")
         } else {
             json["hooks"] = hooks
@@ -1713,6 +1722,50 @@ struct HookInstaller {
         return updated
     }
 
+    private static func usesNestedEventsHooksObject(_ profile: ManagedHookClientProfile?) -> Bool {
+        profile?.id == "zcode-hooks"
+    }
+
+    /// ZCode uses `hooks.events`; when profile is nil, infer the same layout if `hooks.events` exists.
+    private static func usesNestedEventsHooksLayout(
+        profile: ManagedHookClientProfile?,
+        hooks: [String: Any]
+    ) -> Bool {
+        if usesNestedEventsHooksObject(profile) {
+            return true
+        }
+        return profile == nil && hooks["events"] is [String: Any]
+    }
+
+    /// Event-name → entries map. For ZCode this is `hooks.events`; otherwise `hooks` itself.
+    private static func eventEntriesMap(
+        fromHooksObject hooks: [String: Any],
+        profile: ManagedHookClientProfile?
+    ) -> [String: Any] {
+        if usesNestedEventsHooksLayout(profile: profile, hooks: hooks) {
+            return hooks["events"] as? [String: Any] ?? [:]
+        }
+        return hooks
+    }
+
+    /// Writes the event map back. For ZCode, preserves sibling keys and optionally sets `enabled`.
+    private static func hooksObject(
+        embeddingEventEntries events: [String: Any],
+        intoExistingHooks existing: [String: Any],
+        profile: ManagedHookClientProfile?,
+        setEnabledTrue: Bool
+    ) -> [String: Any] {
+        if usesNestedEventsHooksLayout(profile: profile, hooks: existing) {
+            var hooks = existing
+            hooks["events"] = events
+            if setEnabledTrue {
+                hooks["enabled"] = true
+            }
+            return hooks
+        }
+        return events
+    }
+
     private static func updateHooks(at url: URL, profile: ManagedHookClientProfile) {
         var json: [String: Any] = [:]
         if let data = try? Data(contentsOf: url),
@@ -1748,10 +1801,12 @@ struct HookInstaller {
             || profile.id == "qoder-cn-cli-hooks"
             || profile.id == "codebuddy-cli-hooks"
 
-        var hooks = removingIslandManagedHooks(from: json["hooks"] as? [String: Any] ?? [:], profile: profile)
+        let existingHooks = json["hooks"] as? [String: Any] ?? [:]
+        var events = eventEntriesMap(fromHooksObject: existingHooks, profile: profile)
+        events = removingIslandManagedHooks(from: events, profile: profile)
         for event in activeEvents {
-            let existingEvent = hooks[event.name] as? [[String: Any]]
-            hooks[event.name] = normalizedHookEntries(
+            let existingEvent = events[event.name] as? [[String: Any]]
+            events[event.name] = normalizedHookEntries(
                 existingEvent,
                 preferred: makeHookEntries(command: command, event: event),
                 preferredFirst: preferredFirst,
@@ -1759,7 +1814,12 @@ struct HookInstaller {
             )
         }
 
-        json["hooks"] = hooks
+        json["hooks"] = hooksObject(
+            embeddingEventEntries: events,
+            intoExistingHooks: existingHooks,
+            profile: profile,
+            setEnabledTrue: true
+        )
         if profile.id == "claude-hooks" {
             json["statusLine"] = installedClaudeStatusLineConfiguration(
                 preserving: json["statusLine"] as? [String: Any]
@@ -1976,7 +2036,16 @@ struct HookInstaller {
             return false
         }
 
-        for (_, value) in hooks {
+        let events: [String: Any]
+        if let profile, usesNestedEventsHooksObject(profile) {
+            events = eventEntriesMap(fromHooksObject: hooks, profile: profile)
+        } else if let nested = hooks["events"] as? [String: Any] {
+            events = nested
+        } else {
+            events = hooks
+        }
+
+        for (_, value) in events {
             if let entries = value as? [[String: Any]] {
                 for entry in entries {
                     if isIslandManagedHookEntry(entry, for: profile) {
@@ -2046,6 +2115,8 @@ struct HookInstaller {
             return hookCommand(command, hasClientKind: "qoder-cn-cli")
         case "qoderwork-hooks":
             return hookCommand(command, hasClientKind: "qoderwork")
+        case "zcode-hooks":
+            return hookCommand(command, hasClientKind: "zcode")
         default:
             return true
         }
@@ -2053,7 +2124,7 @@ struct HookInstaller {
 
     private static func hookCommand(_ command: String, hasClientKind clientKind: String) -> Bool {
         let escapedKind = NSRegularExpression.escapedPattern(for: clientKind)
-        let pattern = #"(^|\s)--client-kind\s+(?:'\#(escapedKind)'|"\#(escapedKind)"|\#(escapedKind))(?=\s|$)"#
+        let pattern = #"(^|\s)(?:'--client-kind'|"--client-kind"|--client-kind)\s+(?:'\#(escapedKind)'|"\#(escapedKind)"|\#(escapedKind))(?=\s|$)"#
         guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
             return false
         }
@@ -3679,7 +3750,8 @@ struct HookInstaller {
             let activationConfigURL = customActivationConfigurationURL(for: profile, installedURL: url)
             switch profile.installationKind {
             case .jsonHooks:
-                removeManagedHooks(at: url)
+                // Profile required so ZCode clears Island entries under hooks.events, not the flat map.
+                removeManagedHooks(at: url, profile: profile)
             case .pluginFile:
                 removeManagedPlugin(at: url, profile: profile)
                 setManagedPluginEnabled(false, for: profile, customConfigURL: activationConfigURL, pluginURL: url)
@@ -3814,42 +3886,57 @@ struct HookInstaller {
 
         switch profile.installationKind {
         case .jsonHooks:
-            var hooks = json["hooks"] as? [String: Any] ?? [:]
+            var hooksObject = json["hooks"] as? [String: Any] ?? [:]
+            var events = eventEntriesMap(fromHooksObject: hooksObject, profile: profile)
             if installing {
-                hooks = removingIslandManagedHooks(from: hooks, profile: profile)
+                events = removingIslandManagedHooks(from: events, profile: profile)
                 let preferredFirst = profile.id == "qoder-cli-hooks"
                     || profile.id == "qoder-cn-cli-hooks"
                     || profile.id == "codebuddy-cli-hooks"
                 for event in profile.events {
                     let existingEvent = sanitizedHookEntries(
-                        hooks[event.name] as? [[String: Any]],
+                        events[event.name] as? [[String: Any]],
                         removingCommandPrefixes: removingCommandPrefixes
                     )
-                    hooks[event.name] = normalizedHookEntries(
+                    events[event.name] = normalizedHookEntries(
                         existingEvent,
                         preferred: makeHookEntries(command: customCommand, event: event),
                         preferredFirst: preferredFirst,
                         profile: profile
                     )
                 }
+                hooksObject = Self.hooksObject(
+                    embeddingEventEntries: events,
+                    intoExistingHooks: hooksObject,
+                    profile: profile,
+                    setEnabledTrue: true
+                )
+                json["hooks"] = hooksObject
             } else {
-                for (event, value) in hooks {
+                for (event, value) in events {
                     guard var entries = value as? [[String: Any]] else { continue }
                     entries.removeAll { entry in
                         isIslandManagedHookEntry(entry, for: profile)
                     }
                     if entries.isEmpty {
-                        hooks.removeValue(forKey: event)
+                        events.removeValue(forKey: event)
                     } else {
-                        hooks[event] = entries
+                        events[event] = entries
                     }
                 }
-            }
-
-            if hooks.isEmpty {
-                json.removeValue(forKey: "hooks")
-            } else {
-                json["hooks"] = hooks
+                hooksObject = Self.hooksObject(
+                    embeddingEventEntries: events,
+                    intoExistingHooks: hooksObject,
+                    profile: profile,
+                    setEnabledTrue: false
+                )
+                if usesNestedEventsHooksObject(profile) {
+                    json["hooks"] = hooksObject
+                } else if events.isEmpty {
+                    json.removeValue(forKey: "hooks")
+                } else {
+                    json["hooks"] = hooksObject
+                }
             }
 
         case .pluginFile:
@@ -3934,6 +4021,16 @@ struct HookInstaller {
     private static func customInstallationURL(for profile: ManagedHookClientProfile, baseDirectory: URL) -> URL {
         switch profile.installationKind {
         case .jsonHooks, .pluginFile:
+            if profile.id == "zcode-hooks" {
+                if baseDirectory.lastPathComponent == ".zcode" {
+                    return baseDirectory
+                        .appendingPathComponent("cli", isDirectory: true)
+                        .appendingPathComponent("config.json")
+                }
+                if baseDirectory.lastPathComponent == "cli" {
+                    return baseDirectory.appendingPathComponent("config.json")
+                }
+            }
             return baseDirectory.appendingPathComponent(profile.primaryConfigurationURL.lastPathComponent)
         case .tomlHooks:
             return baseDirectory.appendingPathComponent(profile.primaryConfigurationURL.lastPathComponent)

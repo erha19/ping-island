@@ -4351,6 +4351,10 @@ private struct CustomHookInstallSheet: View {
             return "例如 /path/to/.claude"
         }
 
+        if profile.id == "zcode-hooks" {
+            return "例如 /path/to/.zcode 或 /path/to/.zcode/cli"
+        }
+
         switch profile.installationKind {
         case .jsonHooks, .tomlHooks:
             return "例如 /path/to/.claude"
@@ -4366,6 +4370,9 @@ private struct CustomHookInstallSheet: View {
     private var installHint: String? {
         guard let profile = ClientProfileRegistry.managedHookProfile(id: selectedProfileID) else {
             return nil
+        }
+        if profile.id == "zcode-hooks" {
+            return AppLocalization.string("ZCode 可选择 ~/.zcode 根目录，或 ~/.zcode/cli 目录。")
         }
         switch profile.installationKind {
         case .hookDirectory:
@@ -4386,7 +4393,19 @@ private struct CustomHookInstallSheet: View {
         let targetURL: URL
         switch profile.installationKind {
         case .jsonHooks, .pluginFile, .tomlHooks:
-            targetURL = baseURL.appendingPathComponent(resolvedFileName)
+            if profile.id == "zcode-hooks" {
+                if baseURL.lastPathComponent == ".zcode" {
+                    targetURL = baseURL
+                        .appendingPathComponent("cli", isDirectory: true)
+                        .appendingPathComponent("config.json")
+                } else if baseURL.lastPathComponent == "cli" {
+                    targetURL = baseURL.appendingPathComponent("config.json")
+                } else {
+                    targetURL = baseURL.appendingPathComponent(resolvedFileName)
+                }
+            } else {
+                targetURL = baseURL.appendingPathComponent(resolvedFileName)
+            }
         case .pluginDirectory:
             if baseURL.lastPathComponent == ".hermes" {
                 targetURL = baseURL
