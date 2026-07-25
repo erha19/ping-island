@@ -823,7 +823,7 @@ final class SessionStateTests: XCTestCase {
         XCTAssertTrue(session.shouldHideFromPrimaryUI)
     }
 
-    func testCodexNormalJSONPromptStaysVisibleInPrimaryUI() {
+    func testCodexNormalJSONPromptStaysVisibleInPrimaryUIWhileProcessing() {
         let message = #"{"task":"update release notes","exclude":[]}"#
         let session = SessionState(
             sessionId: "codex-json-user-task",
@@ -831,6 +831,7 @@ final class SessionStateTests: XCTestCase {
             provider: .codex,
             clientInfo: .codexApp(threadId: "codex-json-user-task"),
             previewText: message,
+            phase: .processing,
             chatItems: [
                 ChatHistoryItem(id: "user-1", type: .user(message), timestamp: Date())
             ],
@@ -844,10 +845,60 @@ final class SessionStateTests: XCTestCase {
             )
         )
 
+        XCTAssertTrue(session.shouldKeepCodexSessionInPrimaryUI)
         XCTAssertFalse(session.shouldHideFromPrimaryUI)
     }
 
-    func testCodexAuxiliaryJSONWithSpecificSessionNameStaysVisibleInPrimaryUI() {
+    func testCodexIdleHistoryHidesFromPrimaryUI() {
+        let session = SessionState(
+            sessionId: "codex-idle-history",
+            cwd: "/tmp/project",
+            provider: .codex,
+            clientInfo: .codexApp(threadId: "codex-idle-history"),
+            sessionName: "Old research thread",
+            phase: .idle,
+            lastActivity: Date()
+        )
+
+        XCTAssertFalse(session.shouldKeepCodexSessionInPrimaryUI)
+        XCTAssertTrue(session.shouldHideFromPrimaryUI)
+    }
+
+    func testCodexPassiveWaitingForInputHidesFromPrimaryUI() {
+        let session = SessionState(
+            sessionId: "codex-passive-wait",
+            cwd: "/tmp/project",
+            provider: .codex,
+            clientInfo: .codexApp(threadId: "codex-passive-wait"),
+            phase: .waitingForInput,
+            lastActivity: Date()
+        )
+
+        XCTAssertFalse(session.shouldKeepCodexSessionInPrimaryUI)
+        XCTAssertTrue(session.shouldHideFromPrimaryUI)
+    }
+
+    func testCodexApprovalStaysVisibleInPrimaryUI() {
+        let permission = PermissionContext(
+            toolUseId: "tool-1",
+            toolName: "shell",
+            toolInput: nil,
+            receivedAt: Date()
+        )
+        let session = SessionState(
+            sessionId: "codex-approval",
+            cwd: "/tmp/project",
+            provider: .codex,
+            clientInfo: .codexApp(threadId: "codex-approval"),
+            phase: .waitingForApproval(permission),
+            lastActivity: Date()
+        )
+
+        XCTAssertTrue(session.shouldKeepCodexSessionInPrimaryUI)
+        XCTAssertFalse(session.shouldHideFromPrimaryUI)
+    }
+
+    func testCodexAuxiliaryJSONWithSpecificSessionNameStaysVisibleInPrimaryUIWhileProcessing() {
         let message = #"{"suggestions":[{"title":"Add investor appendix slides","prompt":"Add the three investor appendix slides."}]}"#
         let session = SessionState(
             sessionId: "codex-named-user-task",
@@ -857,6 +908,7 @@ final class SessionStateTests: XCTestCase {
             clientInfo: .codexApp(threadId: "codex-named-user-task"),
             sessionName: "Investor appendix work",
             previewText: message,
+            phase: .processing,
             chatItems: [
                 ChatHistoryItem(id: "user-1", type: .user(message), timestamp: Date())
             ],
@@ -870,6 +922,7 @@ final class SessionStateTests: XCTestCase {
             )
         )
 
+        XCTAssertTrue(session.shouldKeepCodexSessionInPrimaryUI)
         XCTAssertFalse(session.shouldHideFromPrimaryUI)
     }
 

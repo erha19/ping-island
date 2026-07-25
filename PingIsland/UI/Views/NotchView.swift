@@ -940,7 +940,7 @@ struct NotchView: View {
             if let message {
                 Text(message)
                     .font(.system(size: 10.5, weight: .medium, design: .rounded))
-                    .foregroundStyle(Color.white.opacity(showClosedActivity ? 0.9 : 0.74))
+                    .foregroundStyle(Color.orange.opacity(showClosedActivity ? 0.95 : 0.82))
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .minimumScaleFactor(0.85)

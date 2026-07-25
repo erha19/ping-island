@@ -102,8 +102,9 @@ This file is a routing layer for coding agents working in this repo. Keep it sho
 - If you change how sessions are associated across relaunches or between hook/app-server ingress paths, inspect both `SessionStore` and `SessionAssociationStore` so cached client metadata stays compatible.
 - If you change the new native runtime rollout path, keep it isolated from the legacy hook/app-server flow. Reuse shared `SessionState`-driven views, but keep runtime orchestration, persistence, and feature gating under `PingIsland/Services/Runtime/` and `PingIsland/Core/FeatureFlags.swift`.
 - If you change session lifecycle or transitions, start in `SessionStore`. Avoid ad-hoc state mutation elsewhere.
-  - Current rule: provider-originated end events should preserve the session in `.ended` so it stays visible in the list; only explicit user archive/removal should delete it from `SessionStore`.
+  - Current rule: provider-originated end events should preserve the session in `.ended` so it stays in `SessionStore` until the user archives/removes it; only explicit user archive/removal should delete it from `SessionStore`.
   - Primary list rule: sessions with no new activity for 30 minutes should auto-hide from the primary list until fresh hook/file/app-server activity updates `lastActivity`; sessions that need manual attention should stay visible.
+  - Codex primary-list exception: hide idle / ended / passive `waitingForInput` Codex rows (Desktop `thread/list` otherwise floods the Island with history). Keep only `processing` / `compacting` or actionable approval / question / intervention sessions (`shouldKeepCodexSessionInPrimaryUI`).
 - If you change notch sizing, opening behavior, or visibility, inspect both `NotchViewModel` and `NotchView`.
   - On physical-notch MacBooks, closed detailed mode grows the island downward and places pet, center title, and trailing badge on one row below the full system notch inset plus a small camera lip (`ClosedNotchPhysicalLayout`) so center text is not covered by the hardware cutout.
 - If you change docked/detached Island transitions or drag-to-detach behavior, trace through `IslandPresentationCoordinator`, `WindowManager`, `NotchViewModel`, `NotchWindowController`, and `DetachedIslandWindowController` together so gesture gating, content resolution, and re-docking stay aligned.
@@ -187,6 +188,7 @@ This file is a routing layer for coding agents working in this repo. Keep it sho
 - If session ingestion changed, do both Claude and Codex sessions still appear and update?
 - If session lifecycle changed, do ended sessions remain visible until the user archives them, and do final Claude/Codex messages still land before the row settles into `.ended`?
 - If idle-session visibility changed, do sessions auto-hide after 30 minutes of inactivity and reappear when a new message or hook/app-server event arrives?
+- If Codex primary-list visibility changed, do idle/ended/history Codex threads stay hidden while processing and approval/question rows still appear?
 - If detached Island behavior changed, can the docked notch still click-open normally, drag-detach from closed/opened states, and re-dock cleanly without duplicate windows?
 - If approval or intervention flows changed, do approve, deny, and answer paths still resolve cleanly?
 - If focus logic changed, does tmux and non-tmux behavior still degrade safely?

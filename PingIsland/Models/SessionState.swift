@@ -414,9 +414,20 @@ struct SessionState: Equatable, Identifiable, Sendable {
     }
 
     /// Safety net for ghost Codex sessions that have no rollout, no history, and no visible content.
+    /// Codex also hides idle/ended/history rows from the primary list — Desktop `thread/list`
+    /// otherwise floods Island with archived-looking chats. Keep only live work and actionable prompts.
     nonisolated var shouldHideFromPrimaryUI: Bool {
         if shouldAutoArchiveFromPrimaryUI {
             return true
+        }
+
+        if provider == .codex {
+            if !shouldKeepCodexSessionInPrimaryUI {
+                return true
+            }
+            // Live / actionable Codex rows stay visible even before transcript or
+            // rollout path is filled in; only hide true auxiliary helper threads.
+            return isLikelyCodexAuxiliaryThreadForUI
         }
 
         if isLikelyCodexAuxiliaryThreadForUI {
@@ -424,6 +435,19 @@ struct SessionState: Equatable, Identifiable, Sendable {
         }
 
         return isLikelyEmptyCodexPlaceholderForUI
+    }
+
+    /// Codex primary list: processing/compacting, or a concrete approval/question/intervention.
+    /// Passive `waitingForInput` / idle / ended threads stay in `SessionStore` but stay off the list.
+    nonisolated var shouldKeepCodexSessionInPrimaryUI: Bool {
+        guard provider == .codex else { return true }
+        if phase.isActive {
+            return true
+        }
+        if needsApprovalResponse || needsQuestionResponse {
+            return true
+        }
+        return intervention != nil
     }
 
     /// Codex may write helper threads for app-side suggestions or selection filters into the

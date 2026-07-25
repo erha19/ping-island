@@ -710,6 +710,15 @@ struct InstanceRow: View {
         session.messageBadgeDisplayName
     }
 
+    /// Shown beside the client badge so the agent/session name stays readable
+    /// even when the leading title sits under the camera cutout.
+    private var agentNameForTrailing: String {
+        if usesCodexSubagentTitleOnlyPresentation {
+            return session.titleOnlySubagentDisplayTitle
+        }
+        return session.displayTitle
+    }
+
     private var interactionLabel: String {
         session.interactionDisplayName
     }
@@ -798,6 +807,7 @@ struct InstanceRow: View {
                             fontDesign: .monospaced
                         )
                         metaBadge(providerLabel, tint: providerColor.opacity(0.2))
+                        trailingAgentNameLabel(compact: false)
                         if let primarySupplementaryBadge {
                             supplementaryBadgeView(primarySupplementaryBadge)
                         }
@@ -1166,10 +1176,21 @@ struct InstanceRow: View {
                 foreground: .white.opacity(0.86),
                 compact: true
             )
+            trailingAgentNameLabel(compact: true)
             if let primarySupplementaryBadge {
                 supplementaryBadgeView(primarySupplementaryBadge, compact: true)
             }
         }
+    }
+
+    private func trailingAgentNameLabel(compact: Bool) -> some View {
+        Text(agentNameForTrailing)
+            .font(.system(size: compact ? max(10, detailFontSize) : max(11, titleFontSize - 1), weight: .semibold))
+            .foregroundColor(.white.opacity(compact ? 0.82 : 0.9))
+            .lineLimit(1)
+            .truncationMode(.middle)
+            .frame(maxWidth: compact ? 132 : 160, alignment: .leading)
+            .accessibilityLabel(agentNameForTrailing)
     }
 
     @ViewBuilder
