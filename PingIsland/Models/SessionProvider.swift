@@ -286,9 +286,13 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
 
     nonisolated var isGeminiClient: Bool {
         profileID == "gemini"
+            || profileID == "antigravity"
             || threadSource?.lowercased() == "gemini-hooks"
+            || threadSource?.lowercased() == "antigravity-hooks"
             || name?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "gemini cli"
+            || name?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "antigravity cli"
             || originator?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "gemini cli"
+            || originator?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "antigravity cli"
     }
 
     nonisolated var prefersHookMessageAsLastMessageFallback: Bool {

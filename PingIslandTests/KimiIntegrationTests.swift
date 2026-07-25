@@ -10,7 +10,14 @@ final class KimiIntegrationTests: XCTestCase {
         XCTAssertEqual(profile?.brand, .kimi)
         XCTAssertEqual(profile?.logoAssetName, "KimiLogo")
         XCTAssertEqual(profile?.prefersBundledLogoOverAppIcon, true)
-        XCTAssertEqual(profile?.primaryConfigurationURL.path, NSHomeDirectory() + "/.kimi/config.toml")
+        XCTAssertEqual(
+            profile?.configurationRelativePaths,
+            [".kimi-code/config.toml", ".kimi/config.toml"]
+        )
+        XCTAssertEqual(
+            profile?.primaryConfigurationURL.path,
+            NSHomeDirectory() + "/.kimi-code/config.toml"
+        )
         XCTAssertEqual(profile?.installationKind, .tomlHooks)
     }
 

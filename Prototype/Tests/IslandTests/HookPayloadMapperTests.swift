@@ -2684,6 +2684,118 @@ func geminiNotificationStaysObservabilityOnly() throws {
 }
 
 @Test
+func antigravityPreToolUseNormalizesOfficialCamelCasePayload() throws {
+    let payload = """
+    {
+      "toolCall": {
+        "name": "run_command",
+        "args": {
+          "CommandLine": "swift test",
+          "Cwd": "/workspace/project"
+        }
+      },
+      "stepIdx": 4,
+      "conversationId": "agy-conversation-1",
+      "workspacePaths": ["/workspace/project"],
+      "transcriptPath": "/tmp/antigravity-cli/brain/agy-conversation-1/transcript.jsonl",
+      "artifactDirectoryPath": "/tmp/antigravity-cli/brain/agy-conversation-1"
+    }
+    """.data(using: .utf8)!
+
+    let envelope = HookPayloadMapper.makeEnvelope(
+        source: .gemini,
+        arguments: [
+            "ping-island-bridge",
+            "--source", "gemini",
+            "--client-kind", "antigravity",
+            "--client-name", "Antigravity CLI",
+            "--client-origin", "cli",
+            "--client-originator", "Antigravity CLI",
+            "--thread-source", "antigravity-hooks",
+            "--event", "PreToolUse"
+        ],
+        environment: ["TERM_PROGRAM": "ghostty"],
+        stdinData: payload
+    )
+
+    #expect(envelope.eventType == "PreToolUse")
+    #expect(envelope.sessionKey == "gemini:agy-conversation-1")
+    #expect(envelope.cwd == "/workspace/project")
+    #expect(envelope.title == "run_command")
+    #expect(envelope.preview?.contains("swift test") == true)
+    #expect(envelope.status?.kind == .runningTool)
+    #expect(envelope.intervention == nil)
+    #expect(envelope.expectsResponse == false)
+    #expect(envelope.metadata["client_kind"] == "antigravity")
+    #expect(envelope.metadata["tool_name"] == "run_command")
+    #expect(envelope.metadata["transcript_path"]?.contains("agy-conversation-1") == true)
+}
+
+@Test
+func antigravityFallbackOutputPreservesNativePermissionHandling() throws {
+    let preToolPayload = try #require(
+        HookPayloadMapper.fallbackStdoutPayload(
+            eventType: "PreToolUse",
+            metadata: ["client_kind": "antigravity"]
+        )
+    )
+    let preToolJSON = try #require(
+        JSONSerialization.jsonObject(with: Data(preToolPayload.utf8)) as? [String: String]
+    )
+    #expect(preToolJSON["decision"] == "ask")
+
+    let stopPayload = try #require(
+        HookPayloadMapper.fallbackStdoutPayload(
+            eventType: "Stop",
+            metadata: ["client_kind": "agy"]
+        )
+    )
+    let stopJSON = try #require(
+        JSONSerialization.jsonObject(with: Data(stopPayload.utf8)) as? [String: String]
+    )
+    #expect(stopJSON["decision"] == "stop")
+
+    #expect(
+        HookPayloadMapper.fallbackStdoutPayload(
+            eventType: "PreToolUse",
+            metadata: ["client_kind": "gemini"]
+        ) == nil
+    )
+}
+
+@Test
+func antigravityStopMapsToWaitingForInput() throws {
+    let payload = """
+    {
+      "executionNum": 1,
+      "terminationReason": "model_stop",
+      "error": "",
+      "fullyIdle": true,
+      "conversationId": "agy-conversation-2",
+      "workspacePaths": ["/workspace/project"],
+      "transcriptPath": "/tmp/antigravity-cli/brain/agy-conversation-2/transcript.jsonl",
+      "artifactDirectoryPath": "/tmp/antigravity-cli/brain/agy-conversation-2"
+    }
+    """.data(using: .utf8)!
+
+    let envelope = HookPayloadMapper.makeEnvelope(
+        source: .gemini,
+        arguments: [
+            "ping-island-bridge",
+            "--source", "gemini",
+            "--client-kind", "antigravity",
+            "--event", "Stop"
+        ],
+        environment: [:],
+        stdinData: payload
+    )
+
+    #expect(envelope.sessionKey == "gemini:agy-conversation-2")
+    #expect(envelope.status?.kind == .waitingForInput)
+    #expect(envelope.expectsResponse == false)
+}
+
+@Test
 func qwenCodeNotificationMapsFromOfficialHookFields() throws {
     let payload = """
     {
