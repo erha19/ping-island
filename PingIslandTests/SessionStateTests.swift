@@ -3,10 +3,21 @@ import XCTest
 @testable import Ping_Island
 
 final class SessionStateTests: XCTestCase {
-    func testClosedNotchMascotStatusReturnsWorkingAfterWarningsClearForLiveSession() {
+    func testClosedNotchMascotStatusReturnsIdleWhenConversationIsComplete() {
         XCTAssertEqual(
             MascotStatus.closedNotchStatus(
                 representativePhase: .idle,
+                hasPendingPermission: false,
+                hasHumanIntervention: false
+            ),
+            .idle
+        )
+    }
+
+    func testClosedNotchMascotStatusReturnsWorkingWhileProcessing() {
+        XCTAssertEqual(
+            MascotStatus.closedNotchStatus(
+                representativePhase: .processing,
                 hasPendingPermission: false,
                 hasHumanIntervention: false
             ),
@@ -22,6 +33,17 @@ final class SessionStateTests: XCTestCase {
                 hasHumanIntervention: false
             ),
             .warning
+        )
+    }
+
+    func testClosedNotchMascotStatusReturnsIdleWhileWaitingForNextPrompt() {
+        XCTAssertEqual(
+            MascotStatus.closedNotchStatus(
+                representativePhase: .waitingForInput,
+                hasPendingPermission: false,
+                hasHumanIntervention: false
+            ),
+            .idle
         )
     }
 

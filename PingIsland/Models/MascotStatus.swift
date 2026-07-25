@@ -31,9 +31,8 @@ extension MascotStatus {
         }
     }
 
-    /// Closed-notch mascot behavior is intentionally more "alive" than row-level status:
-    /// once a warning is handled, any still-live session should return to the active animation
-    /// until it actually ends or disappears from the compact surface.
+    /// Closed-notch status follows real phase semantics so the dot icon can show
+    /// distinct idle (orange) / working (green) / warning (red) states.
     static func closedNotchStatus(
         representativePhase: SessionPhase?,
         hasPendingPermission: Bool,
@@ -48,10 +47,13 @@ extension MascotStatus {
         }
 
         switch representativePhase {
-        case .ended:
+        case .idle, .ended, .waitingForInput:
+            // Turn finished / waiting for the next prompt → idle (orange).
             return .idle
-        case .idle, .processing, .waitingForInput, .waitingForApproval, .compacting:
+        case .processing, .compacting:
             return .working
+        case .waitingForApproval:
+            return .warning
         }
     }
 }

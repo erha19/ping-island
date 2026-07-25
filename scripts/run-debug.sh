@@ -11,6 +11,11 @@ APP_PATH="$DERIVED_DATA_PATH/Build/Products/Debug/Ping Island.app"
 
 cd "$PROJECT_DIR"
 
+# Local debug defaults to ad-hoc signing so machines without the
+# DEVELOPMENT_TEAM Mac Development certificate can still iterate.
+# Override with PING_ISLAND_CODE_SIGN_IDENTITY="Apple Development" when needed.
+CODE_SIGN_IDENTITY="${PING_ISLAND_CODE_SIGN_IDENTITY:--}"
+
 echo "=== Building Ping Island (Debug) ==="
 xcodebuild \
     -project "$PROJECT_FILE" \
@@ -18,6 +23,8 @@ xcodebuild \
     -configuration Debug \
     -derivedDataPath "$DERIVED_DATA_PATH" \
     -destination "platform=macOS" \
+    CODE_SIGN_IDENTITY="$CODE_SIGN_IDENTITY" \
+    CODE_SIGNING_REQUIRED=NO \
     build
 
 if [[ ! -d "$APP_PATH" ]]; then

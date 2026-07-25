@@ -49,6 +49,7 @@ This file is a routing layer for coding agents working in this repo. Keep it sho
 - VS Code-compatible IDE focus extension install / URI launch: `PingIsland/Services/Window/IDEExtensionInstaller.swift`, `PingIsland/Services/Window/TerminalSessionFocuser.swift`
 - Session list UI: `PingIsland/UI/Views/SessionListView.swift`
 - Client mascot system: `PingIsland/UI/Components/MascotView.swift`, `PingIsland/UI/Views/MascotSettingsView.swift`
+- Docked closed-notch pixel status icon (agent silhouette + status bar): `PingIsland/Models/ClosedNotchDotIconModel.swift`, `PingIsland/UI/Components/ClosedNotchDotIcon.swift` (wired from `NotchView` closed header only; detached / opened still use `MascotView`)
 - App updates and release notes: `PingIsland/Services/Update/`, `PingIsland/UI/Views/ReleaseNotesWindowView.swift`, `PingIsland/UI/Window/ReleaseNotesWindowController.swift`
 - Sparkle build configuration: `Config/App.xcconfig`, `Config/LocalSecrets.xcconfig`, `docs/sparkle-release.md`
 - Mac App Store distribution lane: `PingIslandAppStore` target / scheme, `PingIsland/Info-AppStore.plist`, `PingIsland/Resources/PingIsland-AppStore.entitlements`, `Config/AppStore.xcconfig`, `scripts/build-app-store.sh`, and `docs/mac-app-store-submission.md`

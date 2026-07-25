@@ -2124,18 +2124,7 @@ actor SessionStore {
     }
 
     private func sessionHasLiveExecutionEvidence(_ session: SessionState) -> Bool {
-        for item in session.chatItems.reversed() {
-            switch item.type {
-            case .thinking:
-                return true
-            case .toolCall(let tool):
-                return tool.status == .running
-            case .assistant, .user, .interrupted:
-                return false
-            }
-        }
-
-        return false
+        SessionExecutionEvidence.hasLiveExecution(session)
     }
 
     private func mergedLastActivity(

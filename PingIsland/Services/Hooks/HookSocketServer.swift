@@ -697,8 +697,13 @@ private extension BridgeEnvelope {
         return HookEvent(
             sessionId: sessionId,
             cwd: resolvedCWD,
-            event: eventType,
-            status: Self.mapStatus(eventType: eventType, status: status?.kind, notificationType: metadata["notification_type"], provider: provider),
+            event: HookEventName.normalized(eventType),
+            status: HookEventName.mapStatus(
+                eventType: eventType,
+                bridgeStatusKind: status.map { Self.bridgeStatusKindName($0.kind) },
+                notificationType: metadata["notification_type"],
+                provider: provider.sessionProvider
+            ),
             provider: provider.sessionProvider,
             clientInfo: Self.makeClientInfo(
                 provider: provider,
@@ -714,7 +719,7 @@ private extension BridgeEnvelope {
             toolUseId: metadata["tool_use_id"],
             notificationType: metadata["notification_type"],
             message: HookSocketServer.resolvedBridgeMessage(
-                eventType: eventType,
+                eventType: HookEventName.normalized(eventType),
                 metadata: metadata,
                 preview: preview
             ),
@@ -725,60 +730,25 @@ private extension BridgeEnvelope {
             bridgeExpectsResponse: expectsResponse,
             suppressInAppPrompt: (metadata["suppress_in_app_prompt"] == "true"),
             codexBypassPermissions: (
-                eventType == "PermissionRequest"
+                HookEventName.normalized(eventType) == "PermissionRequest"
                 && metadata["permission_mode"] == "bypassPermissions"
             )
         )
     }
 
-    private static func mapStatus(
-        eventType: String,
-        status: BridgeStatusKind?,
-        notificationType: String?,
-        provider: BridgeProvider = .claude
-    ) -> String {
-        if eventType == "Notification", notificationType == "idle_prompt" {
-            return "waiting_for_input"
-        }
-
-        switch status {
-        case .waitingForApproval:
-            return "waiting_for_approval"
-        case .waitingForInput:
-            return "waiting_for_input"
-        case .runningTool:
-            return "running_tool"
-        case .compacting:
-            return "compacting"
-        case .completed:
-            return "ended"
-        case .notification:
-            return "notification"
-        case .interrupted:
-            return "waiting_for_input"
-        case .idle:
-            return "idle"
-        case .thinking, .active, .error, .none:
-            break
-        }
-
-        switch eventType {
-        case "SessionEnd":
-            return "ended"
-        case "SessionStart", "SubagentStop":
-            return "waiting_for_input"
-        case "Stop":
-            return provider == .codex ? "waiting_for_input" : "idle"
-        case "UserPromptSubmit", "PostToolUse":
-            return "processing"
-        case "PreToolUse":
-            return "running_tool"
-        case "PreCompact":
-            return "compacting"
-        case "Notification":
-            return "notification"
-        default:
-            return "processing"
+    private static func bridgeStatusKindName(_ kind: BridgeStatusKind) -> String {
+        switch kind {
+        case .idle: return "idle"
+        case .active: return "active"
+        case .thinking: return "thinking"
+        case .runningTool: return "runningTool"
+        case .waitingForApproval: return "waitingForApproval"
+        case .waitingForInput: return "waitingForInput"
+        case .compacting: return "compacting"
+        case .completed: return "completed"
+        case .interrupted: return "interrupted"
+        case .notification: return "notification"
+        case .error: return "error"
         }
     }
 
@@ -1215,7 +1185,8 @@ struct CodexAuxiliaryHookFilter {
         guard provider == .codex else { return false }
 
         if ignoredSessionIDs[sessionId] != nil {
-            if eventType == "Stop" || eventType == "SessionEnd" {
+            if HookEventName.normalized(eventType) == "Stop"
+                || HookEventName.normalized(eventType) == "SessionEnd" {
                 ignoredSessionIDs.removeValue(forKey: sessionId)
             } else {
                 ignoredSessionIDs[sessionId] = now
@@ -1489,7 +1460,8 @@ class HookSocketServer {
             }.first
         }
 
-        if eventType == "Stop" || eventType == "SessionEnd" {
+        if HookEventName.normalized(eventType) == "Stop"
+            || HookEventName.normalized(eventType) == "SessionEnd" {
             return firstNonEmpty(
                 metadata["last_assistant_message"],
                 metadata["message"],

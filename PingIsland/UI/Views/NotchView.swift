@@ -653,11 +653,7 @@ struct NotchView: View {
                 HStack(spacing: 0) {
                     // Left side - pet always visible while closed.
                     if viewModel.status != .opened && showsClosedLeadingIcon {
-                        MascotView(
-                            kind: closedMascotKind,
-                            status: closedMascotStatus,
-                            size: petIconSize
-                        )
+                        closedLeadingPetIcon(size: petIconSize)
                             .matchedGeometryEffect(id: "pet", in: activityNamespace, isSource: showsClosedLeadingIcon)
                         .frame(width: viewModel.status == .opened ? nil : sideWidth)
                         .padding(.leading, viewModel.status == .opened ? 8 : 0)
@@ -708,15 +704,29 @@ struct NotchView: View {
                     .foregroundStyle(closedIndicatorTone.emphasisColor)
                     .accessibilityLabel("需要处理")
             } else {
-                MascotView(
-                    kind: closedMascotKind,
-                    status: closedMascotStatus,
-                    size: iconOnlySize
-                )
-                .matchedGeometryEffect(id: "pet", in: activityNamespace, isSource: showsClosedLeadingIcon)
+                closedLeadingPetIcon(size: iconOnlySize)
+                    .matchedGeometryEffect(id: "pet", in: activityNamespace, isSource: showsClosedLeadingIcon)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+    }
+
+    /// Docked closed notch uses the pixel silhouette + status bar; other surfaces keep MascotView.
+    @ViewBuilder
+    private func closedLeadingPetIcon(size: CGFloat) -> some View {
+        if viewModel.presentationMode == .docked {
+            ClosedNotchDotIcon(
+                kind: closedMascotKind,
+                status: closedMascotStatus,
+                size: size
+            )
+        } else {
+            MascotView(
+                kind: closedMascotKind,
+                status: closedMascotStatus,
+                size: size
+            )
+        }
     }
 
     private var iconOnlySize: CGFloat {
