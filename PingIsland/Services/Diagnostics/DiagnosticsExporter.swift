@@ -464,6 +464,8 @@ actor DiagnosticsExporter {
             (fileManager.homeDirectoryForCurrentUser.appendingPathComponent(".codex/session_index.jsonl"), "configs/codex-session-index.jsonl"),
             (fileManager.homeDirectoryForCurrentUser.appendingPathComponent(".hermes/plugins/ping_island/plugin.yaml"), "configs/hermes-plugin/plugin.yaml"),
             (fileManager.homeDirectoryForCurrentUser.appendingPathComponent(".hermes/plugins/ping_island/__init__.py"), "configs/hermes-plugin/__init__.py"),
+            (fileManager.homeDirectoryForCurrentUser.appendingPathComponent(".gemini/antigravity-cli/plugins/ping-island/plugin.json"), "configs/antigravity-plugin/plugin.json"),
+            (fileManager.homeDirectoryForCurrentUser.appendingPathComponent(".gemini/antigravity-cli/plugins/ping-island/hooks.json"), "configs/antigravity-plugin/hooks.json"),
         ]
 
         for item in copiedFiles {
@@ -492,6 +494,17 @@ actor DiagnosticsExporter {
             )
         } catch {
             warnings.append("Failed to export Gemini CLI hook debug summaries: \(error.localizedDescription)")
+        }
+
+        do {
+            try copyRecentDirectoryContentsIfPresent(
+                from: fileManager.homeDirectoryForCurrentUser
+                    .appendingPathComponent(".ping-island-debug/antigravity-hooks", isDirectory: true),
+                toRelativeDirectory: "debug/antigravity-hooks",
+                under: exportRoot
+            )
+        } catch {
+            warnings.append("Failed to export Antigravity CLI hook debug summaries: \(error.localizedDescription)")
         }
 
         do {

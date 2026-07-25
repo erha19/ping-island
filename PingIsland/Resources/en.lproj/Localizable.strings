@@ -163,6 +163,7 @@
 "管理 ~/.claude/settings.json，使用统一 PingIslandBridge hooks 入口" = "Manage ~/.claude/settings.json using the unified PingIslandBridge hooks entrypoint";
 "管理 ~/.codex/hooks.json" = "Manage ~/.codex/hooks.json";
 "管理 ~/.gemini/settings.json，按 Gemini CLI 官方 hooks 协议接入 Island" = "Manage ~/.gemini/settings.json using Gemini CLI's official hooks protocol for Island";
+"管理 ~/.gemini/antigravity-cli/plugins/ping-island，按 Antigravity 官方 plugin hooks 协议接入 Island" = "Manage ~/.gemini/antigravity-cli/plugins/ping-island using Antigravity's official plugin hooks protocol for Island";
 "管理 ~/.hermes/plugins/ping_island，按 Hermes 官方 plugin hooks 协议接入 Island" = "Manage ~/.hermes/plugins/ping_island using Hermes' official plugin hooks protocol for Island";
 "管理 ~/.qwen/settings.json，按 Qwen Code 官方 hooks 协议接入 Island" = "Manage ~/.qwen/settings.json using Qwen Code's official hooks protocol for Island";
 "管理 ~/.openclaw/hooks/ping-island-openclaw，并自动启用内部 hook" = "Manage ~/.openclaw/hooks/ping-island-openclaw and automatically enable the internal hook";

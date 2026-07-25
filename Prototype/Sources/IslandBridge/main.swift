@@ -52,6 +52,10 @@ struct IslandBridgeMain {
                 )
 
                 let socketPath = environment["ISLAND_SOCKET_PATH"] ?? "/tmp/island.sock"
+                let fallbackStdoutPayload = HookPayloadMapper.fallbackStdoutPayload(
+                    eventType: envelope.eventType,
+                    metadata: envelope.metadata
+                )
                 guard HookPayloadMapper.shouldDeliverEnvelope(envelope) else {
                     try? BridgeDebugLogger.logDeliveryIfNeeded(
                         envelope: envelope,
@@ -84,6 +88,10 @@ struct IslandBridgeMain {
                         outcome: "connection_failed",
                         policy: runtimeConfig.debugLogPolicy
                     )
+                    if let fallbackStdoutPayload {
+                        FileHandle.standardOutput.write(Data(fallbackStdoutPayload.utf8))
+                        return
+                    }
                     throw BridgeError.connectionFailed
                 }
 
@@ -95,6 +103,8 @@ struct IslandBridgeMain {
                         metadata: envelope.metadata
                     )
                     FileHandle.standardOutput.write(Data(payload.utf8))
+                } else if let fallbackStdoutPayload {
+                    FileHandle.standardOutput.write(Data(fallbackStdoutPayload.utf8))
                 }
             case .remoteAgentService:
                 let hookSocket = try requiredArgument("--hook-socket", arguments: CommandLine.arguments)
@@ -471,6 +481,8 @@ private enum BridgeDebugLogger {
             return "kimi-hooks"
         case "gemini":
             return "gemini-hooks"
+        case "antigravity", "antigravity-cli", "antigravity_cli", "antigravity cli", "agy":
+            return "antigravity-hooks"
         default:
             break
         }
