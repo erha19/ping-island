@@ -290,9 +290,7 @@ actor TerminalSessionFocuser {
             return false
         }
 
-        return await MainActor.run {
-            NSWorkspace.shared.open(url)
-        }
+        return await IDEExtensionInstaller.openManagedURI(url, for: profile)
     }
 
     private func runAppleScript(lines: [String]) async -> Bool {

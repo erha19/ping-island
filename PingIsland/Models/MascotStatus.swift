@@ -31,8 +31,31 @@ extension MascotStatus {
         }
     }
 
-    /// Closed-notch status follows real phase semantics so the dot icon can show
-    /// distinct idle (orange) / working (green) / warning (red) states.
+    /// Closed-notch status aggregates across all sessions so one idle/waiting
+    /// turn-end session cannot hide another agent that is still processing.
+    /// Priority: warning (approval / intervention) → working (any active) → idle.
+    static func closedNotchStatus(
+        sessions: [SessionState],
+        hasPendingPermission: Bool,
+        hasHumanIntervention: Bool
+    ) -> MascotStatus {
+        if hasPendingPermission || hasHumanIntervention {
+            return .warning
+        }
+
+        if sessions.contains(where: { $0.phase.isWaitingForApproval }) {
+            return .warning
+        }
+
+        if sessions.contains(where: \.phase.isActive) {
+            return .working
+        }
+
+        return .idle
+    }
+
+    /// Single-session / representative helper used by unit tests and callers that
+    /// already collapsed the session list.
     static func closedNotchStatus(
         representativePhase: SessionPhase?,
         hasPendingPermission: Bool,

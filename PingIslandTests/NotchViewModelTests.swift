@@ -135,7 +135,8 @@ final class NotchViewModelTests: XCTestCase {
                 hasPhysicalNotch: true,
                 enableEventMonitoring: false,
                 observeSystemEnvironment: false,
-                fullscreenActivityProvider: { _ in false }
+                fullscreenActivityProvider: { _ in false },
+                notchDisplayModeProvider: { .compact }
             )
 
             XCTAssertEqual(viewModel.closedHeight, 38)
@@ -152,11 +153,34 @@ final class NotchViewModelTests: XCTestCase {
                 hasPhysicalNotch: true,
                 enableEventMonitoring: false,
                 observeSystemEnvironment: false,
-                fullscreenActivityProvider: { _ in false }
+                fullscreenActivityProvider: { _ in false },
+                notchDisplayModeProvider: { .compact }
             )
 
             XCTAssertEqual(viewModel.closedWidth, 266)
             XCTAssertEqual(viewModel.closedSize, CGSize(width: 266, height: 38))
+        }
+    }
+
+    func testDetailedPhysicalNotchClosedHeightGrowsForBelowCameraTitle() async {
+        await MainActor.run {
+            let preferredModuleWidth: CGFloat = 180
+            let viewModel = NotchViewModel(
+                deviceNotchRect: CGRect(x: 0, y: 0, width: 220, height: 38),
+                screenRect: CGRect(x: 0, y: 0, width: 1512, height: 982),
+                windowHeight: 320,
+                hasPhysicalNotch: true,
+                enableEventMonitoring: false,
+                observeSystemEnvironment: false,
+                fullscreenActivityProvider: { _ in false },
+                notchModuleWidthProvider: { preferredModuleWidth },
+                notchDisplayModeProvider: { .detailed }
+            )
+
+            let expectedHeight = ClosedNotchPhysicalLayout.preferredClosedHeight(deviceNotchHeight: 38)
+            XCTAssertEqual(viewModel.closedWidth, preferredModuleWidth)
+            XCTAssertEqual(viewModel.closedHeight, expectedHeight)
+            XCTAssertEqual(viewModel.closedSize, CGSize(width: preferredModuleWidth, height: expectedHeight))
         }
     }
 
@@ -226,7 +250,8 @@ final class NotchViewModelTests: XCTestCase {
                 enableEventMonitoring: false,
                 observeSystemEnvironment: false,
                 fullscreenActivityProvider: { _ in false },
-                notchModuleWidthProvider: { AppSettingsStore.minimumNotchModuleWidth }
+                notchModuleWidthProvider: { AppSettingsStore.minimumNotchModuleWidth },
+                notchDisplayModeProvider: { .compact }
             )
 
             XCTAssertEqual(viewModel.closedWidth, AppSettingsStore.minimumNotchModuleWidth)
@@ -244,7 +269,8 @@ final class NotchViewModelTests: XCTestCase {
                 enableEventMonitoring: false,
                 observeSystemEnvironment: false,
                 fullscreenActivityProvider: { _ in false },
-                notchModuleWidthProvider: { 180 }
+                notchModuleWidthProvider: { 180 },
+                notchDisplayModeProvider: { .compact }
             )
 
             XCTAssertEqual(viewModel.closedWidth, 180)
@@ -262,7 +288,8 @@ final class NotchViewModelTests: XCTestCase {
                 enableEventMonitoring: false,
                 observeSystemEnvironment: false,
                 fullscreenActivityProvider: { _ in false },
-                notchModuleWidthProvider: { 398 }
+                notchModuleWidthProvider: { 398 },
+                notchDisplayModeProvider: { .compact }
             )
 
             viewModel.updateOpenedMeasuredHeight(260)
@@ -586,7 +613,8 @@ final class NotchViewModelTests: XCTestCase {
                 hasPhysicalNotch: true,
                 enableEventMonitoring: false,
                 observeSystemEnvironment: false,
-                fullscreenActivityProvider: { _ in false }
+                fullscreenActivityProvider: { _ in false },
+                notchDisplayModeProvider: { .compact }
             )
 
             viewModel.beginDockedDetachmentTrackingForTesting()
@@ -684,7 +712,7 @@ final class NotchViewModelTests: XCTestCase {
         }
     }
 
-    func testDetachedContentResolverPrefersAttentionThenActivity() {
+    func testDetachedContentResolverPrefersActiveOverTurnEndedWaitingForInput() {
         let now = Date()
         let active = SessionState(
             sessionId: "active",
@@ -692,9 +720,9 @@ final class NotchViewModelTests: XCTestCase {
             phase: .processing,
             lastActivity: now.addingTimeInterval(-20)
         )
-        let attention = SessionState(
-            sessionId: "attention",
-            cwd: "/tmp/attention",
+        let waiting = SessionState(
+            sessionId: "waiting",
+            cwd: "/tmp/waiting",
             phase: .waitingForInput,
             lastActivity: now.addingTimeInterval(-60)
         )
@@ -703,10 +731,10 @@ final class NotchViewModelTests: XCTestCase {
             status: .closed,
             openReason: .unknown,
             contentType: .instances,
-            sessions: [active, attention]
+            sessions: [active, waiting]
         )
 
-        XCTAssertEqual(resolved, .chat(attention))
+        XCTAssertEqual(resolved, .chat(active))
     }
 
     func testDetachedContentResolverNormalizesNotificationPreviewToStableDetail() {
@@ -737,7 +765,7 @@ final class NotchViewModelTests: XCTestCase {
         XCTAssertNil(IslandMascotResolver.sourceSession(from: [idle]))
     }
 
-    func testIslandMascotResolverPrefersFreshAttentionOrActiveSessions() {
+    func testIslandMascotResolverPrefersActiveOverTurnEndedWaitingForInput() {
         let now = Date()
         let idle = SessionState(
             sessionId: "idle",
@@ -751,16 +779,41 @@ final class NotchViewModelTests: XCTestCase {
             phase: .processing,
             lastActivity: now.addingTimeInterval(-20)
         )
-        let attention = SessionState(
-            sessionId: "attention",
-            cwd: "/tmp/attention",
+        // Turn-ended sessions land in waitingForInput and refresh lastActivity on Stop.
+        // They must not stick as the closed silhouette while another agent is working.
+        let turnEnded = SessionState(
+            sessionId: "turn-ended",
+            cwd: "/tmp/turn-ended",
             phase: .waitingForInput,
+            lastActivity: now.addingTimeInterval(5)
+        )
+
+        XCTAssertEqual(
+            IslandMascotResolver.sourceSession(from: [idle, active, turnEnded])?.sessionId,
+            "active"
+        )
+    }
+
+    func testIslandMascotResolverPrefersPromptAttentionOverActive() {
+        let now = Date()
+        let active = SessionState(
+            sessionId: "active",
+            cwd: "/tmp/active",
+            phase: .processing,
+            lastActivity: now
+        )
+        let approval = SessionState(
+            sessionId: "approval",
+            cwd: "/tmp/approval",
+            phase: .waitingForApproval(
+                PermissionContext(toolUseId: "tool-1", toolName: "Bash", toolInput: nil, receivedAt: now.addingTimeInterval(-5))
+            ),
             lastActivity: now.addingTimeInterval(-5)
         )
 
         XCTAssertEqual(
-            IslandMascotResolver.sourceSession(from: [idle, active, attention])?.sessionId,
-            "attention"
+            IslandMascotResolver.sourceSession(from: [active, approval])?.sessionId,
+            "approval"
         )
     }
 

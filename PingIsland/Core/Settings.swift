@@ -188,7 +188,7 @@ enum NotchDisplayMode: String, CaseIterable, Identifiable {
         case .compact:
             return "只显示图标和会话数量"
         case .detailed:
-            return "额外显示激活会话的最新消息"
+            return "中间显示当前会话标题或最新提示"
         }
     }
 }

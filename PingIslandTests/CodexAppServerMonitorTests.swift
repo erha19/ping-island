@@ -85,4 +85,32 @@ final class CodexAppServerMonitorTests: XCTestCase {
         XCTAssertEqual(questions.first?.options.map(\.title), ["Tests", "UI"])
         XCTAssertTrue(questions.first?.allowsOther ?? false)
     }
+
+    func testNotLoadedStatusInfersPhaseFromTurns() {
+        XCTAssertTrue(
+            CodexAppServerMonitor.shouldInferPhaseFromTurns(status: ["type": "notLoaded"])
+        )
+        XCTAssertFalse(
+            CodexAppServerMonitor.shouldInferPhaseFromTurns(status: ["type": "active"])
+        )
+
+        XCTAssertEqual(
+            CodexAppServerMonitor.phaseInferredFromTurns([
+                ["status": "inProgress", "startedAt": 1]
+            ]),
+            .processing
+        )
+        XCTAssertEqual(
+            CodexAppServerMonitor.phaseInferredFromTurns([
+                ["status": "completed", "startedAt": 1, "completedAt": 2]
+            ]),
+            .idle
+        )
+        XCTAssertEqual(
+            CodexAppServerMonitor.phaseInferredFromTurns([
+                ["startedAt": 1]
+            ]),
+            .processing
+        )
+    }
 }

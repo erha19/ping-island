@@ -31,6 +31,8 @@ func installerWritesVSCodeCompatibleExtensionPayload() throws {
     #expect(packageJSON.contains("\"displayName\": \"Ping Island\""))
     #expect(packageJSON.contains(#""version": "\#(version)""#))
     #expect(packageJSON.contains("\"activationEvents\""))
+    #expect(packageJSON.contains("onStartupFinished"))
+    #expect(packageJSON.contains("onUri"))
     #expect(packageJSON.contains("\"icon\": \"icon.png\""))
     #expect(packageJSON.contains(repositoryURL))
     #expect(extensionJS.contains("registerUriHandler"))

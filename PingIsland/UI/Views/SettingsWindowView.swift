@@ -6694,7 +6694,7 @@ private struct NotchDisplayModeSelector: View {
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundColor(.white)
 
-            Text(appLocalized: "直接预览刘海闭合态效果。简约模式只显示宠物和数量，详细模式会额外显示中间过程信息。")
+            Text(appLocalized: "直接预览刘海闭合态效果。简约模式只显示宠物和数量，详细模式会在中间显示当前会话标题或最新提示。")
                 .font(.system(size: 11, weight: .medium))
                 .foregroundColor(.white.opacity(0.58))
                 .fixedSize(horizontal: false, vertical: true)

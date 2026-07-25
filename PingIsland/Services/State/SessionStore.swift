@@ -3594,6 +3594,17 @@ actor SessionStore {
         publishState()
         updateCodexPlaceholderPrune(for: session)
 
+        // Desktop Codex threads often arrive from thread/list as status `notLoaded`
+        // with no chat history. Enrich from thread/read + rollout so phase, completion,
+        // and sounds track the Desktop app the same way Cursor hooks do.
+        if session.ingress != .remoteBridge {
+            scheduleCodexRolloutSync(
+                sessionId: resolvedSessionId,
+                clientInfo: session.clientInfo,
+                cwd: session.cwd
+            )
+        }
+
         // Start file watcher for Codex sessions discovered via App Server
         // (Hook-based sessions already get watchers via SessionMonitor.processHookEvent)
         if session.phase == .processing || session.phase == .waitingForInput || session.phase.isWaitingForApproval {

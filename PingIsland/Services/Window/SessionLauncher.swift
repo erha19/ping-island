@@ -1233,9 +1233,7 @@ actor SessionLauncher {
             timeoutNanoseconds: Self.ideSessionActivationDelayNanoseconds
         )
 
-        return await MainActor.run {
-            NSWorkspace.shared.open(url)
-        }
+        return await IDEExtensionInstaller.openManagedURI(url, for: profile)
     }
 
     private func activateURL(_ string: String) async -> Bool {

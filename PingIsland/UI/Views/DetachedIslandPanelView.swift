@@ -731,14 +731,33 @@ struct DetachedIslandPanelView: View {
         settings.mascotKind(for: IslandMascotResolver.sourceSession(from: sortedSessions)?.mascotClient)
     }
 
+    private var compactCarouselSessions: [SessionState] {
+        ClosedNotchMascotCarousel.sessions(from: sortedSessions)
+    }
+
     private var compactMascotStatus: MascotStatus {
         if isPetDragging {
             return .dragging
         }
         return MascotStatus.closedNotchStatus(
-            representativePhase: representativeSession?.phase,
+            sessions: sortedSessions,
             hasPendingPermission: sortedSessions.contains { $0.needsApprovalResponse },
             hasHumanIntervention: sortedSessions.contains { $0.intervention != nil }
+        )
+    }
+
+    private func compactCarouselPresentation(at date: Date) -> (kind: MascotKind, status: MascotStatus) {
+        if isPetDragging {
+            return (compactMascotKind, .dragging)
+        }
+
+        guard let session = ClosedNotchMascotCarousel.currentSession(from: sortedSessions, at: date) else {
+            return (compactMascotKind, compactMascotStatus)
+        }
+
+        return (
+            settings.mascotKind(for: session.mascotClient),
+            ClosedNotchMascotCarousel.status(for: session)
         )
     }
 
@@ -825,11 +844,25 @@ struct DetachedIslandPanelView: View {
     }
 
     private var petButton: some View {
+        Group {
+            if compactCarouselSessions.count > 1, !isPetDragging {
+                TimelineView(.periodic(from: .now, by: ClosedNotchMascotCarousel.interval)) { context in
+                    let presentation = compactCarouselPresentation(at: context.date)
+                    detachedPetInteraction(kind: presentation.kind, status: presentation.status)
+                }
+            } else {
+                let presentation = compactCarouselPresentation(at: Date())
+                detachedPetInteraction(kind: presentation.kind, status: presentation.status)
+            }
+        }
+    }
+
+    private func detachedPetInteraction(kind: MascotKind, status: MascotStatus) -> some View {
         DetachedFloatingPetInteractionView(
             activeCount: activeCount,
             usageWindows: floatingPetUsageWindows,
-            mascotKind: compactMascotKind,
-            mascotStatus: compactMascotStatus,
+            mascotKind: kind,
+            mascotStatus: status,
             petMetrics: petMetrics,
             isDragging: interactionModel.isPetDragging,
             onTap: onPetTap,

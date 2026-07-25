@@ -76,9 +76,10 @@ class NotchViewModel: ObservableObject {
     var screenRect: CGRect { geometry.screenRect }
     var windowHeight: CGFloat { geometry.windowHeight }
     var closedHeight: CGFloat {
-        usesPhysicalNotchClosedPresentation
-            ? deviceNotchRect.height
-            : detectedClosedHeight
+        if usesPhysicalNotchClosedPresentation {
+            return deviceNotchRect.height
+        }
+        return resolvedClosedHeight()
     }
     var usesPhysicalNotchClosedPresentation: Bool {
         hasPhysicalNotch && isFullscreenPhysicalNotchCompactActive
@@ -102,6 +103,15 @@ class NotchViewModel: ObservableObject {
         guard hasPhysicalNotch else { return Self.defaultClosedHeight }
         let systemHeight = ceil(deviceNotchRect.height)
         return systemHeight > 0 ? systemHeight : Self.defaultClosedHeight
+    }
+
+    private func resolvedClosedHeight() -> CGFloat {
+        let base = detectedClosedHeight
+        guard hasPhysicalNotch,
+              notchDisplayModeProvider() == .detailed else {
+            return base
+        }
+        return ClosedNotchPhysicalLayout.preferredClosedHeight(deviceNotchHeight: base)
     }
 
     private func resolvedClosedWidth(preferredModuleWidthOverride: CGFloat? = nil) -> CGFloat {
@@ -267,6 +277,7 @@ class NotchViewModel: ObservableObject {
     private let hideInFullscreenProvider: @MainActor () -> Bool
     private let autoHideWhenIdleProvider: @MainActor () -> Bool
     private let notchModuleWidthProvider: @MainActor () -> Double
+    private let notchDisplayModeProvider: @MainActor () -> NotchDisplayMode
     private var hoverTimer: DispatchWorkItem?
     // Keep hover previews feeling responsive without making incidental cursor
     // passes over the notch expand it too aggressively.
@@ -312,6 +323,7 @@ class NotchViewModel: ObservableObject {
         fullscreenBrowserHiddenProvider: @escaping @MainActor (CGRect) -> Bool = FullscreenAppDetector.isFullscreenBrowserActive,
         autoHideWhenIdleProvider: @escaping @MainActor () -> Bool = { AppSettings.autoHideWhenIdle },
         notchModuleWidthProvider: @escaping @MainActor () -> Double = { AppSettingsStore.defaultNotchModuleWidth },
+        notchDisplayModeProvider: @escaping @MainActor () -> NotchDisplayMode = { AppSettings.notchDisplayMode },
         fullscreenStateSettleDelay: TimeInterval = 0.18
     ) {
         self.geometry = NotchGeometry(
@@ -320,14 +332,16 @@ class NotchViewModel: ObservableObject {
             windowHeight: windowHeight
         )
         self.hasPhysicalNotch = hasPhysicalNotch
-        self.closedWidth = CGFloat(AppSettingsStore.normalizedNotchModuleWidth(notchModuleWidthProvider()))
         self.events = enableEventMonitoring ? EventMonitors.shared : nil
         self.fullscreenActivityProvider = fullscreenActivityProvider
         self.fullscreenBrowserHiddenProvider = fullscreenBrowserHiddenProvider
         self.hideInFullscreenProvider = hideInFullscreenProvider
         self.autoHideWhenIdleProvider = autoHideWhenIdleProvider
         self.notchModuleWidthProvider = notchModuleWidthProvider
+        self.notchDisplayModeProvider = notchDisplayModeProvider
         self.fullscreenStateSettleDelay = fullscreenStateSettleDelay
+        self.closedWidth = CGFloat(AppSettingsStore.normalizedNotchModuleWidth(notchModuleWidthProvider()))
+        self.closedWidth = resolvedClosedWidth()
         if enableEventMonitoring {
             setupEventHandlers()
         }
@@ -403,6 +417,18 @@ class NotchViewModel: ObservableObject {
                     animated: true,
                     animation: .easeOut(duration: 0.12),
                     preferredModuleWidth: width
+                )
+            }
+            .store(in: &cancellables)
+
+        AppSettings.shared.$notchDisplayMode
+            .sink { [weak self] _ in
+                guard let self else { return }
+                // Height is computed from display mode; publish even when width is unchanged.
+                self.objectWillChange.send()
+                self.syncClosedWidth(
+                    animated: true,
+                    animation: .easeOut(duration: 0.12)
                 )
             }
             .store(in: &cancellables)

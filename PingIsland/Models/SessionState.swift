@@ -912,6 +912,43 @@ struct SessionState: Equatable, Identifiable, Sendable {
         return normalized.isEmpty ? nil : normalized
     }
 
+    /// Short title for the closed-notch center slot (detailed mode).
+    /// Prefer durable session identity over transient hook chatter.
+    nonisolated var closedNotchCenterText: String? {
+        let candidates: [String?] = [
+            SessionTextSanitizer.sanitizedDisplayText(sessionName),
+            SessionTextSanitizer.sanitizedDisplayText(conversationInfo.firstUserMessage),
+            compactHookMessage,
+            SessionTextSanitizer.sanitizedDisplayText(previewText),
+            SessionTextSanitizer.sanitizedDisplayText(conversationInfo.lastMessage)
+        ]
+
+        for candidate in candidates {
+            guard let collapsed = Self.normalizedClosedNotchCenterText(candidate) else {
+                continue
+            }
+            return Self.truncatedClosedNotchCenterText(collapsed)
+        }
+        return nil
+    }
+
+    nonisolated private static let closedNotchCenterTextLimit = 48
+
+    nonisolated private static func normalizedClosedNotchCenterText(_ text: String?) -> String? {
+        guard let text else { return nil }
+        let collapsed = text
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return collapsed.isEmpty ? nil : collapsed
+    }
+
+    nonisolated private static func truncatedClosedNotchCenterText(_ text: String) -> String {
+        guard text.count > closedNotchCenterTextLimit else { return text }
+        let end = text.index(text.startIndex, offsetBy: closedNotchCenterTextLimit)
+        let prefix = text[..<end].trimmingCharacters(in: .whitespacesAndNewlines)
+        return prefix.isEmpty ? String(text.prefix(closedNotchCenterTextLimit)) : "\(prefix)…"
+    }
+
     /// Last message role
     nonisolated var lastMessageRole: String? {
         conversationInfo.lastMessageRole

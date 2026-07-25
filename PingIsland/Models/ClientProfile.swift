@@ -33,6 +33,7 @@ enum SessionClientBrand: String, Codable, Equatable, Sendable {
     case copilot
     case neutral
     case kimi
+    case zcode
 }
 
 enum SessionAssistantLabelMode: String, Sendable {
@@ -1057,7 +1058,7 @@ enum ClientProfileRegistry {
                 "--client-originator", "ZCode"
             ],
             defaultEnabled: false,
-            brand: .claude,
+            brand: .zcode,
             events: [
                 HookInstallEventDescriptor(name: "SessionStart", templates: [.matcher(".*")]),
                 HookInstallEventDescriptor(name: "UserPromptSubmit", templates: [.matcher(".*")]),
@@ -1355,6 +1356,21 @@ enum ClientProfileRegistry {
             exactAliases: ["opencode", "open-code", "open code"],
             keywordAliases: ["opencode", "open code"],
             bundleIdentifiers: ["ai.opencode.desktop"]
+        ),
+        SessionClientProfile(
+            id: "zcode",
+            provider: .claude,
+            family: .claudeHooks,
+            kind: .custom,
+            displayName: "ZCode",
+            assistantLabelMode: .badgeLabel,
+            brand: .zcode,
+            defaultBundleIdentifier: nil,
+            defaultOrigin: "cli",
+            recognizedKinds: ["zcode", "z-code", "z_code", "z code"],
+            exactAliases: ["zcode", "z-code", "z code"],
+            keywordAliases: ["zcode", "z code"],
+            bundleIdentifiers: []
         ),
         SessionClientProfile(
             id: "gemini",

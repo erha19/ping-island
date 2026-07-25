@@ -1061,12 +1061,19 @@ actor CodexAppServerMonitor {
         let updatedAt = lifecycleDates.updatedAt ?? createdAt
         let status = thread["status"] as? [String: Any]
         let snapshotClientInfo = makeClientInfo(from: thread, threadId: threadId)
-        let phase = phaseFromCodexStatus(
+        let turns = thread["turns"] as? [[String: Any]] ?? []
+        var phase = phaseFromCodexStatus(
             status,
             threadId: threadId,
             intervention: pendingRequestsByThread[threadId]?.intervention
         )
-        let turns = thread["turns"] as? [[String: Any]] ?? []
+        // Desktop Codex threads often report status `notLoaded` even while turns are
+        // present on disk. Infer live phase from turn status so Island can show work
+        // and completion without waiting for an in-process runtime status.
+        if Self.shouldInferPhaseFromTurns(status: status),
+           let inferredPhase = Self.phaseInferredFromTurns(turns) {
+            phase = inferredPhase
+        }
 
         var historyItems: [ChatHistoryItem] = []
         var firstUserMessage: String?
@@ -1296,6 +1303,45 @@ actor CodexAppServerMonitor {
         return .idle
     }
 
+    /// `notLoaded` (and missing status) means this app-server client does not own the
+    /// live runtime; turn payloads / rollout files remain the source of truth.
+    nonisolated static func shouldInferPhaseFromTurns(status: [String: Any]?) -> Bool {
+        guard let type = status?["type"] as? String else {
+            return true
+        }
+        switch type {
+        case "active", "systemError":
+            return false
+        default:
+            return true
+        }
+    }
+
+    nonisolated static func phaseInferredFromTurns(_ turns: [[String: Any]]) -> SessionPhase? {
+        guard let lastTurn = turns.last else { return nil }
+
+        let normalizedStatus = (lastTurn["status"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+
+        switch normalizedStatus {
+        case "inprogress", "in_progress", "active", "running", "pending":
+            return .processing
+        case "completed", "complete", "failed", "cancelled", "canceled", "aborted":
+            return .idle
+        default:
+            break
+        }
+
+        let hasStarted = lastTurn["startedAt"] != nil || lastTurn["started_at"] != nil
+        let hasCompleted = lastTurn["completedAt"] != nil || lastTurn["completed_at"] != nil
+        if hasStarted && !hasCompleted {
+            return .processing
+        }
+
+        return nil
+    }
+
     static func guardianReviewIntervention(from params: [String: Any]) -> SessionIntervention? {
         func normalized(_ value: String?) -> String? {
             guard let value else { return nil }
@@ -1415,9 +1461,14 @@ actor CodexAppServerMonitor {
         let threadSource = sanitizedText(thread["threadSource"] as? String)
             ?? sanitizedText(thread["source"] as? String)
             ?? sanitizedText(thread["sessionStartSource"] as? String)
+        // Desktop / app-server thread list uses `path` for the rollout JSONL.
+        // Older payloads also use rolloutPath / sessionFilePath variants.
         let sessionFilePath = sanitizedText(thread["rolloutPath"] as? String)
             ?? sanitizedText(thread["sessionFilePath"] as? String)
             ?? sanitizedText(thread["rollout_path"] as? String)
+            ?? sanitizedText(thread["path"] as? String)
+            ?? sanitizedText(thread["filePath"] as? String)
+            ?? sanitizedText(thread["file_path"] as? String)
 
         let resolvedOrigin = origin ?? "desktop"
 

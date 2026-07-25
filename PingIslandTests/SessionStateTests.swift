@@ -58,6 +58,56 @@ final class SessionStateTests: XCTestCase {
         )
     }
 
+    func testClosedNotchStatusPrefersWorkingWhenAnySessionIsProcessing() {
+        let waiting = SessionState(
+            sessionId: "waiting-session",
+            cwd: "/tmp/project",
+            phase: .waitingForInput,
+            lastActivity: Date().addingTimeInterval(10)
+        )
+        let processing = SessionState(
+            sessionId: "processing-session",
+            cwd: "/tmp/project",
+            phase: .processing,
+            lastActivity: Date()
+        )
+
+        // A newer waitingForInput session used to win representation and paint idle,
+        // hiding the still-processing agent. Aggregate status must stay working.
+        XCTAssertEqual(
+            MascotStatus.closedNotchStatus(
+                sessions: [waiting, processing],
+                hasPendingPermission: false,
+                hasHumanIntervention: false
+            ),
+            .working
+        )
+    }
+
+    func testClosedNotchStatusStillWarnsWhenAnySessionNeedsApproval() {
+        let processing = SessionState(
+            sessionId: "processing-session",
+            cwd: "/tmp/project",
+            phase: .processing
+        )
+        let approving = SessionState(
+            sessionId: "approval-session",
+            cwd: "/tmp/project",
+            phase: .waitingForApproval(
+                PermissionContext(toolUseId: "tool-1", toolName: "Bash", toolInput: nil, receivedAt: Date())
+            )
+        )
+
+        XCTAssertEqual(
+            MascotStatus.closedNotchStatus(
+                sessions: [processing, approving],
+                hasPendingPermission: true,
+                hasHumanIntervention: false
+            ),
+            .warning
+        )
+    }
+
     func testDisplayTitleFallsBackToSummaryThenFirstUserMessage() {
         let withSummary = SessionState(
             sessionId: "summary-session",
@@ -312,6 +362,70 @@ final class SessionStateTests: XCTestCase {
         )
 
         XCTAssertNil(session.compactHookMessage)
+    }
+
+    func testClosedNotchCenterTextPrefersSessionNameOverHookMessage() {
+        let session = SessionState(
+            sessionId: "named-session",
+            cwd: "/tmp/project",
+            sessionName: "Fix auth bug",
+            latestHookMessage: "PreToolUse Bash"
+        )
+
+        XCTAssertEqual(session.closedNotchCenterText, "Fix auth bug")
+    }
+
+    func testClosedNotchCenterTextFallsBackToFirstUserMessage() {
+        let session = SessionState(
+            sessionId: "prompt-session",
+            cwd: "/tmp/project",
+            conversationInfo: ConversationInfo(
+                summary: nil,
+                lastMessage: nil,
+                lastMessageRole: nil,
+                lastToolName: nil,
+                firstUserMessage: "  please   fix\nthe login flow  ",
+                lastUserMessageDate: nil
+            )
+        )
+
+        XCTAssertEqual(session.closedNotchCenterText, "please fix the login flow")
+    }
+
+    func testClosedNotchCenterTextFallsBackToCompactHookMessage() {
+        let session = SessionState(
+            sessionId: "hook-only-session",
+            cwd: "/tmp/project",
+            latestHookMessage: "  Waiting for approval  "
+        )
+
+        XCTAssertEqual(session.closedNotchCenterText, "Waiting for approval")
+    }
+
+    func testClosedNotchCenterTextTruncatesLongTitles() {
+        let longTitle = String(repeating: "a", count: 60)
+        let session = SessionState(
+            sessionId: "long-title-session",
+            cwd: "/tmp/project",
+            sessionName: longTitle
+        )
+
+        guard let text = session.closedNotchCenterText else {
+            XCTFail("Expected truncated closed notch center text")
+            return
+        }
+        XCTAssertEqual(text.count, 49)
+        XCTAssertTrue(text.hasSuffix("…"))
+        XCTAssertTrue(text.hasPrefix(String(repeating: "a", count: 48)))
+    }
+
+    func testClosedNotchCenterTextReturnsNilWhenEmpty() {
+        let session = SessionState(
+            sessionId: "empty-session",
+            cwd: "/tmp/project"
+        )
+
+        XCTAssertNil(session.closedNotchCenterText)
     }
 
     func testWaitingForApprovalPhaseSurfacesPendingToolDetails() {

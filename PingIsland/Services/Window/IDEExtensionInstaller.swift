@@ -73,7 +73,53 @@ struct IDEExtensionInstaller {
             return false
         }
 
+        Task { @MainActor in
+            _ = await openManagedURI(url, for: profile)
+        }
+        return true
+    }
+
+    /// Opens an extension URI after bringing the host IDE forward.
+    /// Cursor/VS Code treat unhandled `publisher.extension` URLs as marketplace
+    /// installs; opening too early (before the URI handler is registered) shows
+    /// "cannot be installed because it was not found" even for sideloaded extensions.
+    @MainActor
+    @discardableResult
+    static func openManagedURI(_ url: URL, for profile: ManagedIDEExtensionProfile) async -> Bool {
+        let wasRunning = profile.localAppBundleIdentifiers.contains { bundleIdentifier in
+            !NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifier).isEmpty
+        }
+
+        await activateHostApplication(for: profile)
+
+        let delayNanoseconds: UInt64 = wasRunning ? 400_000_000 : 1_500_000_000
+        try? await Task.sleep(nanoseconds: delayNanoseconds)
+
         return NSWorkspace.shared.open(url)
+    }
+
+    @MainActor
+    private static func activateHostApplication(for profile: ManagedIDEExtensionProfile) async {
+        for bundleIdentifier in profile.localAppBundleIdentifiers {
+            let running = NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifier)
+            if let app = running.first(where: \.isActive) ?? running.first {
+                app.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
+                return
+            }
+
+            guard let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleIdentifier) else {
+                continue
+            }
+
+            let configuration = NSWorkspace.OpenConfiguration()
+            configuration.activates = true
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                NSWorkspace.shared.openApplication(at: appURL, configuration: configuration) { _, _ in
+                    continuation.resume()
+                }
+            }
+            return
+        }
     }
 
     nonisolated static func makeURI(
@@ -313,6 +359,7 @@ struct IDEExtensionInstaller {
             "Other"
           ],
           "activationEvents": [
+            "onStartupFinished",
             "onUri"
           ],
           "main": "./extension.js",

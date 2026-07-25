@@ -167,6 +167,7 @@ struct IDEExtensionInstaller {
             "Other"
           ],
           "activationEvents": [
+            "onStartupFinished",
             "onUri"
           ],
           "main": "./extension.js",

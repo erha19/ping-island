@@ -27,6 +27,7 @@ enum MascotClient: String, CaseIterable, Identifiable, Sendable {
     case trae
     case copilot
     case kimi
+    case zcode
 
     static let allCases: [MascotClient] = [
         .claude,
@@ -42,6 +43,7 @@ enum MascotClient: String, CaseIterable, Identifiable, Sendable {
         .codebuddy,
         .copilot,
         .kimi,
+        .zcode,
     ]
 
     var id: String { rawValue }
@@ -76,6 +78,8 @@ enum MascotClient: String, CaseIterable, Identifiable, Sendable {
             return "Copilot"
         case .kimi:
             return "Kimi CLI"
+        case .zcode:
+            return "ZCode"
         }
     }
 
@@ -109,6 +113,8 @@ enum MascotClient: String, CaseIterable, Identifiable, Sendable {
             return "GitHub Copilot Hooks 客户端"
         case .kimi:
             return "Kimi CLI 官方 hooks 与默认 Kimi 形象"
+        case .zcode:
+            return "ZCode hooks.events 与独立 Z 剪影"
         }
     }
 
@@ -142,6 +148,8 @@ enum MascotClient: String, CaseIterable, Identifiable, Sendable {
             return .copilot
         case .kimi:
             return .kimi
+        case .zcode:
+            return .zcode
         }
     }
 
@@ -175,6 +183,8 @@ enum MascotClient: String, CaseIterable, Identifiable, Sendable {
                 .openclaw
             case "opencode":
                 .opencode
+            case "zcode":
+                .zcode
             case "qoder", "qoderwork", "qoder-cli", "jb-plugin":
                 .qoder
             case "codebuddy", "codebuddy-cli":
@@ -237,6 +247,8 @@ enum MascotClient: String, CaseIterable, Identifiable, Sendable {
             }
         case .opencode:
             self = .opencode
+        case .zcode:
+            self = .zcode
         case .qoder:
             self = .qoder
         case .copilot:
@@ -274,6 +286,7 @@ enum MascotKind: String, CaseIterable, Identifiable, Sendable {
     case codebuddy
     case copilot
     case kimi
+    case zcode
 
     var id: String { rawValue }
 
@@ -305,6 +318,8 @@ enum MascotKind: String, CaseIterable, Identifiable, Sendable {
             return "Copilot"
         case .kimi:
             return "Kimi CLI"
+        case .zcode:
+            return "ZCode"
         }
     }
 
@@ -336,6 +351,8 @@ enum MascotKind: String, CaseIterable, Identifiable, Sendable {
             return "黑框眼镜机器人"
         case .kimi:
             return "Kimi 蓝色键盘球"
+        case .zcode:
+            return "紫色 Z 标记"
         }
     }
 
@@ -367,6 +384,8 @@ enum MascotKind: String, CaseIterable, Identifiable, Sendable {
             return Color(red: 1.0, green: 0.56, blue: 0.28)
         case .kimi:
             return Color(red: 0.96, green: 0.30, blue: 0.42)
+        case .zcode:
+            return Color(red: 0.52, green: 0.38, blue: 0.98)
         }
     }
 
@@ -622,6 +641,8 @@ struct MascotView: View {
             drawCopilot(in: context, canvasSize: canvasSize, time: time, mode: mode)
         case .kimi:
             drawKimi(in: context, canvasSize: canvasSize, time: time, mode: mode)
+        case .zcode:
+            drawZCode(in: context, canvasSize: canvasSize, time: time, mode: mode)
         }
     }
 
@@ -1986,6 +2007,62 @@ struct MascotView: View {
 
         if mode == .warning {
             drawAlertGlyph(in: context, space: space, x: 12.0 + motion.shake, y: 2.0, color: kind.alertColor)
+        }
+    }
+
+    private func drawZCode(
+        in context: GraphicsContext,
+        canvasSize: CGSize,
+        time: TimeInterval,
+        mode: MascotRenderMode
+    ) {
+        let space = PixelSpace(canvasSize, logicalWidth: 17, logicalHeight: 14, yOffset: 2)
+        let motion = motionValues(for: mode, time: time)
+        let body = Color(red: 0.52, green: 0.38, blue: 0.98)
+        let deep = Color(red: 0.28, green: 0.18, blue: 0.62)
+        let highlight = Color(red: 0.78, green: 0.70, blue: 1.0)
+        let eye = Color(red: 0.06, green: 0.04, blue: 0.18)
+        let keyboardBase = Color(red: 0.18, green: 0.14, blue: 0.34)
+        let keyboardKey = Color(red: 0.42, green: 0.34, blue: 0.72)
+
+        drawShadow(in: context, space: space, centerX: 8.5, y: 15.5, width: 7.8 - abs(motion.bounce) * 0.25, opacity: 0.22)
+
+        if mode == .working {
+            drawKeyboard(
+                in: context,
+                space: space,
+                y: 12.8,
+                base: keyboardBase,
+                key: keyboardKey,
+                highlight: highlight,
+                flashIndex: keyboardFlashIndex(time: time)
+            )
+        }
+
+        // Block letter Z body.
+        let bars: [(CGFloat, CGFloat, CGFloat, CGFloat)] = [
+            (4.2, 4.4, 8.6, 1.4),
+            (9.4, 6.2, 2.6, 1.3),
+            (7.4, 7.5, 2.6, 1.3),
+            (5.2, 8.8, 2.6, 1.3),
+            (4.2, 10.4, 8.6, 1.4),
+        ]
+        for bar in bars {
+            context.fill(
+                Path(space.rect(bar.0 + motion.shake, bar.1 + motion.vertical, bar.2 * motion.squashX, bar.3 * motion.squashY)),
+                with: .color(body)
+            )
+        }
+
+        context.fill(Path(space.rect(4.8 + motion.shake, 4.7 + motion.vertical, 3.2, 0.55)), with: .color(highlight.opacity(0.55)))
+        context.fill(Path(space.rect(10.4 + motion.shake, 10.7 + motion.vertical, 1.8, 0.55)), with: .color(deep.opacity(0.55)))
+
+        let eyeHeight: CGFloat = mode == .idle ? 0.42 : (mode == .warning ? 1.2 : blinkHeight(time: time, closedHeight: 0.18, openHeight: 1.2))
+        context.fill(Path(space.rect(6.2 + motion.shake, 6.8 + motion.vertical, 1.0, eyeHeight)), with: .color(eye))
+        context.fill(Path(space.rect(9.8 + motion.shake, 6.8 + motion.vertical, 1.0, eyeHeight)), with: .color(eye))
+
+        if mode == .warning {
+            drawAlertGlyph(in: context, space: space, x: 13.0 + motion.shake, y: 2.1, color: kind.alertColor)
         }
     }
 

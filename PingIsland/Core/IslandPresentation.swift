@@ -92,11 +92,13 @@ struct IslandDetachedContentResolver {
     }
 
     static func preferredSession(from sessions: [SessionState]) -> SessionState? {
-        if let attention = sessions
-            .filter(\.needsManualAttention)
-            .sorted(by: { ($0.attentionRequestedAt ?? $0.lastActivity) > ($1.attentionRequestedAt ?? $1.lastActivity) })
+        if let prompt = sessions
+            .filter(\.needsPromptNotification)
+            .sorted(by: {
+                ($0.attentionRequestedAt ?? $0.lastActivity) > ($1.attentionRequestedAt ?? $1.lastActivity)
+            })
             .first {
-            return attention
+            return prompt
         }
 
         if let active = sessions.filter({ $0.phase.isActive })
@@ -124,12 +126,32 @@ struct IslandDetachedContentResolver {
 }
 
 enum IslandMascotResolver {
+    /// Session that owns the closed-notch silhouette.
+    /// Prefer real prompts (approval / question) over live work, and live work over
+    /// turn-ended `waitingForInput` so a just-finished agent cannot stick on screen
+    /// while another agent is still processing.
     static func sourceSession(from sessions: [SessionState]) -> SessionState? {
-        sessions
-            .filter { $0.phase.isActive || $0.needsManualAttention }
-            .sorted(by: {
-                ($0.attentionRequestedAt ?? $0.lastActivity) > ($1.attentionRequestedAt ?? $1.lastActivity)
-            })
+        if let prompt = sessions
+            .filter(\.needsPromptNotification)
+            .sorted(by: attentionSort)
+            .first {
+            return prompt
+        }
+
+        if let active = sessions
+            .filter({ $0.phase.isActive })
+            .sorted(by: { $0.lastActivity > $1.lastActivity })
+            .first {
+            return active
+        }
+
+        return sessions
+            .filter { $0.phase == .waitingForInput || $0.needsManualAttention }
+            .sorted(by: attentionSort)
             .first
+    }
+
+    private static func attentionSort(_ lhs: SessionState, _ rhs: SessionState) -> Bool {
+        (lhs.attentionRequestedAt ?? lhs.lastActivity) > (rhs.attentionRequestedAt ?? rhs.lastActivity)
     }
 }

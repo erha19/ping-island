@@ -165,4 +165,45 @@ final class ZCodeHookInstallerTests: XCTestCase {
             )
         }
     }
+
+    func testZCodeManagedProfileUsesZCodeBrand() throws {
+        let profile = try profile
+        XCTAssertEqual(profile.brand, .zcode)
+        XCTAssertEqual(profile.title, "ZCode")
+    }
+
+    func testZCodeRuntimeProfileResolvesBrandAndMascot() {
+        let profile = ClientProfileRegistry.matchRuntimeProfile(
+            provider: .claude,
+            explicitKind: "zcode",
+            explicitName: "ZCode",
+            explicitBundleIdentifier: nil,
+            terminalBundleIdentifier: nil,
+            origin: "cli",
+            originator: "ZCode",
+            threadSource: nil,
+            processName: "zcode"
+        )
+
+        XCTAssertEqual(profile?.id, "zcode")
+        XCTAssertEqual(profile?.brand, .zcode)
+
+        let clientInfo = SessionClientInfo(
+            kind: .custom,
+            profileID: "zcode",
+            name: "ZCode",
+            origin: "cli",
+            originator: "ZCode"
+        )
+
+        XCTAssertEqual(clientInfo.brand, .zcode)
+        XCTAssertEqual(MascotClient(clientInfo: clientInfo, provider: .claude), .zcode)
+        XCTAssertEqual(MascotKind(clientInfo: clientInfo, provider: .claude), .zcode)
+        XCTAssertEqual(MascotKind.zcode.subtitle, "紫色 Z 标记")
+
+        let silhouette = ClosedNotchDotGlyph.silhouette(for: .zcode)
+        XCTAssertFalse(silhouette.isEmpty)
+        XCTAssertNotEqual(silhouette, ClosedNotchDotGlyph.silhouette(for: .claude))
+        XCTAssertNotEqual(silhouette, ClosedNotchDotGlyph.silhouette(for: .pi))
+    }
 }

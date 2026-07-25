@@ -42,6 +42,7 @@ enum SessionClientBrand {
     case qoder
     case copilot
     case kimi
+    case zcode
     case claude
     case neutral
 }
