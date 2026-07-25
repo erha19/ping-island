@@ -77,12 +77,19 @@ final class AntigravityIntegrationTests: XCTestCase {
                 "ISLAND_SOCKET_PATH": "/root/.ping-island/run/agent-hook.sock"
             ]
         )
-        let hooks = try XCTUnwrap(files["hooks.json"])
+        let hooksData = try XCTUnwrap(files["hooks.json"]?.data(using: .utf8))
+        let hooksRoot = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: hooksData) as? [String: Any]
+        )
+        let hooks = try XCTUnwrap(hooksRoot["ping-island"] as? [String: Any])
+        let preToolEntries = try XCTUnwrap(hooks["PreToolUse"] as? [[String: Any]])
+        let preToolCommands = try XCTUnwrap(preToolEntries.first?["hooks"] as? [[String: Any]])
+        let command = try XCTUnwrap(preToolCommands.first?["command"] as? String)
 
-        XCTAssertTrue(hooks.contains("/root/.ping-island/bin/ping-island-bridge"))
-        XCTAssertTrue(hooks.contains("ISLAND_SOCKET_PATH="))
-        XCTAssertTrue(hooks.contains("/root/.ping-island/run/agent-hook.sock"))
-        XCTAssertFalse(hooks.contains(NSHomeDirectory() + "/.ping-island/bin"))
+        XCTAssertTrue(command.contains("/root/.ping-island/bin/ping-island-bridge"))
+        XCTAssertTrue(command.contains("ISLAND_SOCKET_PATH="))
+        XCTAssertTrue(command.contains("/root/.ping-island/run/agent-hook.sock"))
+        XCTAssertFalse(command.contains(NSHomeDirectory() + "/.ping-island/bin"))
     }
 
     func testRuntimeProfileKeepsAntigravityIdentityWithGeminiMascot() {
