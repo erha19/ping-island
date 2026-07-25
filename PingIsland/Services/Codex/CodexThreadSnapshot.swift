@@ -86,4 +86,34 @@ struct CodexThreadSnapshot: Equatable, Sendable {
 
         return conversationInfo.lastMessageRole == "assistant"
     }
+
+    /// Chooses which view of a Codex thread `SessionStore` should apply after reading
+    /// both app-server and rollout snapshots. Never drops both — Desktop `notLoaded`
+    /// list rows are often idle/empty while `thread/read` or the jsonl still show work.
+    nonisolated static func preferredForSync(
+        rollout: CodexThreadSnapshot,
+        appServer: CodexThreadSnapshot?
+    ) -> (snapshot: CodexThreadSnapshot, ingress: SessionIngress) {
+        guard let appServer else {
+            return (rollout, .hookBridge)
+        }
+
+        // Prefer a live rollout over a stale idle app-server snapshot when Desktop
+        // owns the runtime and PingIsland's app-server lags behind the jsonl.
+        if rollout.phase.isActive && !appServer.phase.isActive {
+            return (rollout, .hookBridge)
+        }
+        if case .some = rollout.intervention, case .none = appServer.intervention {
+            return (rollout, .hookBridge)
+        }
+
+        let preferAppServer =
+            rollout.historyItems.count <= appServer.historyItems.count
+            && rollout.updatedAt <= appServer.updatedAt
+        if preferAppServer {
+            return (appServer, .codexAppServer)
+        }
+
+        return (rollout, .hookBridge)
+    }
 }

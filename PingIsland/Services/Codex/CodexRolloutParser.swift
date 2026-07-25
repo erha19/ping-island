@@ -94,6 +94,7 @@ actor CodexRolloutParser {
         var latestFinalText: String?
         var latestFinalPhase: String?
         var phase: SessionPhase = .idle
+        var hasOpenTask = false
         var isTurnInterrupted = false
         var intervention: SessionIntervention?
         var sessionName: String?
@@ -186,9 +187,11 @@ actor CodexRolloutParser {
 
                 case "task_started":
                     isTurnInterrupted = false
+                    hasOpenTask = true
                     phase = .processing
 
                 case "task_complete":
+                    hasOpenTask = false
                     if !historyItems.contains(where: Self.isRunningToolItem(_:)) {
                         phase = .idle
                     }
@@ -198,6 +201,7 @@ actor CodexRolloutParser {
 
                 case "turn_aborted":
                     isTurnInterrupted = true
+                    hasOpenTask = false
                     intervention = nil
                     markRunningToolsInterrupted(in: &historyItems)
                     phase = .idle
@@ -336,6 +340,10 @@ actor CodexRolloutParser {
             markRunningToolsInterrupted(in: &historyItems)
             phase = .idle
         } else if historyItems.contains(where: Self.isRunningToolItem(_:)) {
+            phase = .processing
+        } else if hasOpenTask {
+            // Mid-turn assistant/commentary text must not demote an open Desktop turn
+            // to idle — primary UI now hides idle Codex rows.
             phase = .processing
         } else if phase == .processing, latestFinalText != nil {
             phase = .idle

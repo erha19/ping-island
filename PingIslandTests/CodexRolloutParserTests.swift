@@ -280,4 +280,37 @@ final class CodexRolloutParserTests: XCTestCase {
         XCTAssertEqual(snapshot?.subagentRole, "explorer")
         XCTAssertEqual(snapshot?.isSubagent, true)
     }
+
+    func testRolloutParserKeepsProcessingWhileTaskStartedWithoutComplete() async throws {
+        let tempDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDirectory) }
+
+        let threadId = "019f9b9e-650d-7682-89a4-94286ef47cf6"
+        let rolloutURL = tempDirectory.appendingPathComponent("rollout-\(threadId).jsonl")
+        let rollout = """
+        {"timestamp":"2026-07-26T00:00:00Z","type":"session_meta","payload":{"id":"\(threadId)","cwd":"/tmp/project","originator":"Codex Desktop","source":"vscode"}}
+        {"timestamp":"2026-07-26T00:00:01Z","type":"event_msg","payload":{"type":"user_message","message":"enter implementation"}}
+        {"timestamp":"2026-07-26T00:00:02Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-open"}}
+        {"timestamp":"2026-07-26T00:00:03Z","type":"event_msg","payload":{"type":"agent_message","phase":"final","message":"I am writing the plan now."}}
+        {"timestamp":"2026-07-26T00:00:04Z","type":"response_item","payload":{"type":"custom_tool_call","call_id":"call-1","name":"exec","status":"completed","input":"ls"}}
+        {"timestamp":"2026-07-26T00:00:05Z","type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"call-1","output":"ok"}}
+        """
+        try rollout.write(to: rolloutURL, atomically: true, encoding: .utf8)
+
+        let snapshot = await CodexRolloutParser.shared.parseThread(
+            threadId: threadId,
+            fallbackCwd: "/tmp/project",
+            clientInfo: SessionClientInfo(
+                kind: .codexApp,
+                profileID: "codex-app",
+                name: "Codex App",
+                bundleIdentifier: "com.openai.codex",
+                sessionFilePath: rolloutURL.path
+            )
+        )
+
+        XCTAssertEqual(snapshot?.phase, .processing)
+    }
 }

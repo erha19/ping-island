@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 /// Canonical Claude-style hook event names.
@@ -122,3 +123,47 @@ enum SessionExecutionEvidence {
         return false
     }
 }
+
+/// Recovers Claude-family sessions that stay `.processing` after Stop is missed
+/// (common for Cursor IDE hosts whose process PID remains alive).
+enum StuckActiveSessionRecovery {
+    /// No tracked PID: demote sooner once hooks go quiet.
+    static let missingProcessIdleTimeout: TimeInterval = 30
+    /// Live PID (often the IDE): wait longer before assuming the turn finished.
+    static let liveProcessIdleTimeout: TimeInterval = 3 * 60
+
+    enum Decision: Equatable {
+        case keep
+        case demoteToWaitingForInput
+        case endSession
+    }
+
+    static func decision(
+        for session: SessionState,
+        now: Date = Date(),
+        isProcessAlive: (Int) -> Bool = { pid in
+            Darwin.kill(pid_t(pid), 0) == 0
+        }
+    ) -> Decision {
+        guard session.provider == .claude else { return .keep }
+        guard session.ingress != .nativeRuntime else { return .keep }
+        guard session.phase.isActive else { return .keep }
+        guard !session.needsManualAttention else { return .keep }
+
+        let idleSeconds = now.timeIntervalSince(session.lastActivity)
+
+        if let pid = session.pid, pid > 0 {
+            if !isProcessAlive(pid) {
+                return idleSeconds >= missingProcessIdleTimeout ? .endSession : .keep
+            }
+            guard idleSeconds >= liveProcessIdleTimeout else { return .keep }
+            guard !SessionExecutionEvidence.hasLiveExecution(session) else { return .keep }
+            return .demoteToWaitingForInput
+        }
+
+        guard idleSeconds >= missingProcessIdleTimeout else { return .keep }
+        guard !SessionExecutionEvidence.hasLiveExecution(session) else { return .keep }
+        return .demoteToWaitingForInput
+    }
+}
+

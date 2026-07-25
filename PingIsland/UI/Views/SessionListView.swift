@@ -1371,14 +1371,24 @@ struct InstanceRow: View {
         }
 
         if session.phase == .waitingForInput, session.intervention == nil {
+            if let assistantPreview = latestNonToolAssistantPreview {
+                return session.codexSubagentSummaryText(for: assistantPreview)
+            }
             if session.isNativeRuntimeSession {
                 return session.codexSubagentSummaryText(
-                    for: sanitized(session.lastMessage) ?? AppLocalization.string("Native session 已就绪")
+                    for: AppLocalization.string("Native session 已就绪")
                 )
             }
             return session.codexSubagentSummaryText(
-                for: sanitized(session.lastMessage) ?? AppLocalization.string("等待你的下一条消息")
+                for: AppLocalization.string("等待你的下一条消息")
             )
+        }
+
+        if session.phase == .idle || session.phase == .ended {
+            if let assistantPreview = latestNonToolAssistantPreview {
+                return session.codexSubagentSummaryText(for: assistantPreview)
+            }
+            return compactDetailSummary
         }
 
         if let lastMessage = sanitized(session.lastMessage) {
@@ -1386,6 +1396,21 @@ struct InstanceRow: View {
         }
 
         return compactDetailSummary
+    }
+
+    /// Prefer a real assistant reply over a finished tool dump when the turn is quiet.
+    private var latestNonToolAssistantPreview: String? {
+        for item in session.chatItems.reversed() {
+            switch item.type {
+            case .assistant(let text):
+                return sanitized(text)
+            case .user:
+                return nil
+            case .toolCall, .thinking, .interrupted:
+                continue
+            }
+        }
+        return nil
     }
 
     @ViewBuilder

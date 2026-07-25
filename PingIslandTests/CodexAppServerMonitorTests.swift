@@ -112,5 +112,102 @@ final class CodexAppServerMonitorTests: XCTestCase {
             ]),
             .processing
         )
+        // Desktop-owned turns often surface as `interrupted` without completedAt while
+        // the rollout is still growing; treat that as live work, not idle history.
+        XCTAssertEqual(
+            CodexAppServerMonitor.phaseInferredFromTurns([
+                ["status": "interrupted", "startedAt": 1]
+            ]),
+            .processing
+        )
+    }
+
+    func testPreferredCodexSyncSnapshotKeepsActiveRolloutOverStaleIdleAppServer() {
+        let older = Date(timeIntervalSince1970: 1_000)
+        let newer = Date(timeIntervalSince1970: 2_000)
+        let idleAppServer = makeSnapshot(
+            threadId: "thread-1",
+            updatedAt: newer,
+            phase: .idle,
+            historyItemCount: 4
+        )
+        let activeRollout = makeSnapshot(
+            threadId: "thread-1",
+            updatedAt: older,
+            phase: .processing,
+            historyItemCount: 3
+        )
+
+        let preferred = CodexThreadSnapshot.preferredForSync(
+            rollout: activeRollout,
+            appServer: idleAppServer
+        )
+
+        XCTAssertEqual(preferred.snapshot.phase, .processing)
+        XCTAssertEqual(preferred.ingress, .hookBridge)
+    }
+
+    func testPreferredCodexSyncSnapshotAppliesAppServerInsteadOfDroppingBoth() {
+        let older = Date(timeIntervalSince1970: 1_000)
+        let newer = Date(timeIntervalSince1970: 2_000)
+        let activeAppServer = makeSnapshot(
+            threadId: "thread-1",
+            updatedAt: newer,
+            phase: .processing,
+            historyItemCount: 5
+        )
+        let quieterRollout = makeSnapshot(
+            threadId: "thread-1",
+            updatedAt: older,
+            phase: .idle,
+            historyItemCount: 2
+        )
+
+        let preferred = CodexThreadSnapshot.preferredForSync(
+            rollout: quieterRollout,
+            appServer: activeAppServer
+        )
+
+        XCTAssertEqual(preferred.snapshot.phase, .processing)
+        XCTAssertEqual(preferred.ingress, .codexAppServer)
+    }
+
+    private func makeSnapshot(
+        threadId: String,
+        updatedAt: Date,
+        phase: SessionPhase,
+        historyItemCount: Int
+    ) -> CodexThreadSnapshot {
+        let historyItems = (0..<historyItemCount).map { index in
+            ChatHistoryItem(
+                id: "item-\(index)",
+                type: .assistant("message-\(index)"),
+                timestamp: updatedAt
+            )
+        }
+        return CodexThreadSnapshot(
+            threadId: threadId,
+            name: "Codex",
+            preview: "preview",
+            cwd: "/tmp/project",
+            clientInfo: .codexApp(threadId: threadId),
+            intervention: nil,
+            createdAt: updatedAt,
+            updatedAt: updatedAt,
+            phase: phase,
+            historyItems: historyItems,
+            conversationInfo: ConversationInfo(
+                summary: nil,
+                lastMessage: "message",
+                lastMessageRole: "assistant",
+                lastToolName: nil,
+                firstUserMessage: nil,
+                lastUserMessageDate: nil
+            ),
+            latestTurnId: nil,
+            latestResponseText: "message",
+            latestResponsePhase: "final",
+            latestUserText: nil
+        )
     }
 }

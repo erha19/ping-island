@@ -935,11 +935,20 @@ actor CodexAppServerMonitor {
         let preview = thread["preview"] as? String
         let cwd = thread["cwd"] as? String
         let clientInfo = makeClientInfo(from: thread, threadId: threadId)
-        let phase = phaseFromCodexStatus(
-            thread["status"] as? [String: Any],
+        let status = thread["status"] as? [String: Any]
+        let turns = thread["turns"] as? [[String: Any]] ?? []
+        var phase = phaseFromCodexStatus(
+            status,
             threadId: threadId,
             intervention: pendingRequestsByThread[threadId]?.intervention
         )
+        // Match `parseThreadSnapshot`: Desktop `notLoaded` rows need turn inference
+        // when turns are present. Empty `thread/list` turns stay idle and rely on
+        // rollout / thread/read sync to promote live work back into the primary UI.
+        if Self.shouldInferPhaseFromTurns(status: status),
+           let inferredPhase = Self.phaseInferredFromTurns(turns) {
+            phase = inferredPhase
+        }
         let diagnostics = Self.makeThreadDiagnosticsSnapshot(from: thread)
         let lifecycleDates = Self.threadLifecycleDates(from: thread)
         recordThreadDiagnostics(diagnostics)
@@ -1325,7 +1334,9 @@ actor CodexAppServerMonitor {
             .lowercased()
 
         switch normalizedStatus {
-        case "inprogress", "in_progress", "active", "running", "pending":
+        case "inprogress", "in_progress", "active", "running", "pending", "interrupted":
+            // `interrupted` without completedAt is common for Desktop-owned turns that
+            // PingIsland's app-server does not own; keep them live until completed.
             return .processing
         case "completed", "complete", "failed", "cancelled", "canceled", "aborted":
             return .idle

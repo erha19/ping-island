@@ -2632,32 +2632,31 @@ actor SessionStore {
     }
 
     /// Periodically check active Claude sessions whose bridge process has died without
-    /// sending a Stop event (crash, SIGKILL, terminal closed). End them so the bar
-    /// doesn't keep showing dead sessions as still working.
+    /// sending a Stop event (crash, SIGKILL, terminal closed), or whose IDE host PID is
+    /// still alive but the turn has gone quiet with no running tools (Cursor miss-Stop).
     func pruneOrphanedSessions() {
+        var didChange = false
+        let now = Date()
         for (sessionId, var session) in sessions {
-            guard session.provider == .claude else { continue }
-            guard session.ingress != .nativeRuntime else { continue }
-            guard session.phase != .ended else { continue }
-            guard !session.needsManualAttention else { continue }
-
-            let idleSeconds = Date().timeIntervalSince(session.lastActivity)
-            guard idleSeconds >= 30 else { continue }
-
-            if let pid = session.pid, pid > 0 {
-                if Darwin.kill(pid_t(pid), 0) != 0 && errno == ESRCH {
-                    markSessionEnded(&session)
-                    sessions[sessionId] = session
-                }
-            } else if session.phase.isActive, !sessionHasLiveExecutionEvidence(session) {
-                // No PID available but session looks idle with no live evidence.
-                // Transition from processing/compacting to idle so it doesn't
-                // appear stuck as "working" indefinitely.
-                if session.phase.canTransition(to: .idle) {
-                    session.phase = .idle
-                    sessions[sessionId] = session
-                }
+            switch StuckActiveSessionRecovery.decision(for: session, now: now) {
+            case .keep:
+                continue
+            case .endSession:
+                markSessionEnded(&session)
+                sessions[sessionId] = session
+                didChange = true
+            case .demoteToWaitingForInput:
+                let target: SessionPhase = session.phase.canTransition(to: .waitingForInput)
+                    ? .waitingForInput
+                    : .idle
+                guard session.phase.canTransition(to: target) else { continue }
+                session.phase = target
+                sessions[sessionId] = session
+                didChange = true
             }
+        }
+        if didChange {
+            publishState()
         }
     }
 
@@ -3251,17 +3250,23 @@ actor SessionStore {
             await self?.finishCodexRolloutParse(sessionId: sessionId)
 
             guard let snapshot else {
+                if let appServerSnapshot {
+                    await self?.syncCodexThreadSnapshot(
+                        appServerSnapshot,
+                        ingress: .codexAppServer
+                    )
+                }
                 return
             }
 
-            if let appServerSnapshot,
-               snapshot.intervention == nil,
-               snapshot.historyItems.count <= appServerSnapshot.historyItems.count,
-               snapshot.updatedAt <= appServerSnapshot.updatedAt {
-                return
-            }
-
-            await self?.syncCodexThreadSnapshot(snapshot, ingress: .hookBridge)
+            let preferred = CodexThreadSnapshot.preferredForSync(
+                rollout: snapshot,
+                appServer: appServerSnapshot
+            )
+            await self?.syncCodexThreadSnapshot(
+                preferred.snapshot,
+                ingress: preferred.ingress
+            )
         }
     }
 

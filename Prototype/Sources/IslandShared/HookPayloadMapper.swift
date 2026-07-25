@@ -570,11 +570,13 @@ public enum HookPayloadMapper {
     }
 
     private static func detectCWD(payload: [String: Any], environment: [String: String]) -> String? {
-        let candidateCWD = [
+        let orderedCandidates = [
             payload["cwd"] as? String,
             payload["workspace"] as? String,
-            environment["PWD"]
-        ].compactMap { nonEmpty($0) }.first
+            environment["PWD"],
+            environment["VSCODE_CWD"]
+        ].compactMap { nonEmpty($0) }
+        let candidateCWD = preferredWorkspaceCandidate(from: orderedCandidates)
         let sessionFileWorkspace = workspacePathFromSessionFilePath(firstNonEmptyString(
             payload["session_file_path"],
             payload["rollout_path"],
@@ -586,6 +588,14 @@ public enum HookPayloadMapper {
         }
 
         return candidateCWD ?? sessionFileWorkspace
+    }
+
+    private static func preferredWorkspaceCandidate(from candidates: [String]) -> String? {
+        guard !candidates.isEmpty else { return nil }
+        if let nonConfig = candidates.first(where: { !isTopLevelClientConfigDirectory($0) }) {
+            return nonConfig
+        }
+        return candidates.first
     }
 
     private static func makeTerminalContext(environment: [String: String], payload: [String: Any]) -> TerminalContext {

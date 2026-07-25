@@ -1000,11 +1000,14 @@ private extension BridgeEnvelope {
         terminalContext: BridgeTerminalContext,
         metadata: [String: String]
     ) -> String {
-        let candidateCWD = firstNonEmpty(
+        let orderedCandidates = [
             envelopeCWD,
             terminalContext.currentDirectory,
-            metadata["cwd"]
-        )
+            metadata["cwd"],
+            metadata["vscode_cwd"],
+            metadata["VSCODE_CWD"]
+        ].compactMap { firstNonEmpty($0) }
+        let candidateCWD = preferredWorkspaceCandidate(from: orderedCandidates)
         let sessionFileWorkspace = workspacePathFromSessionFilePath(firstNonEmpty(
             metadata["session_file_path"],
             metadata["rollout_path"],
@@ -1016,6 +1019,14 @@ private extension BridgeEnvelope {
         }
 
         return candidateCWD ?? sessionFileWorkspace ?? ""
+    }
+
+    private static func preferredWorkspaceCandidate(from candidates: [String]) -> String? {
+        guard !candidates.isEmpty else { return nil }
+        if let nonConfig = candidates.first(where: { !isTopLevelClientConfigDirectory($0) }) {
+            return nonConfig
+        }
+        return candidates.first
     }
 
     private static func workspacePathFromSessionFilePath(_ sessionFilePath: String?) -> String? {

@@ -369,6 +369,39 @@ func mapsClaudeIDEAndRemoteContextFromEnvironment() throws {
 }
 
 @Test
+func prefersVSCodeCWDOverClientConfigPWDForCursorTerminal() throws {
+    let home = FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL.path
+    let cursorConfig = home + "/.cursor"
+    let workspace = home + "/Projects/ping_island_cursor_cwd_test"
+    let payload = """
+    {
+      "hook_event_name": "SessionStart",
+      "session_id": "cursor-vscode-cwd"
+    }
+    """.data(using: .utf8)!
+
+    let envelope = HookPayloadMapper.makeEnvelope(
+        source: .claude,
+        arguments: [
+            "island-bridge",
+            "--source", "claude",
+            "--client-kind", "cursor",
+            "--client-name", "Cursor"
+        ],
+        environment: [
+            "PWD": cursorConfig,
+            "VSCODE_CWD": workspace,
+            "__CFBundleIdentifier": "com.todesktop.230313mzl4w4u92"
+        ],
+        stdinData: payload
+    )
+
+    #expect(envelope.cwd == workspace)
+    #expect(envelope.terminalContext.currentDirectory == workspace)
+    #expect(envelope.metadata["cwd"] == workspace)
+}
+
+@Test
 func recoversCursorWorkspaceFromAgentTranscriptPathWhenPWDIsClientConfig() throws {
     let tempRoot = FileManager.default.temporaryDirectory
         .appendingPathComponent("pingislandcursor\(UUID().uuidString.replacingOccurrences(of: "-", with: ""))", isDirectory: true)

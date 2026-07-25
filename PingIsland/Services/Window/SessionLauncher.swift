@@ -566,14 +566,16 @@ actor SessionLauncher {
         fallbackLaunchURL: String?,
         additionalBundleIdentifiers: [String] = []
     ) async -> Bool {
-        if profile.prefersWorkspaceWindowRouting {
-            return await Self.routeIDEWorkspaceWindow(
-                detectedBundleIdentifier: detectedBundleIdentifier,
-                appName: appName,
-                workspacePath: workspacePath,
-                fallbackLaunchURL: fallbackLaunchURL,
-                additionalBundleIdentifiers: additionalBundleIdentifiers
-            )
+        if profile.prefersWorkspaceWindowRouting,
+           !Self.shouldFallBackToRecentIDEWindow(forWorkspacePath: workspacePath),
+           await Self.routeIDEWorkspaceWindow(
+            detectedBundleIdentifier: detectedBundleIdentifier,
+            appName: appName,
+            workspacePath: workspacePath,
+            fallbackLaunchURL: fallbackLaunchURL,
+            additionalBundleIdentifiers: additionalBundleIdentifiers
+           ) {
+            return true
         }
 
         for candidateBundleIdentifier in Self.ideCandidateBundleIdentifiers(
@@ -592,6 +594,7 @@ actor SessionLauncher {
         }
 
         if let fallbackLaunchURL,
+           !Self.shouldFallBackToRecentIDEWindow(forWorkspacePath: workspacePath),
            await activateURL(fallbackLaunchURL) {
             try? await Task.sleep(nanoseconds: Self.ideWindowRoutingDelayNanoseconds)
             Self.logger.debug("Activated IDE via fallback URL \(fallbackLaunchURL, privacy: .public)")
@@ -1359,7 +1362,7 @@ actor SessionLauncher {
             }
         }
 
-        if let workspacePath = existingLocalWorkspacePath(workspacePath) {
+        if let workspacePath = usableIDEWorkspacePath(workspacePath) {
             if await focusExistingIDEWorkspaceWindow(
                 bundleIdentifiers: candidateBundleIdentifiers,
                 workspacePath: workspacePath,
@@ -1599,6 +1602,28 @@ actor SessionLauncher {
         return ordered
     }
 
+    /// Workspace paths that are safe to focus or `open` as IDE folders.
+    /// Top-level client config homes such as `~/.cursor` / `~/.claude` are rejected so
+    /// activation falls back to the recent IDE window instead of opening the config dir.
+    nonisolated static func usableIDEWorkspacePath(_ workspacePath: String?) -> String? {
+        guard let workspacePath = existingLocalWorkspacePath(workspacePath) else {
+            return nil
+        }
+        if isTopLevelClientConfigDirectory(workspacePath) {
+            return nil
+        }
+        return workspacePath
+    }
+
+    nonisolated static func shouldFallBackToRecentIDEWindow(forWorkspacePath workspacePath: String?) -> Bool {
+        guard let workspacePath = workspacePath?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !workspacePath.isEmpty else {
+            return false
+        }
+        return usableIDEWorkspacePath(workspacePath) == nil
+            && isTopLevelClientConfigDirectory(workspacePath)
+    }
+
     private static func existingLocalWorkspacePath(_ workspacePath: String?) -> String? {
         guard let workspacePath = workspacePath?.trimmingCharacters(in: .whitespacesAndNewlines),
               !workspacePath.isEmpty else {
@@ -1612,6 +1637,28 @@ actor SessionLauncher {
         }
 
         return workspacePath
+    }
+
+    private nonisolated static func isTopLevelClientConfigDirectory(_ path: String) -> Bool {
+        let url = URL(fileURLWithPath: path).standardizedFileURL
+        let knownClientDirectories: Set<String> = [
+            ".claude",
+            ".codebuddy",
+            ".codex",
+            ".cursor",
+            ".gemini",
+            ".kimi",
+            ".openclaw",
+            ".qoder",
+            ".qwen",
+            ".workbuddy"
+        ]
+        guard knownClientDirectories.contains(url.lastPathComponent) else {
+            return false
+        }
+
+        return url.deletingLastPathComponent().path
+            == FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL.path
     }
 
     static func waitForIDEWindowActivation(
