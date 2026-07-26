@@ -35,6 +35,11 @@ enum NotchContentType: Equatable {
     }
 }
 
+enum PhysicalClosedContentMode: Equatable {
+    case wings
+    case stacked
+}
+
 @MainActor
 class NotchViewModel: ObservableObject {
     // MARK: - Published State
@@ -71,6 +76,8 @@ class NotchViewModel: ObservableObject {
     private static let detachmentLongPressNarrowedWidthScale: CGFloat = 0.82
     private static let detachmentLongPressMaximumShrink: CGFloat = 56
     @Published private(set) var closedWidth: CGFloat
+    @Published private(set) var physicalClosedContentMode: PhysicalClosedContentMode = .wings
+    private var physicalClosedHasExpandedUsage = false
 
     var deviceNotchRect: CGRect { geometry.deviceNotchRect }
     var screenRect: CGRect { geometry.screenRect }
@@ -111,11 +118,24 @@ class NotchViewModel: ObservableObject {
               notchDisplayModeProvider() == .detailed else {
             return base
         }
-        return ClosedNotchPhysicalLayout.preferredClosedHeight(deviceNotchHeight: base)
+        switch physicalClosedContentMode {
+        case .wings:
+            return base
+        case .stacked:
+            return ClosedNotchPhysicalLayout.preferredClosedHeight(deviceNotchHeight: base)
+        }
     }
 
     private func resolvedClosedWidth(preferredModuleWidthOverride: CGFloat? = nil) -> CGFloat {
-        preferredModuleWidthOverride ?? preferredModuleWidth
+        if hasPhysicalNotch,
+           notchDisplayModeProvider() == .detailed,
+           physicalClosedContentMode == .wings {
+            return ClosedNotchPhysicalLayout.preferredWingClosedWidth(
+                deviceNotchWidth: ceil(deviceNotchRect.width),
+                hasExpandedUsage: physicalClosedHasExpandedUsage
+            )
+        }
+        return preferredModuleWidthOverride ?? preferredModuleWidth
     }
 
     private var preferredModuleWidth: CGFloat {
@@ -1047,6 +1067,20 @@ class NotchViewModel: ObservableObject {
             guard let self = self, self.openReason == .boot else { return }
             self.notchClose()
         }
+    }
+
+    func setPhysicalClosedContentMode(
+        _ mode: PhysicalClosedContentMode,
+        hasExpandedUsage: Bool = false
+    ) {
+        let usageChanged = physicalClosedHasExpandedUsage != hasExpandedUsage
+        let modeChanged = physicalClosedContentMode != mode
+        physicalClosedHasExpandedUsage = hasExpandedUsage
+        if modeChanged {
+            physicalClosedContentMode = mode
+        }
+        guard modeChanged || usageChanged else { return }
+        syncClosedWidth(animated: false)
     }
 
     private func syncClosedWidth(

@@ -177,10 +177,92 @@ final class NotchViewModelTests: XCTestCase {
                 notchDisplayModeProvider: { .detailed }
             )
 
+            viewModel.setPhysicalClosedContentMode(.stacked)
+
             let expectedHeight = ClosedNotchPhysicalLayout.preferredClosedHeight(deviceNotchHeight: 38)
             XCTAssertEqual(viewModel.closedWidth, preferredModuleWidth)
             XCTAssertEqual(viewModel.closedHeight, expectedHeight)
             XCTAssertEqual(viewModel.closedSize, CGSize(width: preferredModuleWidth, height: expectedHeight))
+        }
+    }
+
+    func testDetailedPhysicalNotchDefaultsToWingClosedSize() async {
+        await MainActor.run {
+            let viewModel = NotchViewModel(
+                deviceNotchRect: CGRect(x: 0, y: 0, width: 220, height: 38),
+                screenRect: CGRect(x: 0, y: 0, width: 1512, height: 982),
+                windowHeight: 320,
+                hasPhysicalNotch: true,
+                enableEventMonitoring: false,
+                observeSystemEnvironment: false,
+                fullscreenActivityProvider: { _ in false },
+                notchModuleWidthProvider: { 180 },
+                notchDisplayModeProvider: { .detailed }
+            )
+
+            let expectedWidth = ClosedNotchPhysicalLayout.preferredWingClosedWidth(
+                deviceNotchWidth: 220,
+                hasExpandedUsage: false
+            )
+            XCTAssertEqual(viewModel.physicalClosedContentMode, .wings)
+            XCTAssertEqual(viewModel.closedHeight, 38)
+            XCTAssertEqual(viewModel.closedWidth, expectedWidth)
+            XCTAssertEqual(viewModel.closedSize, CGSize(width: expectedWidth, height: 38))
+        }
+    }
+
+    func testDetailedPhysicalNotchWingModeHonorsExpandedUsageTrailing() async {
+        await MainActor.run {
+            let viewModel = NotchViewModel(
+                deviceNotchRect: CGRect(x: 0, y: 0, width: 220, height: 38),
+                screenRect: CGRect(x: 0, y: 0, width: 1512, height: 982),
+                windowHeight: 320,
+                hasPhysicalNotch: true,
+                enableEventMonitoring: false,
+                observeSystemEnvironment: false,
+                fullscreenActivityProvider: { _ in false },
+                notchModuleWidthProvider: { 180 },
+                notchDisplayModeProvider: { .detailed }
+            )
+
+            viewModel.setPhysicalClosedContentMode(.wings, hasExpandedUsage: true)
+
+            let expectedWidth = ClosedNotchPhysicalLayout.preferredWingClosedWidth(
+                deviceNotchWidth: 220,
+                hasExpandedUsage: true
+            )
+            XCTAssertEqual(viewModel.closedWidth, expectedWidth)
+            XCTAssertEqual(viewModel.closedHeight, 38)
+        }
+    }
+
+    func testSwitchingPhysicalClosedContentModeUpdatesClosedSize() async {
+        await MainActor.run {
+            let preferredModuleWidth: CGFloat = 180
+            let viewModel = NotchViewModel(
+                deviceNotchRect: CGRect(x: 0, y: 0, width: 220, height: 38),
+                screenRect: CGRect(x: 0, y: 0, width: 1512, height: 982),
+                windowHeight: 320,
+                hasPhysicalNotch: true,
+                enableEventMonitoring: false,
+                observeSystemEnvironment: false,
+                fullscreenActivityProvider: { _ in false },
+                notchModuleWidthProvider: { preferredModuleWidth },
+                notchDisplayModeProvider: { .detailed }
+            )
+
+            viewModel.setPhysicalClosedContentMode(.stacked)
+            let stackedHeight = ClosedNotchPhysicalLayout.preferredClosedHeight(deviceNotchHeight: 38)
+            XCTAssertEqual(viewModel.closedWidth, preferredModuleWidth)
+            XCTAssertEqual(viewModel.closedHeight, stackedHeight)
+
+            viewModel.setPhysicalClosedContentMode(.wings, hasExpandedUsage: false)
+            let wingWidth = ClosedNotchPhysicalLayout.preferredWingClosedWidth(
+                deviceNotchWidth: 220,
+                hasExpandedUsage: false
+            )
+            XCTAssertEqual(viewModel.closedWidth, wingWidth)
+            XCTAssertEqual(viewModel.closedHeight, 38)
         }
     }
 

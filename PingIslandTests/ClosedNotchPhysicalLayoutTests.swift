@@ -35,4 +35,40 @@ final class ClosedNotchPhysicalLayoutTests: XCTestCase {
 
         XCTAssertEqual(clearance, 32 + ClosedNotchPhysicalLayout.cameraLipPadding)
     }
+
+    func testWingSideWidthConstant() {
+        XCTAssertEqual(ClosedNotchPhysicalLayout.wingSideWidth, 28)
+        XCTAssertEqual(ClosedNotchPhysicalLayout.wingUsageTrailingMinWidth, 34)
+    }
+
+    func testWingTrailingWidthUsesUsageFloor() {
+        XCTAssertEqual(
+            ClosedNotchPhysicalLayout.wingTrailingWidth(hasExpandedUsage: false),
+            ClosedNotchPhysicalLayout.wingSideWidth
+        )
+        XCTAssertEqual(
+            ClosedNotchPhysicalLayout.wingTrailingWidth(hasExpandedUsage: true),
+            ClosedNotchPhysicalLayout.wingUsageTrailingMinWidth
+        )
+    }
+
+    func testPreferredWingClosedWidthAddsBothWings() {
+        let width = ClosedNotchPhysicalLayout.preferredWingClosedWidth(
+            deviceNotchWidth: 220,
+            hasExpandedUsage: false
+        )
+        XCTAssertEqual(
+            width,
+            220 + 28 + 28 + (ClosedNotchPhysicalLayout.closedHorizontalContentInset * 2)
+        )
+
+        let usageWidth = ClosedNotchPhysicalLayout.preferredWingClosedWidth(
+            deviceNotchWidth: 220,
+            hasExpandedUsage: true
+        )
+        XCTAssertEqual(
+            usageWidth,
+            220 + 34 + 34 + (ClosedNotchPhysicalLayout.closedHorizontalContentInset * 2)
+        )
+    }
 }

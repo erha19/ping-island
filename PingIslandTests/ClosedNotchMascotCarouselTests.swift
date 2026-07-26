@@ -82,4 +82,35 @@ final class ClosedNotchMascotCarouselTests: XCTestCase {
             "first"
         )
     }
+
+    func testHasCenterSummaryChangesWithCarouselDate() {
+        let now = Date()
+        let titled = SessionState(
+            sessionId: "titled",
+            cwd: "/workspace/titled",
+            sessionName: "Visible summary",
+            phase: .processing,
+            lastActivity: now
+        )
+        let untitled = SessionState(
+            sessionId: "untitled",
+            cwd: "/workspace/untitled",
+            phase: .processing,
+            lastActivity: now.addingTimeInterval(-1)
+        )
+        let instances = [titled, untitled]
+
+        XCTAssertTrue(
+            ClosedNotchMascotCarousel.hasCenterSummary(
+                from: instances,
+                at: Date(timeIntervalSinceReferenceDate: 0)
+            )
+        )
+        XCTAssertFalse(
+            ClosedNotchMascotCarousel.hasCenterSummary(
+                from: instances,
+                at: Date(timeIntervalSinceReferenceDate: ClosedNotchMascotCarousel.interval)
+            )
+        )
+    }
 }

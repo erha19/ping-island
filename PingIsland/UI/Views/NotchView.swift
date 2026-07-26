@@ -12,7 +12,7 @@ import SwiftUI
 // Corner radius constants
 private let cornerRadiusInsets = (
     opened: (top: CGFloat(19), bottom: CGFloat(24)),
-    closed: (top: CGFloat(6), bottom: CGFloat(14))
+    closed: (top: CGFloat(6), bottom: ClosedNotchPhysicalLayout.closedHorizontalContentInset)
 )
 
 /// Keeps the compact center message slightly narrower than the full center slot
@@ -61,6 +61,7 @@ struct NotchView: View {
     @State private var detachmentHintDismissWorkItem: DispatchWorkItem?
     @State private var detachmentHintPresentationWorkItem: DispatchWorkItem?
     @State private var delayedManualAttentionWorkItem: DispatchWorkItem?
+    @State private var closedCarouselDate = Date()
 
     @Namespace private var activityNamespace
 
@@ -175,7 +176,7 @@ struct NotchView: View {
     }
 
     private var closedCenterMessage: String? {
-        closedCenterMessage(at: Date())
+        closedCenterMessage(at: closedCarouselDate)
     }
 
     private func closedCenterMessage(at date: Date) -> String? {
@@ -388,10 +389,14 @@ struct NotchView: View {
 
     private var lifecycleBody: some View {
         presentedBody
+            .background(alignment: .topLeading) {
+                closedCarouselClock
+            }
             .onAppear {
                 if !SessionMonitor.isRunningUnderXCTest {
                     sessionMonitor.startMonitoring()
                 }
+                syncPhysicalClosedContentMode()
                 viewModel.updateIdleAutoHiddenState(hasVisibleSessionActivity: !shouldHideForIdleState)
                 isVisible = !viewModel.shouldHideWindowPresentation
                 viewModel.setManualAttentionActive(hasManualAttentionIndicator)
@@ -406,6 +411,34 @@ struct NotchView: View {
             .onChange(of: viewModel.status) { oldStatus, newStatus in
                 handleStatusChange(from: oldStatus, to: newStatus)
             }
+            .onChange(of: hasClosedCenterSummary) { _, _ in
+                syncPhysicalClosedContentMode()
+            }
+            .onChange(of: closedTrailingUsageWindow != nil) { _, _ in
+                syncPhysicalClosedContentMode()
+            }
+            .onChange(of: settings.notchDisplayMode) { _, _ in
+                syncPhysicalClosedContentMode()
+            }
+            .onChange(of: viewModel.hasPhysicalNotch) { _, _ in
+                syncPhysicalClosedContentMode()
+            }
+    }
+
+    @ViewBuilder
+    private var closedCarouselClock: some View {
+        if closedCarouselSessions.count > 1 && !viewModel.isDetachmentGestureActive {
+            TimelineView(.periodic(from: .now, by: ClosedNotchMascotCarousel.interval)) { context in
+                Color.clear
+                    .frame(width: 0, height: 0)
+                    .onAppear {
+                        updateClosedCarouselDate(context.date)
+                    }
+                    .onChange(of: context.date) { _, date in
+                        updateClosedCarouselDate(date)
+                    }
+            }
+        }
     }
 
     private var settingsAwareBody: some View {
@@ -690,6 +723,8 @@ struct NotchView: View {
                     .frame(width: closedInnerWidth, height: closedNotchSize.height)
             } else if usesPhysicalNotchStackedLayout {
                 closedPhysicalNotchStackedHeader
+            } else if usesPhysicalNotchWingLayout {
+                closedPhysicalNotchWingHeader
             } else {
                 HStack(spacing: 0) {
                     // Left side - pet always visible while closed.
@@ -725,15 +760,50 @@ struct NotchView: View {
             && closedNotchSize.width < minimumClosedNotchFullContentWidth
     }
 
-    /// On camera-notch MacBooks the hardware cutout sits in the middle of the
-    /// thin top band. Detailed closed mode grows the island downward and places
-    /// pet, title, and trailing badge on one row below the camera so nothing
-    /// is covered by the cutout.
+    private var hasClosedCenterSummary: Bool {
+        hasClosedCenterSummary(at: closedCarouselDate)
+    }
+
+    private func hasClosedCenterSummary(at date: Date) -> Bool {
+        guard settings.notchDisplayMode == .detailed else { return false }
+        return ClosedNotchMascotCarousel.hasCenterSummary(
+            from: sessionMonitor.instances,
+            at: date,
+            fallback: representativeClosedSession
+        )
+    }
+
     private var usesPhysicalNotchStackedLayout: Bool {
         viewModel.status != .opened
             && viewModel.hasPhysicalNotch
             && settings.notchDisplayMode == .detailed
             && !usesClosedIconOnlyLayout
+            && hasClosedCenterSummary
+    }
+
+    private var usesPhysicalNotchWingLayout: Bool {
+        viewModel.status != .opened
+            && viewModel.hasPhysicalNotch
+            && settings.notchDisplayMode == .detailed
+            && !usesClosedIconOnlyLayout
+            && !hasClosedCenterSummary
+    }
+
+    private func syncPhysicalClosedContentMode(at date: Date? = nil) {
+        guard viewModel.hasPhysicalNotch, settings.notchDisplayMode == .detailed else { return }
+        let mode: PhysicalClosedContentMode = hasClosedCenterSummary(at: date ?? closedCarouselDate)
+            ? .stacked
+            : .wings
+        viewModel.setPhysicalClosedContentMode(
+            mode,
+            hasExpandedUsage: closedTrailingUsageWindow != nil
+        )
+    }
+
+    private func updateClosedCarouselDate(_ date: Date) {
+        guard !viewModel.isDetachmentGestureActive else { return }
+        closedCarouselDate = date
+        syncPhysicalClosedContentMode(at: date)
     }
 
     private var physicalTopBandHeight: CGFloat {
@@ -778,23 +848,11 @@ struct NotchView: View {
                             .frame(width: physicalContentSideWidth, height: ClosedNotchPhysicalLayout.textBandHeight)
                     }
 
-                    Group {
-                        if closedCarouselSessions.count > 1 {
-                            TimelineView(.periodic(from: .now, by: ClosedNotchMascotCarousel.interval)) { context in
-                                closedCenterMessageLabel(
-                                    closedCenterMessage(at: context.date),
-                                    width: physicalContentCenterWidth,
-                                    alignment: .center
-                                )
-                            }
-                        } else {
-                            closedCenterMessageLabel(
-                                closedCenterMessage,
-                                width: physicalContentCenterWidth,
-                                alignment: .center
-                            )
-                        }
-                    }
+                    closedCenterMessageLabel(
+                        closedCenterMessage,
+                        width: physicalContentCenterWidth,
+                        alignment: .center
+                    )
                     .frame(width: physicalContentCenterWidth, height: ClosedNotchPhysicalLayout.textBandHeight, alignment: .center)
 
                     closedTrailingBadge
@@ -818,6 +876,34 @@ struct NotchView: View {
             Spacer(minLength: 0)
         }
         .frame(width: closedInnerWidth, height: closedNotchSize.height, alignment: .top)
+    }
+
+    @ViewBuilder
+    private var closedPhysicalNotchWingHeader: some View {
+        let sideWidth = ClosedNotchPhysicalLayout.wingTrailingWidth(
+            hasExpandedUsage: closedTrailingUsageWindow != nil
+        )
+
+        HStack(spacing: 0) {
+            if showsClosedLeadingIcon {
+                closedLeadingPetIcon(size: petIconSize)
+                    .matchedGeometryEffect(id: "pet", in: activityNamespace, isSource: showsClosedLeadingIcon)
+                    .frame(width: sideWidth, height: closedNotchSize.height)
+            }
+
+            Color.clear
+                .frame(maxWidth: .infinity)
+                .frame(height: closedNotchSize.height)
+                .allowsHitTesting(false)
+
+            closedTrailingBadge
+                .frame(
+                    width: sideWidth,
+                    height: closedNotchSize.height,
+                    alignment: .trailing
+                )
+        }
+        .frame(width: closedInnerWidth, height: closedNotchSize.height)
     }
 
     @ViewBuilder
@@ -856,23 +942,12 @@ struct NotchView: View {
     /// Multiple live agents rotate so each identity remains visible without widening the island.
     @ViewBuilder
     private func closedLeadingPetIcon(size: CGFloat) -> some View {
-        if closedCarouselSessions.count > 1, !viewModel.isDetachmentGestureActive {
-            TimelineView(.periodic(from: .now, by: ClosedNotchMascotCarousel.interval)) { context in
-                let presentation = closedCarouselPresentation(at: context.date)
-                closedLeadingPetIconContent(
-                    kind: presentation.kind,
-                    status: presentation.status,
-                    size: size
-                )
-            }
-        } else {
-            let presentation = closedCarouselPresentation(at: Date())
-            closedLeadingPetIconContent(
-                kind: presentation.kind,
-                status: presentation.status,
-                size: size
-            )
-        }
+        let presentation = closedCarouselPresentation(at: closedCarouselDate)
+        closedLeadingPetIconContent(
+            kind: presentation.kind,
+            status: presentation.status,
+            size: size
+        )
     }
 
     @ViewBuilder
@@ -925,19 +1000,8 @@ struct NotchView: View {
 
     @ViewBuilder
     private var closedCenterContent: some View {
-        Group {
-            if closedCarouselSessions.count > 1 {
-                TimelineView(.periodic(from: .now, by: ClosedNotchMascotCarousel.interval)) { context in
-                    closedCenterMessageLabel(
-                        closedCenterMessage(at: context.date),
-                        width: compactCenterContentWidth
-                    )
-                }
-            } else {
-                closedCenterMessageLabel(closedCenterMessage, width: compactCenterContentWidth)
-            }
-        }
-        .frame(width: closedCenterWidth, alignment: .center)
+        closedCenterMessageLabel(closedCenterMessage, width: compactCenterContentWidth)
+            .frame(width: closedCenterWidth, alignment: .center)
     }
 
     @ViewBuilder
@@ -949,7 +1013,7 @@ struct NotchView: View {
         HStack {
             if let message {
                 Text(message)
-                    .font(.system(size: 10.5, weight: .medium, design: .rounded))
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
                     .foregroundStyle(Color.orange.opacity(showClosedActivity ? 0.95 : 0.82))
                     .lineLimit(1)
                     .truncationMode(.tail)

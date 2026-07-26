@@ -46,6 +46,21 @@ enum ClosedNotchMascotCarousel {
         return sessions[index(sessionCount: sessions.count, at: date)]
     }
 
+    static func hasCenterSummary(
+        from instances: [SessionState],
+        at date: Date,
+        fallback: SessionState? = nil
+    ) -> Bool {
+        let message: String?
+        if let session = currentSession(from: instances, at: date) {
+            message = session.closedNotchCenterText
+        } else {
+            message = fallback?.closedNotchCenterText
+        }
+        guard let message else { return false }
+        return !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     /// Per-session status for the currently shown silhouette.
     static func status(for session: SessionState) -> MascotStatus {
         MascotStatus(session: session)
