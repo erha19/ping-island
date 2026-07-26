@@ -1,6 +1,6 @@
 import Foundation
 
-/// Rotates the closed-notch silhouette across live agents so multiple working
+/// Rotates the closed-notch pet identity across live agents so multiple working
 /// sessions remain visible without widening the island.
 enum ClosedNotchMascotCarousel {
     static let interval: TimeInterval = 2.0
@@ -61,7 +61,7 @@ enum ClosedNotchMascotCarousel {
         return !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    /// Per-session status for the currently shown silhouette.
+    /// Per-session status for the currently shown pet.
     static func status(for session: SessionState) -> MascotStatus {
         MascotStatus(session: session)
     }

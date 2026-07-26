@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// Docked closed-notch pixel icon: agent silhouette on the left, status indicator on the right.
+/// Docked closed-notch icon: miniaturized settings pet + pixel status bar.
+/// Pet uses the live status (so working is not shown as sleeping); the bar mirrors the same status.
 struct ClosedNotchDotIcon: View {
     let kind: MascotKind
     let status: MascotStatus
@@ -16,14 +17,38 @@ struct ClosedNotchDotIcon: View {
         ClosedNotchDotStatusMotion.from(status: status)
     }
 
+    private let interItemSpacing: CGFloat = 2
+
+    /// Leave room for a 2-column status strip + gap; do not overlap the pet.
+    private var petSize: CGFloat {
+        max(8, size * 0.58)
+    }
+
+    private var statusWidth: CGFloat {
+        max(4, size - petSize - interItemSpacing)
+    }
+
     var body: some View {
-        if shouldAnimate {
-            TimelineView(.periodic(from: .now, by: animationInterval)) { context in
-                canvas(at: context.date)
+        HStack(spacing: interItemSpacing) {
+            MascotView(kind: kind, status: status, size: petSize)
+                .frame(width: petSize, height: petSize)
+                .clipped()
+
+            Group {
+                if shouldAnimate {
+                    TimelineView(.periodic(from: .now, by: animationInterval)) { context in
+                        statusCanvas(at: context.date)
+                    }
+                } else {
+                    statusCanvas(at: nil)
+                }
             }
-        } else {
-            canvas(at: nil)
+            .frame(width: statusWidth, height: size)
+            .clipped()
         }
+        .frame(width: size, height: size)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text("\(kind.title), \(status.displayName)"))
     }
 
     private var shouldAnimate: Bool {
@@ -47,9 +72,8 @@ struct ClosedNotchDotIcon: View {
         }
     }
 
-    private func canvas(at date: Date?) -> some View {
+    private func statusCanvas(at date: Date?) -> some View {
         let color = tone.color
-        let silhouette = ClosedNotchDotGlyph.silhouette(for: kind)
         let columns = ClosedNotchDotGlyph.canvasColumns
         let rows = ClosedNotchDotGlyph.canvasRows
         let gapFraction: CGFloat = 0.18
@@ -85,17 +109,12 @@ struct ClosedNotchDotIcon: View {
                 context.fill(Path(rect), with: .color(color.opacity(opacity)))
             }
 
-            for point in silhouette {
-                fillGrid(point, opacity: 0.92)
-            }
-
             switch motion {
             case .staticBar:
                 for point in ClosedNotchDotGlyph.statusBarPoints {
                     fillGrid(point, opacity: 0.55)
                 }
             case .spin:
-                // Rotate the right status bar around its own geometric center.
                 for center in ClosedNotchDotGlyph.rotatedStatusBarCenters(angleRadians: spinAngle) {
                     fillLogical(x: center.x, y: center.y, opacity: 1.0)
                 }
@@ -105,8 +124,7 @@ struct ClosedNotchDotIcon: View {
                 }
             }
         }
-        .frame(width: size, height: size)
-        .accessibilityLabel(Text("\(kind.title), \(status.displayName)"))
+        .frame(width: statusWidth, height: size)
     }
 
     private func spinAngleRadians(at date: Date?) -> Double {

@@ -938,7 +938,7 @@ struct NotchView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
     }
 
-    /// Docked closed notch uses the pixel silhouette + status bar; other surfaces keep MascotView.
+    /// Docked closed notch uses mini settings pet + status bar; other surfaces keep MascotView.
     /// Multiple live agents rotate so each identity remains visible without widening the island.
     @ViewBuilder
     private func closedLeadingPetIcon(size: CGFloat) -> some View {

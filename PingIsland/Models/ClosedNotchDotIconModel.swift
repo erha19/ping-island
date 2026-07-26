@@ -1,7 +1,7 @@
 import Foundation
 import SwiftUI
 
-/// Logical pixel inside the closed-notch dot canvas (10×4).
+/// Logical pixel inside the closed-notch status-bar canvas (2×4).
 struct ClosedNotchDotPoint: Hashable, Sendable {
     let x: Int
     let y: Int
@@ -70,22 +70,22 @@ enum ClosedNotchDotStatusMotion: Equatable, Sendable {
     }
 }
 
-/// Left identity silhouette + shared right status bar for the closed docked notch.
+/// Status-bar pixel grid for the closed docked notch (identity is `MascotView`).
 enum ClosedNotchDotGlyph {
-    static let canvasColumns = 10
+    static let canvasColumns = 2
     static let canvasRows = 4
 
-    /// Geometric center of the right-hand status bar (pivot for working spin).
+    /// Geometric center of the status bar (pivot for working spin).
     static var statusBarCenter: (x: CGFloat, y: CGFloat) {
-        (x: 8.5, y: 1.5)
+        (x: 0.5, y: 1.5)
     }
 
-    /// Shared 2×4 status column on the right of the 10×4 canvas.
+    /// Full 2×4 status column.
     static let statusBarPoints: [ClosedNotchDotPoint] = [
-        ClosedNotchDotPoint(8, 0), ClosedNotchDotPoint(9, 0),
-        ClosedNotchDotPoint(8, 1), ClosedNotchDotPoint(9, 1),
-        ClosedNotchDotPoint(8, 2), ClosedNotchDotPoint(9, 2),
-        ClosedNotchDotPoint(8, 3), ClosedNotchDotPoint(9, 3),
+        ClosedNotchDotPoint(0, 0), ClosedNotchDotPoint(1, 0),
+        ClosedNotchDotPoint(0, 1), ClosedNotchDotPoint(1, 1),
+        ClosedNotchDotPoint(0, 2), ClosedNotchDotPoint(1, 2),
+        ClosedNotchDotPoint(0, 3), ClosedNotchDotPoint(1, 3),
     ]
 
     static func rotatedPoint(
@@ -107,128 +107,6 @@ enum ClosedNotchDotGlyph {
     static func rotatedStatusBarCenters(angleRadians: Double) -> [(x: CGFloat, y: CGFloat)] {
         statusBarPoints.map {
             rotatedPoint($0, angleRadians: angleRadians, around: statusBarCenter)
-        }
-    }
-
-    static func silhouette(for kind: MascotKind) -> Set<ClosedNotchDotPoint> {
-        Set(points(for: kind).map { ClosedNotchDotPoint($0.0, $0.1) })
-    }
-
-    /// Distinct 6×4 agent outlines (columns 0…5, rows 0…3).
-    private static func points(for kind: MascotKind) -> [(Int, Int)] {
-        switch kind {
-        case .claude:
-            // Cat ears + face (matches the reference silhouette).
-            return [
-                (1, 0), (3, 0),
-                (0, 1), (1, 1), (2, 1), (3, 1), (4, 1), (5, 1),
-                (0, 2), (1, 2), (2, 2), (3, 2), (4, 2), (5, 2),
-                (0, 3), (1, 3), (4, 3), (5, 3),
-            ]
-        case .codex:
-            // Soft cloud blob.
-            return [
-                (1, 0), (2, 0), (3, 0),
-                (0, 1), (1, 1), (2, 1), (3, 1), (4, 1),
-                (0, 2), (1, 2), (2, 2), (3, 2), (4, 2), (5, 2),
-                (1, 3), (2, 3), (3, 3), (4, 3),
-            ]
-        case .gemini:
-            // Twin diamond / dual spark.
-            return [
-                (1, 0), (4, 0),
-                (0, 1), (1, 1), (2, 1), (3, 1), (4, 1), (5, 1),
-                (1, 2), (2, 2), (3, 2), (4, 2),
-                (2, 3), (3, 3),
-            ]
-        case .hermes:
-            // Winged helmet / fox ears.
-            return [
-                (0, 0), (2, 0), (4, 0),
-                (0, 1), (1, 1), (2, 1), (3, 1), (4, 1),
-                (1, 2), (2, 2), (3, 2),
-                (1, 3), (3, 3),
-            ]
-        case .pi:
-            // π stem with orbit dots.
-            return [
-                (0, 0), (1, 0), (2, 0), (3, 0), (4, 0), (5, 0),
-                (1, 1), (4, 1),
-                (1, 2), (4, 2),
-                (1, 3), (2, 3), (4, 3),
-            ]
-        case .qwen:
-            // Round capybara head + scarf hint.
-            return [
-                (1, 0), (2, 0), (3, 0), (4, 0),
-                (0, 1), (1, 1), (2, 1), (3, 1), (4, 1), (5, 1),
-                (0, 2), (1, 2), (4, 2), (5, 2),
-                (1, 3), (2, 3), (3, 3), (4, 3),
-            ]
-        case .openclaw:
-            // Twin claws.
-            return [
-                (0, 0), (1, 0), (4, 0), (5, 0),
-                (0, 1), (2, 1), (3, 1), (5, 1),
-                (1, 2), (2, 2), (3, 2), (4, 2),
-                (2, 3), (3, 3),
-            ]
-        case .opencode:
-            // Tall octopus head + tentacles.
-            return [
-                (2, 0), (3, 0),
-                (1, 1), (2, 1), (3, 1), (4, 1),
-                (1, 2), (2, 2), (3, 2), (4, 2),
-                (0, 3), (2, 3), (3, 3), (5, 3),
-            ]
-        case .cursor:
-            // Crystal / chevron.
-            return [
-                (2, 0), (3, 0),
-                (1, 1), (2, 1), (3, 1), (4, 1),
-                (0, 2), (1, 2), (4, 2), (5, 2),
-                (0, 3), (5, 3),
-            ]
-        case .qoder:
-            // Q letter.
-            return [
-                (1, 0), (2, 0), (3, 0), (4, 0),
-                (0, 1), (5, 1),
-                (0, 2), (2, 2), (3, 2), (5, 2),
-                (1, 3), (2, 3), (3, 3), (4, 3), (5, 3),
-            ]
-        case .codebuddy:
-            // Astronaut helmet.
-            return [
-                (1, 0), (2, 0), (3, 0), (4, 0),
-                (0, 1), (1, 1), (4, 1), (5, 1),
-                (0, 2), (1, 2), (2, 2), (3, 2), (4, 2), (5, 2),
-                (1, 3), (4, 3),
-            ]
-        case .copilot:
-            // Glasses robot.
-            return [
-                (0, 0), (1, 0), (4, 0), (5, 0),
-                (0, 1), (1, 1), (2, 1), (3, 1), (4, 1), (5, 1),
-                (1, 2), (2, 2), (3, 2), (4, 2),
-                (2, 3), (3, 3),
-            ]
-        case .kimi:
-            // Round keyboard ball.
-            return [
-                (2, 0), (3, 0),
-                (1, 1), (2, 1), (3, 1), (4, 1),
-                (0, 2), (1, 2), (2, 2), (3, 2), (4, 2), (5, 2),
-                (1, 3), (2, 3), (3, 3), (4, 3),
-            ]
-        case .zcode:
-            // Letter Z.
-            return [
-                (0, 0), (1, 0), (2, 0), (3, 0), (4, 0), (5, 0),
-                (4, 1), (5, 1),
-                (0, 2), (1, 2),
-                (0, 3), (1, 3), (2, 3), (3, 3), (4, 3), (5, 3),
-            ]
         }
     }
 }

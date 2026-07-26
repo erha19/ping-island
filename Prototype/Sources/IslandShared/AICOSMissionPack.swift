@@ -134,4 +134,71 @@ public enum SharedAICOSMissionPackBuilder {
 
         return (clipboardPrompt, readingPaths)
     }
+
+    public static func buildInvestmentDecision(
+        draft: SharedAICOSMissionDraft,
+        decisionSkillRootPath: String,
+        languageCode: String = "en"
+    ) -> (clipboardPrompt: String, readingPaths: [String]) {
+        let protocolPaths = draft.selectedSkills.map { skill in
+            URL(fileURLWithPath: draft.protocolRootPath, isDirectory: true)
+                .appendingPathComponent(skill.relativePath)
+                .path
+        }
+        let decisionRoot = URL(fileURLWithPath: decisionSkillRootPath, isDirectory: true)
+        let decisionPaths = [
+            decisionRoot.appendingPathComponent("SKILL.md").path,
+            decisionRoot.appendingPathComponent("references/investment-adapter.md").path
+        ]
+        let readingPaths = protocolPaths + decisionPaths
+        let chinese = languageCode.lowercased().hasPrefix("zh")
+        let readingListPlain: String
+        if readingPaths.isEmpty {
+            readingListPlain = chinese ? "（未配置）" : "(none configured)"
+        } else {
+            readingListPlain = readingPaths.enumerated().map { "\($0.offset + 1). \($0.element)" }.joined(separator: "\n")
+        }
+
+        let level = SharedAICOSExecutionLevel.l3
+        let levelName = level.displayName
+        let title = level.title(languageCode: languageCode)
+        let summary = level.protocolSummary(languageCode: languageCode)
+
+        let clipboardPrompt: String
+        if chinese {
+            clipboardPrompt = """
+            请遵循 AI-COS \(levelName)。
+
+            任务类型：投资决策
+            协议：\(title)
+            摘要：\(summary)
+
+            开始前请阅读：
+
+            \(readingListPlain)
+
+            按 decision skill（含 investment-adapter）做投资决策支持：交叉验证证据、主动寻找反证，并输出可复核的决策记录。重大投资结论必须由用户确认。不得下单，不得连接券商，不得代替持牌专业人士。
+
+            然后在 AI-COS \(levelName) 规则下执行用户给出的投资问题。仅在存在阻碍安全执行的实质歧义时提问。最终结果需附带验证证据。
+            """
+        } else {
+            clipboardPrompt = """
+            Follow AI-COS \(levelName).
+
+            Mission type: Investment Decision
+            Protocol: \(title)
+            Summary: \(summary)
+
+            Before you begin, read:
+
+            \(readingListPlain)
+
+            Follow the decision skill (including investment-adapter) for investment decision support: cross-check evidence, seek counter-evidence, and produce a reviewable decision record. Material investment conclusions must be confirmed by the user. Do not place orders, connect to a broker, or replace licensed professionals.
+
+            Then execute the user's investment question under AI-COS \(levelName) rules. Ask only when a material ambiguity blocks safe execution. Report verification evidence with the final result.
+            """
+        }
+
+        return (clipboardPrompt, readingPaths)
+    }
 }

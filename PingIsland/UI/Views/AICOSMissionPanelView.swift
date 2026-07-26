@@ -2,7 +2,8 @@
 //  AICOSMissionPanelView.swift
 //  PingIsland
 //
-//  Pick an AI-COS protocol level, copy a paste prompt, and open the selected agent.
+//  Pick an AI-COS protocol level or the dedicated Investment Decision entry,
+//  copy a paste prompt, and open the selected agent.
 //
 
 import AppKit
@@ -19,6 +20,7 @@ struct AICOSMissionPanelView: View {
     @State private var statusMessage: String?
     @State private var isLaunching = false
     @State private var showProtocolRootMissing = false
+    @State private var showDecisionSkillMissing = false
 
     private var languageCode: String {
         settings.appLanguage.resolvedLanguageCode()
@@ -122,6 +124,13 @@ struct AICOSMissionPanelView: View {
                 }
             }
 
+            if showDecisionSkillMissing {
+                Text(appLocalized: "未找到 decision skill（SKILL.md / investment-adapter.md）。投资决策入口需要 ~/wiki/claude-obsidian/skills/decision。")
+                    .font(.system(size: 10))
+                    .foregroundColor(.orange.opacity(0.9))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             Button(action: launchMission) {
                 HStack {
                     if isLaunching {
@@ -142,6 +151,19 @@ struct AICOSMissionPanelView: View {
             }
             .buttonStyle(.plain)
             .disabled(!canLaunch || isLaunching)
+
+            Button(action: launchInvestmentDecision) {
+                Text(investmentLaunchButtonTitle)
+                    .font(.system(size: 12, weight: .semibold))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 9)
+                    .foregroundColor(.white.opacity(canLaunchInvestment ? 0.92 : 0.4))
+                    .background(Color.white.opacity(canLaunchInvestment ? 0.10 : 0.04))
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(!canLaunchInvestment || isLaunching)
 
             Text(launchHint)
                 .font(.system(size: 10))
@@ -165,7 +187,7 @@ struct AICOSMissionPanelView: View {
     private var launchHint: String {
         if isProtocolRootReady {
             return AppLocalization.format(
-                "将复制 AI-COS %@ 启动词并打开 %@。粘贴一次即可应用协议。",
+                "将复制 AI-COS %@ 启动词并打开 %@。粘贴一次即可应用协议。投资决策入口固定使用 L3 + decision skill。",
                 level.displayName,
                 launchTargetTitle
             )
@@ -177,8 +199,16 @@ struct AICOSMissionPanelView: View {
         !showProtocolRootMissing
     }
 
+    private var isDecisionSkillReady: Bool {
+        !showDecisionSkillMissing
+    }
+
     private var canLaunch: Bool {
         isProtocolRootReady && !isLaunching
+    }
+
+    private var canLaunchInvestment: Bool {
+        isProtocolRootReady && isDecisionSkillReady && !isLaunching
     }
 
     private var launchButtonTitle: String {
@@ -186,6 +216,13 @@ struct AICOSMissionPanelView: View {
             return AppLocalization.string("复制协议并打开 Agent")
         }
         return AppLocalization.format("复制协议并打开 %@", launchTarget.title)
+    }
+
+    private var investmentLaunchButtonTitle: String {
+        guard let launchTarget else {
+            return AppLocalization.string("投资决策")
+        }
+        return AppLocalization.format("投资决策并打开 %@", launchTarget.title)
     }
 
     private func labeledField<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
@@ -202,11 +239,16 @@ struct AICOSMissionPanelView: View {
             level = recent.level
         }
         refreshProtocolRootAvailability()
+        refreshDecisionSkillAvailability()
         refreshLaunchTargetSelection()
     }
 
     private func refreshProtocolRootAvailability() {
         showProtocolRootMissing = !AICOSProtocolCatalog.protocolRootExists()
+    }
+
+    private func refreshDecisionSkillAvailability() {
+        showDecisionSkillMissing = !AICOSDecisionSkillCatalog.decisionSkillExists()
     }
 
     private func refreshLaunchTargetSelection() {
@@ -263,6 +305,55 @@ struct AICOSMissionPanelView: View {
             } else {
                 statusMessage = AppLocalization.format(
                     "启动词已复制，但未能打开 %@。请手动启动后粘贴。",
+                    launchTargetTitle
+                )
+            }
+        }
+    }
+
+    private func launchInvestmentDecision() {
+        refreshProtocolRootAvailability()
+        refreshDecisionSkillAvailability()
+        guard canLaunchInvestment else { return }
+
+        isLaunching = true
+        statusMessage = nil
+
+        let protocolRootPath = AICOSProtocolCatalog.resolvedProtocolRoot().path
+        let decisionRootPath = AICOSDecisionSkillCatalog.resolvedDecisionSkillRoot().path
+        let draft = AICOSMissionDraft(
+            level: .l3,
+            selectedSkillIDs: AICOSProtocolCatalog.defaultSelectedSkillIDs(for: .l3),
+            protocolRootPath: protocolRootPath
+        )
+        let languageCode = self.languageCode
+        let profile = launchTarget
+
+        Task { @MainActor in
+            defer { isLaunching = false }
+
+            let pack = AICOSMissionPackBuilder.buildInvestmentDecision(
+                draft: draft,
+                decisionSkillRootPath: decisionRootPath,
+                languageCode: languageCode
+            )
+            AICOSMissionPackBuilder.copyPromptToClipboard(pack.clipboardPrompt)
+            AICOSMissionHistoryStore.saveRecent(draft)
+
+            let activated = await AICOSCodexActivator.activate(
+                profile: profile,
+                workspacePath: "",
+                matchingSessions: sessionMonitor.instances
+            )
+
+            if activated {
+                statusMessage = AppLocalization.format(
+                    "已复制投资决策启动词。%@ 已前置 — 粘贴后补充具体标的与约束即可。",
+                    launchTargetTitle
+                )
+            } else {
+                statusMessage = AppLocalization.format(
+                    "投资决策启动词已复制，但未能打开 %@。请手动启动后粘贴。",
                     launchTargetTitle
                 )
             }

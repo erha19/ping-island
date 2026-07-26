@@ -145,9 +145,15 @@ enum AICOSMissionConstants {
     static let protocolRootDefaultsKey = "AICOS.protocolRootPath.v1"
     static let recentMissionDefaultsKey = "AICOS.recentMission.v1"
     static let launchTargetProfileIDDefaultsKey = "AICOS.launchTargetProfileID.v1"
+    static let decisionSkillRootDefaultsKey = "AICOS.decisionSkillRootPath.v1"
 
     /// Default checkout used when present on this machine.
     static var defaultProtocolRootPath: String {
         NSHomeDirectory() + "/wiki/claude-obsidian/.worktrees/ai-cos-execution-protocol/ai-cos"
+    }
+
+    /// Default decision skill root (investment adapter lives under references/).
+    static var defaultDecisionSkillRootPath: String {
+        NSHomeDirectory() + "/wiki/claude-obsidian/skills/decision"
     }
 }

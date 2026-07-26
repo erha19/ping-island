@@ -126,7 +126,7 @@ struct IslandDetachedContentResolver {
 }
 
 enum IslandMascotResolver {
-    /// Session that owns the closed-notch silhouette.
+    /// Session that owns the closed-notch pet identity.
     /// Prefer real prompts (approval / question) over live work, and live work over
     /// turn-ended `waitingForInput` so a just-finished agent cannot stick on screen
     /// while another agent is still processing.

@@ -862,7 +862,7 @@ final class NotchViewModelTests: XCTestCase {
             lastActivity: now.addingTimeInterval(-20)
         )
         // Turn-ended sessions land in waitingForInput and refresh lastActivity on Stop.
-        // They must not stick as the closed silhouette while another agent is working.
+        // They must not stick as the closed pet while another agent is working.
         let turnEnded = SessionState(
             sessionId: "turn-ended",
             cwd: "/tmp/turn-ended",

@@ -200,10 +200,5 @@ final class ZCodeHookInstallerTests: XCTestCase {
         XCTAssertEqual(MascotClient(clientInfo: clientInfo, provider: .claude), .zcode)
         XCTAssertEqual(MascotKind(clientInfo: clientInfo, provider: .claude), .zcode)
         XCTAssertEqual(MascotKind.zcode.subtitle, "紫色 Z 标记")
-
-        let silhouette = ClosedNotchDotGlyph.silhouette(for: .zcode)
-        XCTAssertFalse(silhouette.isEmpty)
-        XCTAssertNotEqual(silhouette, ClosedNotchDotGlyph.silhouette(for: .claude))
-        XCTAssertNotEqual(silhouette, ClosedNotchDotGlyph.silhouette(for: .pi))
     }
 }

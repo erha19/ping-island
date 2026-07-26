@@ -648,3 +648,9 @@
 "请先在上方安装至少一个 Agent" = "请先在上方安装至少一个 Agent";
 "请先在 设置 → 集成 中安装至少一个 Agent" = "请先在 设置 → 集成 中安装至少一个 Agent";
 "未选择可启动的 Agent" = "未选择可启动的 Agent";
+"投资决策" = "投资决策";
+"投资决策并打开 %@" = "投资决策并打开 %@";
+"将复制 AI-COS %@ 启动词并打开 %@。粘贴一次即可应用协议。投资决策入口固定使用 L3 + decision skill。" = "将复制 AI-COS %@ 启动词并打开 %@。粘贴一次即可应用协议。投资决策入口固定使用 L3 + decision skill。";
+"未找到 decision skill（SKILL.md / investment-adapter.md）。投资决策入口需要 ~/wiki/claude-obsidian/skills/decision。" = "未找到 decision skill（SKILL.md / investment-adapter.md）。投资决策入口需要 ~/wiki/claude-obsidian/skills/decision。";
+"已复制投资决策启动词。%@ 已前置 — 粘贴后补充具体标的与约束即可。" = "已复制投资决策启动词。%@ 已前置 — 粘贴后补充具体标的与约束即可。";
+"投资决策启动词已复制，但未能打开 %@。请手动启动后粘贴。" = "投资决策启动词已复制，但未能打开 %@。请手动启动后粘贴。";

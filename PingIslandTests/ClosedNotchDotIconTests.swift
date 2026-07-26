@@ -13,29 +13,14 @@ final class ClosedNotchDotIconTests: XCTestCase {
         XCTAssertEqual(ClosedNotchDotTone.warning.rgb, ClosedNotchDotTone.RGB(r: 1.0, g: 0.3, b: 0.3))
     }
 
-    func testEveryMascotKindHasNonEmptyDistinctSilhouette() {
-        var seen: Set<Set<ClosedNotchDotPoint>> = []
+    func testStatusBarFillsLocalTwoByFourCanvas() {
+        XCTAssertEqual(ClosedNotchDotGlyph.canvasColumns, 2)
+        XCTAssertEqual(ClosedNotchDotGlyph.canvasRows, 4)
 
-        for kind in MascotKind.allCases {
-            let silhouette = ClosedNotchDotGlyph.silhouette(for: kind)
-            XCTAssertFalse(silhouette.isEmpty, "\(kind.rawValue) silhouette should not be empty")
-            XCTAssertTrue(
-                silhouette.allSatisfy { $0.x >= 0 && $0.x <= 5 && $0.y >= 0 && $0.y <= 3 },
-                "\(kind.rawValue) silhouette should stay in the 6x4 left grid"
-            )
-            XCTAssertTrue(seen.insert(silhouette).inserted, "\(kind.rawValue) silhouette should be unique")
-        }
-    }
-
-    func testStatusBarOccupiesRightColumnAndLayoutSeparatesIdentityFromStatus() {
         let bar = ClosedNotchDotGlyph.statusBarPoints
-        XCTAssertEqual(Set(bar.map(\.x)), Set([8, 9]))
+        XCTAssertEqual(bar.count, 8)
+        XCTAssertEqual(Set(bar.map(\.x)), Set([0, 1]))
         XCTAssertEqual(Set(bar.map(\.y)), Set([0, 1, 2, 3]))
-
-        for kind in MascotKind.allCases {
-            let silhouetteXs = Set(ClosedNotchDotGlyph.silhouette(for: kind).map(\.x))
-            XCTAssertTrue(silhouetteXs.isDisjoint(with: [8, 9]), "\(kind.rawValue) silhouette must not overlap status bar")
-        }
     }
 
     func testStatusMotionUsesSpinForWorkingAndBlinkForWarning() {
@@ -47,19 +32,19 @@ final class ClosedNotchDotIconTests: XCTestCase {
 
     func testWorkingSpinRotatesStatusBarAroundItsCenter() {
         let center = ClosedNotchDotGlyph.statusBarCenter
-        XCTAssertEqual(center.x, 8.5, accuracy: 0.001)
+        XCTAssertEqual(center.x, 0.5, accuracy: 0.001)
         XCTAssertEqual(center.y, 1.5, accuracy: 0.001)
 
         let upright = ClosedNotchDotGlyph.rotatedStatusBarCenters(angleRadians: 0)
         XCTAssertEqual(upright.count, ClosedNotchDotGlyph.statusBarPoints.count)
 
-        // Corner (9, 0) around (8.5, 1.5) by 180° → (8, 3)
+        // Corner (1, 0) around (0.5, 1.5) by 180° → (0, 3)
         let flipped = ClosedNotchDotGlyph.rotatedPoint(
-            ClosedNotchDotPoint(9, 0),
+            ClosedNotchDotPoint(1, 0),
             angleRadians: .pi,
             around: center
         )
-        XCTAssertEqual(flipped.x, 8.0, accuracy: 0.001)
+        XCTAssertEqual(flipped.x, 0.0, accuracy: 0.001)
         XCTAssertEqual(flipped.y, 3.0, accuracy: 0.001)
 
         let quarter = ClosedNotchDotGlyph.rotatedStatusBarCenters(angleRadians: .pi / 2)

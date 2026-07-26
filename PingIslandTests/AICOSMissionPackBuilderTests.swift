@@ -38,6 +38,94 @@ final class AICOSMissionPackBuilderTests: XCTestCase {
         XCTAssertTrue(pack.clipboardPrompt.contains("然后仅按 AI-COS L1 规则执行用户请求"))
     }
 
+    func testBuildInvestmentDecisionPromptIncludesL3AndDecisionSkills() {
+        let draft = AICOSMissionDraft(
+            missionID: "mission-invest-001",
+            level: .l3,
+            selectedSkillIDs: AICOSProtocolCatalog.defaultSelectedSkillIDs(for: .l3),
+            protocolRootPath: "/tmp/ai-cos-protocol"
+        )
+        let decisionRoot = "/tmp/decision-skill"
+
+        let pack = AICOSMissionPackBuilder.buildInvestmentDecision(
+            draft: draft,
+            decisionSkillRootPath: decisionRoot,
+            languageCode: "en"
+        )
+
+        XCTAssertTrue(pack.clipboardPrompt.contains("Follow AI-COS L3."))
+        XCTAssertTrue(pack.clipboardPrompt.contains("Investment Decision"))
+        XCTAssertTrue(pack.clipboardPrompt.contains("/tmp/ai-cos-protocol/PROTOCOL.md"))
+        XCTAssertTrue(pack.clipboardPrompt.contains("\(decisionRoot)/SKILL.md"))
+        XCTAssertTrue(pack.clipboardPrompt.contains("\(decisionRoot)/references/investment-adapter.md"))
+        XCTAssertTrue(pack.clipboardPrompt.contains("must be confirmed by the user"))
+        XCTAssertTrue(pack.clipboardPrompt.contains("Do not place orders"))
+        XCTAssertTrue(pack.requiredReadingPaths.contains("\(decisionRoot)/SKILL.md"))
+        XCTAssertTrue(pack.requiredReadingPaths.contains("\(decisionRoot)/references/investment-adapter.md"))
+    }
+
+    func testBuildInvestmentDecisionPromptUsesChineseWhenRequested() {
+        let draft = AICOSMissionDraft(
+            missionID: "mission-invest-zh",
+            level: .l3,
+            selectedSkillIDs: ["readme", "protocol"],
+            protocolRootPath: "/tmp/ai-cos-protocol"
+        )
+
+        let pack = AICOSMissionPackBuilder.buildInvestmentDecision(
+            draft: draft,
+            decisionSkillRootPath: "/tmp/decision-skill",
+            languageCode: "zh-Hans"
+        )
+
+        XCTAssertTrue(pack.clipboardPrompt.contains("请遵循 AI-COS L3。"))
+        XCTAssertTrue(pack.clipboardPrompt.contains("投资决策"))
+        XCTAssertTrue(pack.clipboardPrompt.contains("重大投资结论必须由用户确认"))
+        XCTAssertTrue(pack.clipboardPrompt.contains("不得下单"))
+        XCTAssertTrue(pack.clipboardPrompt.contains("/tmp/decision-skill/SKILL.md"))
+        XCTAssertTrue(pack.clipboardPrompt.contains("/tmp/decision-skill/references/investment-adapter.md"))
+    }
+
+    func testDecisionSkillRootResolutionAndExistence() {
+        let suiteName = "AICOSDecisionSkillCatalogTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let fileManager = FileManager.default
+        let tempRoot = fileManager.temporaryDirectory
+            .appendingPathComponent("aicos-decision-\(UUID().uuidString)", isDirectory: true)
+        let references = tempRoot.appendingPathComponent("references", isDirectory: true)
+        defer { try? fileManager.removeItem(at: tempRoot) }
+
+        try? fileManager.createDirectory(at: references, withIntermediateDirectories: true)
+        XCTAssertFalse(
+            AICOSDecisionSkillCatalog.decisionSkillExists(
+                override: tempRoot.path,
+                fileManager: fileManager,
+                defaults: defaults
+            )
+        )
+
+        fileManager.createFile(atPath: tempRoot.appendingPathComponent("SKILL.md").path, contents: Data("x".utf8))
+        fileManager.createFile(
+            atPath: references.appendingPathComponent("investment-adapter.md").path,
+            contents: Data("y".utf8)
+        )
+        XCTAssertTrue(
+            AICOSDecisionSkillCatalog.decisionSkillExists(
+                override: tempRoot.path,
+                fileManager: fileManager,
+                defaults: defaults
+            )
+        )
+
+        AICOSDecisionSkillCatalog.setDecisionSkillRootPath(tempRoot.path, defaults: defaults)
+        XCTAssertEqual(
+            AICOSDecisionSkillCatalog.resolvedDecisionSkillRoot(defaults: defaults).path,
+            URL(fileURLWithPath: tempRoot.path, isDirectory: true).path
+        )
+    }
+
     func testProtocolTitlesSwitchByLanguage() {
         XCTAssertEqual(
             AICOSExecutionLevel.l2.title(languageCode: "en"),
