@@ -769,42 +769,52 @@ struct NotchView: View {
             Color.clear
                 .frame(width: closedInnerWidth, height: physicalTopBandHeight)
 
-            HStack(spacing: 0) {
-                if showsClosedLeadingIcon {
-                    closedLeadingPetIcon(size: petIconSize)
-                        .matchedGeometryEffect(id: "pet", in: activityNamespace, isSource: showsClosedLeadingIcon)
-                        .frame(width: physicalContentSideWidth, height: ClosedNotchPhysicalLayout.textBandHeight)
-                }
+            // Below-camera visible band: content row top-aligned, padding underneath.
+            VStack(spacing: 0) {
+                HStack(spacing: 0) {
+                    if showsClosedLeadingIcon {
+                        closedLeadingPetIcon(size: petIconSize)
+                            .matchedGeometryEffect(id: "pet", in: activityNamespace, isSource: showsClosedLeadingIcon)
+                            .frame(width: physicalContentSideWidth, height: ClosedNotchPhysicalLayout.textBandHeight)
+                    }
 
-                Group {
-                    if closedCarouselSessions.count > 1 {
-                        TimelineView(.periodic(from: .now, by: ClosedNotchMascotCarousel.interval)) { context in
+                    Group {
+                        if closedCarouselSessions.count > 1 {
+                            TimelineView(.periodic(from: .now, by: ClosedNotchMascotCarousel.interval)) { context in
+                                closedCenterMessageLabel(
+                                    closedCenterMessage(at: context.date),
+                                    width: physicalContentCenterWidth,
+                                    alignment: .center
+                                )
+                            }
+                        } else {
                             closedCenterMessageLabel(
-                                closedCenterMessage(at: context.date),
+                                closedCenterMessage,
                                 width: physicalContentCenterWidth,
                                 alignment: .center
                             )
                         }
-                    } else {
-                        closedCenterMessageLabel(
-                            closedCenterMessage,
-                            width: physicalContentCenterWidth,
-                            alignment: .center
-                        )
                     }
+                    .frame(width: physicalContentCenterWidth, height: ClosedNotchPhysicalLayout.textBandHeight, alignment: .center)
+
+                    closedTrailingBadge
+                        .frame(
+                            width: physicalContentTrailingWidth,
+                            height: ClosedNotchPhysicalLayout.textBandHeight,
+                            alignment: .trailing
+                        )
                 }
-                .frame(width: physicalContentCenterWidth, height: ClosedNotchPhysicalLayout.textBandHeight, alignment: .center)
+                .frame(width: closedInnerWidth, height: ClosedNotchPhysicalLayout.textBandHeight, alignment: .top)
 
-                closedTrailingBadge
-                    .frame(
-                        width: physicalContentTrailingWidth,
-                        height: ClosedNotchPhysicalLayout.textBandHeight,
-                        alignment: .trailing
-                    )
+                Spacer(minLength: 0)
             }
-            .frame(width: closedInnerWidth, height: ClosedNotchPhysicalLayout.textBandHeight, alignment: .top)
+            .frame(
+                width: closedInnerWidth,
+                height: ClosedNotchPhysicalLayout.visibleBandHeight,
+                alignment: .top
+            )
 
-            // Absorb any rounding slack at the bottom so the row stays pinned up.
+            // Absorb any outer rounding slack so the bands stay pinned up.
             Spacer(minLength: 0)
         }
         .frame(width: closedInnerWidth, height: closedNotchSize.height, alignment: .top)
