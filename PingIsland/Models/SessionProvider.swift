@@ -952,9 +952,14 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
     }
 
     private nonisolated static func workspaceURL(scheme: String, path: String) -> String? {
-        let trimmedPath = path.nonEmpty ?? ""
+        let trimmedPath = path.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedPath.isEmpty else { return nil }
-        let encodedPath = trimmedPath.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? trimmedPath
+        let standardizedPath = URL(fileURLWithPath: trimmedPath).standardizedFileURL.path
+        // Never mint IDE deep links for filesystem root; opening cursor://file/ creates a
+        // brand-new window at / while also activating the existing Cursor app.
+        guard standardizedPath != "/" else { return nil }
+        let encodedPath = standardizedPath.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed)
+            ?? standardizedPath
         return "\(scheme)://file\(encodedPath)"
     }
 }

@@ -28,6 +28,10 @@ final class SessionLauncherWorkspaceRoutingTests: XCTestCase {
         XCTAssertEqual(SessionLauncher.usableIDEWorkspacePath(path), path)
     }
 
+    func testUsableIDEWorkspacePathRejectsFilesystemRoot() {
+        XCTAssertNil(SessionLauncher.usableIDEWorkspacePath("/"))
+    }
+
     func testShouldFallBackToRecentIDEWindowWhenWorkspaceIsClientConfigDirectory() {
         let cursorHome = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".cursor", isDirectory: true)
@@ -35,6 +39,12 @@ final class SessionLauncherWorkspaceRoutingTests: XCTestCase {
 
         XCTAssertTrue(
             SessionLauncher.shouldFallBackToRecentIDEWindow(forWorkspacePath: cursorHome)
+        )
+    }
+
+    func testShouldFallBackToRecentIDEWindowWhenWorkspaceIsFilesystemRoot() {
+        XCTAssertTrue(
+            SessionLauncher.shouldFallBackToRecentIDEWindow(forWorkspacePath: "/")
         )
     }
 
@@ -46,6 +56,43 @@ final class SessionLauncherWorkspaceRoutingTests: XCTestCase {
 
         XCTAssertFalse(
             SessionLauncher.shouldFallBackToRecentIDEWindow(forWorkspacePath: tempRoot.path)
+        )
+    }
+
+    func testIDEWorkspaceWindowMatchingRejectsFilesystemRoot() {
+        XCTAssertEqual(
+            SessionLauncher.ideWorkspaceWindowMatchScore(
+                title: "SessionLauncher.swift — /Users/example/ping_island — Cursor",
+                document: "file:///Users/example/ping_island/SessionLauncher.swift",
+                workspacePath: "/",
+                appName: "Cursor"
+            ),
+            0
+        )
+    }
+
+    func testUsableIDEWorkspaceLaunchURLRejectsCursorFileRoot() {
+        XCTAssertNil(SessionLauncher.usableIDEWorkspaceLaunchURL("cursor://file/"))
+        XCTAssertNil(SessionLauncher.usableIDEWorkspaceLaunchURL("cursor://file"))
+        XCTAssertNil(SessionLauncher.usableIDEWorkspaceLaunchURL("vscode://file/"))
+    }
+
+    func testUsableIDEWorkspaceLaunchURLKeepsOrdinaryProjectFileURL() throws {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ping-island-workspace-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let launchURL = "cursor://file\(tempRoot.path)"
+        XCTAssertEqual(SessionLauncher.usableIDEWorkspaceLaunchURL(launchURL), launchURL)
+    }
+
+    func testAppLaunchURLRejectsFilesystemRootWorkspace() {
+        XCTAssertNil(
+            SessionClientInfo.appLaunchURL(
+                bundleIdentifier: "com.todesktop.230313mzl4w4u92",
+                workspacePath: "/"
+            )
         )
     }
 }

@@ -85,7 +85,7 @@ This file is a routing layer for coding agents working in this repo. Keep it sho
   - `PingIsland/Services/State/SessionStore.swift`
   - the affected UI under `PingIsland/UI/`
 - If you change provider/client detection or click-through behavior, trace through `HookSocketServer`, `SessionStore`, `SessionState`, `SessionLauncher`, and the session list / hover UI so labels and launch targets stay in sync.
-  - IDE workspace routing (Cursor / VS Code family) must not `open` top-level client config homes such as `~/.cursor` or `~/.claude`; fall back to the recent IDE window instead. Hook cwd resolution should prefer a non-config candidate (for example `VSCODE_CWD`) when `PWD` is one of those config directories.
+  - IDE workspace routing (Cursor / VS Code family) must not `open` filesystem root (`/`) or top-level client config homes such as `~/.cursor` or `~/.claude`, and must not open deep links like `cursor://file/`; fall back to the recent IDE window instead. Hook cwd resolution should prefer a non-config candidate (for example `VSCODE_CWD`) when `PWD` is one of those config directories.
 - If you add a Claude-compatible hook client, start in `PingIsland/Models/ClientProfile.swift` and wire any truly client-specific behavior from there before adding new ad-hoc switches elsewhere.
   - Gemini CLI hooks are managed through `~/.gemini/settings.json`; its `BeforeTool` / `AfterTool` matchers are regex-based, so use `.*` rather than Claude-style `*`.
   - Hermes Agent CLI integration must use plugin hooks under `~/.hermes/plugins/ping_island/`; `~/.hermes/hooks/` is gateway-only and will not fire in the Hermes CLI, so keep Ping Island on `ctx.register_hook()`-based plugin registration instead of gateway hook directories.

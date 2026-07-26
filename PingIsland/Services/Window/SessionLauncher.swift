@@ -448,7 +448,7 @@ actor SessionLauncher {
             detectedBundleIdentifier: detectedBundleIdentifier,
             appName: appName,
             workspacePath: session.cwd,
-            fallbackLaunchURL: session.clientInfo.launchURL,
+            fallbackLaunchURL: Self.usableIDEWorkspaceLaunchURL(session.clientInfo.launchURL),
             additionalBundleIdentifiers: additionalBundleIdentifiers
         )
 
@@ -486,7 +486,7 @@ actor SessionLauncher {
             bundleIdentifier: detectedBundleIdentifier,
             appName: appName
         )
-        let resolvedLaunchURL = session.clientInfo.launchURL
+        let resolvedLaunchURL = Self.usableIDEWorkspaceLaunchURL(session.clientInfo.launchURL)
             ?? session.clientInfo.bundleIdentifier.flatMap {
                 SessionClientInfo.appLaunchURL(
                     bundleIdentifier: $0,
@@ -514,7 +514,7 @@ actor SessionLauncher {
             detectedBundleIdentifier: detectedBundleIdentifier,
             appName: appName,
             workspacePath: session.cwd,
-            fallbackLaunchURL: session.clientInfo.launchURL,
+            fallbackLaunchURL: Self.usableIDEWorkspaceLaunchURL(session.clientInfo.launchURL),
             additionalBundleIdentifiers: additionalBundleIdentifiers
         ) {
             let strategy = ideProfile.prefersWorkspaceWindowRouting ? "workspace routing" : "recent window activation"
@@ -527,7 +527,7 @@ actor SessionLauncher {
             detectedBundleIdentifier: detectedBundleIdentifier,
             appName: appName,
             workspacePath: session.cwd,
-            fallbackLaunchURL: session.clientInfo.launchURL,
+            fallbackLaunchURL: Self.usableIDEWorkspaceLaunchURL(session.clientInfo.launchURL),
             additionalBundleIdentifiers: additionalBundleIdentifiers
         ) {
             Self.logger.debug("Activated session \(session.sessionId, privacy: .public) via workspace window routing")
@@ -1222,7 +1222,7 @@ actor SessionLauncher {
             detectedBundleIdentifier: bundleIdentifier,
             appName: appName,
             workspacePath: session.cwd,
-            fallbackLaunchURL: session.clientInfo.launchURL,
+            fallbackLaunchURL: Self.usableIDEWorkspaceLaunchURL(session.clientInfo.launchURL),
             additionalBundleIdentifiers: candidateBundleIdentifiers
         )
 
@@ -1336,6 +1336,15 @@ actor SessionLauncher {
         fallbackLaunchURL: String?,
         additionalBundleIdentifiers: [String] = []
     ) async -> Bool {
+        // Unsafe workspaces such as `/` or `~/.cursor` must never be opened as folders /
+        // deep links. Callers should fall back to activating the recent IDE window.
+        if shouldFallBackToRecentIDEWindow(forWorkspacePath: workspacePath) {
+            Self.logger.debug(
+                "Skipped IDE workspace routing for unsafe workspace=\(workspacePath ?? "nil", privacy: .public)"
+            )
+            return false
+        }
+
         let normalizedBundleIdentifier = detectedBundleIdentifier
             .map(TerminalAppRegistry.normalizedHostBundleIdentifier(for:))
         let profile = ClientProfileRegistry.ideExtensionProfile(
@@ -1347,16 +1356,17 @@ actor SessionLauncher {
             appName: appName,
             additionalBundleIdentifiers: additionalBundleIdentifiers
         )
+        let safeFallbackLaunchURL = usableIDEWorkspaceLaunchURL(fallbackLaunchURL)
 
         if profile?.prefersWorkspaceURLRouting == true,
-           let fallbackLaunchURL,
-           let url = URL(string: fallbackLaunchURL) {
+           let safeFallbackLaunchURL,
+           let url = URL(string: safeFallbackLaunchURL) {
             let didOpenURL = await MainActor.run {
                 NSWorkspace.shared.open(url)
             }
 
             if didOpenURL {
-                Self.logger.debug("Routed IDE workspace via preferred URL \(fallbackLaunchURL, privacy: .public)")
+                Self.logger.debug("Routed IDE workspace via preferred URL \(safeFallbackLaunchURL, privacy: .public)")
                 try? await Task.sleep(nanoseconds: Self.ideWindowRoutingDelayNanoseconds)
                 return true
             }
@@ -1390,8 +1400,8 @@ actor SessionLauncher {
             }
         }
 
-        guard let fallbackLaunchURL,
-              let url = URL(string: fallbackLaunchURL) else {
+        guard let safeFallbackLaunchURL,
+              let url = URL(string: safeFallbackLaunchURL) else {
             return false
         }
 
@@ -1400,7 +1410,7 @@ actor SessionLauncher {
         }
 
         if didOpenURL {
-            Self.logger.debug("Routed IDE workspace via launch URL \(fallbackLaunchURL, privacy: .public)")
+            Self.logger.debug("Routed IDE workspace via launch URL \(safeFallbackLaunchURL, privacy: .public)")
             try? await Task.sleep(nanoseconds: Self.ideWindowRoutingDelayNanoseconds)
         }
 
@@ -1504,14 +1514,15 @@ actor SessionLauncher {
         appName: String?
     ) -> Int {
         guard let normalizedWorkspacePath = normalizedWorkspaceMatchPath(workspacePath),
-              !normalizedWorkspacePath.isEmpty else {
+              !normalizedWorkspacePath.isEmpty,
+              !isFilesystemRootDirectory(normalizedWorkspacePath) else {
             return 0
         }
 
         let workspaceName = URL(fileURLWithPath: normalizedWorkspacePath, isDirectory: true)
             .lastPathComponent
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !workspaceName.isEmpty else { return 0 }
+        guard !workspaceName.isEmpty, workspaceName != "/" else { return 0 }
 
         let normalizedWorkspaceName = workspaceName.lowercased()
         if let documentPath = normalizedWorkspaceMatchPath(document) {
@@ -1603,13 +1614,14 @@ actor SessionLauncher {
     }
 
     /// Workspace paths that are safe to focus or `open` as IDE folders.
-    /// Top-level client config homes such as `~/.cursor` / `~/.claude` are rejected so
-    /// activation falls back to the recent IDE window instead of opening the config dir.
+    /// Filesystem root (`/`) and top-level client config homes such as `~/.cursor` /
+    /// `~/.claude` are rejected so activation falls back to the recent IDE window
+    /// instead of opening those directories as new IDE folders.
     nonisolated static func usableIDEWorkspacePath(_ workspacePath: String?) -> String? {
         guard let workspacePath = existingLocalWorkspacePath(workspacePath) else {
             return nil
         }
-        if isTopLevelClientConfigDirectory(workspacePath) {
+        if isUnsafeIDEWorkspacePath(workspacePath) {
             return nil
         }
         return workspacePath
@@ -1621,7 +1633,20 @@ actor SessionLauncher {
             return false
         }
         return usableIDEWorkspacePath(workspacePath) == nil
-            && isTopLevelClientConfigDirectory(workspacePath)
+            && isUnsafeIDEWorkspacePath(workspacePath)
+    }
+
+    /// Rejects IDE deep links that would open unsafe folders such as `cursor://file/` (filesystem root).
+    nonisolated static func usableIDEWorkspaceLaunchURL(_ launchURL: String?) -> String? {
+        guard let launchURL = launchURL?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !launchURL.isEmpty else {
+            return nil
+        }
+        if let workspacePath = workspacePathFromIDEFileLaunchURL(launchURL),
+           isUnsafeIDEWorkspacePath(workspacePath) {
+            return nil
+        }
+        return launchURL
     }
 
     private static func existingLocalWorkspacePath(_ workspacePath: String?) -> String? {
@@ -1637,6 +1662,27 @@ actor SessionLauncher {
         }
 
         return workspacePath
+    }
+
+    private nonisolated static func workspacePathFromIDEFileLaunchURL(_ launchURL: String) -> String? {
+        guard let url = URL(string: launchURL),
+              url.host?.lowercased() == "file" else {
+            return nil
+        }
+
+        let path = url.path.trimmingCharacters(in: .whitespacesAndNewlines)
+        if path.isEmpty {
+            return "/"
+        }
+        return path
+    }
+
+    private nonisolated static func isUnsafeIDEWorkspacePath(_ path: String) -> Bool {
+        isFilesystemRootDirectory(path) || isTopLevelClientConfigDirectory(path)
+    }
+
+    private nonisolated static func isFilesystemRootDirectory(_ path: String) -> Bool {
+        URL(fileURLWithPath: path).standardizedFileURL.path == "/"
     }
 
     private nonisolated static func isTopLevelClientConfigDirectory(_ path: String) -> Bool {
