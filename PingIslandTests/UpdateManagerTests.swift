@@ -1,6 +1,6 @@
 import XCTest
 import Sparkle
-@testable import Ping_Island
+@testable import NotchCode
 
 final class UpdateManagerTests: XCTestCase {
     func testSilentUpdateCheckIntervalMatchesTenMinuteIdlePolicy() {

@@ -122,6 +122,26 @@ enum SessionExecutionEvidence {
         }
         return false
     }
+
+    /// Clears hook placeholders left behind when PreToolUse arrived but PostToolUse / Stop never did.
+    static func settleStaleSession(_ session: inout SessionState) {
+        session.subagentState = SubagentState()
+
+        for index in session.chatItems.indices {
+            guard case .toolCall(var tool) = session.chatItems[index].type else { continue }
+            guard tool.status == .running || tool.status == .waitingForApproval else { continue }
+            tool.status = .interrupted
+            session.chatItems[index] = ChatHistoryItem(
+                id: session.chatItems[index].id,
+                type: .toolCall(tool),
+                timestamp: session.chatItems[index].timestamp
+            )
+        }
+
+        if session.phase.canTransition(to: .idle) {
+            session.phase = .idle
+        }
+    }
 }
 
 /// Recovers Claude-family sessions that stay `.processing` after Stop is missed
@@ -131,11 +151,14 @@ enum StuckActiveSessionRecovery {
     static let missingProcessIdleTimeout: TimeInterval = 30
     /// Live PID (often the IDE): wait longer before assuming the turn finished.
     static let liveProcessIdleTimeout: TimeInterval = 3 * 60
+    /// Hook placeholders with no follow-up PostToolUse / Stop should not block recovery forever.
+    static let staleExecutionIdleTimeout: TimeInterval = 30 * 60
 
     enum Decision: Equatable {
         case keep
         case demoteToWaitingForInput
         case endSession
+        case settleStaleSession
     }
 
     static func decision(
@@ -147,10 +170,20 @@ enum StuckActiveSessionRecovery {
     ) -> Decision {
         guard session.provider == .claude else { return .keep }
         guard session.ingress != .nativeRuntime else { return .keep }
+
+        let idleSeconds = now.timeIntervalSince(session.lastActivity)
+
+        if shouldSettleStaleWaitingSession(session, idleSeconds: idleSeconds) {
+            return .settleStaleSession
+        }
+
         guard session.phase.isActive else { return .keep }
         guard !session.needsManualAttention else { return .keep }
 
-        let idleSeconds = now.timeIntervalSince(session.lastActivity)
+        if idleSeconds >= staleExecutionIdleTimeout,
+           SessionExecutionEvidence.hasLiveExecution(session) {
+            return .settleStaleSession
+        }
 
         if let pid = session.pid, pid > 0 {
             if !isProcessAlive(pid) {
@@ -164,6 +197,17 @@ enum StuckActiveSessionRecovery {
         guard idleSeconds >= missingProcessIdleTimeout else { return .keep }
         guard !SessionExecutionEvidence.hasLiveExecution(session) else { return .keep }
         return .demoteToWaitingForInput
+    }
+
+    private static func shouldSettleStaleWaitingSession(
+        _ session: SessionState,
+        idleSeconds: TimeInterval
+    ) -> Bool {
+        guard idleSeconds >= staleExecutionIdleTimeout else { return false }
+        guard case .waitingForInput = session.phase else { return false }
+        guard session.intervention == nil else { return false }
+        guard !session.needsApprovalResponse else { return false }
+        return true
     }
 }
 

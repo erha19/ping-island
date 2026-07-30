@@ -294,15 +294,15 @@ struct ManagedHookClientProfile: Identifiable, Sendable {
     nonisolated var reinstallDescriptionFormat: String {
         switch installationKind {
         case .jsonHooks:
-            return "这会重新写入 %@ 的 Island hooks 配置，并保留其他非 Island hooks。"
+            return "这会重新写入 %@ 的灵动码 hooks 配置，并保留其他非灵动码 hooks。"
         case .pluginFile:
-            return "这会重新生成 %@ 的 Island 插件文件，并覆盖旧的 Island 托管版本。"
+            return "这会重新生成 %@ 的灵动码插件文件，并覆盖旧的灵动码托管版本。"
         case .pluginDirectory:
-            return "这会重新生成 %@ 的 Island 插件目录，并覆盖旧的 Island 托管版本。"
+            return "这会重新生成 %@ 的灵动码插件目录，并覆盖旧的灵动码托管版本。"
         case .hookDirectory:
-            return "这会重新生成 %@ 的 Island hook 目录，并刷新 OpenClaw 的启用状态。"
+            return "这会重新生成 %@ 的灵动码 hook 目录，并刷新 OpenClaw 的启用状态。"
         case .tomlHooks:
-            return "这会重新写入 %@ 的 Island hooks TOML 配置，并保留其他非 Island 设置。"
+            return "这会重新写入 %@ 的灵动码 hooks TOML 配置，并保留其他非灵动码设置。"
         }
     }
 
@@ -601,7 +601,7 @@ enum ClientProfileRegistry {
         ManagedHookClientProfile(
             id: "gemini-hooks",
             title: "Gemini CLI",
-            subtitle: "管理 ~/.gemini/settings.json，按 Gemini CLI 官方 hooks 协议接入 Island",
+            subtitle: "管理 ~/.gemini/settings.json，按 Gemini CLI 官方 hooks 协议接入灵动码",
             alwaysVisibleInSettings: true,
             logoAssetName: "GeminiLogo",
             prefersBundledLogoOverAppIcon: true,
@@ -631,7 +631,7 @@ enum ClientProfileRegistry {
         ManagedHookClientProfile(
             id: "hermes-hooks",
             title: "Hermes",
-            subtitle: "管理 ~/.hermes/plugins/ping_island，按 Hermes 官方 plugin hooks 协议接入 Island",
+            subtitle: "管理 ~/.hermes/plugins/ping_island，按 Hermes 官方 plugin hooks 协议接入灵动码",
             installationKind: .pluginDirectory,
             alwaysVisibleInSettings: true,
             logoAssetName: "HermesLogo",
@@ -653,7 +653,7 @@ enum ClientProfileRegistry {
         ManagedHookClientProfile(
             id: "pi-hooks",
             title: "Pi Agent",
-            subtitle: "管理 ~/.pi/agent/extensions/ping_island，按 Pi 官方 extension 机制接入 Island",
+            subtitle: "管理 ~/.pi/agent/extensions/ping_island，按 Pi 官方 extension 机制接入灵动码",
             installationKind: .pluginDirectory,
             alwaysVisibleInSettings: true,
             logoAssetName: "PiLogo",
@@ -675,7 +675,7 @@ enum ClientProfileRegistry {
         ManagedHookClientProfile(
             id: "qwen-code-hooks",
             title: "Qwen Code",
-            subtitle: "管理 ~/.qwen/settings.json，按 Qwen Code 官方 hooks 协议接入 Island",
+            subtitle: "管理 ~/.qwen/settings.json，按 Qwen Code 官方 hooks 协议接入灵动码",
             alwaysVisibleInSettings: true,
             logoAssetName: "QwenLogo",
             localAppBundleIdentifiers: ["com.qwen.chat"],
@@ -771,7 +771,7 @@ enum ClientProfileRegistry {
         ManagedHookClientProfile(
             id: "codebuddy-cli-hooks",
             title: "CodeBuddy CLI",
-            subtitle: "管理 ~/.codebuddy/settings.json，按 CodeBuddy CLI Claude-compatible hooks 协议接入 Island",
+            subtitle: "管理 ~/.codebuddy/settings.json，按 CodeBuddy CLI Claude-compatible hooks 协议接入灵动码",
             alwaysVisibleInSettings: true,
             logoAssetName: "CodeBuddyLogo",
             prefersBundledLogoOverAppIcon: true,
@@ -802,7 +802,7 @@ enum ClientProfileRegistry {
         ManagedHookClientProfile(
             id: "workbuddy-hooks",
             title: "WorkBuddy",
-            subtitle: "管理 ~/.workbuddy/settings.json，按 CodeBuddy Hooks 协议接入 Island",
+            subtitle: "管理 ~/.workbuddy/settings.json，按 CodeBuddy Hooks 协议接入灵动码",
             logoAssetName: "WorkBuddyLogo",
             prefersBundledLogoOverAppIcon: true,
             localAppBundleIdentifiers: ["com.workbuddy.workbuddy"],
@@ -831,7 +831,7 @@ enum ClientProfileRegistry {
         ManagedHookClientProfile(
             id: "cursor-hooks",
             title: "Cursor",
-            subtitle: "管理 ~/.cursor/hooks.json，按 Claude Hooks 协议接入 Island",
+            subtitle: "管理 ~/.cursor/hooks.json，按 Claude Hooks 协议接入灵动码",
             logoAssetName: "CursorLogo",
             prefersBundledLogoOverAppIcon: true,
             localAppBundleIdentifiers: ["com.todesktop.230313mzl4w4u92"],
@@ -972,7 +972,7 @@ enum ClientProfileRegistry {
         ManagedHookClientProfile(
             id: "qoderwork-hooks",
             title: "QoderWork",
-            subtitle: "管理 ~/.qoderwork/settings.json，按 Qoder CLI 同款 Claude Hooks 协议接入 Island",
+            subtitle: "管理 ~/.qoderwork/settings.json，按 Qoder CLI 同款 Claude Hooks 协议接入灵动码",
             logoAssetName: "QoderWorkLogo",
             prefersBundledLogoOverAppIcon: true,
             localAppBundleIdentifiers: ["com.qoder.work"],
@@ -1023,7 +1023,7 @@ enum ClientProfileRegistry {
         ManagedHookClientProfile(
             id: "opencode-hooks",
             title: "OpenCode",
-            subtitle: "管理 ~/.config/opencode/plugins/ping-island.js，按 OpenCode 官方插件 hooks 接入 Island",
+            subtitle: "管理 ~/.config/opencode/plugins/ping-island.js，按 OpenCode 官方插件 hooks 接入灵动码",
             installationKind: .pluginFile,
             alwaysVisibleInSettings: true,
             logoAssetName: "OpenCodeLogo",
@@ -1047,8 +1047,9 @@ enum ClientProfileRegistry {
         ManagedHookClientProfile(
             id: "zcode-hooks",
             title: "ZCode",
-            subtitle: "管理 ~/.zcode/cli/config.json，按 ZCode hooks.events 协议接入 Island",
+            subtitle: "管理 ~/.zcode/cli/config.json，按 ZCode hooks.events 协议接入灵动码",
             alwaysVisibleInSettings: true,
+            localAppBundleIdentifiers: ["dev.zcode.app"],
             iconSymbolName: "z.square.fill",
             configurationRelativePath: ".zcode/cli/config.json",
             bridgeSource: "claude",
@@ -1072,7 +1073,7 @@ enum ClientProfileRegistry {
         ManagedHookClientProfile(
             id: "kimi-hooks",
             title: "Kimi CLI",
-            subtitle: "管理 ~/.kimi/config.toml，按 Kimi CLI 官方 hooks 协议接入 Island",
+            subtitle: "管理 ~/.kimi/config.toml，按 Kimi CLI 官方 hooks 协议接入灵动码",
             installationKind: .tomlHooks,
             alwaysVisibleInSettings: true,
             logoAssetName: "KimiLogo",
@@ -1468,7 +1469,7 @@ enum ClientProfileRegistry {
         ManagedIDEExtensionProfile(
             id: "vscode-extension",
             title: "VS Code",
-            subtitle: "安装 Ping Island，支持终端精准聚焦",
+            subtitle: "安装灵动码，支持终端精准聚焦",
             logoAssetName: "VSCodeLogo",
             prefersBundledLogoOverAppIcon: true,
             localAppBundleIdentifiers: ["com.microsoft.VSCode", "com.microsoft.VSCodeInsiders"],
@@ -1483,7 +1484,7 @@ enum ClientProfileRegistry {
         ManagedIDEExtensionProfile(
             id: "cursor-extension",
             title: "Cursor",
-            subtitle: "安装 Ping Island，支持终端精准聚焦",
+            subtitle: "安装灵动码，支持终端精准聚焦",
             logoAssetName: "CursorLogo",
             prefersBundledLogoOverAppIcon: true,
             localAppBundleIdentifiers: ["com.todesktop.230313mzl4w4u92"],
@@ -1498,7 +1499,7 @@ enum ClientProfileRegistry {
         ManagedIDEExtensionProfile(
             id: "codebuddy-extension",
             title: "CodeBuddy",
-            subtitle: "安装 Ping Island，支持终端精准聚焦",
+            subtitle: "安装灵动码，支持终端精准聚焦",
             logoAssetName: "CodeBuddyLogo",
             prefersBundledLogoOverAppIcon: true,
             localAppBundleIdentifiers: ["com.tencent.codebuddy", "com.codebuddy.app"],
@@ -1519,7 +1520,7 @@ enum ClientProfileRegistry {
         ManagedIDEExtensionProfile(
             id: "workbuddy-extension",
             title: "WorkBuddy",
-            subtitle: "安装 Ping Island，支持终端精准聚焦",
+            subtitle: "安装灵动码，支持终端精准聚焦",
             showsInSettings: false,
             logoAssetName: "WorkBuddyLogo",
             prefersBundledLogoOverAppIcon: true,
@@ -1535,7 +1536,7 @@ enum ClientProfileRegistry {
         ManagedIDEExtensionProfile(
             id: "qoder-extension",
             title: "Qoder",
-            subtitle: "安装 Ping Island，支持会话跳转与终端精准聚焦",
+            subtitle: "安装灵动码，支持会话跳转与终端精准聚焦",
             logoAssetName: "QoderLogo",
             prefersBundledLogoOverAppIcon: true,
             sessionFocusStrategy: .qoderChatHistory,
@@ -1551,7 +1552,7 @@ enum ClientProfileRegistry {
         ManagedIDEExtensionProfile(
             id: "qoder-cn-extension",
             title: "Qoder CN",
-            subtitle: "安装 Ping Island，支持会话跳转与终端精准聚焦",
+            subtitle: "安装灵动码，支持会话跳转与终端精准聚焦",
             logoAssetName: "QoderCNLogo",
             prefersBundledLogoOverAppIcon: true,
             sessionFocusStrategy: .qoderChatHistory,

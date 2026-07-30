@@ -38,8 +38,8 @@ This file is a routing layer for coding agents working in this repo. Keep it sho
 - Codex ingress: `PingIsland/Services/Codex/`, `PingIsland/UI/Views/CodexSessionView.swift`
  - Hook-less fallback parsing for Codex sessions lives in `PingIsland/Services/Codex/CodexRolloutParser.swift`
  - Codex Desktop threads often report app-server status `notLoaded` (runtime owned by the Desktop app). Island maps thread `path` to the rollout file, infers phase from turn status when needed, and schedules thread/read + rollout sync from list upserts so working/completion status and sounds stay aligned with Cursor-style hook updates. Prefer an active rollout over a stale idle app-server snapshot, and never drop both snapshots when the app-server view looks "fresher"
-- AI-COS Mission Pack (protocol → selected Integration agent launch, plus dedicated Investment Decision entry using L3 + decision skill): `docs/ai-cos-mission-pack.md`, `PingIsland/Models/AICOSMissionModels.swift`, `PingIsland/Services/AICOS/`, `PingIsland/UI/Views/AICOSMissionPanelView.swift` (header flag in `NotchView`; skills path and launch target in Settings → Integration)
-  - Pure text-shape reference for Prototype tests: `Prototype/Sources/IslandShared/AICOSMissionPack.swift`
+- Local Skill Manager (discover local `SKILL.md` skills, central launch/symlink routing, paste prompt → selected Integration agent, one-click consolidate into `~/.agents/skills`, vault CRUD, remote catalog install from allowlisted GitHub repos, use-count tracking): `docs/local-skill-manager.md`, `PingIsland/Models/LocalSkillModels.swift`, `PingIsland/Services/SkillManager/`, `PingIsland/UI/Views/LocalSkillManagerPanelView.swift` (header flag in `NotchView`; Settings → Integration → 本地技能). Former AI-COS Mission panel is superseded (`docs/ai-cos-mission-pack.md` pointer; legacy pack builders under `PingIsland/Services/AICOS/` may remain for tests)
+ - Pure text-shape reference for Prototype tests: `Prototype/Sources/IslandShared/AICOSMissionPack.swift`
 - Terminal and focus control: `PingIsland/Services/Tmux/`, `PingIsland/Services/Window/`, `PingIsland/Utilities/TerminalVisibilityDetector.swift`
   - Terminal focus flows currently cover iTerm2, Ghostty, Terminal.app, tmux, and IDE-hosted terminals
 - Remote SSH forwarding and remote-host management: `PingIsland/Services/Remote/`
@@ -64,7 +64,8 @@ This file is a routing layer for coding agents working in this repo. Keep it sho
 - `PingIsland/Services`: ingestion, socket handling, state management, tmux, windows, updates
 - `PingIsland/Services/Usage`: Claude status-line quota cache readers, Claude-family transcript token parsing, and Codex rollout quota readers for UI usage summaries
 - `PingIsland/Services/Runtime`: isolated native Claude/Codex runtime work. This path should coexist with the current implementation behind feature flags until parity is proven.
-- `PingIsland/Services/AICOS`: AI-COS Mission Pack builder, protocol catalog, decision-skill catalog (Investment Decision), launch-target resolver, selected-agent activator, and recent-mission persistence
+- `PingIsland/Services/SkillManager`: local skill discovery, central route registry, paste prompts, agent skills-dir symlink linking, vault inventory/writer/uninstall, remote catalog install, and usage counts
+- `PingIsland/Services/AICOS`: legacy AI-COS Mission Pack builders / catalogs (tests / migration); launch-target resolver and activator are still reused by the skill manager
 - `PingIsland/Services/Remote`: remote endpoint persistence, SSH bootstrap / attach, and remote hook forwarding
   - Remote bootstrap currently covers JSON hook configs, managed hook directories, and managed plugin directories (for example remote Hermes installs under `~/.hermes/plugins/ping_island`)
 - `PingIsland/Services/Update`: Sparkle updater bridge, appcast/release-notes loading, update state publishing
@@ -106,7 +107,7 @@ This file is a routing layer for coding agents working in this repo. Keep it sho
   - Current rule: provider-originated end events should preserve the session in `.ended` so it stays in `SessionStore` until the user archives/removes it; only explicit user archive/removal should delete it from `SessionStore`.
   - Primary list rule: sessions with no new activity for 30 minutes should auto-hide from the primary list until fresh hook/file/app-server activity updates `lastActivity`; sessions that need manual attention should stay visible.
   - Codex primary-list exception: hide idle / ended / passive `waitingForInput` Codex rows (Desktop `thread/list` otherwise floods the Island with history). Keep only `processing` / `compacting` or actionable approval / question / intervention sessions (`shouldKeepCodexSessionInPrimaryUI`).
-  - Claude-family stuck-turn recovery: `pruneOrphanedSessions` / `StuckActiveSessionRecovery` demotes quiet `.processing`/`.compacting` rows to `waitingForInput` when Stop was missed (including live Cursor IDE PIDs with no running tools after 3 minutes), and ends sessions whose tracked PID is dead.
+  - Claude-family stuck-turn recovery: `pruneOrphanedSessions` / `StuckActiveSessionRecovery` demotes quiet `.processing`/`.compacting` rows to `waitingForInput` when Stop was missed (including live Cursor IDE PIDs with no running tools after 3 minutes), ends sessions whose tracked PID is dead, and after 30 minutes of hook silence settles orphaned running-tool placeholders to `.idle` (also clears stale passive `waitingForInput` rows with no intervention).
 - If you change notch sizing, opening behavior, or visibility, inspect both `NotchViewModel` and `NotchView`.
   - On physical-notch MacBooks, closed detailed mode uses ear wings at system-notch height when there is no center summary (`ClosedNotchPhysicalLayout` wing width = device notch + side caps); when a center summary is present it grows downward and places pet, title, and trailing badge on one top-aligned row inside a below-camera visible band (camera clearance + `visibleBandHeight`)
 - If you change docked/detached Island transitions or drag-to-detach behavior, trace through `IslandPresentationCoordinator`, `WindowManager`, `NotchViewModel`, `NotchWindowController`, and `DetachedIslandWindowController` together so gesture gating, content resolution, and re-docking stay aligned.
@@ -120,12 +121,13 @@ This file is a routing layer for coding agents working in this repo. Keep it sho
 - If you change IDE terminal jump behavior, inspect both `TerminalSessionFocuser` and `IDEExtensionInstaller`, plus the integration settings UI so install state and URI schemes stay aligned.
 - If you change Codex behavior, verify both the monitor layer under `PingIsland/Services/Codex/` and the UI under `PingIsland/UI/Views/CodexSessionView.swift`.
   - Long Codex/subagent prompts, results, tool details, and transcript rows must keep full data in `SessionStore` / snapshots and apply bounded display text only at SwiftUI rendering boundaries. Prefer `SessionTextSanitizer.boundedDisplayText` for inline `Text` / Markdown content, add or preserve tests for truncation behavior, and avoid passing unbounded transcripts directly into expanded Island detail views.
-- If you change AI-COS Mission Pack shape or selected-agent launch flow, update these together:
-  - `PingIsland/Models/AICOSMissionModels.swift`
-  - `PingIsland/Services/AICOS/`
-  - `PingIsland/UI/Views/NotchView.swift` (header entry) / `AICOSMissionPanelView.swift` / `SessionListView.swift` / Settings Integration AI-COS path in `SettingsWindowView.swift`
-  - `Prototype/Sources/IslandShared/AICOSMissionPack.swift` plus `PingIslandTests/AICOSMissionPackBuilderTests.swift` / Prototype AICOS tests
-  - `docs/ai-cos-mission-pack.md`
+- If you change Local Skill Manager discovery, routing, paste, symlink, consolidate, or vault inventory/uninstall behavior, update these together:
+  - `PingIsland/Models/LocalSkillModels.swift`
+  - `PingIsland/Services/SkillManager/`
+  - `PingIsland/UI/Views/NotchView.swift` (header entry) / `LocalSkillManagerPanelView.swift` / `SessionListView.swift` / Settings Integration local-skills block in `SettingsWindowView.swift`
+  - `PingIslandTests/LocalSkillManagerTests.swift` / `SkillConsolidateTests.swift` / `SkillVaultLifecycleTests.swift` / `SkillVaultWriterTests.swift` / `SkillUsageStoreTests.swift` / `SkillRemoteInstallTests.swift`
+  - `docs/local-skill-manager.md`
+- If you change leftover AI-COS Mission Pack builder text shape (tests only), update `PingIsland/Services/AICOS/`, `Prototype/Sources/IslandShared/AICOSMissionPack.swift`, and `PingIslandTests/AICOSMissionPackBuilderTests.swift` together.
 - If you change app updates or release notes, trace through `PingIsland/Services/Update/`, `PingIsland/Info.plist`, the settings UI, and `scripts/create-release.sh` so appcast assets, runtime config, and update messaging stay aligned.
 - If you change Sparkle configuration keys or hosting assumptions, update `Config/App.xcconfig`, `Config/LocalSecrets.example.xcconfig`, `scripts/generate-keys.sh`, and `docs/sparkle-release.md` together.
 - If you change App Store distribution behavior, keep the `PingIslandAppStore` target isolated from the regular `PingIsland` Developer ID/Sparkle lane, and update `docs/mac-app-store-submission.md` plus `scripts/build-app-store.sh` together.
@@ -199,6 +201,7 @@ This file is a routing layer for coding agents working in this repo. Keep it sho
 ## Current Reality
 
 - The main shipping target is the Xcode project, not the Swift package under `Prototype/`.
+- User-facing product name is **NotchCode** (Chinese display name **灵动码**); copyright string is **Copyright © 2026 廖作东**. Xcode target names, scheme names, and `PRODUCT_BUNDLE_IDENTIFIER` (`com.wudanwu.PingIsland`) remain Ping Island for build/update continuity; the built app bundle is `NotchCode.app`. Bundled legal copies live in `PingIsland/Resources/Legal/` (copies of root `LICENSE.md` / `NOTICE`, flattened into the app `Resources` bundle) and should stay in sync with the repo root files.
 - The root project now includes `PingIslandTests` and `PingIslandUITests` targets for app-level state and settings-window coverage.
 - `Prototype/Tests` remains the fastest place for logic-level unit tests plus process/socket e2e coverage.
 - Sparkle update discovery is expected to use the GitHub Releases `latest/download/appcast.xml` asset unless a local override explicitly replaces it.

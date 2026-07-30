@@ -14,10 +14,10 @@ NOTES_DIR="$PROJECT_DIR/releases/notes"
 KEYS_DIR="$PROJECT_DIR/.sparkle-keys"
 STAGING_DIR="$BUILD_DIR/dmg-staging"
 DMG_BACKGROUND_SOURCE="${PING_ISLAND_DMG_BACKGROUND_SOURCE:-$PROJECT_DIR/docs/images/ping-island-dmg-installer-background.png}"
-DMG_LOGO_SOURCE="${PING_ISLAND_DMG_LOGO_SOURCE:-$PROJECT_DIR/docs/images/ping-island-icon-transparent.svg}"
+DMG_LOGO_SOURCE="${PING_ISLAND_DMG_LOGO_SOURCE:-$PROJECT_DIR/docs/images/notchcode-icon-transparent.svg}"
 
-APP_BUNDLE_NAME="Ping Island.app"
-APP_PRODUCT_NAME="PingIsland"
+APP_BUNDLE_NAME="NotchCode.app"
+APP_PRODUCT_NAME="NotchCode"
 APP_PATH="$EXPORT_PATH/$APP_BUNDLE_NAME"
 
 NOTARY_APPLE_ID="${PING_ISLAND_NOTARY_APPLE_ID:-${APPLE_ID:-}}"
@@ -310,7 +310,7 @@ PY
     previous_plist="$tmp_dir/previous-Info.plist"
 
     curl -fsSL "$previous_zip_url" -o "$tmp_dir/previous.zip"
-    unzip -p "$tmp_dir/previous.zip" "Ping Island.app/Contents/Info.plist" > "$previous_plist"
+    unzip -p "$tmp_dir/previous.zip" "NotchCode.app/Contents/Info.plist" > "$previous_plist"
 
     previous_version=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$previous_plist" 2>/dev/null || true)
     previous_build=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$previous_plist" 2>/dev/null || true)
@@ -362,7 +362,7 @@ require_file "$DMG_BACKGROUND_SOURCE"
 
 resolve_notary_credentials
 
-echo "=== Packaging Signed Ping Island ==="
+echo "=== Packaging Signed NotchCode ==="
 echo ""
 
 export PING_ISLAND_BUILD_DIR="$BUILD_DIR"
@@ -412,7 +412,7 @@ log_section "Creating ZIP"
 ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "$ZIP_PATH"
 
 log_section "Creating DMG"
-create_styled_dmg "$APP_PATH" "$DMG_PATH" "Ping Island" "$STAGING_DIR" "$PROJECT_DIR"
+create_styled_dmg "$APP_PATH" "$DMG_PATH" "NotchCode" "$STAGING_DIR" "$PROJECT_DIR"
 
 notarize_and_staple "$DMG_PATH" "$DMG_PATH"
 if [ "$SKIP_NOTARIZATION" != "1" ]; then

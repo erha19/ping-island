@@ -1,5 +1,5 @@
 import XCTest
-@testable import Ping_Island
+@testable import NotchCode
 
 /// Integration tests for the Stop / SubagentStop / SessionEnd hook semantics
 /// introduced by the `fix-claude-sound-triggers` change. These verify that the

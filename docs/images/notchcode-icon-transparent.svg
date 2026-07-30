@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="accent" x1="312" y1="520" x2="712" y2="720" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#7DD3FC"/>
+      <stop offset="0.45" stop-color="#38BDF8"/>
+      <stop offset="1" stop-color="#2563EB"/>
+    </linearGradient>
+    <linearGradient id="notch" x1="352" y1="168" x2="672" y2="248" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#05070C"/>
+      <stop offset="1" stop-color="#171D29"/>
+    </linearGradient>
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="10" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <rect x="312" y="168" width="400" height="96" rx="48" fill="url(#notch)"/>
+  <circle cx="512" cy="216" r="18" fill="#2B3445"/>
+  <circle cx="512" cy="216" r="10" fill="#0F172A"/>
+
+  <g filter="url(#glow)">
+    <path d="M360 560 L500 700 L440 760 L240 560 L440 360 L500 420 Z" fill="url(#accent)"/>
+    <path d="M664 560 L464 760 L524 820 L724 620 L524 420 L464 480 Z" fill="url(#accent)"/>
+  </g>
+
+  <rect x="280" y="792" width="464" height="10" rx="5" fill="#243044"/>
+  <rect x="312" y="792" width="96" height="10" rx="5" fill="#38BDF8" opacity="0.85"/>
+</svg>

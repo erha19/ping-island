@@ -1,7 +1,7 @@
 import Darwin
 import Foundation
 import XCTest
-@testable import Ping_Island
+@testable import NotchCode
 
 /// Tests for the periodic liveness sweep introduced by
 /// `fix-claude-sound-triggers`. The sweep removes sessions whose tracked pid

@@ -181,7 +181,7 @@ enum GlobalShortcutAction: String, CaseIterable, Identifiable {
         case .openActiveSession:
             return "优先打开最近需要关注或正在运行的会话。"
         case .openSessionList:
-            return "直接展开 Island 的会话列表视图。"
+            return "直接展开灵动码的会话列表视图。"
         }
     }
 

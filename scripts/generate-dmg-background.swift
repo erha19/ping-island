@@ -225,7 +225,7 @@ func drawBackground(configuration: Configuration) throws {
         .paragraphStyle: titleStyle,
         .kern: canvasWidth <= 700 ? 1.2 : 2.0
     ]
-    let title = NSAttributedString(string: "PING ISLAND", attributes: titleAttributes)
+    let title = NSAttributedString(string: "NOTCHCODE", attributes: titleAttributes)
     title.draw(in: NSRect(x: 0, y: layout.titleY, width: canvasWidth, height: layout.titleHeight))
 
     drawInstallArrow(from: layout.arrowStart, to: layout.arrowEnd)

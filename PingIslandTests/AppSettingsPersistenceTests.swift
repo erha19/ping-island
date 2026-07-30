@@ -1,6 +1,6 @@
 import AppKit
 import XCTest
-@testable import Ping_Island
+@testable import NotchCode
 
 @MainActor
 final class AppSettingsPersistenceTests: XCTestCase {

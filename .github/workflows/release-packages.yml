@@ -329,7 +329,7 @@ jobs:
             exit 1
           fi
 
-          app_path="build/release/export/Ping Island.app"
+          app_path="build/release/export/NotchCode.app"
           if [ "${#linux_bridge_assets[@]}" -lt 1 ]; then
             echo "::error::Expected at least one Linux bridge asset in releases/bridge, found ${#linux_bridge_assets[@]}"
             exit 1
@@ -395,7 +395,7 @@ jobs:
             echo "has_notes_asset=$has_notes_asset"
             echo "appcast_path=$appcast_path"
             echo "has_appcast=$has_appcast"
-            echo "release_title=Ping Island $RELEASE_TAG"
+            echo "release_title=NotchCode $RELEASE_TAG"
           } >> "$GITHUB_OUTPUT"
 
       - name: Upload signed macOS packages artifact

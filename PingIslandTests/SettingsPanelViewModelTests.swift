@@ -1,5 +1,5 @@
 import XCTest
-@testable import Ping_Island
+@testable import NotchCode
 
 @MainActor
 private final class AccessibilityStatusProbe {

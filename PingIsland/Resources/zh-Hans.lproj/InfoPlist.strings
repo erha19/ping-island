@@ -1,1 +1,5 @@
-"NSAppleEventsUsageDescription" = "Ping Island 会通过 Apple Events 聚焦到与当前会话匹配的 iTerm、Ghostty、cmux 或终端窗口。";
+/* Localized Info.plist strings */
+"CFBundleDisplayName" = "灵动码";
+"CFBundleName" = "灵动码";
+"NSHumanReadableCopyright" = "Copyright © 2026 廖作东。保留所有权利。";
+"NSAppleEventsUsageDescription" = "灵动码会通过 Apple Events 聚焦到与当前会话匹配的 iTerm、Ghostty、cmux 或终端窗口。";

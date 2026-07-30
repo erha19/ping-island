@@ -1,6 +1,6 @@
 import Foundation
 import XCTest
-@testable import Ping_Island
+@testable import NotchCode
 
 final class SessionStateTests: XCTestCase {
     func testClosedNotchMascotStatusReturnsIdleWhenConversationIsComplete() {
@@ -426,6 +426,28 @@ final class SessionStateTests: XCTestCase {
         )
 
         XCTAssertNil(session.closedNotchCenterText)
+    }
+
+    func testDisplayTitleFallsBackToPreviewTextBeforeProjectName() {
+        let session = SessionState(
+            sessionId: "preview-title-session",
+            cwd: "/tmp/project",
+            previewText: "论文 | 知行情三位一体深度融合"
+        )
+
+        XCTAssertEqual(session.displayTitle, "论文 | 知行情三位一体深度融合")
+        XCTAssertEqual(session.closedNotchCenterText, "论文 | 知行情三位一体深度融合")
+    }
+
+    func testDisplayTitleFallsBackToCompactHookMessageBeforeProjectName() {
+        let session = SessionState(
+            sessionId: "hook-title-session",
+            cwd: "/tmp/project",
+            latestHookMessage: "  Waiting for approval  "
+        )
+
+        XCTAssertEqual(session.displayTitle, "Waiting for approval")
+        XCTAssertEqual(session.closedNotchCenterText, "Waiting for approval")
     }
 
     func testWaitingForApprovalPhaseSurfacesPendingToolDetails() {

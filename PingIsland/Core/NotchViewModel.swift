@@ -58,7 +58,7 @@ class NotchViewModel: ObservableObject {
     @Published private(set) var isQuietBackgroundPresentationActive = false
     @Published private(set) var isSettingsPopoverPresented = false
     @Published private(set) var isInlineTextInputActive = false
-    /// AI-COS Mission composer. Kept on the view model so the panel survives
+    /// Local skill manager panel. Kept on the view model so the panel survives
     /// SessionListView identity churn and can be toggled from the opened header.
     @Published var showAICOSMissionPanel = false
     /// True while a system file panel is up so hover-leave does not dismiss Island.
@@ -1033,7 +1033,7 @@ class NotchViewModel: ObservableObject {
         openedMeasuredHeight = sanitized
     }
 
-    /// Opens or closes the AI-COS Mission composer from the header icon.
+    /// Opens or closes the local skill manager from the header icon.
     func toggleAICOSMissionPanel() {
         setAICOSMissionPanelVisible(!showAICOSMissionPanel)
     }

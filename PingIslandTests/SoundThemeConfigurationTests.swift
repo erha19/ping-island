@@ -1,5 +1,5 @@
 import XCTest
-@testable import Ping_Island
+@testable import NotchCode
 
 final class SoundThemeConfigurationTests: XCTestCase {
     func testIsland8BitThemeModeIsAvailable() {

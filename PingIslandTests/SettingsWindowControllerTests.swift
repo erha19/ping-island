@@ -1,7 +1,7 @@
 import AppKit
 import Carbon.HIToolbox
 import XCTest
-@testable import Ping_Island
+@testable import NotchCode
 
 @MainActor
 final class SettingsWindowControllerTests: XCTestCase {
@@ -25,7 +25,7 @@ final class SettingsWindowControllerTests: XCTestCase {
             zhHans.contains("\"拖动宠物，让宠物离岛工作\" = \"拖动宠物，让宠物离岛工作\";")
         )
         XCTAssertTrue(
-            english.contains("\"拖动宠物，让宠物离岛工作\" = \"Drag the mascot to let the pet work away from the Island.\";")
+            english.contains("\"拖动宠物，让宠物离岛工作\" = \"Drag the mascot to let the pet work away from the NotchCode.\";")
         )
         XCTAssertTrue(
             zhHans.contains("\"刘海拖拽引导\" = \"刘海拖拽引导\";")
@@ -67,7 +67,7 @@ final class SettingsWindowControllerTests: XCTestCase {
             english.contains("\"重新体验首次引导\" = \"Replay first-run onboarding\";")
         )
         XCTAssertTrue(
-            english.contains("\"手动打开形态选择引导；选择刘海屏或独立悬浮宠物后，会继续进入 Hooks 演示。\" = \"Manually open the surface selection onboarding. After choosing the top Island or floating pet, Ping Island continues into the Hooks demo.\";")
+            english.contains("\"手动打开形态选择引导；选择刘海屏或独立悬浮宠物后，会继续进入 Hooks 演示。\" = \"Manually open the surface selection onboarding. After choosing the top NotchCode or floating pet, NotchCode continues into the Hooks demo.\";")
         )
     }
 

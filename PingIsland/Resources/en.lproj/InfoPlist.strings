@@ -1,1 +1,5 @@
-"NSAppleEventsUsageDescription" = "Ping Island uses Apple Events to focus the matching iTerm, Ghostty, cmux, or Terminal window for a session.";
+/* Localized Info.plist strings */
+"CFBundleDisplayName" = "NotchCode";
+"CFBundleName" = "NotchCode";
+"NSHumanReadableCopyright" = "Copyright © 2026 廖作东. All rights reserved.";
+"NSAppleEventsUsageDescription" = "NotchCode uses Apple Events to focus the matching iTerm, Ghostty, cmux, or Terminal window for a session.";

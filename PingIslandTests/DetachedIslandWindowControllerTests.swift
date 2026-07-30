@@ -2,7 +2,7 @@ import AppKit
 import Combine
 import SwiftUI
 import XCTest
-@testable import Ping_Island
+@testable import NotchCode
 
 @MainActor
 final class DetachedIslandWindowControllerTests: XCTestCase {

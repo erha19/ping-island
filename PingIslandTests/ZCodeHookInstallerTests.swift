@@ -1,5 +1,5 @@
 import XCTest
-@testable import Ping_Island
+@testable import NotchCode
 
 final class ZCodeHookInstallerTests: XCTestCase {
     private var profile: ManagedHookClientProfile {
@@ -170,6 +170,7 @@ final class ZCodeHookInstallerTests: XCTestCase {
         let profile = try profile
         XCTAssertEqual(profile.brand, .zcode)
         XCTAssertEqual(profile.title, "ZCode")
+        XCTAssertEqual(profile.localAppBundleIdentifiers, ["dev.zcode.app"])
     }
 
     func testZCodeRuntimeProfileResolvesBrandAndMascot() {

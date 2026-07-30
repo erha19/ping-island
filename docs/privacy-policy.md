@@ -1,26 +1,28 @@
 # Privacy Policy
 
-Last updated: May 5, 2026
+Last updated: July 28, 2026
 
-Ping Island is a macOS utility for monitoring AI coding sessions from the macOS
-menu bar. This policy explains what information the app handles and how it is
-used.
+NotchCode (Chinese display name: 灵动码) is a macOS utility for monitoring AI
+coding sessions from the macOS menu bar. This distribution is based on the
+open-source [Ping Island](https://github.com/erha19/ping-island) project and
+modified by 廖作东. This policy explains what information the app handles and how
+it is used.
 
 ## Data Collection
 
-Ping Island does not sell personal information and does not use advertising
+NotchCode does not sell personal information and does not use advertising
 tracking.
 
-The app is designed to process session information locally on your Mac. Ping
-Island does not send your coding session content to the developer.
+The app is designed to process session information locally on your Mac. NotchCode
+does not send your coding session content to the developer.
 
-Ping Island may offer optional anonymous usage telemetry. The first-run
-onboarding includes a preselected consent checkbox for helping improve Ping
-Island, and returning users may see a one-time Settings prompt. Telemetry is not
-uploaded until consent is confirmed, and it can be disabled in Settings at any
-time. When enabled, Ping Island may send a small allowlist of product usage
-events, such as app launches, Hook installation results, client type categories,
-and coarse session lifecycle buckets, to help improve the app.
+NotchCode may offer optional anonymous usage telemetry. The first-run onboarding
+includes a preselected consent checkbox for helping improve NotchCode, and
+returning users may see a one-time Settings prompt. Telemetry is not uploaded
+until consent is confirmed, and it can be disabled in Settings at any time.
+When enabled, NotchCode may send a small allowlist of product usage events, such
+as app launches, Hook installation results, client type categories, and coarse
+session lifecycle buckets, to help improve the app.
 
 Anonymous telemetry does not include prompts, responses, code, diffs, terminal
 output, project paths, file paths, repository names, usernames, hostnames, SSH
@@ -29,7 +31,7 @@ or API keys.
 
 ## Data Processed Locally
 
-To provide its core features, Ping Island may process information on your Mac
+To provide its core features, NotchCode may process information on your Mac
 such as:
 
 - AI coding session status, events, prompts, responses, approvals, questions,
@@ -48,7 +50,7 @@ terminal or IDE windows.
 
 ## Permissions
 
-Ping Island may request macOS permissions needed for its features, including:
+NotchCode may request macOS permissions needed for its features, including:
 
 - File access to user-selected folders or tool configuration locations.
 - Apple Events or Accessibility access for window focus and terminal jump-back
@@ -60,29 +62,29 @@ You can manage these permissions in macOS System Settings.
 
 ## Remote SSH Features
 
-If you enable remote SSH support, Ping Island uses the SSH target information
-you provide to connect to the selected host, install or remove the remote bridge
-when requested, and forward session events back to the local Ping Island app.
+If you enable remote SSH support, NotchCode uses the SSH target information you
+provide to connect to the selected host, install or remove the remote bridge
+when requested, and forward session events back to the local NotchCode app.
 Remote SSH information and forwarded session events are used for this feature
 and are not sent to the developer.
 
 ## Diagnostics
 
-Ping Island may let you export diagnostics for troubleshooting. Diagnostic
-exports are user-initiated, saved to a location you choose, and are intended to
-redact secrets where possible. Review diagnostic files before sharing them in a
-GitHub issue or support request.
+NotchCode may let you export diagnostics for troubleshooting. Diagnostic exports
+are user-initiated, saved to a location you choose, and are intended to redact
+secrets where possible. Review diagnostic files before sharing them in a GitHub
+issue or support request.
 
 ## Third-Party Services
 
-Ping Island can work with third-party developer tools and services that you
-install or configure separately. Those tools, remote hosts, Apple services,
-GitHub, and any AI providers you use have their own privacy practices. This
-policy only covers Ping Island itself.
+NotchCode can work with third-party developer tools and services that you install
+or configure separately. Those tools, remote hosts, Apple services, GitHub, and
+any AI providers you use have their own privacy practices. This policy only
+covers NotchCode itself.
 
-If optional anonymous telemetry is enabled, Ping Island may use Alibaba Cloud
-Simple Log Service to store product usage events. See
-`docs/telemetry.md` for the current event and field allowlist.
+If optional anonymous telemetry is enabled, NotchCode may use Alibaba Cloud
+Simple Log Service to store product usage events. See `docs/telemetry.md` for
+the current event and field allowlist.
 
 ## Contact
 

@@ -322,6 +322,10 @@ struct HoverSessionCard: View {
         HoverConversationSnapshotBuilder.snapshot(for: session)
     }
 
+    private var hasConversationSnapshot: Bool {
+        snapshot.userText != nil || snapshot.assistantText != nil
+    }
+
     private var shouldSuppressPromptControls: Bool {
         session.shouldSuppressInAppPromptControls(
             routePromptsToTerminal: suppressInAppPromptControls
@@ -330,9 +334,13 @@ struct HoverSessionCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            if session.needsApprovalResponse {
-                HoverSessionHeader(session: session)
+            HoverSessionHeader(session: session)
 
+            if hasConversationSnapshot {
+                HoverConversationCard(session: session, snapshot: snapshot)
+            }
+
+            if session.needsApprovalResponse {
                 HoverApprovalCard(
                     session: session,
                     sessionMonitor: sessionMonitor,
@@ -340,8 +348,6 @@ struct HoverSessionCard: View {
                     onActionCompleted: onActionCompleted
                 )
             } else if let intervention = session.intervention, intervention.kind == .question {
-                HoverSessionHeader(session: session)
-
                 HoverQuestionInterventionCard(
                     session: session,
                     intervention: intervention,
@@ -350,9 +356,7 @@ struct HoverSessionCard: View {
                     onQuestionInteractionStateChanged: onQuestionInteractionStateChanged,
                     onActionCompleted: onActionCompleted
                 )
-            } else {
-                HoverSessionHeader(session: session)
-
+            } else if !hasConversationSnapshot {
                 HoverConversationCard(session: session, snapshot: snapshot)
             }
         }
@@ -407,7 +411,8 @@ private struct HoverConversationCard: View {
         VStack(alignment: .leading, spacing: compact ? 8 : 10) {
             if let userText = snapshot.userText {
                 HoverConversationLine(
-                    label: "你：",
+                    role: .user,
+                    label: "你",
                     labelColor: .white.opacity(0.54),
                     text: userText,
                     textColor: .white.opacity(0.84),
@@ -418,7 +423,8 @@ private struct HoverConversationCard: View {
 
             if let assistantText = snapshot.assistantText {
                 HoverConversationLine(
-                    label: HoverPreviewStyle.assistantPrefixLabel(for: session) + "：",
+                    role: .assistant,
+                    label: HoverPreviewStyle.assistantPrefixLabel(for: session),
                     labelColor: HoverPreviewStyle.assistantPrefixColor(for: session),
                     text: assistantText,
                     textColor: HoverPreviewStyle.assistantTextColor(for: session, compact: false),
@@ -650,7 +656,7 @@ private struct HoverTerminalRoutedPromptNotice: View {
 
     var body: some View {
         Text(verbatim: AppLocalization.format(
-            "已保留在%@中处理。Ping Island 只提醒，不接管此处响应。",
+            "已保留在%@中处理。灵动码只提醒，不接管此处响应。",
             session.isInTmux ? AppLocalization.string("终端") : session.interactionDisplayName
         ))
         .font(.system(size: 11, weight: .medium))
@@ -971,6 +977,12 @@ private struct HoverPreviewLine: Identifiable {
 }
 
 private struct HoverConversationLine: View {
+    enum Role {
+        case user
+        case assistant
+    }
+
+    let role: Role
     let label: String
     let labelColor: Color
     let text: String
@@ -979,13 +991,53 @@ private struct HoverConversationLine: View {
     let lineLimit: Int
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
-            Text(label)
-                .font(.system(size: max(11, fontSize - 1), weight: .semibold))
-                .foregroundColor(labelColor)
+        HStack(alignment: .top, spacing: 0) {
+            if role == .user {
+                Spacer(minLength: 28)
+            }
 
-            MarkdownText(text, color: textColor, fontSize: fontSize)
-                .lineLimit(lineLimit)
+            VStack(alignment: role == .user ? .trailing : .leading, spacing: 6) {
+                Text(label)
+                    .font(.system(size: max(10, fontSize - 2), weight: .semibold))
+                    .foregroundColor(labelColor)
+
+                MarkdownText(text, color: textColor, fontSize: fontSize)
+                    .lineLimit(lineLimit)
+                    .multilineTextAlignment(role == .user ? .trailing : .leading)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .fill(bubbleFill)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                    .strokeBorder(bubbleBorder, lineWidth: 1)
+                            )
+                    )
+            }
+            .frame(maxWidth: .infinity, alignment: role == .user ? .trailing : .leading)
+
+            if role == .assistant {
+                Spacer(minLength: 28)
+            }
+        }
+    }
+
+    private var bubbleFill: Color {
+        switch role {
+        case .user:
+            return Color.white.opacity(0.14)
+        case .assistant:
+            return Color.white.opacity(0.06)
+        }
+    }
+
+    private var bubbleBorder: Color {
+        switch role {
+        case .user:
+            return Color.white.opacity(0.08)
+        case .assistant:
+            return Color.white.opacity(0.05)
         }
     }
 }
@@ -1233,7 +1285,7 @@ struct HoverEmptyPreviewView: View {
                         .foregroundColor(.white)
                         .shadow(color: Color.black.opacity(0.30), radius: 6, y: 3)
 
-                    Text(appLocalized: "Hover to preview active sessions. Click the Island to open the session list.")
+                    Text(appLocalized: "Hover to preview active sessions. Click the NotchCode to open the session list.")
                         .font(.system(size: density == .detachedCompact ? 10 : 12, weight: .semibold))
                         .foregroundColor(.white.opacity(0.58))
                         .multilineTextAlignment(.center)

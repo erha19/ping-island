@@ -1,5 +1,5 @@
 import XCTest
-@testable import Ping_Island
+@testable import NotchCode
 
 final class PiIntegrationTests: XCTestCase {
     func testPiManagedProfileUsesExtensionDirectoryInstallation() {
@@ -31,7 +31,7 @@ final class PiIntegrationTests: XCTestCase {
         let source = try XCTUnwrap(files["index.ts"])
 
         XCTAssertEqual(Set(files.keys), ["index.ts"])
-        XCTAssertTrue(source.contains("Ping Island managed integration: pi-hooks"))
+        XCTAssertTrue(source.contains("NotchCode managed integration: pi-hooks"))
         XCTAssertTrue(source.contains("import type { ExtensionAPI }"))
         XCTAssertTrue(source.contains("pi.on(\"session_start\""))
         XCTAssertTrue(source.contains("hook_event_name: \"SessionStart\""))
@@ -41,7 +41,7 @@ final class PiIntegrationTests: XCTestCase {
         XCTAssertTrue(source.contains("hook_event_name: \"PreToolUse\""))
         XCTAssertTrue(source.contains("hook_event_name: \"PermissionRequest\""))
         XCTAssertTrue(source.contains("DANGEROUS_BASH_PATTERNS"))
-        XCTAssertTrue(source.contains("return { block: true, reason: \"Blocked by Ping Island\" }"))
+        XCTAssertTrue(source.contains("return { block: true, reason: \"Blocked by NotchCode\" }"))
         XCTAssertTrue(source.contains("pi.on(\"tool_result\""))
         XCTAssertTrue(source.contains("hook_event_name: \"PostToolUse\""))
         XCTAssertTrue(source.contains("pi.on(\"agent_end\""))

@@ -1,5 +1,5 @@
 import XCTest
-@testable import Ping_Island
+@testable import NotchCode
 
 final class StuckActiveSessionRecoveryTests: XCTestCase {
     private let now = Date(timeIntervalSince1970: 1_700_000_000)
@@ -34,7 +34,7 @@ final class StuckActiveSessionRecoveryTests: XCTestCase {
         XCTAssertEqual(decision, .demoteToWaitingForInput)
     }
 
-    func testLivePidKeepsProcessingWhileToolStillRunning() {
+    func testLivePidKeepsProcessingWhileToolStillRunningBeforeStaleTimeout() {
         let session = makeClaudeSession(
             phase: .processing,
             pid: 12_345,
@@ -62,6 +62,113 @@ final class StuckActiveSessionRecoveryTests: XCTestCase {
         )
 
         XCTAssertEqual(decision, .keep)
+    }
+
+    func testLivePidSettlesProcessingWhenRunningToolPlaceholderIsStale() {
+        let session = makeClaudeSession(
+            phase: .processing,
+            pid: 12_345,
+            lastActivity: now.addingTimeInterval(-StuckActiveSessionRecovery.staleExecutionIdleTimeout - 1),
+            chatItems: [
+                ChatHistoryItem(
+                    id: "tool-1",
+                    type: .toolCall(ToolCallItem(
+                        name: "Write",
+                        input: ["file_path": "models.json"],
+                        status: .running,
+                        result: nil,
+                        structuredResult: nil,
+                        subagentTools: []
+                    )),
+                    timestamp: now.addingTimeInterval(-4_000)
+                )
+            ]
+        )
+
+        let decision = StuckActiveSessionRecovery.decision(
+            for: session,
+            now: now,
+            isProcessAlive: { _ in true }
+        )
+
+        XCTAssertEqual(decision, .settleStaleSession)
+    }
+
+    func testMissingPidSettlesProcessingWhenRunningToolPlaceholderIsStale() {
+        let session = makeClaudeSession(
+            phase: .processing,
+            pid: nil,
+            lastActivity: now.addingTimeInterval(-StuckActiveSessionRecovery.staleExecutionIdleTimeout - 1),
+            chatItems: [
+                ChatHistoryItem(
+                    id: "tool-1",
+                    type: .toolCall(ToolCallItem(
+                        name: "Shell",
+                        input: ["command": "cd /tmp/project"],
+                        status: .running,
+                        result: nil,
+                        structuredResult: nil,
+                        subagentTools: []
+                    )),
+                    timestamp: now.addingTimeInterval(-4_000)
+                )
+            ]
+        )
+
+        let decision = StuckActiveSessionRecovery.decision(
+            for: session,
+            now: now,
+            isProcessAlive: { _ in true }
+        )
+
+        XCTAssertEqual(decision, .settleStaleSession)
+    }
+
+    func testStaleWaitingForInputWithoutInterventionSettles() {
+        let session = makeClaudeSession(
+            phase: .waitingForInput,
+            pid: nil,
+            lastActivity: now.addingTimeInterval(-StuckActiveSessionRecovery.staleExecutionIdleTimeout - 1),
+            chatItems: []
+        )
+
+        let decision = StuckActiveSessionRecovery.decision(
+            for: session,
+            now: now,
+            isProcessAlive: { _ in true }
+        )
+
+        XCTAssertEqual(decision, .settleStaleSession)
+    }
+
+    func testSettleStaleSessionInterruptsRunningToolsAndDemotesToIdle() {
+        var session = makeClaudeSession(
+            phase: .processing,
+            pid: 12_345,
+            lastActivity: now.addingTimeInterval(-StuckActiveSessionRecovery.staleExecutionIdleTimeout - 1),
+            chatItems: [
+                ChatHistoryItem(
+                    id: "tool-1",
+                    type: .toolCall(ToolCallItem(
+                        name: "Write",
+                        input: ["file_path": "models.json"],
+                        status: .running,
+                        result: nil,
+                        structuredResult: nil,
+                        subagentTools: []
+                    )),
+                    timestamp: now.addingTimeInterval(-4_000)
+                )
+            ]
+        )
+
+        SessionExecutionEvidence.settleStaleSession(&session)
+
+        XCTAssertEqual(session.phase, .idle)
+        guard case .toolCall(let tool) = session.chatItems[0].type else {
+            return XCTFail("Expected tool call item")
+        }
+        XCTAssertEqual(tool.status, .interrupted)
     }
 
     func testLivePidKeepsProcessingBeforeTimeout() {

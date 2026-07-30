@@ -1,6 +1,6 @@
 # Anonymous Usage Telemetry
 
-Ping Island can optionally send a small amount of anonymous product telemetry to
+NotchCode can optionally send a small amount of anonymous product telemetry to
 Alibaba Cloud Simple Log Service (SLS). Telemetry is not uploaded until the user
 confirms consent during first-run onboarding or later in Settings. The
 "匿名使用统计" switch in Settings can disable it at any time.

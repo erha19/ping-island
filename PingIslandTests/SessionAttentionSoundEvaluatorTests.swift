@@ -1,5 +1,5 @@
 import XCTest
-@testable import Ping_Island
+@testable import NotchCode
 
 /// Tests for the always-allow guard introduced by `fix-claude-sound-triggers`.
 /// The evaluator decides whether a session contributes to the

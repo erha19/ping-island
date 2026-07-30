@@ -16,7 +16,7 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "A10000000000000000000028"
-               BuildableName = "Ping Island.app"
+               BuildableName = "NotchCode.app"
                BlueprintName = "PingIslandAppStore"
                ReferencedContainer = "container:PingIsland.xcodeproj">
             </BuildableReference>
@@ -33,7 +33,7 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "A10000000000000000000028"
-            BuildableName = "Ping Island.app"
+            BuildableName = "NotchCode.app"
             BlueprintName = "PingIslandAppStore"
             ReferencedContainer = "container:PingIsland.xcodeproj">
          </BuildableReference>
@@ -54,7 +54,7 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "A10000000000000000000028"
-            BuildableName = "Ping Island.app"
+            BuildableName = "NotchCode.app"
             BlueprintName = "PingIslandAppStore"
             ReferencedContainer = "container:PingIsland.xcodeproj">
          </BuildableReference>
@@ -71,7 +71,7 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "A10000000000000000000028"
-            BuildableName = "Ping Island.app"
+            BuildableName = "NotchCode.app"
             BlueprintName = "PingIslandAppStore"
             ReferencedContainer = "container:PingIsland.xcodeproj">
          </BuildableReference>

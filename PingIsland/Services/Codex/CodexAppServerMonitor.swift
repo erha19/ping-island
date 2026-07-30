@@ -389,8 +389,8 @@ actor CodexAppServerMonitor {
                 method: "initialize",
                 params: [
                     "clientInfo": [
-                        "name": "Island",
-                        "title": "Island",
+                        "name": "灵动码",
+                        "title": "灵动码",
                         "version": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.1.0"
                     ],
                     "capabilities": [

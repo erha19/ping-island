@@ -480,9 +480,9 @@ private struct HookInstallWelcomeView: View {
 
     private var subtitle: String {
 #if APP_STORE
-        "Mac App Store 版本不会自动写入 ~/.claude、~/.codex 等目录。选择安装时，Ping Island 会请求你授权用户主目录后再写入配置。"
+        "Mac App Store 版本不会自动写入 ~/.claude、~/.codex 等目录。选择安装时，灵动码会请求你授权用户主目录后再写入配置。"
 #else
-        "Ping Island 通过 Hooks 监听会话事件、显示通知与审批。可以一键安装默认配置，或选择仅启用部分事件。"
+        "灵动码通过 Hooks 监听会话事件、显示通知与审批。可以一键安装默认配置，或选择仅启用部分事件。"
 #endif
     }
 
@@ -701,7 +701,7 @@ private struct PresentationModeWelcomeView: View {
                         .font(.system(size: 30, weight: .bold))
                         .foregroundColor(.white)
 
-                    Text(appLocalized: "你可以把 Ping Island 放在屏幕顶部，也可以让宠物默认贴近当前激活窗口右下角显示。之后都能在设置里随时切换。")
+                    Text(appLocalized: "你可以把灵动码放在屏幕顶部，也可以让宠物默认贴近当前激活窗口右下角显示。之后都能在设置里随时切换。")
                         .font(.system(size: 14, weight: .medium))
                         .foregroundColor(.white.opacity(0.70))
                         .fixedSize(horizontal: false, vertical: true)
@@ -720,7 +720,7 @@ private struct PresentationModeWelcomeView: View {
 
                 Toggle(isOn: $analyticsOptIn) {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(appLocalized: "帮助提升 Ping Island 体验")
+                        Text(appLocalized: "帮助提升灵动码体验")
                             .font(.system(size: 13, weight: .bold))
                             .foregroundColor(.white.opacity(0.88))
                         Text(appLocalized: "发送匿名使用统计，帮助改进常用功能。不会包含会话内容、代码、路径或主机信息。")

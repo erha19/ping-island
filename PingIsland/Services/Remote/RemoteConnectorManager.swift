@@ -1489,7 +1489,7 @@ final class RemoteConnectorManager: ObservableObject {
           exit 0
         fi
         if [ ! -x \(shellQuote("\(installRoot)/bin/ping-island-bridge")) ] || [ ! -x \(shellQuote("\(installRoot)/bin/PingIslandBridge")) ]; then
-          echo "Ping Island remote bridge is not installed at \(installRoot)/bin" >&2
+          echo "NotchCode remote bridge is not installed at \(installRoot)/bin" >&2
           exit 127
         fi
         pkill -f \(shellQuote(servicePattern)) >/dev/null 2>&1 || true
@@ -1499,7 +1499,7 @@ final class RemoteConnectorManager: ObservableObject {
         if [ -S \(shellQuote(controlSocketPath)) ] && pgrep -f \(shellQuote(servicePattern)) >/dev/null 2>&1; then
           exit 0
         fi
-        echo "Ping Island remote bridge failed to start" >&2
+        echo "NotchCode remote bridge failed to start" >&2
         tail -n 40 \(shellQuote("\(installRoot)/logs/remote-agent.log")) >&2 2>/dev/null || true
         exit 1
         """

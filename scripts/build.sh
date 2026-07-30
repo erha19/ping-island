@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build Ping Island for release
+# Build NotchCode for release
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -16,7 +16,7 @@ ENABLE_HARDENED_RUNTIME="${PING_ISLAND_ENABLE_HARDENED_RUNTIME:-YES}"
 SCHEME="${PING_ISLAND_SCHEME:-PingIsland}"
 PROJECT_FILE="${PING_ISLAND_PROJECT_FILE:-PingIsland.xcodeproj}"
 
-echo "=== Building Ping Island ==="
+echo "=== Building NotchCode ==="
 echo ""
 
 # Clean previous builds
@@ -99,6 +99,6 @@ fi
 
 echo ""
 echo "=== Build Complete ==="
-echo "App exported to: $EXPORT_PATH/Ping Island.app"
+echo "App exported to: $EXPORT_PATH/NotchCode.app"
 echo ""
 echo "Next: Run ./scripts/create-release.sh to notarize and create DMG"

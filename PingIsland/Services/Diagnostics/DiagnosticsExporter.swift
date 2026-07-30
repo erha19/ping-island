@@ -693,7 +693,7 @@ actor DiagnosticsExporter {
         let result = try tailData(from: sourceURL, maxBytes: Self.maxDebugFileBytes)
         let text = String(decoding: result.data, as: UTF8.self)
         var output = result.wasTruncated
-            ? "[Ping Island diagnostics: file truncated to last \(Self.maxDebugFileBytes) bytes]\n"
+            ? "[NotchCode diagnostics: file truncated to last \(Self.maxDebugFileBytes) bytes]\n"
             : ""
         output += DiagnosticsLogRedactor.redactedPlainText(text, limit: Self.maxDebugFileBytes)
 
@@ -705,7 +705,7 @@ actor DiagnosticsExporter {
         let result = try tailData(from: sourceURL, maxBytes: Self.maxDebugFileBytes)
         var output = Data()
         if result.wasTruncated {
-            output.append(Data("[Ping Island diagnostics: file truncated to last \(Self.maxDebugFileBytes) bytes]\n".utf8))
+            output.append(Data("[NotchCode diagnostics: file truncated to last \(Self.maxDebugFileBytes) bytes]\n".utf8))
         }
         output.append(result.data)
 

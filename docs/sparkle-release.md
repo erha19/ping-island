@@ -69,11 +69,11 @@ The workflow will upload the signed `.dmg`, `.zip`, and zipped Linux `musl` brid
 When Sparkle secrets are present, the same draft Release will also include:
 
 - `appcast.xml`
-- `PingIsland-<version>.md`
+- `NotchCode-<version>.md`
 
 Use the GitHub Release assets as the canonical download surface so the DMG stays a direct `.dmg` file instead of an Actions artifact wrapped in an outer `.zip`.
 
-Ping Island is available from the official Homebrew Cask repository, so the
+NotchCode is available from the official Homebrew Cask repository, so the
 release workflow only publishes the signed GitHub Release assets. See
 [homebrew-cask-release.md](homebrew-cask-release.md) for the Homebrew install and
 release verification notes.
@@ -121,6 +121,6 @@ xcrun notarytool store-credentials "PingIsland" \
 - `scripts/package-release.sh` is the shared build + sign + notarize packaging entrypoint used by both local release tooling and GitHub Actions.
 - `scripts/create-styled-dmg.sh` now defaults to the repo-tracked installer artwork at `docs/images/ping-island-dmg-installer-background.png`; set `PING_ISLAND_DMG_BACKGROUND_SOURCE` if you need to preview a different background locally.
 - `scripts/package-release.sh` now compares the build against the latest earlier published GitHub release and fails if `CFBundleVersion` did not increase.
-- `scripts/create-release.sh` packages `releases/notes/<version>.md` as `PingIsland-<version>.md` and uses it as the GitHub Release body when present.
+- `scripts/create-release.sh` packages `releases/notes/<version>.md` as `NotchCode-<version>.md` and uses it as the GitHub Release body when present.
 - `scripts/create-release.sh` infers the GitHub repo from `origin` by default; set `PING_ISLAND_GITHUB_REPO=owner/repo` if you need to override it.
 - The app prefers Markdown release notes and falls back to Sparkle's explicit release notes links when Markdown is unavailable.

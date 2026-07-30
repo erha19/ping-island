@@ -3,14 +3,14 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SOURCE_SVG="${ROOT_DIR}/docs/images/ping-island-icon.svg"
+SOURCE_SVG="${ROOT_DIR}/docs/images/notchcode-icon.svg"
 OUTPUT_DIR="${ROOT_DIR}/PingIsland/Assets.xcassets/AppIcon.appiconset"
 
 usage() {
   cat <<'EOF'
 Usage: render-app-icons.sh [--source <svg-path>] [--output-dir <path>]
 
-Regenerates the macOS AppIcon asset set from the Ping Island SVG source.
+Regenerates the macOS AppIcon asset set from the NotchCode SVG source.
 The export intentionally preserves SVG transparency so the rounded corners
 stay transparent instead of being baked onto a white canvas.
 EOF

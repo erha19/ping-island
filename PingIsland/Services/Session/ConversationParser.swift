@@ -557,19 +557,25 @@ actor ConversationParser {
 
     /// Build session file path
     private static func sessionFilePath(sessionId: String, cwd: String, explicitFilePath: String? = nil) -> String {
-        if let explicitFilePath, !explicitFilePath.isEmpty {
-            if FileManager.default.fileExists(atPath: explicitFilePath) {
-                return explicitFilePath
-            }
-
-            if let fallbackOpenClawPath = latestOpenClawSessionFilePath(preferredPath: explicitFilePath) {
-                return fallbackOpenClawPath
-            }
-
+        if let explicitFilePath,
+           !explicitFilePath.isEmpty,
+           FileManager.default.fileExists(atPath: explicitFilePath) {
             return explicitFilePath
         }
 
-        let projectDir = cwd.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ".", with: "-")
+        if let explicitFilePath,
+           !explicitFilePath.isEmpty,
+           let fallbackOpenClawPath = latestOpenClawSessionFilePath(preferredPath: explicitFilePath) {
+            return fallbackOpenClawPath
+        }
+
+        let projectDir = projectDirectorySlug(for: cwd)
+        for candidate in codeBuddyFamilyHistoryCandidates(sessionId: sessionId, projectDir: projectDir) {
+            if FileManager.default.fileExists(atPath: candidate) {
+                return candidate
+            }
+        }
+
         let qoderPath = NSHomeDirectory() + "/.qoder/projects/" + projectDir + "/transcript/" + sessionId + ".jsonl"
         if FileManager.default.fileExists(atPath: qoderPath) {
             return qoderPath
@@ -585,11 +591,36 @@ actor ConversationParser {
             return claudePath
         }
 
-        if let fallbackOpenClawPath = latestOpenClawSessionFilePath(preferredPath: nil) {
+        if let fallbackOpenClawPath = latestOpenClawSessionFilePath(preferredPath: explicitFilePath) {
             return fallbackOpenClawPath
         }
 
+        if let explicitFilePath, !explicitFilePath.isEmpty {
+            return explicitFilePath
+        }
+
         return claudePath
+    }
+
+    private static func projectDirectorySlug(for cwd: String) -> String {
+        cwd.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ".", with: "-")
+    }
+
+    private static func codeBuddyFamilyHistoryCandidates(sessionId: String, projectDir: String) -> [String] {
+        let home = NSHomeDirectory()
+        let appSupport = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support", isDirectory: true)
+
+        return [
+            "\(home)/.codebuddy/projects/\(projectDir)/\(sessionId).jsonl",
+            "\(home)/.workbuddy/projects/\(projectDir)/\(sessionId).jsonl",
+            appSupport
+                .appendingPathComponent("WorkBuddy/User/globalStorage/tencent-cloud.coding-copilot/brain/\(sessionId)/index.json")
+                .path,
+            appSupport
+                .appendingPathComponent("CodeBuddy/User/globalStorage/tencent-cloud.coding-copilot/brain/\(sessionId)/index.json")
+                .path,
+        ]
     }
 
     private static func latestOpenClawSessionFilePath(preferredPath: String?) -> String? {
@@ -1484,7 +1515,7 @@ actor ConversationParser {
             id: "qoder-question-\(latestSection.requestId)",
             kind: .question,
             title: title,
-            message: "Qoder 已在 IDE 内弹出问题，请回到 Qoder 完成回答。Island 会继续保留提醒，直到会话继续推进。",
+            message: "Qoder 已在 IDE 内弹出问题，请回到 Qoder 完成回答。灵动码会继续保留提醒，直到会话继续推进。",
             options: [],
             questions: [],
             supportsSessionScope: false,

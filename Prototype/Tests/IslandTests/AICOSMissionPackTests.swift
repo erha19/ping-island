@@ -34,7 +34,9 @@ func sharedAICOSInvestmentDecisionPackIncludesDecisionSkillPaths() {
         missionID: "mission-invest-shared",
         level: .l3,
         selectedSkills: [
-            SharedAICOSSkillRef(id: "protocol", title: "Protocol", relativePath: "PROTOCOL.md")
+            SharedAICOSSkillRef(id: "readme", title: "README", relativePath: "README.md"),
+            SharedAICOSSkillRef(id: "protocol", title: "Protocol", relativePath: "PROTOCOL.md"),
+            SharedAICOSSkillRef(id: "schema-goal", title: "Goal", relativePath: "schemas/goal.md")
         ],
         protocolRootPath: "/tmp/ai-cos-protocol"
     )
@@ -46,9 +48,13 @@ func sharedAICOSInvestmentDecisionPackIncludesDecisionSkillPaths() {
     )
     #expect(pack.clipboardPrompt.contains("Follow AI-COS L3."))
     #expect(pack.clipboardPrompt.contains("Investment Decision"))
-    #expect(pack.clipboardPrompt.contains("/tmp/ai-cos-protocol/PROTOCOL.md"))
-    #expect(pack.clipboardPrompt.contains("/tmp/decision-skill/SKILL.md"))
-    #expect(pack.clipboardPrompt.contains("/tmp/decision-skill/references/investment-adapter.md"))
+    #expect(pack.readingPaths == [
+        "/tmp/ai-cos-protocol/PROTOCOL.md",
+        "/tmp/decision-skill/SKILL.md",
+        "/tmp/decision-skill/references/investment-adapter.md"
+    ])
+    #expect(!pack.clipboardPrompt.contains("Summary:"))
+    #expect(!pack.clipboardPrompt.contains("README.md"))
     #expect(pack.clipboardPrompt.contains("must be confirmed by the user"))
     #expect(pack.clipboardPrompt.contains("Do not place orders"))
 }

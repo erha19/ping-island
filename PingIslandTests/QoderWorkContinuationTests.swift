@@ -1,6 +1,6 @@
 import Foundation
 import XCTest
-@testable import Ping_Island
+@testable import NotchCode
 
 final class QoderWorkContinuationTests: XCTestCase {
     func testQoderIDEResolvedInterventionWaitsForClientContinuationNotification() async {

@@ -29,18 +29,17 @@ enum AICOSCodexActivator {
         }
 
         let bundleIDs = profile.localAppBundleIdentifiers
-        guard !bundleIDs.isEmpty else { return false }
+        if !bundleIDs.isEmpty {
+            if await activateRunningApp(bundleIdentifiers: bundleIDs, workspace: workspace) {
+                return true
+            }
 
-        if await activateRunningApp(bundleIdentifiers: bundleIDs, workspace: workspace) {
-            return true
+            if await openApplication(bundleIdentifiers: bundleIDs, workspace: workspace) {
+                return true
+            }
         }
 
-        if await openApplication(bundleIdentifiers: bundleIDs, workspace: workspace) {
-            return true
-        }
-
-        if profile.id == "codex-hooks" {
-            guard let url = URL(string: "codex://") else { return false }
+        if let url = launchURL(for: profile) {
             return workspace.open(url)
         }
         return false
@@ -51,11 +50,29 @@ enum AICOSCodexActivator {
         workspacePath: String,
         sessions: [SessionState]
     ) -> SessionState? {
-        let normalizedWorkspace = normalizedPath(workspacePath)
-        guard !normalizedWorkspace.isEmpty else { return nil }
-
         let branded = sessions.filter { $0.clientInfo.brand == profile.brand }
-        return branded.first { normalizedPath($0.cwd) == normalizedWorkspace }
+        guard !branded.isEmpty else { return nil }
+
+        let normalizedWorkspace = normalizedPath(workspacePath)
+        if !normalizedWorkspace.isEmpty {
+            return branded.first { normalizedPath($0.cwd) == normalizedWorkspace }
+        }
+
+        // Skill-manager style launches often omit a workspace; prefer any live
+        // session for the selected agent brand before falling back to the app.
+        return branded.first
+    }
+
+    /// Custom URL schemes used when bundle lookup cannot open the agent app.
+    nonisolated static func launchURL(for profile: ManagedHookClientProfile) -> URL? {
+        switch profile.id {
+        case "codex-hooks":
+            return URL(string: "codex://")
+        case "zcode-hooks":
+            return URL(string: "zcode://")
+        default:
+            return nil
+        }
     }
 
     @MainActor

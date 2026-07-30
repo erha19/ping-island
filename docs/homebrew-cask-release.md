@@ -1,11 +1,15 @@
 # Homebrew Cask Release Notes
 
-Ping Island is published through the official Homebrew Cask repository. Users can
-install it directly without adding a custom tap:
+NotchCode (灵动码) builds on the upstream [Ping Island](https://github.com/erha19/ping-island)
+project. The upstream project is still published through the official Homebrew Cask
+repository as `ping-island`:
 
 ```bash
 brew install --cask ping-island
 ```
+
+For this derivative distribution, publish a separate cask name such as `notchcode`
+only after you own the download URL and artifact naming (`NotchCode-<version>.dmg`).
 
 Machines that still have the legacy `erha19/tap` tap may resolve that tap before
 the official cask. Remove the old tap once before checking the official source:
@@ -23,7 +27,7 @@ Sparkle release flow publish.
 The release workflow is intentionally limited to assets owned by this
 repository:
 
-1. Build and notarize the macOS app.
+1. Build and notarize the macOS app (`NotchCode.app`).
 2. Publish the signed DMG and ZIP to the matching GitHub Release.
 3. Publish Sparkle appcast assets when Sparkle signing secrets are configured.
 4. Publish the Linux `PingIslandBridge` assets for remote SSH bootstrap.

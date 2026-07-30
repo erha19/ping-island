@@ -338,7 +338,7 @@ struct IDEExtensionInstaller {
         return """
         {
           "name": "\(extensionName)",
-          "displayName": "Ping Island",
+          "displayName": "NotchCode",
           "description": "\(description)",
           "version": "\(extensionVersion)",
           "publisher": "\(extensionPublisher)",
@@ -764,7 +764,7 @@ struct IDEExtensionInstaller {
                 }));
             }
 
-            await vscode.window.showInformationMessage('Ping Island is ready in \(profile.title).');
+            await vscode.window.showInformationMessage('NotchCode is ready in \(profile.title).');
         }
 
         function activate(context) {
@@ -802,16 +802,16 @@ struct IDEExtensionInstaller {
     private static func extensionReadme(for profile: ManagedIDEExtensionProfile) -> String {
         let capabilityLine = profile.supportsSessionFocus
             ? "It can reopen the matching chat session when the host IDE supports it, and otherwise falls back to the matching terminal tab."
-            : "It reopens the matching terminal tab from Ping Island's session context."
+            : "It reopens the matching terminal tab from NotchCode's session context."
 
         return """
-        # Ping Island
+        # NotchCode
 
-        Ping Island installs this VS Code-compatible extension so the app can jump back into the right IDE window for your active coding session.
+        NotchCode installs this VS Code-compatible extension so the app can jump back into the right IDE window for your active coding session.
 
         \(capabilityLine)
 
-        Manage installs, reinstalls, and authorization from Ping Island's **Settings -> Integration** panel.
+        Manage installs, reinstalls, and authorization from NotchCode's **Settings -> Integration** panel.
 
         Repository:
         \(projectHomepage)
@@ -849,8 +849,8 @@ struct IDEExtensionInstaller {
 
     private static func extensionDescription(for profile: ManagedIDEExtensionProfile) -> String {
         profile.supportsSessionFocus
-            ? "Lets Ping Island focus the matching chat session or terminal tab"
-            : "Lets Ping Island focus the matching terminal tab"
+            ? "Lets NotchCode focus the matching chat session or terminal tab"
+            : "Lets NotchCode focus the matching terminal tab"
     }
 
     nonisolated private static func applicationVersion() -> String {
@@ -861,15 +861,15 @@ struct IDEExtensionInstaller {
 
     private static func vsixManifest(for profile: ManagedIDEExtensionProfile) -> String {
         let description = profile.supportsSessionFocus
-            ? "Lets Ping Island focus the matching chat session or terminal tab in VS Code compatible IDEs."
-            : "Lets Ping Island focus the matching terminal tab in VS Code compatible IDEs."
+            ? "Lets NotchCode focus the matching chat session or terminal tab in VS Code compatible IDEs."
+            : "Lets NotchCode focus the matching terminal tab in VS Code compatible IDEs."
 
         return """
         <?xml version="1.0" encoding="utf-8"?>
         <PackageManifest Version="2.0.0" xmlns="http://schemas.microsoft.com/developer/vsx-schema/2011">
           <Metadata>
             <Identity Language="en-US" Id="\(extensionName)" Version="\(extensionVersion)" Publisher="\(extensionPublisher)"/>
-            <DisplayName>Ping Island</DisplayName>
+            <DisplayName>NotchCode</DisplayName>
             <Description xml:space="preserve">\(description)</Description>
           </Metadata>
           <Installation>

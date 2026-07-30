@@ -140,29 +140,23 @@ public enum SharedAICOSMissionPackBuilder {
         decisionSkillRootPath: String,
         languageCode: String = "en"
     ) -> (clipboardPrompt: String, readingPaths: [String]) {
-        let protocolPaths = draft.selectedSkills.map { skill in
-            URL(fileURLWithPath: draft.protocolRootPath, isDirectory: true)
-                .appendingPathComponent(skill.relativePath)
-                .path
-        }
+        // Occam's razor: investment paste prompts list PROTOCOL + decision skill only.
+        // draft.selectedSkills is ignored so callers cannot accidentally re-inflate the list.
+        let protocolRoot = URL(fileURLWithPath: draft.protocolRootPath, isDirectory: true)
         let decisionRoot = URL(fileURLWithPath: decisionSkillRootPath, isDirectory: true)
-        let decisionPaths = [
+        let readingPaths = [
+            protocolRoot.appendingPathComponent("PROTOCOL.md").path,
             decisionRoot.appendingPathComponent("SKILL.md").path,
             decisionRoot.appendingPathComponent("references/investment-adapter.md").path
         ]
-        let readingPaths = protocolPaths + decisionPaths
         let chinese = languageCode.lowercased().hasPrefix("zh")
-        let readingListPlain: String
-        if readingPaths.isEmpty {
-            readingListPlain = chinese ? "（未配置）" : "(none configured)"
-        } else {
-            readingListPlain = readingPaths.enumerated().map { "\($0.offset + 1). \($0.element)" }.joined(separator: "\n")
-        }
+        let readingListPlain = readingPaths.enumerated()
+            .map { "\($0.offset + 1). \($0.element)" }
+            .joined(separator: "\n")
 
         let level = SharedAICOSExecutionLevel.l3
         let levelName = level.displayName
         let title = level.title(languageCode: languageCode)
-        let summary = level.protocolSummary(languageCode: languageCode)
 
         let clipboardPrompt: String
         if chinese {
@@ -171,7 +165,6 @@ public enum SharedAICOSMissionPackBuilder {
 
             任务类型：投资决策
             协议：\(title)
-            摘要：\(summary)
 
             开始前请阅读：
 
@@ -187,7 +180,6 @@ public enum SharedAICOSMissionPackBuilder {
 
             Mission type: Investment Decision
             Protocol: \(title)
-            Summary: \(summary)
 
             Before you begin, read:
 

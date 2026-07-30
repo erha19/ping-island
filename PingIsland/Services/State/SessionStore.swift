@@ -2632,8 +2632,9 @@ actor SessionStore {
     }
 
     /// Periodically check active Claude sessions whose bridge process has died without
-    /// sending a Stop event (crash, SIGKILL, terminal closed), or whose IDE host PID is
-    /// still alive but the turn has gone quiet with no running tools (Cursor miss-Stop).
+    /// sending a Stop event (crash, SIGKILL, terminal closed), whose IDE host PID is
+    /// still alive but the turn has gone quiet with no running tools (Cursor miss-Stop),
+    /// or whose hook placeholders were never completed (missed PostToolUse / Stop).
     func pruneOrphanedSessions() {
         var didChange = false
         let now = Date()
@@ -2651,6 +2652,10 @@ actor SessionStore {
                     : .idle
                 guard session.phase.canTransition(to: target) else { continue }
                 session.phase = target
+                sessions[sessionId] = session
+                didChange = true
+            case .settleStaleSession:
+                SessionExecutionEvidence.settleStaleSession(&session)
                 sessions[sessionId] = session
                 didChange = true
             }
@@ -4224,7 +4229,7 @@ actor SessionStore {
             id: "qoder-question-intent-\(session.sessionId)",
             kind: .question,
             title: title,
-            message: "Qoder 似乎正在 IDE 内等待你的回答，请回到 Qoder 完成输入。Island 会继续保留提醒，直到会话继续推进。",
+            message: "Qoder 似乎正在 IDE 内等待你的回答，请回到 Qoder 完成输入。灵动码会继续保留提醒，直到会话继续推进。",
             options: [],
             questions: [],
             supportsSessionScope: false,

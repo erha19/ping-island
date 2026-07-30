@@ -59,7 +59,7 @@ final class HookWalkthroughDemoRunner {
                 toolUseId: toolUseId,
                 result: ToolCompletionResult(
                     status: .success,
-                    result: AppLocalization.string("Ping Island 已处理这次演示审批。"),
+                    result: AppLocalization.string("灵动码已处理这次演示审批。"),
                     structuredResult: nil
                 )
             ))
@@ -71,7 +71,7 @@ final class HookWalkthroughDemoRunner {
                         id: "\(sessionId)-assistant-complete",
                         role: .assistant,
                         timestamp: now,
-                        content: [.text(AppLocalization.string("Hooks 审批演示完成：你刚刚体验了通知、审批提交、处理完成、以及完成提醒。顶部 Island 和独立悬浮宠物会共用这一套流程。"))]
+                        content: [.text(AppLocalization.string("Hooks 审批演示完成：你刚刚体验了通知、审批提交、处理完成、以及完成提醒。顶部灵动码和独立悬浮宠物会共用这一套流程。"))]
                     )
                 ],
                 completedTools: [toolUseId],
@@ -79,10 +79,10 @@ final class HookWalkthroughDemoRunner {
                 structuredResults: [:],
                 conversationInfo: ConversationInfo(
                     summary: AppLocalization.string("Hooks 审批演示案例"),
-                    lastMessage: AppLocalization.string("Hooks 审批演示完成：你刚刚体验了通知、审批提交、处理完成、以及完成提醒。顶部 Island 和独立悬浮宠物会共用这一套流程。"),
+                    lastMessage: AppLocalization.string("Hooks 审批演示完成：你刚刚体验了通知、审批提交、处理完成、以及完成提醒。顶部灵动码和独立悬浮宠物会共用这一套流程。"),
                     lastMessageRole: "assistant",
                     lastToolName: nil,
-                    firstUserMessage: AppLocalization.string("体验一轮 Ping Island Hooks 审批通知流程"),
+                    firstUserMessage: AppLocalization.string("体验一轮灵动码 Hooks 审批通知流程"),
                     lastUserMessageDate: now
                 )
             ))
@@ -142,8 +142,8 @@ final class HookWalkthroughDemoRunner {
                 [
                     "id": "demo_next_step",
                     "header": "1.",
-                    "question": AppLocalization.string("是否批准 Ping Island 继续完成这轮演示？"),
-                    "description": AppLocalization.string("选择“批准并继续”，再点击提交，Ping Island 会模拟处理完成并弹出通知。"),
+                    "question": AppLocalization.string("是否批准灵动码继续完成这轮演示？"),
+                    "description": AppLocalization.string("选择“批准并继续”，再点击提交，灵动码会模拟处理完成并弹出通知。"),
                     "options": [
                         [
                             "id": "approve",
@@ -173,19 +173,19 @@ final class HookWalkthroughDemoRunner {
             toolInput: toolInput,
             toolUseId: toolUseId,
             notificationType: "hook_walkthrough_question",
-            message: AppLocalization.string("Ping Island Demo 正在等待一次演示审批。"),
+            message: AppLocalization.string("灵动码Demo 正在等待一次演示审批。"),
             bridgeIntervention: SessionIntervention(
                 id: toolUseId,
                 kind: .question,
-                title: AppLocalization.string("Ping Island Demo 的审批"),
+                title: AppLocalization.string("灵动码Demo 的审批"),
                 message: AppLocalization.string("请选择“批准并继续”，然后点击提交。提交后会模拟 agent 继续执行并完成。"),
                 options: [],
                 questions: [
                     SessionInterventionQuestion(
                         id: "demo_next_step",
                         header: "1.",
-                        prompt: AppLocalization.string("是否批准 Ping Island 继续完成这轮演示？"),
-                        detail: AppLocalization.string("选择“批准并继续”，再点击提交，Ping Island 会模拟处理完成并弹出通知。"),
+                        prompt: AppLocalization.string("是否批准灵动码继续完成这轮演示？"),
+                        detail: AppLocalization.string("选择“批准并继续”，再点击提交，灵动码会模拟处理完成并弹出通知。"),
                         options: [
                             SessionInterventionOption(
                                 id: "approve",
@@ -219,7 +219,7 @@ final class HookWalkthroughDemoRunner {
         SessionClientInfo(
             kind: .custom,
             profileID: "ping-island-demo",
-            name: "Ping Island Demo",
+            name: "灵动码Demo",
             launchURL: "pingisland://demo/\(sessionId)",
             origin: "demo"
         )
@@ -347,11 +347,11 @@ private struct HookWalkthroughDemoBackdropView: View {
             .ignoresSafeArea()
 
             VStack(spacing: 8) {
-                Text(appLocalized: "Ping Island 演示模式")
+                Text(appLocalized: "灵动码演示模式")
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundColor(.white.opacity(0.86))
 
-                Text(appLocalized: "请在 Island 弹出的审批卡片中选择并提交。")
+                Text(appLocalized: "请在灵动码弹出的审批卡片中选择并提交。")
                     .font(.system(size: 13, weight: .medium))
                     .foregroundColor(.white.opacity(0.58))
             }

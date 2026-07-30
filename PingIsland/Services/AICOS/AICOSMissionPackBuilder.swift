@@ -70,39 +70,29 @@ enum AICOSMissionPackBuilder {
         )
     }
 
-    /// Dedicated Investment Decision entry: AI-COS L3 plus decision skill + investment adapter.
+    /// Dedicated Investment Decision entry: L3 with a minimal reading set
+    /// (`PROTOCOL.md` + decision skill + investment adapter). Schemas / templates /
+    /// examples stay out of the paste prompt; Agents load them only if needed.
     static func buildInvestmentDecision(
         draft: AICOSMissionDraft,
         decisionSkillRootPath: String,
-        languageCode: String = "en",
-        catalogSkills: [AICOSSkillRef] = AICOSProtocolCatalog.allSkills
+        languageCode: String = "en"
     ) -> AICOSMissionPack {
         let protocolRoot = URL(fileURLWithPath: draft.protocolRootPath, isDirectory: true)
-        let selected = draft.selectedSkillIDs.compactMap { id in
-            catalogSkills.first { $0.id == id }
-        }
-        let protocolPaths = selected.map { skill in
-            skill.resolvedPath(protocolRoot: protocolRoot).path
-        }
         let decisionRoot = URL(fileURLWithPath: decisionSkillRootPath, isDirectory: true)
-        let decisionPaths = [
+        let readingPaths = [
+            protocolRoot.appendingPathComponent("PROTOCOL.md").path,
             decisionRoot.appendingPathComponent(AICOSDecisionSkillCatalog.skillRelativePath).path,
             decisionRoot.appendingPathComponent(AICOSDecisionSkillCatalog.investmentAdapterRelativePath).path
         ]
-        let readingPaths = protocolPaths + decisionPaths
 
         let chinese = AICOSExecutionLevel.usesChinese(languageCode)
-        let readingListPlain: String
-        if readingPaths.isEmpty {
-            readingListPlain = chinese ? "（未配置）" : "(none configured)"
-        } else {
-            readingListPlain = readingPaths.enumerated().map { "\($0.offset + 1). \($0.element)" }.joined(separator: "\n")
-        }
+        let readingListPlain = readingPaths.enumerated()
+            .map { "\($0.offset + 1). \($0.element)" }
+            .joined(separator: "\n")
 
         let levelName = AICOSExecutionLevel.l3.displayName
         let title = AICOSExecutionLevel.l3.title(languageCode: languageCode)
-        let summary = AICOSExecutionLevel.l3.protocolSummary(languageCode: languageCode)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
 
         let clipboardPrompt: String
         if chinese {
@@ -111,7 +101,6 @@ enum AICOSMissionPackBuilder {
 
             任务类型：投资决策
             协议：\(title)
-            摘要：\(summary)
 
             开始前请阅读：
 
@@ -127,7 +116,6 @@ enum AICOSMissionPackBuilder {
 
             Mission type: Investment Decision
             Protocol: \(title)
-            Summary: \(summary)
 
             Before you begin, read:
 

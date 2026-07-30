@@ -221,11 +221,16 @@ struct SessionState: Equatable, Identifiable, Sendable {
         return sessionId
     }
 
-    /// Display title: summary > first user message > project name
+    /// Display title for expanded surfaces. Keep the fallback chain aligned with
+    /// `closedNotchCenterText` so opened/hover rows show the same identity as the
+    /// closed-notch center slot before falling back to the project folder name.
     nonisolated var displayTitle: String {
         sessionName
             ?? SessionTextSanitizer.sanitizedDisplayText(conversationInfo.summary)
             ?? SessionTextSanitizer.sanitizedDisplayText(conversationInfo.firstUserMessage)
+            ?? compactHookMessage
+            ?? SessionTextSanitizer.sanitizedDisplayText(previewText)
+            ?? SessionTextSanitizer.sanitizedDisplayText(conversationInfo.lastMessage)
             ?? projectName
     }
 

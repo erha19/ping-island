@@ -20,6 +20,6 @@ func installerWritesSetupURIHandlerFeedback() throws {
     #expect(extensionJS.contains("async function handleSetupURI(uri)"))
     #expect(extensionJS.contains("writeProbeFile(probePath"))
     #expect(extensionJS.contains("Received setup URI"))
-    #expect(extensionJS.contains("showInformationMessage('Ping Island is ready.');"))
+    #expect(extensionJS.contains("showInformationMessage('NotchCode is ready.');"))
     #expect(extensionJS.contains("if (uri.path === '/setup')"))
 }

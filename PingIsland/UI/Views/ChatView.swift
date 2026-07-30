@@ -659,7 +659,7 @@ struct ChatView: View {
 
     private var terminalRoutedPromptNotice: some View {
         Text(verbatim: AppLocalization.format(
-            "已保留在%@中处理。Ping Island 只提醒，不接管此处响应。",
+            "已保留在%@中处理。灵动码只提醒，不接管此处响应。",
             session.isInTmux ? AppLocalization.string("终端") : session.interactionDisplayName
         ))
         .font(.system(size: 11, weight: .medium))

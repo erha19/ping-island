@@ -96,7 +96,7 @@ enum SoundThemeMode: String, CaseIterable, Identifiable {
         case .builtIn:
             return "为不同阶段分别选择 macOS 系统音。"
         case .island8Bit:
-            return "使用 Island 内置的 8-bit 固定方案，并带有客户端启动音。"
+            return "使用灵动码内置的 8-bit 固定方案，并带有客户端启动音。"
         case .soundPack:
             return "使用兼容 OpenPeon / CESP 的本地音效包。"
         }

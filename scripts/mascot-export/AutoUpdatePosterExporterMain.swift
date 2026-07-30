@@ -178,7 +178,7 @@ private struct AutoUpdatePosterView: View {
                     Badge(text: "Sparkle", tint: Color(red: 0.97, green: 0.72, blue: 0.24))
                 }
 
-                Text("Ping Island")
+                Text("NotchCode")
                     .font(.system(size: 134, weight: .black, design: .rounded))
                     .foregroundStyle(Color(red: 0.16, green: 0.12, blue: 0.08))
 
@@ -245,7 +245,7 @@ private struct AutoUpdatePosterView: View {
                     .font(.system(size: 56, weight: .bold, design: .rounded))
                     .foregroundStyle(Color(red: 0.18, green: 0.13, blue: 0.10))
 
-                Text("0.1.0 合并了 0.0.5 到 0.0.9 的更新能力，并接入 Sparkle 自动更新链路。Ping Island 会在启动和会话空闲时静默检查新版本，后台完成下载与准备。")
+                Text("0.1.0 合并了 0.0.5 到 0.0.9 的更新能力，并接入 Sparkle 自动更新链路。NotchCode 会在启动和会话空闲时静默检查新版本，后台完成下载与准备。")
                     .font(.system(size: 31, weight: .medium, design: .rounded))
                     .foregroundStyle(Color(red: 0.42, green: 0.33, blue: 0.24))
                     .fixedSize(horizontal: false, vertical: true)

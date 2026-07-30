@@ -3,9 +3,9 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleName</key>
-    <string>Ping Island</string>
+    <string>NotchCode</string>
     <key>CFBundleDisplayName</key>
-    <string>Ping Island</string>
+    <string>NotchCode</string>
     <key>CFBundleIdentifier</key>
     <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
     <key>CFBundleVersion</key>
@@ -17,9 +17,9 @@
     <key>LSApplicationCategoryType</key>
     <string>public.app-category.developer-tools</string>
     <key>NSAppleEventsUsageDescription</key>
-    <string>Ping Island uses Apple Events to focus the matching iTerm, Ghostty, cmux, or Terminal window for a session.</string>
+    <string>NotchCode uses Apple Events to focus the matching iTerm, Ghostty, cmux, or Terminal window for a session.</string>
     <key>NSHumanReadableCopyright</key>
-    <string>Copyright 2025. All rights reserved.</string>
+    <string>Copyright © 2026 廖作东. All rights reserved.</string>
     <key>PINGTelemetryDailyEventLimit</key>
     <string>$(PING_ISLAND_TELEMETRY_DAILY_EVENT_LIMIT)</string>
     <key>PINGTelemetrySLSHost</key>

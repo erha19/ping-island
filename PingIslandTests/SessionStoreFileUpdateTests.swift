@@ -1,6 +1,6 @@
 import Combine
 import XCTest
-@testable import Ping_Island
+@testable import NotchCode
 
 final class SessionStoreFileUpdateTests: XCTestCase {
     func testNoOpEventDoesNotRepublishUnchangedSessions() async throws {

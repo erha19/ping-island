@@ -1,5 +1,5 @@
 import XCTest
-@testable import Ping_Island
+@testable import NotchCode
 
 final class RuntimeSessionRegistryTests: XCTestCase {
     func testUpsertPersistsAndReloadsRecords() async {

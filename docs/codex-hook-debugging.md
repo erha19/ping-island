@@ -65,7 +65,7 @@ Inspect the latest records with:
 tail -n 20 ~/.ping-island-debug/codex-hooks/$(date +%Y%m%d).jsonl
 ```
 
-If you want to see only captured payloads without forwarding into Ping Island, run the same command with `--log-only`:
+If you want to see only captured payloads without forwarding into NotchCode, run the same command with `--log-only`:
 
 ```json
 {

@@ -2,13 +2,13 @@
 //  IslandOpenPanelPresenter.swift
 //  PingIsland
 //
-//  Presents NSOpenPanel above Ping Island floating/notch panels.
+//  Presents NSOpenPanel above Island floating/notch panels.
 //
 
 import AppKit
 
 enum IslandOpenPanelPresenter {
-    /// Directory picker that stays above Ping Island floating/notch panels.
+    /// Directory picker that stays above Island floating/notch panels.
     @MainActor
     static func chooseDirectory(
         prompt: String = "Choose",

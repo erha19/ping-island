@@ -373,7 +373,7 @@ extension HookEvent {
                 id: toolUseId ?? "codebuddy-cli-notification-\(sessionId)",
                 kind: .question,
                 title: "\(actorName) 请求处理",
-                message: "\(actorName) 正在等待权限处理。请打开 \(actorName) 继续；如果收到可响应请求，Island 会展示完整选项。",
+                message: "\(actorName) 正在等待权限处理。请打开 \(actorName) 继续；如果收到可响应请求，灵动码会展示完整选项。",
                 options: [],
                 questions: [],
                 supportsSessionScope: false,
@@ -457,7 +457,7 @@ extension HookEvent {
         let message: String
         if isExternalClientQuestionEvent {
             metadata["responseMode"] = "external_only"
-            message = "\(actorName) 已在客户端内发起提问，请切回 \(actorName) 完成回答。Island 暂不支持直接提交这类回答。"
+            message = "\(actorName) 已在客户端内发起提问，请切回 \(actorName) 完成回答。灵动码暂不支持直接提交这类回答。"
         } else {
             message = "\(actorName) 需要你补充回答，提交后会继续执行当前会话。"
         }

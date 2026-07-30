@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 import XCTest
-@testable import Ping_Island
+@testable import NotchCode
 
 @MainActor
 final class IslandTextFieldTests: XCTestCase {

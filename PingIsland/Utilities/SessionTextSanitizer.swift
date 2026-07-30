@@ -73,5 +73,5 @@ enum SessionTextSanitizer {
 }
 
 enum SessionDetailDisplayStrings {
-    static let truncationNoticeKey = "Showing a shortened preview to keep Ping Island responsive. Open the client to view the full content."
+    static let truncationNoticeKey = "Showing a shortened preview to keep NotchCode responsive. Open the client to view the full content."
 }

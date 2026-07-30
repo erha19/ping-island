@@ -168,7 +168,7 @@ actor ClaudeDesktopWatcher {
         await SessionStore.shared.process(.desktopSessionDiscovered(info))
 
         // Advance ConversationParser's internal offset to end-of-file without emitting
-        // events, so we only pick up content written after Ping Island started watching.
+        // events, so we only pick up content written after Island started watching.
         await ConversationParser.shared.resetState(for: metadata.cliSessionId)
         _ = await ConversationParser.shared.parseIncremental(
             sessionId: metadata.cliSessionId,

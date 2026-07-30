@@ -1,6 +1,6 @@
 # Mac App Store Submission Notes
 
-Ping Island's normal `PingIsland` target remains packaged for direct Developer
+NotchCode's normal `PingIsland` target remains packaged for direct Developer
 ID distribution through GitHub Releases, notarization, and Sparkle updates. The
 Mac App Store build uses the separate `PingIslandAppStore` target and shared
 scheme so App Store signing, sandboxing, and updater behavior do not change the
@@ -8,8 +8,8 @@ current direct-download lane.
 
 ## Current App Identity
 
-- App Store name: Ping Island
-- Bundle display name: Ping Island
+- App Store name: NotchCode
+- Bundle display name: NotchCode (Chinese: 灵动码)
 - Bundle ID: `com.wudanwu.PingIsland`
 - Version: `0.24.2`
 - Build: `62`
@@ -133,10 +133,10 @@ current Mac when it needs a development profile for the archive phase; set
 
 ## Metadata Draft
 
-- Title: Ping Island
+- Title: NotchCode
 - Subtitle: AI coding session monitor
 - Promotional text: Monitor Claude Code, Codex, Gemini CLI, Qwen Code, Hermes, and compatible hook-driven agent sessions from a native macOS menu bar utility.
-- Description: Ping Island brings AI coding session status, approval prompts, follow-up questions, remote SSH activity, and completion notifications into a compact macOS menu bar surface. It supports Claude Code, Codex, Gemini CLI, Qwen Code, Hermes Agent, and compatible hook-driven clients, with mascot-rich status views, terminal jump-back, and docked or detached modes.
+- Description: NotchCode brings AI coding session status, approval prompts, follow-up questions, remote SSH activity, and completion notifications into a compact macOS menu bar surface. It supports Claude Code, Codex, Gemini CLI, Qwen Code, Hermes Agent, and compatible hook-driven clients, with mascot-rich status views, terminal jump-back, and docked or detached modes.
 - Keywords: Claude Code, Codex, Gemini CLI, AI coding, menu bar, developer tools
 - Support URL: https://github.com/erha19/ping-island/issues
 - Privacy policy URL: https://github.com/erha19/ping-island/blob/main/docs/privacy-policy.md

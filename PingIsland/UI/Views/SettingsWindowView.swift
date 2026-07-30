@@ -42,7 +42,7 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
         case .mascot: return "客户端宠物与动作"
         case .sound: return "通知与提示音"
         case .analytics: return "Agent、Token 与工具"
-        case .integration: return "Hooks、IDE 扩展与 AI-COS"
+        case .integration: return "Hooks、IDE 扩展与本地技能"
         case .remote: return "SSH 主机与远程转发"
         case .labs: return "试验性特性"
         case .about: return "版本与更新"
@@ -182,7 +182,7 @@ final class SettingsPanelViewModel: ObservableObject {
     @Published private(set) var ideExtensionInstallationStates: [String: Bool] = [:]
     @Published var accessibilityEnabled = false
     @Published var isExportingLogs = false
-    @Published var logExportStatus = AppLocalization.string("导出最近 10 分钟的 Island 诊断日志与配置")
+    @Published var logExportStatus = AppLocalization.string("导出最近 10 分钟的灵动码诊断日志与配置")
     @Published private(set) var reinstallingHookProfileID: String?
     @Published private(set) var hookReinstallFeedbacks: [String: HookReinstallFeedback] = [:]
     @Published private(set) var customHookInstallations: [HookInstaller.CustomHookInstallation] = []
@@ -197,6 +197,18 @@ final class SettingsPanelViewModel: ObservableObject {
     @Published private(set) var aicosProtocolRootConfigured = AICOSProtocolCatalog.protocolRootExists()
     @Published private(set) var aicosLaunchTargetProfileID: String = ""
     @Published private(set) var aicosInstalledLaunchProfiles: [ManagedHookClientProfile] = []
+    @Published private(set) var skillManagerManualRoots: [String] = []
+    @Published private(set) var skillManagerDiscoveredCount = 0
+    @Published private(set) var skillManagerVaultRootPath = SkillRouteRegistry.resolvedVaultRootPath()
+    @Published private(set) var skillManagerVaultEntries: [SkillVaultEntry] = []
+    @Published private(set) var skillConsolidatePreviewMessage: String?
+    @Published private(set) var skillConsolidateResultMessage: String?
+    @Published private(set) var pendingSkillConsolidatePlan: SkillConsolidatePlan?
+    @Published private(set) var skillVaultUninstallPreviewMessage: String?
+    @Published private(set) var skillVaultUninstallResultMessage: String?
+    @Published private(set) var pendingSkillVaultUninstallEntry: SkillVaultEntry?
+    @Published private(set) var skillVaultEditorResultMessage: String?
+    @Published private(set) var skillRemoteInstallResultMessage: String?
 
     private var hookFeedbackClearTasks: [String: Task<Void, Never>] = [:]
     private let qoderCLIHookRefreshStatusProvider: @MainActor () -> HookInstaller.QoderCLIHookRefreshStatus?
@@ -275,7 +287,7 @@ final class SettingsPanelViewModel: ObservableObject {
             refreshCustomHookInstallations()
             refreshQoderCLIHookRefreshStatus()
             refreshBridgeHealthStatus()
-            refreshAICOSProtocolRootState()
+            refreshSkillManagerState()
         case .general, .shortcuts, .mascot, .analytics, .remote, .labs, .about:
             break
         }
@@ -292,7 +304,7 @@ final class SettingsPanelViewModel: ObservableObject {
 
     func refreshLocalizedState() {
         guard !isExportingLogs else { return }
-        logExportStatus = AppLocalization.string("导出最近 10 分钟的 Island 诊断日志与配置")
+        logExportStatus = AppLocalization.string("导出最近 10 分钟的灵动码诊断日志与配置")
     }
 
     func refreshQoderCLIHookRefreshStatus() {
@@ -333,23 +345,302 @@ final class SettingsPanelViewModel: ObservableObject {
         let installed = AICOSLaunchTargetResolver.installedProfiles { isHookInstalled($0) }
         aicosInstalledLaunchProfiles = installed
 
+        let registry = SkillRouteRegistry.load()
         if let resolved = AICOSLaunchTargetResolver.resolve(
-            storedProfileID: AICOSLaunchTargetResolver.loadStoredProfileID(),
+            storedProfileID: registry.global_launch_profile_id,
             installed: installed
         ) {
             aicosLaunchTargetProfileID = resolved.id
-            if AICOSLaunchTargetResolver.loadStoredProfileID() != resolved.id {
-                AICOSLaunchTargetResolver.setStoredProfileID(resolved.id)
+            if registry.global_launch_profile_id != resolved.id {
+                SkillRouteRegistry.setGlobalLaunchProfileID(resolved.id)
             }
         } else {
             aicosLaunchTargetProfileID = ""
-            AICOSLaunchTargetResolver.setStoredProfileID(nil)
+            SkillRouteRegistry.setGlobalLaunchProfileID(nil)
         }
     }
 
     func setAICOSLaunchTargetProfileID(_ profileID: String) {
-        AICOSLaunchTargetResolver.setStoredProfileID(profileID)
+        SkillRouteRegistry.setGlobalLaunchProfileID(profileID.isEmpty ? nil : profileID)
+        refreshSkillManagerState()
+    }
+
+    func refreshSkillManagerState() {
         refreshAICOSLaunchTargetState()
+        let registry = SkillRouteRegistry.load()
+        skillManagerManualRoots = registry.manual_roots
+        skillManagerVaultRootPath = SkillRouteRegistry.resolvedVaultRootPath(snapshot: registry)
+        skillManagerDiscoveredCount = LocalSkillCatalog.discover(manualRoots: registry.manual_roots).count
+        skillManagerVaultEntries = SkillVaultCatalog.listEntries(
+            vaultRoot: skillManagerVaultRootPath,
+            manualRoots: registry.manual_roots,
+            useCounts: SkillUsageStore.load().use_counts
+        )
+    }
+
+    func chooseSkillManagerVaultRoot() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.showsHiddenFiles = true
+        panel.message = AppLocalization.string("选择中央技能库目录")
+        panel.prompt = AppLocalization.string("选择")
+        let starting = URL(fileURLWithPath: skillManagerVaultRootPath, isDirectory: true)
+        if FileManager.default.fileExists(atPath: starting.path) {
+            panel.directoryURL = starting
+        }
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        SkillRouteRegistry.setVaultRootPath(url.path)
+        refreshSkillManagerState()
+    }
+
+    func openSkillManagerVaultRoot() {
+        let path = skillManagerVaultRootPath
+        let url = URL(fileURLWithPath: path, isDirectory: true)
+        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        NSWorkspace.shared.open(url)
+    }
+
+    func resetSkillManagerVaultRoot() {
+        SkillRouteRegistry.setVaultRootPath(nil)
+        refreshSkillManagerState()
+    }
+
+    func prepareSkillConsolidatePreview() {
+        let registry = SkillRouteRegistry.load()
+        let vault = SkillRouteRegistry.resolvedVaultRootPath(snapshot: registry)
+        let skills = LocalSkillCatalog.discover(manualRoots: registry.manual_roots)
+        let plan = SkillConsolidatePlanner.plan(
+            skills: skills,
+            vaultRoot: vault,
+            manualRoots: registry.manual_roots
+        )
+        pendingSkillConsolidatePlan = plan
+        skillConsolidateResultMessage = nil
+        skillConsolidatePreviewMessage = AppLocalization.format(
+            "将移动 %d、收纳外部软链 %d、改写链接 %d；跳过 %d，冲突 %d。确认后才会改动磁盘。",
+            plan.moveCount,
+            plan.adoptCount,
+            plan.relinkCount,
+            plan.skipCount,
+            plan.conflictCount
+        )
+    }
+
+    func confirmPendingSkillConsolidate() {
+        guard let plan = pendingSkillConsolidatePlan else { return }
+        let result = SkillConsolidator.execute(plan)
+        pendingSkillConsolidatePlan = nil
+        skillConsolidatePreviewMessage = nil
+        if plan.workCount == 0 && result.adopted.isEmpty && result.moved.isEmpty && result.relinked.isEmpty {
+            skillConsolidateResultMessage = AppLocalization.format(
+                "无需改动：已整理 %d 个，仍有冲突 %d。",
+                result.skipped.count,
+                result.conflicts.count
+            )
+        } else {
+            skillConsolidateResultMessage = AppLocalization.format(
+                "整理完成：移动 %d，收纳 %d，链接 %d，跳过 %d，冲突 %d。",
+                result.moved.count,
+                result.adopted.count,
+                result.relinked.count,
+                result.skipped.count,
+                result.conflicts.count
+            )
+        }
+        refreshSkillManagerState()
+    }
+
+    func cancelPendingSkillConsolidate() {
+        pendingSkillConsolidatePlan = nil
+        skillConsolidatePreviewMessage = nil
+    }
+
+    func prepareSkillVaultUninstall(_ entry: SkillVaultEntry) {
+        let registry = SkillRouteRegistry.load()
+        // Re-list so inbound links are current before confirm.
+        let fresh = SkillVaultCatalog.listEntries(
+            vaultRoot: SkillRouteRegistry.resolvedVaultRootPath(snapshot: registry),
+            manualRoots: registry.manual_roots
+        ).first { $0.path == entry.path } ?? entry
+        let preview = SkillVaultUninstaller.preview(entry: fresh, registry: registry)
+        pendingSkillVaultUninstallEntry = fresh
+        skillVaultUninstallResultMessage = nil
+        if preview.is_vault_symlink {
+            skillVaultUninstallPreviewMessage = AppLocalization.format(
+                "将移除中央库入口「%@」及其 %d 个 Agent 链接；外部源目录不会删除。",
+                preview.folder_name,
+                preview.inbound_link_paths.count
+            )
+        } else {
+            skillVaultUninstallPreviewMessage = AppLocalization.format(
+                "将删除中央库技能「%@」及其 %d 个 Agent 链接。此操作不可撤销。",
+                preview.folder_name,
+                preview.inbound_link_paths.count
+            )
+        }
+    }
+
+    func confirmPendingSkillVaultUninstall() {
+        guard let entry = pendingSkillVaultUninstallEntry else { return }
+        var registry = SkillRouteRegistry.load()
+        let result = SkillVaultUninstaller.uninstall(entry: entry, registry: &registry)
+        SkillRouteRegistry.save(registry)
+        pendingSkillVaultUninstallEntry = nil
+        skillVaultUninstallPreviewMessage = nil
+        if result.errors.isEmpty {
+            skillVaultUninstallResultMessage = AppLocalization.format(
+                "已删除「%@」：中央库 %d，链接 %d。",
+                entry.folder_name,
+                result.removed_vault_entry ? 1 : 0,
+                result.removed_inbound_links
+            )
+        } else {
+            skillVaultUninstallResultMessage = AppLocalization.format(
+                "删除「%@」部分完成：中央库 %d，链接 %d；错误 %d。",
+                entry.folder_name,
+                result.removed_vault_entry ? 1 : 0,
+                result.removed_inbound_links,
+                result.errors.count
+            )
+        }
+        refreshSkillManagerState()
+    }
+
+    func cancelPendingSkillVaultUninstall() {
+        pendingSkillVaultUninstallEntry = nil
+        skillVaultUninstallPreviewMessage = nil
+    }
+
+    func openSkillVaultEntry(_ entry: SkillVaultEntry) {
+        NSWorkspace.shared.open(URL(fileURLWithPath: entry.path, isDirectory: true))
+    }
+
+    func installRemoteSkill(_ summary: SkillRemoteSkillSummary) async -> String? {
+        do {
+            _ = try await SkillRemoteInstallService.install(
+                summary: summary,
+                vaultRoot: skillManagerVaultRootPath
+            )
+            skillRemoteInstallResultMessage = AppLocalization.format(
+                "已从仓库安装「%@」。",
+                summary.name ?? summary.folder_name
+            )
+            skillVaultEditorResultMessage = nil
+            skillVaultUninstallResultMessage = nil
+            refreshSkillManagerState()
+            return nil
+        } catch let error as SkillRemoteInstallError {
+            switch error {
+            case .alreadyExists:
+                return AppLocalization.string("中央库中已存在同名技能，请先删除或换名后再安装。")
+            case .catalogMissing:
+                return AppLocalization.string("未找到对应的技能仓库配置。")
+            case .writeFailed(let message):
+                return AppLocalization.format("安装失败：%@", message)
+            }
+        } catch let error as SkillRemoteCatalogError {
+            return AppLocalization.format("下载失败：%@", error.localizedDescription)
+        } catch {
+            return error.localizedDescription
+        }
+    }
+
+    func draftForNewSkillVaultEntry() -> SkillVaultDraft {
+        SkillVaultDraft()
+    }
+
+    func draftForEditingSkillVaultEntry(_ entry: SkillVaultEntry) -> SkillVaultDraft {
+        SkillVaultDraft(
+            folder_name: entry.folder_name,
+            name: entry.name,
+            description: entry.description ?? "",
+            body: entry.body
+        )
+    }
+
+    /// Returns localized error message on failure; nil on success.
+    func saveSkillVaultCreate(_ draft: SkillVaultDraft) -> String? {
+        do {
+            _ = try SkillVaultWriter.create(
+                draft: draft,
+                vaultRoot: skillManagerVaultRootPath
+            )
+            skillVaultEditorResultMessage = AppLocalization.format(
+                "已新建技能「%@」。",
+                draft.folder_name.trimmingCharacters(in: .whitespacesAndNewlines)
+            )
+            skillVaultUninstallResultMessage = nil
+            refreshSkillManagerState()
+            return nil
+        } catch let error as SkillVaultWriterError {
+            return localizedSkillVaultWriterError(error)
+        } catch {
+            return error.localizedDescription
+        }
+    }
+
+    /// Returns localized error message on failure; nil on success.
+    func saveSkillVaultUpdate(path: String, draft: SkillVaultDraft) -> String? {
+        do {
+            try SkillVaultWriter.update(
+                path: path,
+                name: draft.name,
+                description: draft.description,
+                body: draft.body
+            )
+            skillVaultEditorResultMessage = AppLocalization.format(
+                "已更新技能「%@」。",
+                draft.folder_name
+            )
+            skillVaultUninstallResultMessage = nil
+            refreshSkillManagerState()
+            return nil
+        } catch let error as SkillVaultWriterError {
+            return localizedSkillVaultWriterError(error)
+        } catch {
+            return error.localizedDescription
+        }
+    }
+
+    private func localizedSkillVaultWriterError(_ error: SkillVaultWriterError) -> String {
+        switch error {
+        case .invalidFolderName:
+            return AppLocalization.string("目录名无效：请使用小写字母、数字、连字符或下划线，并以字母或数字开头。")
+        case .alreadyExists:
+            return AppLocalization.string("中央库中已存在同名技能，请换一个目录名。")
+        case .missingPath:
+            return AppLocalization.string("技能目录不存在，可能已被删除。")
+        case .symlinkNotEditable:
+            return AppLocalization.string("软链技能不能在应用内编辑，请打开外部目录修改。")
+        case .writeFailed(let message):
+            return AppLocalization.format("写入失败：%@", message)
+        }
+    }
+
+    func chooseSkillManagerManualRoot() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.showsHiddenFiles = true
+        panel.message = AppLocalization.string("选择本地技能根目录（将扫描含 SKILL.md 的子目录）")
+        panel.prompt = AppLocalization.string("选择")
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        SkillRouteRegistry.addManualRoot(url.path)
+        refreshSkillManagerState()
+    }
+
+    func openSkillManagerManualRoot(_ path: String) {
+        let url = URL(fileURLWithPath: path, isDirectory: true)
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    func removeSkillManagerManualRoot(_ path: String) {
+        SkillRouteRegistry.removeManualRoot(path)
+        refreshSkillManagerState()
     }
 
     func chooseAICOSProtocolRoot() {
@@ -611,7 +902,7 @@ final class SettingsPanelViewModel: ObservableObject {
         }
 
         return AppLocalization.format(
-            "检测到 Qoder CLI %@；启动时会刷新 Island 托管的 Qoder CLI hooks，并保留同一 ~/.qoder/settings.json 内的 Qoder IDE hooks 与其他 JSON 配置。",
+            "检测到 Qoder CLI %@；启动时会刷新灵动码托管的 Qoder CLI hooks，并保留同一 ~/.qoder/settings.json 内的 Qoder IDE hooks 与其他 JSON 配置。",
             status.version
         )
     }
@@ -748,7 +1039,7 @@ private struct SoundSettingsContent: View {
 
                 SettingsSliderLine(
                     title: "音量",
-                    subtitle: "控制 Island 播放提示音时的音量大小",
+                    subtitle: "控制灵动码播放提示音时的音量大小",
                     value: $settings.soundVolume,
                     range: 0...1,
                     step: 0.05,
@@ -2324,6 +2615,10 @@ private struct SettingsPanelContentView: View {
     @State private var pendingHookReinstallProfile: ManagedHookClientProfile?
     @State private var pendingHookOptionsRequest: HookInstallOptionsRequest?
     @State private var showingUninstallAllHooksConfirmation = false
+    @State private var showingSkillConsolidateConfirmation = false
+    @State private var showingSkillVaultUninstallConfirmation = false
+    @State private var skillVaultEditorRequest: SkillVaultEditorRequest?
+    @State private var showingSkillRemoteInstallSheet = false
     @State private var showingCustomHookInstallSheet = false
     @State private var showingRemoteHostSheet = false
     @State private var remotePasswordPromptRequest: RemotePasswordPromptRequest?
@@ -2415,7 +2710,7 @@ private struct SettingsPanelContentView: View {
             viewModel.refreshLocalizedState()
         }
         .alert(
-            AppLocalization.string("帮助提升 Ping Island 体验？"),
+            AppLocalization.string("帮助提升灵动码体验？"),
             isPresented: $showingAnalyticsConsentPrompt
         ) {
             Button(AppLocalization.string("暂不开启"), role: .cancel) {
@@ -2457,7 +2752,63 @@ private struct SettingsPanelContentView: View {
                 viewModel.uninstallAllHooks()
             }
         } message: {
-            Text(appLocalized: "这会移除 Island 为所有本机集成写入的托管 Hooks 配置文件，包括自定义配置记录。")
+            Text(appLocalized: "这会移除灵动码为所有本机集成写入的托管 Hooks 配置文件，包括自定义配置记录。")
+        }
+        .alert(
+            AppLocalization.string("一键整理技能？"),
+            isPresented: $showingSkillConsolidateConfirmation
+        ) {
+            Button(AppLocalization.string("取消"), role: .cancel) {
+                viewModel.cancelPendingSkillConsolidate()
+            }
+            Button(AppLocalization.string("确认整理")) {
+                viewModel.confirmPendingSkillConsolidate()
+            }
+        } message: {
+            Text(verbatim: viewModel.skillConsolidatePreviewMessage
+                 ?? AppLocalization.string("将把散落技能移动到中央库，并把原位置改为符号链接。"))
+        }
+        .alert(
+            AppLocalization.string("从中央库删除技能？"),
+            isPresented: $showingSkillVaultUninstallConfirmation
+        ) {
+            Button(AppLocalization.string("取消"), role: .cancel) {
+                viewModel.cancelPendingSkillVaultUninstall()
+            }
+            Button(AppLocalization.string("确认删除"), role: .destructive) {
+                viewModel.confirmPendingSkillVaultUninstall()
+            }
+        } message: {
+            Text(verbatim: viewModel.skillVaultUninstallPreviewMessage
+                 ?? AppLocalization.string("将删除中央库中的该技能，并清理指向它的 Agent 符号链接。"))
+        }
+        .sheet(item: $skillVaultEditorRequest) { request in
+            SkillVaultEditorSheet(
+                request: request,
+                onSave: { draft in
+                    let error: String?
+                    switch request {
+                    case .create:
+                        error = viewModel.saveSkillVaultCreate(draft)
+                    case .edit(let entry, _):
+                        error = viewModel.saveSkillVaultUpdate(path: entry.path, draft: draft)
+                    }
+                    if error == nil {
+                        skillVaultEditorRequest = nil
+                    }
+                    return error
+                },
+                onCancel: { skillVaultEditorRequest = nil }
+            )
+        }
+        .sheet(isPresented: $showingSkillRemoteInstallSheet) {
+            SkillRemoteInstallSheet(
+                vaultFolderNames: Set(viewModel.skillManagerVaultEntries.map(\.folder_name)),
+                onInstall: { summary in
+                    await viewModel.installRemoteSkill(summary)
+                },
+                onClose: { showingSkillRemoteInstallSheet = false }
+            )
         }
         .sheet(isPresented: $showingCustomHookInstallSheet) {
             CustomHookInstallSheet(viewModel: viewModel) {
@@ -2901,7 +3252,7 @@ private struct SettingsPanelContentView: View {
 
                 SettingsToggleLine(
                     title: "登录时打开",
-                    subtitle: "启动 macOS 后自动显示 Island",
+                    subtitle: "启动 macOS 后自动显示灵动码",
                     isOn: Binding(
                         get: { viewModel.launchAtLogin },
                         set: { viewModel.setLaunchAtLogin($0) }
@@ -2909,7 +3260,7 @@ private struct SettingsPanelContentView: View {
                 )
                 SettingsLineDivider()
 
-                SettingsInfoLine(title: "显示器", subtitle: "选择 Island 所在显示器") {
+                SettingsInfoLine(title: "显示器", subtitle: "选择灵动码所在显示器") {
                     screenPicker
                 }
             }
@@ -2917,14 +3268,14 @@ private struct SettingsPanelContentView: View {
             SettingsSectionCard(title: "行为") {
                 SettingsToggleLine(
                     title: "全屏时隐藏",
-                    subtitle: "无刘海屏会在全屏时收起到顶部中央触发区；刘海屏会收缩为空白系统刘海，hover 后再展示 Island 内容",
+                    subtitle: "无刘海屏会在全屏时收起到顶部中央触发区；刘海屏会收缩为空白系统刘海，hover 后再展示灵动码内容",
                     isOn: $settings.hideInFullscreen
                 )
                 SettingsLineDivider()
 
                 SettingsToggleLine(
                     title: "无活跃会话时自动隐藏",
-                    subtitle: "当前没有正在运行或需要处理的会话时，自动隐藏 Island",
+                    subtitle: "当前没有正在运行或需要处理的会话时，自动隐藏灵动码",
                     isOn: $settings.autoHideWhenIdle
                 )
                 SettingsLineDivider()
@@ -2960,7 +3311,7 @@ private struct SettingsPanelContentView: View {
             SettingsSectionCard(title: "应用") {
                 SettingsActionLine(
                     title: "退出应用",
-                    subtitle: "立即关闭 Island"
+                    subtitle: "立即关闭灵动码"
                 ) {
                     NSApplication.shared.terminate(nil)
                 } accessory: {
@@ -2977,7 +3328,7 @@ private struct SettingsPanelContentView: View {
             SettingsSectionCard(title: "显示器") {
                 SettingsInfoLine(
                     title: "当前显示器",
-                    subtitle: "切换后会重新挂载 Island 窗口位置"
+                    subtitle: "切换后会重新挂载灵动码窗口位置"
                 ) {
                     screenPicker
                 }
@@ -3218,7 +3569,7 @@ private struct SettingsPanelContentView: View {
             SettingsSectionCard(title: "审批与提问") {
                 SettingsToggleLine(
                     title: "保留终端中的提问与审批",
-                    subtitle: "开启后终端中的 Claude / Codex 审批仍会保留；如果 Island 有可回写的审批请求，也可以直接在 Island 里批准或拒绝。",
+                    subtitle: "开启后终端中的 Claude / Codex 审批仍会保留；如果灵动码有可回写的审批请求，也可以直接在灵动码里批准或拒绝。",
                     isOn: $settings.routePromptsToTerminal
                 )
                 SettingsLineDivider()
@@ -3280,21 +3631,59 @@ private struct SettingsPanelContentView: View {
                 .opacity(settings.hookDebugLoggingEnabled ? 1 : 0.45)
             }
 
-            SettingsSectionCard(title: "AI-COS") {
-                AICOSProtocolRootLine(
-                    path: viewModel.aicosProtocolRootPath,
-                    isConfigured: viewModel.aicosProtocolRootConfigured,
-                    chooseAction: { viewModel.chooseAICOSProtocolRoot() },
-                    openAction: { viewModel.openAICOSProtocolRoot() },
-                    resetAction: { viewModel.resetAICOSProtocolRoot() }
-                )
-                SettingsLineDivider()
-                AICOSLaunchTargetLine(
+            SettingsSectionCard(title: "本地技能") {
+                LocalSkillManagerLaunchTargetLine(
                     profiles: viewModel.aicosInstalledLaunchProfiles,
                     selection: Binding(
                         get: { viewModel.aicosLaunchTargetProfileID },
                         set: { viewModel.setAICOSLaunchTargetProfileID($0) }
                     )
+                )
+                SettingsLineDivider()
+                LocalSkillManagerVaultLine(
+                    path: viewModel.skillManagerVaultRootPath,
+                    chooseAction: { viewModel.chooseSkillManagerVaultRoot() },
+                    openAction: { viewModel.openSkillManagerVaultRoot() },
+                    resetAction: { viewModel.resetSkillManagerVaultRoot() },
+                    consolidateAction: {
+                        viewModel.prepareSkillConsolidatePreview()
+                        showingSkillConsolidateConfirmation = true
+                    },
+                    resultMessage: viewModel.skillConsolidateResultMessage
+                )
+                SettingsLineDivider()
+                LocalSkillManagerVaultInventoryLine(
+                    entries: viewModel.skillManagerVaultEntries,
+                    resultMessage: viewModel.skillRemoteInstallResultMessage
+                        ?? viewModel.skillVaultEditorResultMessage
+                        ?? viewModel.skillVaultUninstallResultMessage,
+                    createAction: {
+                        skillVaultEditorRequest = .create(
+                            draft: viewModel.draftForNewSkillVaultEntry()
+                        )
+                    },
+                    remoteInstallAction: {
+                        showingSkillRemoteInstallSheet = true
+                    },
+                    openAction: { viewModel.openSkillVaultEntry($0) },
+                    editAction: { entry in
+                        skillVaultEditorRequest = .edit(
+                            entry: entry,
+                            draft: viewModel.draftForEditingSkillVaultEntry(entry)
+                        )
+                    },
+                    deleteAction: { entry in
+                        viewModel.prepareSkillVaultUninstall(entry)
+                        showingSkillVaultUninstallConfirmation = true
+                    }
+                )
+                SettingsLineDivider()
+                LocalSkillManagerRootsLine(
+                    roots: viewModel.skillManagerManualRoots,
+                    discoveredCount: viewModel.skillManagerDiscoveredCount,
+                    addAction: { viewModel.chooseSkillManagerManualRoot() },
+                    openAction: { viewModel.openSkillManagerManualRoot($0) },
+                    removeAction: { viewModel.removeSkillManagerManualRoot($0) }
                 )
             }
 
@@ -3453,7 +3842,7 @@ private struct SettingsPanelContentView: View {
 
                 SettingsActionLine(
                     title: "体验 Hooks 演示",
-                    subtitle: "启动一轮可交互案例：干净桌面背景、审批提交、处理完成、完成提醒。顶部 Island 与独立悬浮宠物都支持。"
+                    subtitle: "启动一轮可交互案例：干净桌面背景、审批提交、处理完成、完成提醒。顶部灵动码与独立悬浮宠物都支持。"
                 ) {
                     SettingsWindowController.shared.dismiss()
                     HookWalkthroughDemoRunner.shared.start()
@@ -3507,13 +3896,56 @@ private struct SettingsPanelContentView: View {
     private var aboutContent: some View {
         VStack(alignment: .leading, spacing: 18) {
             SettingsSectionCard(title: "应用信息") {
+                SettingsValueLine(title: "名称", value: appDisplayName)
+                SettingsLineDivider()
                 SettingsValueLine(title: "版本", value: appVersion)
                 SettingsLineDivider()
                 SettingsValueLine(title: "构建", value: appBuild)
                 SettingsLineDivider()
+                SettingsValueLine(title: "版权", value: appCopyright)
+                SettingsLineDivider()
                 SettingsValueLine(title: "安装时间", value: versionMetadata)
                 SettingsLineDivider()
                 SettingsValueLine(title: "之前版本", value: previousVersion)
+            }
+
+            SettingsSectionCard(title: "开源许可") {
+                SettingsInfoLine(
+                    title: "NotchCode / 灵动码",
+                    subtitle: "基于 Ping Island（Apache License 2.0）改进。本发行版修改版权归廖作东（Copyright 2026）。再分发须保留 LICENSE 与 NOTICE，且不得将上游商标冒充为本产品品牌。"
+                ) {
+                    Image(systemName: "doc.text")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.5))
+                }
+
+                SettingsLineDivider()
+
+                SettingsActionLine(
+                    title: "查看许可文件",
+                    subtitle: "在访达中打开 LICENSE 与 NOTICE"
+                ) {
+                    openBundledLegalDocuments()
+                } accessory: {
+                    Image(systemName: "folder")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.5))
+                }
+
+                SettingsLineDivider()
+
+                SettingsActionLine(
+                    title: "查看 Apache 2.0",
+                    subtitle: "在浏览器中打开许可证全文"
+                ) {
+                    if let url = URL(string: "https://www.apache.org/licenses/LICENSE-2.0") {
+                        NSWorkspace.shared.open(url)
+                    }
+                } accessory: {
+                    Image(systemName: "arrow.up.right.square")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.5))
+                }
             }
 
             SettingsSectionCard(title: "隐私与分析") {
@@ -3555,7 +3987,7 @@ private struct SettingsPanelContentView: View {
 
                     SettingsActionLine(
                         title: "立即重启安装",
-                        subtitle: "不等待空闲，立即退出 Ping Island 并完成已下载的更新"
+                        subtitle: "不等待空闲，立即退出 NotchCode 并完成已下载的更新"
                     ) {
                         updateManager.installAndRelaunch()
                     } accessory: {
@@ -3622,7 +4054,7 @@ private struct SettingsPanelContentView: View {
                         Text(appLocalized: "还没有添加任何远程主机")
                             .font(.system(size: 14, weight: .semibold))
                             .foregroundColor(.white)
-                        Text(appLocalized: "添加后，Island 会通过 SSH 安装远程 bridge、改写远程 hooks，并建立一个双向转发通道。")
+                        Text(appLocalized: "添加后，灵动码会通过 SSH 安装远程 bridge、改写远程 hooks，并建立一个双向转发通道。")
                             .font(.system(size: 12, weight: .medium))
                             .foregroundColor(.white.opacity(0.58))
                             .fixedSize(horizontal: false, vertical: true)
@@ -3692,9 +4124,9 @@ private struct SettingsPanelContentView: View {
                     .foregroundColor(.white)
 
                 VStack(alignment: .leading, spacing: 10) {
-                    Text(appLocalized: "添加远程主机后，Island 会通过 SSH 检查环境、安装远程 bridge，并配置 Hooks。")
+                    Text(appLocalized: "添加远程主机后，灵动码会通过 SSH 检查环境、安装远程 bridge，并配置 Hooks。")
                     Text(appLocalized: "连接成功后，远程会话会回传到本机显示；如果密码连接失败，需要重新输入密码。")
-                    Text(appLocalized: "如果不再需要远端集成，可在这里直接卸载 bridge；这会删除远端 `~/.ping-island` 并撤回 Island 托管的 hooks。")
+                    Text(appLocalized: "如果不再需要远端集成，可在这里直接卸载 bridge；这会删除远端 `~/.ping-island` 并撤回灵动码托管的 hooks。")
                 }
                 .font(.system(size: 13, weight: .medium))
                 .foregroundColor(.white.opacity(0.62))
@@ -3759,6 +4191,42 @@ private struct SettingsPanelContentView: View {
     private func screenToken(for screen: NSScreen) -> String {
         let identifier = ScreenIdentifier(screen: screen)
         return "\(identifier.displayID ?? 0)-\(identifier.localizedName)"
+    }
+
+    private var appDisplayName: String {
+        if let displayName = Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String,
+           !displayName.isEmpty {
+            return displayName
+        }
+        if let bundleName = Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String,
+           !bundleName.isEmpty {
+            return bundleName
+        }
+        return "NotchCode"
+    }
+
+    private var appCopyright: String {
+        if let copyright = Bundle.main.object(forInfoDictionaryKey: "NSHumanReadableCopyright") as? String,
+           !copyright.isEmpty {
+            return copyright
+        }
+        return "Copyright © 2026 廖作东. All rights reserved."
+    }
+
+    private func openBundledLegalDocuments() {
+        let candidates = [
+            Bundle.main.url(forResource: "LICENSE", withExtension: "md"),
+            Bundle.main.url(forResource: "NOTICE", withExtension: nil),
+        ].compactMap { $0 }
+
+        guard let first = candidates.first else {
+            if let url = URL(string: "https://www.apache.org/licenses/LICENSE-2.0") {
+                NSWorkspace.shared.open(url)
+            }
+            return
+        }
+
+        NSWorkspace.shared.activateFileViewerSelecting(candidates.isEmpty ? [first] : candidates)
     }
 
     private var appVersion: String {
@@ -4071,6 +4539,666 @@ private struct SettingsLineDivider: View {
         Divider()
             .overlay(Color.white.opacity(0.10))
             .padding(.horizontal, 18)
+    }
+}
+
+private struct LocalSkillManagerLaunchTargetLine: View {
+    let profiles: [ManagedHookClientProfile]
+    @Binding var selection: String
+
+    private let tint = Color(red: 0.45, green: 0.62, blue: 1.0)
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 14) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(tint.opacity(0.18))
+                    .frame(width: 40, height: 40)
+                Image(systemName: "arrow.up.forward.app")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(tint)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(appLocalized: "全局默认启动 Agent")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.white)
+
+                Text(appLocalized: "技能管理器复制提示后默认打开该应用；单个技能可覆盖")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.white.opacity(0.58))
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if profiles.isEmpty {
+                    Text(appLocalized: "请先在上方安装至少一个 Agent")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundColor(TerminalColors.amber)
+                        .padding(.top, 2)
+                }
+            }
+
+            Spacer(minLength: 12)
+
+            Picker("", selection: $selection) {
+                ForEach(profiles) {
+                    Text(verbatim: $0.title).tag($0.id)
+                }
+            }
+            .labelsHidden()
+            .accessibilityLabel(Text(appLocalized: "全局默认启动 Agent"))
+            .settingsMenuPicker(width: 168)
+            .disabled(profiles.isEmpty)
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 16)
+    }
+}
+
+private struct LocalSkillManagerVaultLine: View {
+    let path: String
+    let chooseAction: () -> Void
+    let openAction: () -> Void
+    let resetAction: () -> Void
+    let consolidateAction: () -> Void
+    let resultMessage: String?
+
+    private let tint = Color(red: 0.45, green: 0.62, blue: 1.0)
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .center, spacing: 14) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(tint.opacity(0.18))
+                        .frame(width: 40, height: 40)
+                    Image(systemName: "archivebox")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(tint)
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(appLocalized: "中央技能库")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.white)
+
+                    Text(appLocalized: "一键整理会把散落技能移动到此处，原位置改为符号链接")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(.white.opacity(0.58))
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Text(verbatim: path)
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.45))
+                        .lineLimit(2)
+                        .padding(.top, 2)
+                }
+
+                Spacer(minLength: 12)
+            }
+
+            HStack(spacing: 10) {
+                HookManagementButton(
+                    title: "选择目录",
+                    tint: tint,
+                    action: chooseAction
+                )
+                HookManagementButton(
+                    title: "打开目录",
+                    tint: TerminalColors.blue,
+                    action: openAction
+                )
+                HookManagementButton(
+                    title: "恢复默认",
+                    tint: TerminalColors.amber,
+                    action: resetAction
+                )
+                HookManagementButton(
+                    title: "一键整理",
+                    tint: TerminalColors.green,
+                    action: consolidateAction
+                )
+            }
+
+            if let resultMessage, !resultMessage.isEmpty {
+                Text(verbatim: resultMessage)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.white.opacity(0.62))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 16)
+    }
+}
+
+private enum SkillVaultEditorRequest: Identifiable {
+    case create(draft: SkillVaultDraft)
+    case edit(entry: SkillVaultEntry, draft: SkillVaultDraft)
+
+    var id: String {
+        switch self {
+        case .create:
+            return "create"
+        case .edit(let entry, _):
+            return "edit:\(entry.path)"
+        }
+    }
+
+    var isCreate: Bool {
+        if case .create = self { return true }
+        return false
+    }
+
+    var initialDraft: SkillVaultDraft {
+        switch self {
+        case .create(let draft), .edit(_, let draft):
+            return draft
+        }
+    }
+}
+
+private struct SkillVaultEditorSheet: View {
+    let request: SkillVaultEditorRequest
+    let onSave: (SkillVaultDraft) -> String?
+    let onCancel: () -> Void
+
+    @State private var draft: SkillVaultDraft
+    @State private var errorMessage: String?
+
+    init(
+        request: SkillVaultEditorRequest,
+        onSave: @escaping (SkillVaultDraft) -> String?,
+        onCancel: @escaping () -> Void
+    ) {
+        self.request = request
+        self.onSave = onSave
+        self.onCancel = onCancel
+        _draft = State(initialValue: request.initialDraft)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text(appLocalized: request.isCreate ? "新建中央库技能" : "编辑中央库技能")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundColor(.white)
+
+            labeledField("目录名 (folder_name)") {
+                TextField("my-skill", text: $draft.folder_name)
+                    .textFieldStyle(.roundedBorder)
+                    .disabled(!request.isCreate)
+                    .opacity(request.isCreate ? 1 : 0.55)
+            }
+
+            labeledField("名称") {
+                TextField(AppLocalization.string("显示名称"), text: $draft.name)
+                    .textFieldStyle(.roundedBorder)
+            }
+
+            labeledField("说明") {
+                TextField(AppLocalization.string("简短描述"), text: $draft.description)
+                    .textFieldStyle(.roundedBorder)
+            }
+
+            labeledField("正文") {
+                TextEditor(text: $draft.body)
+                    .font(.system(size: 12, design: .monospaced))
+                    .frame(minHeight: 120, maxHeight: 180)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
+                    )
+            }
+
+            if let errorMessage, !errorMessage.isEmpty {
+                Text(verbatim: errorMessage)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(TerminalColors.amber)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            HStack {
+                Spacer()
+                Button(AppLocalization.string("取消")) { onCancel() }
+                    .keyboardShortcut(.cancelAction)
+                Button(AppLocalization.string("保存")) {
+                    if let error = onSave(draft) {
+                        errorMessage = error
+                    }
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(
+                    request.isCreate
+                        && draft.folder_name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                )
+            }
+        }
+        .padding(20)
+        .frame(width: 420)
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private func labeledField<Content: View>(
+        _ title: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(appLocalized: title)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(.white.opacity(0.55))
+            content()
+        }
+    }
+}
+
+private struct SkillRemoteInstallSheet: View {
+    let vaultFolderNames: Set<String>
+    let onInstall: (SkillRemoteSkillSummary) async -> String?
+    let onClose: () -> Void
+
+    @State private var catalogID: String = SkillRemoteCatalog.builtIn.first?.id ?? ""
+    @State private var skills: [SkillRemoteSkillSummary] = []
+    @State private var query = ""
+    @State private var isLoading = false
+    @State private var installingID: String?
+    @State private var statusMessage: String?
+    @State private var errorMessage: String?
+    @State private var installedFolderNames: Set<String> = []
+
+    private var selectedCatalog: SkillRemoteCatalogDefinition? {
+        SkillRemoteCatalog.definition(id: catalogID) ?? SkillRemoteCatalog.builtIn.first
+    }
+
+    private var filteredSkills: [SkillRemoteSkillSummary] {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return skills }
+        return skills.filter {
+            $0.folder_name.localizedCaseInsensitiveContains(trimmed)
+                || ($0.name?.localizedCaseInsensitiveContains(trimmed) == true)
+                || ($0.description?.localizedCaseInsensitiveContains(trimmed) == true)
+        }
+    }
+
+    private func isInstalled(_ skill: SkillRemoteSkillSummary) -> Bool {
+        installedFolderNames.contains(skill.folder_name)
+            || vaultFolderNames.contains(skill.folder_name)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Text(appLocalized: "从仓库安装技能")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(.white)
+                Spacer()
+                Button(AppLocalization.string("关闭")) { onClose() }
+            }
+
+            if SkillRemoteCatalog.builtIn.count > 1 {
+                Picker(AppLocalization.string("仓库"), selection: $catalogID) {
+                    ForEach(SkillRemoteCatalog.builtIn) { catalog in
+                        Text(verbatim: catalog.title).tag(catalog.id)
+                    }
+                }
+                .labelsHidden()
+                .onChange(of: catalogID) { _, _ in
+                    Task { await reload() }
+                }
+            } else if let catalog = selectedCatalog {
+                Text(AppLocalization.format("仓库：%@ (%@)", catalog.title, catalog.repository_slug))
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.white.opacity(0.55))
+            }
+
+            TextField(AppLocalization.string("搜索技能…"), text: $query)
+                .textFieldStyle(.roundedBorder)
+
+            if isLoading && skills.isEmpty {
+                ProgressView()
+                    .frame(maxWidth: .infinity, minHeight: 120)
+            } else if let errorMessage, skills.isEmpty {
+                Text(verbatim: errorMessage)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(TerminalColors.amber)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button(AppLocalization.string("重试")) {
+                    Task { await reload() }
+                }
+            } else if filteredSkills.isEmpty {
+                Text(appLocalized: "没有可安装的技能")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.white.opacity(0.45))
+                    .frame(maxWidth: .infinity, minHeight: 80, alignment: .leading)
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 10) {
+                        ForEach(filteredSkills) { skill in
+                            remoteSkillRow(skill)
+                        }
+                    }
+                }
+                .frame(minHeight: 280, maxHeight: 420)
+            }
+
+            if let statusMessage, !statusMessage.isEmpty {
+                Text(verbatim: statusMessage)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.white.opacity(0.62))
+            }
+            if let errorMessage, !skills.isEmpty {
+                Text(verbatim: errorMessage)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(TerminalColors.amber)
+            }
+        }
+        .padding(20)
+        .frame(width: 480)
+        .background(Color(nsColor: .windowBackgroundColor))
+        .task {
+            await reload()
+        }
+    }
+
+    @ViewBuilder
+    private func remoteSkillRow(_ skill: SkillRemoteSkillSummary) -> some View {
+        let installed = isInstalled(skill)
+        HStack(alignment: .top, spacing: 10) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(verbatim: skill.name ?? skill.folder_name)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.white)
+                if let description = skill.description, !description.isEmpty {
+                    Text(verbatim: description)
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundColor(.white.opacity(0.5))
+                        .lineLimit(2)
+                }
+                Text(verbatim: skill.remote_path)
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .foregroundColor(.white.opacity(0.35))
+            }
+            Spacer(minLength: 8)
+            if installed {
+                Text(appLocalized: "已安装")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(TerminalColors.green)
+            } else {
+                HookManagementButton(
+                    title: installingID == skill.id ? "安装中…" : "安装",
+                    tint: TerminalColors.green,
+                    action: {
+                        Task { await install(skill) }
+                    }
+                )
+                .disabled(installingID != nil)
+            }
+        }
+    }
+
+    private func reload() async {
+        guard let catalog = selectedCatalog else { return }
+        isLoading = true
+        errorMessage = nil
+        defer { isLoading = false }
+        do {
+            skills = try await SkillRemoteCatalogClient.listSkills(catalog: catalog)
+        } catch {
+            skills = []
+            errorMessage = AppLocalization.format(
+                "无法加载仓库列表：%@",
+                error.localizedDescription
+            )
+        }
+    }
+
+    private func install(_ skill: SkillRemoteSkillSummary) async {
+        installingID = skill.id
+        errorMessage = nil
+        statusMessage = nil
+        let error = await onInstall(skill)
+        installingID = nil
+        if let error {
+            errorMessage = error
+        } else {
+            installedFolderNames.insert(skill.folder_name)
+            statusMessage = AppLocalization.format(
+                "已安装「%@」。",
+                skill.name ?? skill.folder_name
+            )
+        }
+    }
+}
+
+private struct LocalSkillManagerVaultInventoryLine: View {
+    let entries: [SkillVaultEntry]
+    let resultMessage: String?
+    let createAction: () -> Void
+    let remoteInstallAction: () -> Void
+    let openAction: (SkillVaultEntry) -> Void
+    let editAction: (SkillVaultEntry) -> Void
+    let deleteAction: (SkillVaultEntry) -> Void
+
+    @State private var query = ""
+
+    private let tint = Color(red: 0.45, green: 0.62, blue: 1.0)
+
+    private var filteredEntries: [SkillVaultEntry] {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return entries }
+        return entries.filter {
+            $0.name.localizedCaseInsensitiveContains(trimmed)
+                || $0.folder_name.localizedCaseInsensitiveContains(trimmed)
+                || ($0.description?.localizedCaseInsensitiveContains(trimmed) == true)
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .center, spacing: 14) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(tint.opacity(0.18))
+                        .frame(width: 40, height: 40)
+                    Image(systemName: "list.bullet.rectangle")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(tint)
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(appLocalized: "中央库技能")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.white)
+
+                    Text(appLocalized: "新建 / 从仓库安装 / 编辑实体技能；软链仅可查看与删除")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(.white.opacity(0.58))
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Text(AppLocalization.format("共 %d 个", entries.count))
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundColor(.white.opacity(0.45))
+                        .padding(.top, 2)
+                }
+
+                Spacer(minLength: 12)
+
+                HookManagementButton(
+                    title: "从仓库安装",
+                    tint: tint,
+                    action: remoteInstallAction
+                )
+                HookManagementButton(
+                    title: "新建",
+                    tint: TerminalColors.green,
+                    action: createAction
+                )
+            }
+
+            if !entries.isEmpty {
+                TextField(AppLocalization.string("搜索技能名称…"), text: $query)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 12))
+            }
+
+            if filteredEntries.isEmpty {
+                Text(appLocalized: entries.isEmpty ? "中央库为空" : "无匹配技能")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.white.opacity(0.45))
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(filteredEntries) { entry in
+                            vaultEntryRow(entry)
+                        }
+                    }
+                }
+                .frame(maxHeight: 220)
+            }
+
+            if let resultMessage, !resultMessage.isEmpty {
+                Text(verbatim: resultMessage)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.white.opacity(0.62))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 16)
+    }
+
+    @ViewBuilder
+    private func vaultEntryRow(_ entry: SkillVaultEntry) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    Text(verbatim: entry.name)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(.white)
+                        .lineLimit(1)
+                    Text(appLocalized: entry.is_symlink ? "软链" : "目录")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundColor(entry.is_symlink ? TerminalColors.amber : TerminalColors.green)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(
+                            Capsule(style: .continuous)
+                                .fill((entry.is_symlink ? TerminalColors.amber : TerminalColors.green).opacity(0.16))
+                        )
+                }
+
+                if let description = entry.description, !description.isEmpty {
+                    Text(verbatim: description)
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundColor(.white.opacity(0.5))
+                        .lineLimit(2)
+                }
+
+                Text(
+                    AppLocalization.format(
+                        "已链接 %d 处 · 已使用 %d 次",
+                        entry.inbound_link_paths.count,
+                        entry.use_count
+                    )
+                )
+                .font(.system(size: 10, weight: .medium))
+                .foregroundColor(.white.opacity(0.42))
+            }
+
+            Spacer(minLength: 8)
+
+            HookManagementButton(
+                title: "打开",
+                tint: TerminalColors.blue,
+                action: { openAction(entry) }
+            )
+            if !entry.is_symlink {
+                HookManagementButton(
+                    title: "编辑",
+                    tint: tint,
+                    action: { editAction(entry) }
+                )
+            }
+            HookManagementButton(
+                title: "删除",
+                tint: TerminalColors.red,
+                action: { deleteAction(entry) }
+            )
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+private struct LocalSkillManagerRootsLine: View {
+    let roots: [String]
+    let discoveredCount: Int
+    let addAction: () -> Void
+    let openAction: (String) -> Void
+    let removeAction: (String) -> Void
+
+    private let tint = Color(red: 0.45, green: 0.62, blue: 1.0)
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .center, spacing: 14) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(tint.opacity(0.18))
+                        .frame(width: 40, height: 40)
+                    Image(systemName: "books.vertical")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(tint)
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(appLocalized: "手动技能根目录")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.white)
+
+                    Text(appLocalized: "自动扫描常见 Agent skills 目录；此处可追加额外根路径")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(.white.opacity(0.58))
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Text(AppLocalization.format("当前发现 %d 个技能", discoveredCount))
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundColor(.white.opacity(0.45))
+                        .padding(.top, 2)
+                }
+
+                Spacer(minLength: 12)
+
+                HookManagementButton(
+                    title: "添加目录",
+                    tint: tint,
+                    action: addAction
+                )
+            }
+
+            if !roots.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(roots, id: \.self) { root in
+                        HStack(spacing: 10) {
+                            Text(verbatim: root)
+                                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                                .foregroundColor(.white.opacity(0.55))
+                                .lineLimit(2)
+                            Spacer(minLength: 8)
+                            HookManagementButton(
+                                title: "打开",
+                                tint: TerminalColors.blue,
+                                action: { openAction(root) }
+                            )
+                            HookManagementButton(
+                                title: "移除",
+                                tint: TerminalColors.amber,
+                                action: { removeAction(root) }
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 16)
     }
 }
 
@@ -6336,7 +7464,7 @@ private struct FloatingPetSizeModePicker: View {
 struct IslandSurfaceModeSelector: View {
     @Binding var mode: IslandSurfaceMode
     var title: String? = "展示模式"
-    var subtitle: String? = "选择 Ping Island 的主显示方式。你随时可以在设置里切换，并立即看到新的渲染效果。"
+    var subtitle: String? = "选择灵动码的主显示方式。你随时可以在设置里切换，并立即看到新的渲染效果。"
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -6512,7 +7640,7 @@ private struct IslandSurfaceModePreviewScene: View {
 
             HStack {
                 Spacer()
-                Text(appLocalized: "顶部 Island")
+                Text(appLocalized: "顶部灵动码")
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundColor(.white.opacity(0.42))
             }

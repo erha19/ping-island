@@ -1,5 +1,5 @@
 import XCTest
-@testable import Ping_Island
+@testable import NotchCode
 
 /// Tests for `SessionPhase.contributesToProcessingSoundEdge`, the predicate
 /// that decides whether a session keeps participating in the

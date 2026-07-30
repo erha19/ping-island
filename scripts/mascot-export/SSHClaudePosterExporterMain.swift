@@ -181,10 +181,10 @@ private struct SSHClaudePosterView: View {
                 HStack(spacing: 14) {
                     Badge(text: "SSH Remote", tint: Color(red: 0.97, green: 0.54, blue: 0.20))
                     Badge(text: "Claude Code", tint: MascotKind.claude.alertColor)
-                    Badge(text: "Ping Island", tint: Color(red: 0.95, green: 0.73, blue: 0.33))
+                    Badge(text: "NotchCode", tint: Color(red: 0.95, green: 0.73, blue: 0.33))
                 }
 
-                Text("Ping Island")
+                Text("NotchCode")
                     .font(.system(size: 134, weight: .black, design: .rounded))
                     .foregroundStyle(Color(red: 0.16, green: 0.12, blue: 0.08))
 
@@ -247,11 +247,11 @@ private struct SSHClaudePosterView: View {
             }
 
             VStack(alignment: .leading, spacing: 16) {
-                Text("把远程 Claude Code 会话带回 Ping Island")
+                Text("把远程 Claude Code 会话带回 NotchCode")
                     .font(.system(size: 56, weight: .bold, design: .rounded))
                     .foregroundStyle(Color(red: 0.18, green: 0.13, blue: 0.10))
 
-                Text("添加 SSH 主机后，Ping Island 会在远程机器上部署 bridge，接住 hooks，再把远程事件稳定转发回本机。")
+                Text("添加 SSH 主机后，NotchCode 会在远程机器上部署 bridge，接住 hooks，再把远程事件稳定转发回本机。")
                     .font(.system(size: 31, weight: .medium, design: .rounded))
                     .foregroundStyle(Color(red: 0.42, green: 0.33, blue: 0.24))
                     .fixedSize(horizontal: false, vertical: true)
@@ -297,7 +297,7 @@ private struct SSHClaudePosterView: View {
 
             FlowStepCard(
                 icon: "menubar.rectangle",
-                title: "Ping Island",
+                title: "NotchCode",
                 detail: "在本机 notch / 菜单栏继续看见 Claude Code 动态"
             )
         }
@@ -350,7 +350,7 @@ private struct SSHClaudePosterView: View {
             Text("ssh dev@gpu-box")
             Text("claude")
             Text("审批 / 提问 / 完成提醒")
-            Text("回到 Ping Island")
+            Text("回到 NotchCode")
         }
         .font(.system(size: 20, weight: .semibold, design: .monospaced))
         .foregroundStyle(Color.white.opacity(0.94))

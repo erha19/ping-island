@@ -13,8 +13,8 @@ NOTES_DIR="$PROJECT_DIR/releases/notes"
 WEBSITE_DIR="${PING_ISLAND_WEBSITE:-$PROJECT_DIR/../PingIsland-website}"
 WEBSITE_PUBLIC="$WEBSITE_DIR/public"
 
-APP_PATH="$EXPORT_PATH/Ping Island.app"
-APP_NAME="PingIsland"
+APP_PATH="$EXPORT_PATH/NotchCode.app"
+APP_NAME="NotchCode"
 NOTARY_PROFILE="${PING_ISLAND_NOTARY_KEYCHAIN_PROFILE:-PingIsland}"
 
 infer_github_repo() {
@@ -90,7 +90,7 @@ else
         if [ -f "$NOTES_PATH" ]; then
             gh release edit "v$VERSION" \
                 --repo "$GITHUB_REPO" \
-                --title "Ping Island v$VERSION" \
+                --title "NotchCode v$VERSION" \
                 --notes-file "$NOTES_PATH"
         fi
     else
@@ -103,15 +103,15 @@ else
         if [ -f "$NOTES_PATH" ]; then
             gh release create "v$VERSION" "${RELEASE_ASSETS[@]}" \
                 --repo "$GITHUB_REPO" \
-                --title "Ping Island v$VERSION" \
+                --title "NotchCode v$VERSION" \
                 --notes-file "$NOTES_PATH"
         else
             gh release create "v$VERSION" "${RELEASE_ASSETS[@]}" \
                 --repo "$GITHUB_REPO" \
-                --title "Ping Island v$VERSION" \
+                --title "NotchCode v$VERSION" \
                 --notes "## Highlights
 
-- Download \`$(basename "$DMG_PATH")\` and install the latest Ping Island release.
+- Download \`$(basename "$DMG_PATH")\` and install the latest NotchCode release.
 
 ## Fixes
 
@@ -119,8 +119,8 @@ else
 
 ## Notes
 
-- Open the DMG, drag Ping Island to Applications, and launch it normally.
-- After installation, Ping Island will automatically check for updates."
+- Open the DMG, drag NotchCode to Applications, and launch it normally.
+- After installation, NotchCode will automatically check for updates."
         fi
     fi
 

@@ -1045,6 +1045,17 @@ struct NotchView: View {
                 .padding(.leading, 14)
             }
 
+            if settings.notchDisplayMode == .detailed,
+               let message = closedCenterMessage {
+                closedCenterMessageLabel(
+                    message,
+                    width: max(120, notchSize.width * 0.34),
+                    alignment: .leading
+                )
+                .padding(.leading, viewModel.openReason == .notification && activeCompletionNotification != nil ? 4 : 10)
+                .layoutPriority(2)
+            }
+
             if shouldShowOpenedHeaderUsage {
                 UsageSummaryStripView(
                     providers: usageSummaryProviders,
@@ -1954,8 +1965,8 @@ private struct NotchAICOSMissionButton: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help(isActive ? "关闭 AI-COS Mission" : "AI-COS Mission")
-        .accessibilityLabel(isActive ? "关闭 AI-COS Mission" : "打开 AI-COS Mission")
+        .help(isActive ? "关闭本地技能" : "本地技能")
+        .accessibilityLabel(isActive ? "关闭本地技能" : "打开本地技能")
         .onHover { hovering in
             withAnimation(.easeOut(duration: 0.12)) {
                 isHovering = hovering

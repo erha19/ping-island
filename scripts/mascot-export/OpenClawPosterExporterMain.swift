@@ -146,7 +146,7 @@ private enum PosterExportError: LocalizedError {
               --output-name <name>  Output filename (default: ping-island-openclaw-poster.png)
               --width <pixels>      Canvas width (default: 2800)
               --height <pixels>     Canvas height (default: 1800)
-              --icon <path>         Ping Island app icon path
+              --icon <path>         NotchCode app icon path
               --logo <path>         OpenClaw logo asset path
               --mascot <path>       OpenClaw mascot asset path
             """
@@ -189,10 +189,10 @@ private struct OpenClawPosterView: View {
                 HStack(spacing: 14) {
                     Badge(text: "OpenClaw", tint: Color(red: 0.90, green: 0.39, blue: 0.26))
                     Badge(text: "Latest Support", tint: Color(red: 0.98, green: 0.61, blue: 0.20))
-                    Badge(text: "Ping Island", tint: Color(red: 0.82, green: 0.54, blue: 0.20))
+                    Badge(text: "NotchCode", tint: Color(red: 0.82, green: 0.54, blue: 0.20))
                 }
 
-                Text("Ping Island")
+                Text("NotchCode")
                     .font(.system(size: 132, weight: .black, design: .rounded))
                     .foregroundStyle(Color(red: 0.16, green: 0.12, blue: 0.08))
 
@@ -255,7 +255,7 @@ private struct OpenClawPosterView: View {
                     .font(.system(size: 54, weight: .bold, design: .rounded))
                     .foregroundStyle(Color(red: 0.18, green: 0.13, blue: 0.10))
 
-                Text("Ping Island 会管理 `~/.openclaw/hooks/ping-island-openclaw`，同步启用 `openclaw.json`，随后从 `~/.openclaw/agents/main/sessions/` 回读会话，避免 UI 只剩下一条入站消息。")
+                Text("NotchCode 会管理 `~/.openclaw/hooks/ping-island-openclaw`，同步启用 `openclaw.json`，随后从 `~/.openclaw/agents/main/sessions/` 回读会话，避免 UI 只剩下一条入站消息。")
                     .font(.system(size: 30, weight: .medium, design: .rounded))
                     .foregroundStyle(Color(red: 0.42, green: 0.33, blue: 0.24))
                     .fixedSize(horizontal: false, vertical: true)

@@ -27,7 +27,7 @@ struct SessionListView: View {
     var body: some View {
         Group {
             if showAICOSMissionPanel {
-                AICOSMissionPanelView(
+                LocalSkillManagerPanelView(
                     sessionMonitor: sessionMonitor,
                     viewModel: viewModel,
                     onClose: { viewModel.setAICOSMissionPanelVisible(false) }

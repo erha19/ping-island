@@ -2,7 +2,7 @@ import AppKit
 import Combine
 import CoreGraphics
 import XCTest
-@testable import Ping_Island
+@testable import NotchCode
 
 final class NotchViewModelTests: XCTestCase {
     func testPresentNotificationChatOpensClosedNotchAndShowsTargetSession() async {

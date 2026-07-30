@@ -7,7 +7,7 @@ PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 SCHEME="${PING_ISLAND_SCHEME:-PingIsland}"
 PROJECT_FILE="${PING_ISLAND_PROJECT_FILE:-PingIsland.xcodeproj}"
 DERIVED_DATA_PATH="${PING_ISLAND_DERIVED_DATA_PATH:-$PROJECT_DIR/build/DerivedData}"
-APP_PATH="$DERIVED_DATA_PATH/Build/Products/Debug/Ping Island.app"
+APP_PATH="$DERIVED_DATA_PATH/Build/Products/Debug/NotchCode.app"
 
 cd "$PROJECT_DIR"
 
@@ -16,7 +16,7 @@ cd "$PROJECT_DIR"
 # Override with PING_ISLAND_CODE_SIGN_IDENTITY="Apple Development" when needed.
 CODE_SIGN_IDENTITY="${PING_ISLAND_CODE_SIGN_IDENTITY:--}"
 
-echo "=== Building Ping Island (Debug) ==="
+echo "=== Building NotchCode (Debug) ==="
 xcodebuild \
     -project "$PROJECT_FILE" \
     -scheme "$SCHEME" \
@@ -33,9 +33,9 @@ if [[ ! -d "$APP_PATH" ]]; then
 fi
 
 # Prefer a single Debug instance for local iteration.
-if pgrep -f "$APP_PATH/Contents/MacOS/Ping Island" >/dev/null 2>&1; then
+if pgrep -f "$APP_PATH/Contents/MacOS/NotchCode" >/dev/null 2>&1; then
     echo "Stopping existing Debug instance..."
-    pkill -f "$APP_PATH/Contents/MacOS/Ping Island" || true
+    pkill -f "$APP_PATH/Contents/MacOS/NotchCode" || true
     sleep 0.4
 fi
 

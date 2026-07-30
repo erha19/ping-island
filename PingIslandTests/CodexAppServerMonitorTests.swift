@@ -1,6 +1,6 @@
 import Foundation
 import XCTest
-@testable import Ping_Island
+@testable import NotchCode
 
 final class CodexAppServerMonitorTests: XCTestCase {
     func testWebSocketTaskAllowsLargeCodexMessages() throws {

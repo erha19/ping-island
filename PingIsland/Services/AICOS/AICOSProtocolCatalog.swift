@@ -91,6 +91,9 @@ enum AICOSProtocolCatalog {
         skills(for: level).map(\.id)
     }
 
+    /// Minimal protocol reading for Investment Decision paste prompts.
+    static let investmentDecisionProtocolSkillIDs: [String] = ["protocol"]
+
     static func skill(id: String) -> AICOSSkillRef? {
         allSkills.first { $0.id == id }
     }

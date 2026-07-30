@@ -1,6 +1,6 @@
 import AppKit
 import XCTest
-@testable import Ping_Island
+@testable import NotchCode
 
 final class AppLaunchConfigurationTests: XCTestCase {
     private func makeDefaults(testName: String = #function) -> UserDefaults {

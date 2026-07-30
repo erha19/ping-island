@@ -241,7 +241,7 @@ enum IslandSurfaceMode: String, CaseIterable, Identifiable {
     var subtitle: String {
         switch self {
         case .notch:
-            return "固定在屏幕顶部中央，沿用 Island 刘海/胶囊体验"
+            return "固定在屏幕顶部中央，沿用灵动码刘海/胶囊体验"
         case .floatingPet:
             return "默认贴近当前激活窗口右下角，可拖动并记住位置"
         }

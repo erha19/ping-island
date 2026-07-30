@@ -1,5 +1,5 @@
 import XCTest
-@testable import Ping_Island
+@testable import NotchCode
 
 final class AICOSMissionPackBuilderTests: XCTestCase {
     func testBuildClipboardPromptIncludesProtocolAndDefaultReadings() {
@@ -55,20 +55,26 @@ final class AICOSMissionPackBuilderTests: XCTestCase {
 
         XCTAssertTrue(pack.clipboardPrompt.contains("Follow AI-COS L3."))
         XCTAssertTrue(pack.clipboardPrompt.contains("Investment Decision"))
-        XCTAssertTrue(pack.clipboardPrompt.contains("/tmp/ai-cos-protocol/PROTOCOL.md"))
-        XCTAssertTrue(pack.clipboardPrompt.contains("\(decisionRoot)/SKILL.md"))
-        XCTAssertTrue(pack.clipboardPrompt.contains("\(decisionRoot)/references/investment-adapter.md"))
+        XCTAssertTrue(pack.clipboardPrompt.contains("1. /tmp/ai-cos-protocol/PROTOCOL.md"))
+        XCTAssertTrue(pack.clipboardPrompt.contains("2. \(decisionRoot)/SKILL.md"))
+        XCTAssertTrue(pack.clipboardPrompt.contains("3. \(decisionRoot)/references/investment-adapter.md"))
+        XCTAssertFalse(pack.clipboardPrompt.contains("Summary:"))
+        XCTAssertFalse(pack.clipboardPrompt.contains("README.md"))
+        XCTAssertFalse(pack.clipboardPrompt.contains("schemas/goal.md"))
         XCTAssertTrue(pack.clipboardPrompt.contains("must be confirmed by the user"))
         XCTAssertTrue(pack.clipboardPrompt.contains("Do not place orders"))
-        XCTAssertTrue(pack.requiredReadingPaths.contains("\(decisionRoot)/SKILL.md"))
-        XCTAssertTrue(pack.requiredReadingPaths.contains("\(decisionRoot)/references/investment-adapter.md"))
+        XCTAssertEqual(pack.requiredReadingPaths, [
+            "/tmp/ai-cos-protocol/PROTOCOL.md",
+            "\(decisionRoot)/SKILL.md",
+            "\(decisionRoot)/references/investment-adapter.md"
+        ])
     }
 
     func testBuildInvestmentDecisionPromptUsesChineseWhenRequested() {
         let draft = AICOSMissionDraft(
             missionID: "mission-invest-zh",
             level: .l3,
-            selectedSkillIDs: ["readme", "protocol"],
+            selectedSkillIDs: ["readme", "protocol", "schema-goal"],
             protocolRootPath: "/tmp/ai-cos-protocol"
         )
 
@@ -80,10 +86,13 @@ final class AICOSMissionPackBuilderTests: XCTestCase {
 
         XCTAssertTrue(pack.clipboardPrompt.contains("请遵循 AI-COS L3。"))
         XCTAssertTrue(pack.clipboardPrompt.contains("投资决策"))
+        XCTAssertFalse(pack.clipboardPrompt.contains("摘要："))
         XCTAssertTrue(pack.clipboardPrompt.contains("重大投资结论必须由用户确认"))
         XCTAssertTrue(pack.clipboardPrompt.contains("不得下单"))
+        XCTAssertEqual(pack.requiredReadingPaths.count, 3)
         XCTAssertTrue(pack.clipboardPrompt.contains("/tmp/decision-skill/SKILL.md"))
         XCTAssertTrue(pack.clipboardPrompt.contains("/tmp/decision-skill/references/investment-adapter.md"))
+        XCTAssertFalse(pack.clipboardPrompt.contains("README.md"))
     }
 
     func testDecisionSkillRootResolutionAndExistence() {
@@ -224,7 +233,7 @@ final class AICOSMissionPackBuilderTests: XCTestCase {
         XCTAssertNil(preferred)
     }
 
-    func testPreferredSessionReturnsNilWithoutWorkspace() throws {
+    func testPreferredSessionFallsBackToBrandedSessionWithoutWorkspace() throws {
         let cursor = try XCTUnwrap(ClientProfileRegistry.managedHookProfile(id: "cursor-hooks"))
         let brandedSession = SessionState(
             sessionId: "claude:cursor-a",
@@ -243,7 +252,13 @@ final class AICOSMissionPackBuilderTests: XCTestCase {
             workspacePath: "",
             sessions: [brandedSession]
         )
-        XCTAssertNil(preferred)
+        XCTAssertEqual(preferred?.sessionId, brandedSession.sessionId)
+    }
+
+    func testZCodeLaunchURLAndBundleIdentifiers() throws {
+        let zcode = try XCTUnwrap(ClientProfileRegistry.managedHookProfile(id: "zcode-hooks"))
+        XCTAssertEqual(zcode.localAppBundleIdentifiers, ["dev.zcode.app"])
+        XCTAssertEqual(AICOSCodexActivator.launchURL(for: zcode)?.absoluteString, "zcode://")
     }
 
     func testMissionHistoryRoundTrip() {
