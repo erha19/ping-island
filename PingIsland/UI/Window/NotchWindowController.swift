@@ -41,6 +41,10 @@ class NotchWindowController: NSWindowController {
             backing: .buffered,
             defer: false
         )
+        notchWindow.shouldAcceptMouseEvents = { [weak viewModel] in
+            guard let viewModel else { return false }
+            return viewModel.status == .opened && !viewModel.shouldHideWindowPresentation
+        }
 
         super.init(window: notchWindow)
 

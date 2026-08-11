@@ -2061,6 +2061,33 @@ final class SessionStateTests: XCTestCase {
         )
     }
 
+    func testRemoteCodexAppIdentityOverridesStaleCLIKind() {
+        let conflictingRemoteIdentity = SessionClientInfo(
+            kind: .codexCLI,
+            profileID: "codex-app",
+            name: "Codex App",
+            origin: "desktop",
+            transport: "ssh-remote",
+            remoteHost: "remote-devbox"
+        )
+
+        let normalized = conflictingRemoteIdentity.normalizedForCodexRouting(
+            sessionId: "019fcb5b-244a-78f3-8727-503dc00ed157"
+        )
+
+        XCTAssertEqual(normalized.kind, .codexApp)
+        XCTAssertEqual(normalized.profileID, "codex-app")
+        XCTAssertEqual(normalized.bundleIdentifier, "com.openai.codex")
+        XCTAssertEqual(normalized.launchURL, "codex://threads/019fcb5b-244a-78f3-8727-503dc00ed157")
+        XCTAssertTrue(normalized.prefersAppNavigation)
+        XCTAssertTrue(
+            SessionLauncher.allowsAppFallback(
+                provider: .codex,
+                clientInfo: normalized
+            )
+        )
+    }
+
     func testTerminalHostedQoderCLIDoesNotFallBackToQoderAppNavigation() {
         let terminalHostedQoderCLI = SessionClientInfo(
             kind: .qoder,

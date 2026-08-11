@@ -1184,6 +1184,33 @@ actor CodexAppServerMonitor {
         .first(where: { $0.hasSuffix(".jsonl") })
     }
 
+    nonisolated static func hasExplicitSubagentMetadata(in thread: [String: Any]) -> Bool {
+        let topLevelValues = [
+            thread["parentThreadId"],
+            thread["parent_thread_id"],
+            thread["subagentDepth"],
+            thread["depth"],
+            thread["agentNickname"],
+            thread["agent_nickname"],
+            thread["agentRole"],
+            thread["agent_role"]
+        ]
+        if topLevelValues.contains(where: { value in
+            if let text = value as? String {
+                return sanitizedThreadText(text) != nil
+            }
+            return value is NSNumber
+        }) {
+            return true
+        }
+
+        guard let source = thread["source"] as? [String: Any],
+              let subagent = source["subagent"] as? [String: Any] else {
+            return false
+        }
+        return subagent["thread_spawn"] is [String: Any]
+    }
+
     private func parseThreadSnapshot(_ thread: [String: Any]) -> CodexThreadSnapshot? {
         guard let threadId = thread["id"] as? String else { return nil }
         guard !Self.shouldIgnoreAuxiliaryThread(thread) else { return nil }
@@ -1349,22 +1376,23 @@ actor CodexAppServerMonitor {
     }
 
     private func parseSubagentMetadata(from thread: [String: Any]) -> ParsedSubagentMetadata? {
+        guard Self.hasExplicitSubagentMetadata(in: thread) else {
+            return nil
+        }
+
         let topLevelNickname = sanitizedText(thread["agentNickname"] as? String)
             ?? sanitizedText(thread["agent_nickname"] as? String)
         let topLevelRole = sanitizedText(thread["agentRole"] as? String)
             ?? sanitizedText(thread["agent_role"] as? String)
-        let topLevelParent = sanitizedText(thread["parentThreadId"] as? String)
+        let explicitTopLevelParent = sanitizedText(thread["parentThreadId"] as? String)
             ?? sanitizedText(thread["parent_thread_id"] as? String)
-            ?? sanitizedText(thread["forkedFromId"] as? String)
+        let forkedFromId = sanitizedText(thread["forkedFromId"] as? String)
             ?? sanitizedText(thread["forked_from_id"] as? String)
         let topLevelDepth = intValue(thread["subagentDepth"]) ?? intValue(thread["depth"])
 
         guard let source = thread["source"] as? [String: Any] else {
-            guard topLevelParent != nil || topLevelDepth != nil || topLevelNickname != nil || topLevelRole != nil else {
-                return nil
-            }
             return ParsedSubagentMetadata(
-                parentThreadId: topLevelParent,
+                parentThreadId: explicitTopLevelParent ?? forkedFromId,
                 depth: topLevelDepth,
                 nickname: topLevelNickname,
                 role: topLevelRole
@@ -1374,7 +1402,9 @@ actor CodexAppServerMonitor {
         let subagent = source["subagent"] as? [String: Any]
         let threadSpawn = subagent?["thread_spawn"] as? [String: Any]
 
-        let parentThreadId = sanitizedText(threadSpawn?["parent_thread_id"] as? String) ?? topLevelParent
+        let parentThreadId = sanitizedText(threadSpawn?["parent_thread_id"] as? String)
+            ?? explicitTopLevelParent
+            ?? forkedFromId
         let depth = intValue(threadSpawn?["depth"]) ?? topLevelDepth
         let nickname = sanitizedText(threadSpawn?["agent_nickname"] as? String) ?? topLevelNickname
         let role = sanitizedText(threadSpawn?["agent_role"] as? String) ?? topLevelRole

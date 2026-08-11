@@ -280,4 +280,164 @@ final class CodexRolloutParserTests: XCTestCase {
         XCTAssertEqual(snapshot?.subagentRole, "explorer")
         XCTAssertEqual(snapshot?.isSubagent, true)
     }
+
+    func testRolloutParserKeepsUserForkAsRegularThread() async throws {
+        let tempDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDirectory) }
+
+        let parentThreadId = "019da119-db3a-7532-8355-5ba0ecf56640"
+        let threadId = "019da11a-353a-79e3-8a52-5f051d2e00b0"
+        let rolloutURL = tempDirectory.appendingPathComponent("rollout-\(threadId).jsonl")
+        let rollout = """
+        {"timestamp":"2026-08-04T10:00:00Z","type":"session_meta","payload":{"id":"\(threadId)","forked_from_id":"\(parentThreadId)","cwd":"/tmp/ping-island-project","originator":"Codex Desktop","source":"vscode","thread_source":"user","title":"User fork"}}
+        {"timestamp":"2026-08-04T10:00:01Z","type":"event_msg","payload":{"type":"user_message","message":"continue from here"}}
+        """
+        try rollout.write(to: rolloutURL, atomically: true, encoding: .utf8)
+
+        let snapshot = await CodexRolloutParser.shared.parseThread(
+            threadId: threadId,
+            fallbackCwd: "/tmp/ping-island-project",
+            clientInfo: SessionClientInfo(
+                kind: .codexApp,
+                profileID: "codex-app",
+                name: "Codex App",
+                bundleIdentifier: "com.openai.codex",
+                sessionFilePath: rolloutURL.path
+            )
+        )
+
+        XCTAssertEqual(snapshot?.name, "User fork")
+        XCTAssertNil(snapshot?.parentThreadId)
+        XCTAssertNil(snapshot?.subagentDepth)
+        XCTAssertFalse(snapshot?.isSubagent ?? true)
+    }
+
+    func testRolloutParserReadsOnlyAppendedBytesAndRebuildsAfterTruncation() async throws {
+        let tempDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDirectory) }
+
+        let threadId = "019fdd31-9f64-7533-8f52-7ac4ed96f001"
+        let rolloutURL = tempDirectory.appendingPathComponent("rollout-\(threadId).jsonl")
+        let initialRollout = """
+        {"timestamp":"2026-08-11T08:00:00Z","type":"session_meta","payload":{"id":"\(threadId)","cwd":"/tmp/ping-island-project","source":"desktop"}}
+        {"timestamp":"2026-08-11T08:00:01Z","type":"event_msg","payload":{"type":"user_message","message":"first request"}}
+
+        """
+        let initialData = try XCTUnwrap(initialRollout.data(using: .utf8))
+        try initialData.write(to: rolloutURL)
+
+        let clientInfo = SessionClientInfo(
+            kind: .codexApp,
+            profileID: "codex-app",
+            name: "Codex App",
+            bundleIdentifier: "com.openai.codex",
+            sessionFilePath: rolloutURL.path
+        )
+
+        let initialSnapshot = await CodexRolloutParser.shared.parseThread(
+            threadId: threadId,
+            fallbackCwd: "/tmp/ping-island-project",
+            clientInfo: clientInfo
+        )
+        let initialMetrics = await CodexRolloutParser.shared.debugReadMetrics(forFilePath: rolloutURL.path)
+
+        XCTAssertEqual(initialSnapshot?.latestUserText, "first request")
+        XCTAssertEqual(initialMetrics?.fullRebuildCount, 1)
+        XCTAssertEqual(initialMetrics?.incrementalReadCount, 0)
+        XCTAssertEqual(initialMetrics?.lastReadByteCount, initialData.count)
+
+        let appendedRollout = """
+        {"timestamp":"2026-08-11T08:00:02Z","type":"event_msg","payload":{"type":"agent_message","phase":"final","message":"first response"}}
+
+        """
+        let appendedData = try XCTUnwrap(appendedRollout.data(using: .utf8))
+        let appendHandle = try FileHandle(forWritingTo: rolloutURL)
+        try appendHandle.seekToEnd()
+        try appendHandle.write(contentsOf: appendedData)
+        try appendHandle.close()
+
+        let appendedSnapshot = await CodexRolloutParser.shared.parseThread(
+            threadId: threadId,
+            fallbackCwd: "/tmp/ping-island-project",
+            clientInfo: clientInfo
+        )
+        let appendedMetrics = await CodexRolloutParser.shared.debugReadMetrics(forFilePath: rolloutURL.path)
+
+        XCTAssertEqual(appendedSnapshot?.latestResponseText, "first response")
+        XCTAssertEqual(appendedSnapshot?.historyItems.count, 2)
+        XCTAssertEqual(appendedMetrics?.fullRebuildCount, 1)
+        XCTAssertEqual(appendedMetrics?.incrementalReadCount, 1)
+        XCTAssertEqual(appendedMetrics?.lastReadByteCount, appendedData.count)
+
+        let replacementRollout = """
+        {"timestamp":"2026-08-11T09:00:00Z","type":"session_meta","payload":{"id":"\(threadId)","cwd":"/tmp/new-project"}}
+        {"timestamp":"2026-08-11T09:00:01Z","type":"event_msg","payload":{"type":"user_message","message":"replacement"}}
+
+        """
+        let replacementData = try XCTUnwrap(replacementRollout.data(using: .utf8))
+        let replacementHandle = try FileHandle(forWritingTo: rolloutURL)
+        try replacementHandle.truncate(atOffset: 0)
+        try replacementHandle.write(contentsOf: replacementData)
+        try replacementHandle.close()
+
+        let replacementSnapshot = await CodexRolloutParser.shared.parseThread(
+            threadId: threadId,
+            fallbackCwd: "/tmp/ping-island-project",
+            clientInfo: clientInfo
+        )
+        let replacementMetrics = await CodexRolloutParser.shared.debugReadMetrics(forFilePath: rolloutURL.path)
+
+        XCTAssertEqual(replacementSnapshot?.cwd, "/tmp/new-project")
+        XCTAssertEqual(replacementSnapshot?.latestUserText, "replacement")
+        XCTAssertNil(replacementSnapshot?.latestResponseText)
+        XCTAssertEqual(replacementSnapshot?.historyItems.count, 1)
+        XCTAssertEqual(replacementMetrics?.fullRebuildCount, 2)
+        XCTAssertEqual(replacementMetrics?.incrementalReadCount, 1)
+        XCTAssertEqual(replacementMetrics?.lastReadByteCount, replacementData.count)
+    }
+
+    func testRolloutParserBoundsRetainedHistoryWhilePreservingLatestState() async throws {
+        let tempDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDirectory) }
+
+        let threadId = "019fdd31-9f64-7533-8f52-7ac4ed96f002"
+        let rolloutURL = tempDirectory.appendingPathComponent("rollout-\(threadId).jsonl")
+        var lines = [
+            "{\"timestamp\":\"2026-08-11T08:00:00Z\",\"type\":\"session_meta\",\"payload\":{\"id\":\"\(threadId)\",\"cwd\":\"/tmp/ping-island-project\",\"source\":\"desktop\"}}"
+        ]
+        lines.append(contentsOf: (0..<650).map { index in
+            "{\"timestamp\":\"2026-08-11T08:00:01Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"user_message\",\"message\":\"request \(index)\"}}"
+        })
+        try (lines.joined(separator: "\n") + "\n").write(
+            to: rolloutURL,
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let snapshot = await CodexRolloutParser.shared.parseThread(
+            threadId: threadId,
+            fallbackCwd: "/tmp/ping-island-project",
+            clientInfo: SessionClientInfo(
+                kind: .codexApp,
+                profileID: "codex-app",
+                name: "Codex App",
+                bundleIdentifier: "com.openai.codex",
+                sessionFilePath: rolloutURL.path
+            )
+        )
+
+        XCTAssertEqual(snapshot?.historyItems.count, CodexRolloutParser.maximumRetainedHistoryItems)
+        XCTAssertEqual(snapshot?.conversationInfo.firstUserMessage, "request 0")
+        XCTAssertEqual(snapshot?.latestUserText, "request 649")
+        guard case .user(let oldestRetainedText) = snapshot?.historyItems.first?.type else {
+            return XCTFail("Expected retained user history")
+        }
+        XCTAssertEqual(oldestRetainedText, "request 150")
+    }
 }

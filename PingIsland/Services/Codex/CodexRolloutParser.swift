@@ -10,10 +10,38 @@ actor CodexRolloutParser {
         let role: String?
     }
 
+    struct DebugReadMetrics: Equatable {
+        let fullRebuildCount: Int
+        let incrementalReadCount: Int
+        let lastReadByteCount: Int
+    }
+
     private struct CachedSnapshot {
         let modificationDate: Date
-        let snapshot: CodexThreadSnapshot
+        let fileIdentifier: UInt64?
+        let fileSize: UInt64
+        let readOffset: UInt64
+        let pendingData: Data
+        let isDiscardingOversizedLine: Bool
+        let nextLineIndex: Int
+        let parsedSnapshot: CodexThreadSnapshot
+        let visibleSnapshot: CodexThreadSnapshot?
+        let metrics: DebugReadMetrics
     }
+
+    private struct ReadResult {
+        let parsedSnapshot: CodexThreadSnapshot?
+        let pendingData: Data
+        let isDiscardingOversizedLine: Bool
+        let nextLineIndex: Int
+        let bytesRead: Int
+    }
+
+    static let maximumRetainedHistoryItems = 500
+    private static let readChunkSize = 64 * 1024
+    private static let maximumBatchLineCount = 128
+    private static let maximumBatchBytes = 512 * 1024
+    private static let maximumJSONLineBytes = 8 * 1024 * 1024
 
     private let fractionalTimestampFormatter: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
@@ -36,34 +64,216 @@ actor CodexRolloutParser {
     ) -> CodexThreadSnapshot? {
         guard let fileURL = resolveRolloutURL(threadId: threadId, clientInfo: clientInfo),
               let attributes = try? FileManager.default.attributesOfItem(atPath: fileURL.path),
-              let modificationDate = attributes[.modificationDate] as? Date else {
+              let modificationDate = attributes[.modificationDate] as? Date,
+              let fileSizeNumber = attributes[.size] as? NSNumber else {
             return nil
         }
 
-        if let cached = cache[fileURL.path], cached.modificationDate == modificationDate {
-            return cached.snapshot
+        let fileSize = fileSizeNumber.uint64Value
+        let fileIdentifier = (attributes[.systemFileNumber] as? NSNumber)?.uint64Value
+
+        if let cached = cache[fileURL.path],
+           cached.modificationDate == modificationDate,
+           cached.fileSize == fileSize {
+            return cached.visibleSnapshot
         }
 
-        guard let raw = try? String(contentsOf: fileURL, encoding: .utf8) else {
-            return nil
-        }
+        let previous = cache[fileURL.path]
+        let canReadIncrementally = previous.map {
+            $0.fileIdentifier == fileIdentifier && fileSize > $0.readOffset
+        } ?? false
+        let startOffset = canReadIncrementally ? (previous?.readOffset ?? 0) : 0
+        let seedSnapshot = canReadIncrementally ? previous?.parsedSnapshot : nil
+        let pendingData = canReadIncrementally ? (previous?.pendingData ?? Data()) : Data()
+        let isDiscardingOversizedLine = canReadIncrementally
+            ? (previous?.isDiscardingOversizedLine ?? false)
+            : false
+        let startingLineIndex = canReadIncrementally ? (previous?.nextLineIndex ?? 0) : 0
 
-        let snapshot = parseRollout(
-            raw,
+        guard let readResult = readRollout(
             fileURL: fileURL,
+            throughOffset: fileSize,
+            startingAt: startOffset,
+            pendingData: pendingData,
+            isDiscardingOversizedLine: isDiscardingOversizedLine,
+            startingLineIndex: startingLineIndex,
+            seedSnapshot: seedSnapshot,
             fallbackThreadId: threadId,
             fallbackCwd: fallbackCwd,
             clientInfo: clientInfo
-        )
-
-        if let snapshot {
-            cache[fileURL.path] = CachedSnapshot(
-                modificationDate: modificationDate,
-                snapshot: snapshot
-            )
+        ), let parsedSnapshot = readResult.parsedSnapshot else {
+            return nil
         }
 
-        return snapshot
+        let visibleSnapshot = parseRollout(
+            "",
+            fileURL: fileURL,
+            fallbackThreadId: threadId,
+            fallbackCwd: fallbackCwd,
+            clientInfo: clientInfo,
+            seedSnapshot: parsedSnapshot,
+            startingLineIndex: readResult.nextLineIndex,
+            applyAuxiliaryFilter: true
+        )
+
+        let previousMetrics = previous?.metrics
+        let metrics = DebugReadMetrics(
+            fullRebuildCount: (previousMetrics?.fullRebuildCount ?? 0) + (canReadIncrementally ? 0 : 1),
+            incrementalReadCount: (previousMetrics?.incrementalReadCount ?? 0) + (canReadIncrementally ? 1 : 0),
+            lastReadByteCount: readResult.bytesRead
+        )
+        cache[fileURL.path] = CachedSnapshot(
+            modificationDate: modificationDate,
+            fileIdentifier: fileIdentifier,
+            fileSize: fileSize,
+            readOffset: fileSize,
+            pendingData: readResult.pendingData,
+            isDiscardingOversizedLine: readResult.isDiscardingOversizedLine,
+            nextLineIndex: readResult.nextLineIndex,
+            parsedSnapshot: parsedSnapshot,
+            visibleSnapshot: visibleSnapshot,
+            metrics: metrics
+        )
+
+        return visibleSnapshot
+    }
+
+    func debugReadMetrics(forFilePath filePath: String) -> DebugReadMetrics? {
+        cache[filePath]?.metrics
+    }
+
+    private func readRollout(
+        fileURL: URL,
+        throughOffset targetOffset: UInt64,
+        startingAt startOffset: UInt64,
+        pendingData initialPendingData: Data,
+        isDiscardingOversizedLine initialDiscardingState: Bool,
+        startingLineIndex: Int,
+        seedSnapshot: CodexThreadSnapshot?,
+        fallbackThreadId: String,
+        fallbackCwd: String,
+        clientInfo: SessionClientInfo?
+    ) -> ReadResult? {
+        guard let handle = try? FileHandle(forReadingFrom: fileURL) else {
+            return nil
+        }
+        defer { try? handle.close() }
+
+        do {
+            try handle.seek(toOffset: startOffset)
+        } catch {
+            return nil
+        }
+
+        var parsedSnapshot = seedSnapshot
+        var pendingData = initialPendingData
+        var isDiscardingOversizedLine = initialDiscardingState
+        var nextLineIndex = startingLineIndex
+        var currentOffset = startOffset
+        var bytesRead = 0
+        var batch: [String] = []
+        var batchBytes = 0
+        var batchStartIndex = nextLineIndex
+
+        func flushBatch() {
+            guard !batch.isEmpty else { return }
+            parsedSnapshot = parseRollout(
+                batch.joined(separator: "\n"),
+                fileURL: fileURL,
+                fallbackThreadId: fallbackThreadId,
+                fallbackCwd: fallbackCwd,
+                clientInfo: clientInfo,
+                seedSnapshot: parsedSnapshot,
+                startingLineIndex: batchStartIndex,
+                applyAuxiliaryFilter: false
+            )
+            batch.removeAll(keepingCapacity: true)
+            batchBytes = 0
+            batchStartIndex = nextLineIndex
+        }
+
+        func appendLine(_ lineData: Data, at index: Int) {
+            guard lineData.count <= Self.maximumJSONLineBytes else {
+                flushBatch()
+                batchStartIndex = nextLineIndex
+                return
+            }
+            if batch.isEmpty {
+                batchStartIndex = index
+            }
+            batch.append(String(decoding: lineData, as: UTF8.self))
+            batchBytes += lineData.count
+            if batch.count >= Self.maximumBatchLineCount || batchBytes >= Self.maximumBatchBytes {
+                flushBatch()
+            }
+        }
+
+        while currentOffset < targetOffset {
+            let remaining = targetOffset - currentOffset
+            let requestedCount = Int(min(UInt64(Self.readChunkSize), remaining))
+            guard requestedCount > 0 else {
+                break
+            }
+
+            let chunk: Data
+            do {
+                guard let nextChunk = try handle.read(upToCount: requestedCount),
+                      !nextChunk.isEmpty else {
+                    break
+                }
+                chunk = nextChunk
+            } catch {
+                return nil
+            }
+
+            currentOffset += UInt64(chunk.count)
+            bytesRead += chunk.count
+            var chunkRemainder = chunk
+
+            if isDiscardingOversizedLine {
+                guard let newlineIndex = chunkRemainder.firstIndex(of: 0x0A) else {
+                    continue
+                }
+                chunkRemainder.removeSubrange(chunkRemainder.startIndex...newlineIndex)
+                isDiscardingOversizedLine = false
+                nextLineIndex += 1
+                batchStartIndex = nextLineIndex
+            }
+
+            pendingData.append(chunkRemainder)
+            while let newlineIndex = pendingData.firstIndex(of: 0x0A) {
+                let lineData = Data(pendingData[..<newlineIndex])
+                pendingData.removeSubrange(pendingData.startIndex...newlineIndex)
+                let lineIndex = nextLineIndex
+                nextLineIndex += 1
+                appendLine(lineData, at: lineIndex)
+            }
+
+            if pendingData.count > Self.maximumJSONLineBytes {
+                pendingData.removeAll(keepingCapacity: false)
+                isDiscardingOversizedLine = true
+                flushBatch()
+                batchStartIndex = nextLineIndex
+            }
+        }
+
+        if !isDiscardingOversizedLine,
+           !pendingData.isEmpty,
+           (try? JSONSerialization.jsonObject(with: pendingData)) is [String: Any] {
+            let lineIndex = nextLineIndex
+            nextLineIndex += 1
+            appendLine(pendingData, at: lineIndex)
+            pendingData.removeAll(keepingCapacity: false)
+        }
+
+        flushBatch()
+        return ReadResult(
+            parsedSnapshot: parsedSnapshot,
+            pendingData: pendingData,
+            isDiscardingOversizedLine: isDiscardingOversizedLine,
+            nextLineIndex: nextLineIndex,
+            bytesRead: bytesRead
+        )
     }
 
     private func parseRollout(
@@ -71,43 +281,53 @@ actor CodexRolloutParser {
         fileURL: URL,
         fallbackThreadId: String,
         fallbackCwd: String,
-        clientInfo: SessionClientInfo?
+        clientInfo: SessionClientInfo?,
+        seedSnapshot: CodexThreadSnapshot? = nil,
+        startingLineIndex: Int = 0,
+        applyAuxiliaryFilter: Bool = true
     ) -> CodexThreadSnapshot? {
-        let lines = content.split(separator: "\n")
-        guard !lines.isEmpty else { return nil }
+        let lines = content.split(separator: "\n", omittingEmptySubsequences: false)
 
-        var resolvedThreadId = fallbackThreadId
-        var resolvedCwd = fallbackCwd.nonEmpty ?? "/"
-        var createdAt: Date?
-        var updatedAt: Date?
-        var latestTurnId: String?
+        var resolvedThreadId = seedSnapshot?.threadId ?? fallbackThreadId
+        var resolvedCwd = seedSnapshot?.cwd ?? fallbackCwd.nonEmpty ?? "/"
+        var createdAt: Date? = seedSnapshot?.createdAt
+        var updatedAt: Date? = seedSnapshot?.updatedAt
+        var latestTurnId: String? = seedSnapshot?.latestTurnId
 
-        var historyItems: [ChatHistoryItem] = []
-        var toolIndexes: [String: Int] = [:]
-        var firstUserMessage: String?
-        var lastMessage: String?
-        var lastMessageRole: String?
-        var lastUserMessageDate: Date?
-        var latestUserText: String?
-        var latestAgentText: String?
-        var latestAgentPhase: String?
-        var latestFinalText: String?
-        var latestFinalPhase: String?
-        var phase: SessionPhase = .idle
-        var isTurnInterrupted = false
-        var intervention: SessionIntervention?
-        var sessionName: String?
-        var origin: String?
-        var originator: String?
-        var threadSource: String?
+        var historyItems: [ChatHistoryItem] = seedSnapshot?.historyItems ?? []
+        var toolIndexes: [String: Int] = Dictionary(uniqueKeysWithValues: historyItems.enumerated().compactMap { index, item in
+            guard case .toolCall = item.type else { return nil }
+            return (item.id, index)
+        })
+        var firstUserMessage: String? = seedSnapshot?.conversationInfo.firstUserMessage
+        var lastMessage: String? = seedSnapshot?.conversationInfo.lastMessage
+        var lastMessageRole: String? = seedSnapshot?.conversationInfo.lastMessageRole
+        var lastUserMessageDate: Date? = seedSnapshot?.conversationInfo.lastUserMessageDate
+        var latestUserText: String? = seedSnapshot?.latestUserText
+        var latestAgentText: String? = seedSnapshot?.latestResponseText
+        var latestAgentPhase: String? = seedSnapshot?.latestResponsePhase
+        var latestFinalText: String? = seedSnapshot?.latestResponsePhase == "commentary"
+            ? nil
+            : seedSnapshot?.latestResponseText
+        var latestFinalPhase: String? = seedSnapshot?.latestResponsePhase == "commentary"
+            ? nil
+            : seedSnapshot?.latestResponsePhase
+        var phase: SessionPhase = seedSnapshot?.phase ?? .idle
+        var isTurnInterrupted = seedSnapshot?.isTurnInterrupted ?? false
+        var intervention: SessionIntervention? = seedSnapshot?.intervention
+        var sessionName: String? = seedSnapshot?.name
+        var origin: String? = seedSnapshot?.clientInfo?.origin
+        var originator: String? = seedSnapshot?.clientInfo?.originator
+        var threadSource: String? = seedSnapshot?.clientInfo?.threadSource
         var subagentMetadata = ParsedSubagentMetadata(
-            parentThreadId: nil,
-            depth: nil,
-            nickname: nil,
-            role: nil
+            parentThreadId: seedSnapshot?.parentThreadId,
+            depth: seedSnapshot?.subagentDepth,
+            nickname: seedSnapshot?.subagentNickname,
+            role: seedSnapshot?.subagentRole
         )
 
-        for (index, line) in lines.enumerated() {
+        for (lineOffset, line) in lines.enumerated() {
+            let index = startingLineIndex + lineOffset
             guard let data = line.data(using: .utf8),
                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
                 continue
@@ -147,6 +367,8 @@ actor CodexRolloutParser {
                 case "user_message":
                     guard let text = normalizedText(payload["message"]) else { continue }
                     isTurnInterrupted = false
+                    latestFinalText = nil
+                    latestFinalPhase = nil
                     if firstUserMessage == nil {
                         firstUserMessage = text
                     }
@@ -186,6 +408,8 @@ actor CodexRolloutParser {
 
                 case "task_started":
                     isTurnInterrupted = false
+                    latestFinalText = nil
+                    latestFinalPhase = nil
                     phase = .processing
 
                 case "task_complete":
@@ -330,6 +554,10 @@ actor CodexRolloutParser {
             }
         }
 
+        if historyItems.count > Self.maximumRetainedHistoryItems {
+            historyItems.removeFirst(historyItems.count - Self.maximumRetainedHistoryItems)
+        }
+
         if intervention?.kind == .question {
             phase = .waitingForInput
         } else if isTurnInterrupted {
@@ -342,12 +570,14 @@ actor CodexRolloutParser {
         }
 
         let preview = latestFinalText ?? latestAgentText ?? latestUserText ?? firstUserMessage
-        guard !CodexAuxiliaryHookFilter.isCodexMemoryMaintenanceThread(
-            cwd: resolvedCwd,
-            title: sessionName,
-            preview: preview
-        ) else {
-            return nil
+        if applyAuxiliaryFilter {
+            guard !CodexAuxiliaryHookFilter.isCodexMemoryMaintenanceThread(
+                cwd: resolvedCwd,
+                title: sessionName,
+                preview: preview
+            ) else {
+                return nil
+            }
         }
 
         let conversationInfo = ConversationInfo(
@@ -359,13 +589,14 @@ actor CodexRolloutParser {
             lastUserMessageDate: lastUserMessageDate
         )
 
-        let prefersCLIContext = clientInfo?.kind == .codexCLI
+        let normalizedClientInfo = clientInfo?.normalizedForCodexRouting(sessionId: resolvedThreadId)
+        let prefersCLIContext = normalizedClientInfo?.kind == .codexCLI
             || origin == "cli"
             || threadSource == "cli"
-            || (clientInfo?.terminalBundleIdentifier?.isEmpty == false
-                && clientInfo?.terminalBundleIdentifier != "com.openai.codex")
-            || clientInfo?.terminalSessionIdentifier?.isEmpty == false
-            || clientInfo?.iTermSessionIdentifier?.isEmpty == false
+            || (normalizedClientInfo?.terminalBundleIdentifier?.isEmpty == false
+                && normalizedClientInfo?.terminalBundleIdentifier != "com.openai.codex")
+            || normalizedClientInfo?.terminalSessionIdentifier?.isEmpty == false
+            || normalizedClientInfo?.iTermSessionIdentifier?.isEmpty == false
 
         if prefersCLIContext,
            let inferredIntervention = Self.pendingMCPApprovalIntervention(from: historyItems) {
@@ -379,28 +610,28 @@ actor CodexRolloutParser {
 
         let resolvedClientInfo = baseClientInfo.merged(with: SessionClientInfo(
             kind: prefersCLIContext ? .codexCLI : .codexApp,
-            name: originator ?? clientInfo?.name,
-            bundleIdentifier: prefersCLIContext ? clientInfo?.bundleIdentifier : (clientInfo?.bundleIdentifier ?? "com.openai.codex"),
+            name: originator ?? normalizedClientInfo?.name,
+            bundleIdentifier: prefersCLIContext ? normalizedClientInfo?.bundleIdentifier : (normalizedClientInfo?.bundleIdentifier ?? "com.openai.codex"),
             launchURL: prefersCLIContext
-                ? clientInfo?.launchURL
-                : (clientInfo?.launchURL ?? SessionClientInfo.appLaunchURL(
-                    bundleIdentifier: clientInfo?.bundleIdentifier ?? "com.openai.codex",
+                ? normalizedClientInfo?.launchURL
+                : (normalizedClientInfo?.launchURL ?? SessionClientInfo.appLaunchURL(
+                    bundleIdentifier: normalizedClientInfo?.bundleIdentifier ?? "com.openai.codex",
                     sessionId: resolvedThreadId,
                     workspacePath: resolvedCwd
                 )),
-            origin: origin ?? clientInfo?.origin ?? (prefersCLIContext ? "cli" : "desktop"),
-            originator: originator ?? clientInfo?.originator,
-            threadSource: threadSource ?? clientInfo?.threadSource,
-            transport: clientInfo?.transport,
-            remoteHost: clientInfo?.remoteHost,
+            origin: origin ?? normalizedClientInfo?.origin ?? (prefersCLIContext ? "cli" : "desktop"),
+            originator: originator ?? normalizedClientInfo?.originator,
+            threadSource: threadSource ?? normalizedClientInfo?.threadSource,
+            transport: normalizedClientInfo?.transport,
+            remoteHost: normalizedClientInfo?.remoteHost,
             sessionFilePath: fileURL.path,
-            terminalBundleIdentifier: clientInfo?.terminalBundleIdentifier,
-            terminalProgram: clientInfo?.terminalProgram,
-            terminalSessionIdentifier: clientInfo?.terminalSessionIdentifier,
-            iTermSessionIdentifier: clientInfo?.iTermSessionIdentifier,
-            tmuxSessionIdentifier: clientInfo?.tmuxSessionIdentifier,
-            tmuxPaneIdentifier: clientInfo?.tmuxPaneIdentifier,
-            processName: clientInfo?.processName
+            terminalBundleIdentifier: normalizedClientInfo?.terminalBundleIdentifier,
+            terminalProgram: normalizedClientInfo?.terminalProgram,
+            terminalSessionIdentifier: normalizedClientInfo?.terminalSessionIdentifier,
+            iTermSessionIdentifier: normalizedClientInfo?.iTermSessionIdentifier,
+            tmuxSessionIdentifier: normalizedClientInfo?.tmuxSessionIdentifier,
+            tmuxPaneIdentifier: normalizedClientInfo?.tmuxPaneIdentifier,
+            processName: normalizedClientInfo?.processName
         ))
 
         return CodexThreadSnapshot(
@@ -465,7 +696,7 @@ actor CodexRolloutParser {
         let forkedFromId = stringValue(payload["forked_from_id"])
 
         guard let sourceObject = sourceValue as? [String: Any] else {
-            if forkedFromId == nil, topLevelNickname == nil, topLevelRole == nil {
+            if topLevelNickname == nil, topLevelRole == nil {
                 return nil
             }
 
@@ -479,6 +710,10 @@ actor CodexRolloutParser {
 
         let subagent = sourceObject["subagent"] as? [String: Any]
         let threadSpawn = subagent?["thread_spawn"] as? [String: Any]
+
+        guard threadSpawn != nil || topLevelNickname != nil || topLevelRole != nil else {
+            return nil
+        }
 
         let parentThreadId = stringValue(threadSpawn?["parent_thread_id"]) ?? forkedFromId
         let depth = intValue(threadSpawn?["depth"])

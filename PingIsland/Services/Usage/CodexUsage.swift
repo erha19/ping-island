@@ -180,14 +180,20 @@ enum CodexUsageLoader {
             return nil
         }
 
+        var legacySnapshot: CodexUsageSnapshot?
         for line in contents.split(separator: "\n", omittingEmptySubsequences: false).reversed() {
             if line.contains("\"token_count\""),
                line.contains("\"rate_limits\""),
                let snapshot = snapshot(from: String(line), filePath: fileURL.path, fallbackTimestamp: modifiedAt) {
-                return snapshot
+                if snapshot.limitID == "codex" {
+                    return snapshot
+                }
+                if snapshot.limitID == nil, case nil = legacySnapshot {
+                    legacySnapshot = snapshot
+                }
             }
         }
-        return nil
+        return legacySnapshot
     }
 
     private nonisolated static func readSuffixText(from fileURL: URL, fileSize: UInt64, maxBytes: Int) -> String? {
