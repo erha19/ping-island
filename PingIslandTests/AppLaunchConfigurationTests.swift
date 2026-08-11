@@ -350,4 +350,25 @@ final class AppLaunchConfigurationTests: XCTestCase {
         XCTAssertFalse(MouseEventReplay.isReplayed(originalNSEvent))
         XCTAssertEqual(replayedNSEvent.type, .leftMouseDown)
     }
+
+    func testNotchPanelPassesBackgroundScrollWithoutStealingInteractiveScroll() {
+        XCTAssertTrue(
+            NotchPanel.shouldPassThroughEvent(
+                .scrollWheel,
+                hitsInteractiveContent: false
+            )
+        )
+        XCTAssertFalse(
+            NotchPanel.shouldPassThroughEvent(
+                .scrollWheel,
+                hitsInteractiveContent: true
+            )
+        )
+        XCTAssertFalse(
+            NotchPanel.shouldPassThroughEvent(
+                .mouseMoved,
+                hitsInteractiveContent: false
+            )
+        )
+    }
 }

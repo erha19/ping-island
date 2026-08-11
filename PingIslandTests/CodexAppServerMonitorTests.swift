@@ -217,4 +217,26 @@ final class CodexAppServerMonitorTests: XCTestCase {
             "path": "/tmp/codex-workspace"
         ]))
     }
+
+    func testUserForkDoesNotCountAsAppServerSubagentWithoutExplicitMetadata() {
+        XCTAssertFalse(CodexAppServerMonitor.hasExplicitSubagentMetadata(in: [
+            "id": "user-fork",
+            "forkedFromId": "parent-thread",
+            "source": "vscode",
+            "threadSource": "user"
+        ]))
+
+        XCTAssertTrue(CodexAppServerMonitor.hasExplicitSubagentMetadata(in: [
+            "id": "spawned-agent",
+            "forkedFromId": "parent-thread",
+            "source": [
+                "subagent": [
+                    "thread_spawn": [
+                        "parent_thread_id": "parent-thread",
+                        "depth": 1
+                    ]
+                ]
+            ]
+        ]))
+    }
 }

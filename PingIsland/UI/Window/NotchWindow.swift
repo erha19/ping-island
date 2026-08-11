@@ -11,6 +11,8 @@ import AppKit
 
 // Use NSPanel subclass for non-activating behavior
 class NotchPanel: NSPanel {
+    var shouldAcceptMouseEvents: () -> Bool = { false }
+
     override init(
         contentRect: NSRect,
         styleMask style: NSWindow.StyleMask,
@@ -66,30 +68,55 @@ class NotchPanel: NSPanel {
 
     // MARK: - Click-through for areas outside the panel content
 
+    static func shouldPassThroughEvent(
+        _ type: NSEvent.EventType,
+        hitsInteractiveContent: Bool
+    ) -> Bool {
+        guard !hitsInteractiveContent else { return false }
+
+        switch type {
+        case .leftMouseDown, .leftMouseUp, .rightMouseDown, .rightMouseUp, .scrollWheel:
+            return true
+        default:
+            return false
+        }
+    }
+
     override func sendEvent(_ event: NSEvent) {
-        // For mouse events, check if we should pass through
-        if event.type == .leftMouseDown || event.type == .leftMouseUp ||
-           event.type == .rightMouseDown || event.type == .rightMouseUp {
-            // Get the location in window coordinates
-            let locationInWindow = event.locationInWindow
-
-            // Check if any view wants to handle this event
-            if let contentView = self.contentView,
-               contentView.hitTest(locationInWindow) == nil {
-                // No view wants this event - pass it through to windows behind
-                // by temporarily ignoring mouse events and re-posting
-                let screenLocation = convertPoint(toScreen: locationInWindow)
-                ignoresMouseEvents = true
-
-                // Re-post the event after a tiny delay
-                DispatchQueue.main.async { [weak self] in
-                    self?.repostMouseEvent(event, at: screenLocation)
-                }
-                return
-            }
+        let locationInWindow = event.locationInWindow
+        let hitsInteractiveContent = contentView?.hitTest(locationInWindow) != nil
+        guard Self.shouldPassThroughEvent(
+            event.type,
+            hitsInteractiveContent: hitsInteractiveContent
+        ) else {
+            super.sendEvent(event)
+            return
         }
 
-        super.sendEvent(event)
+        if event.type == .scrollWheel {
+            guard let copiedEvent = event.cgEvent?.copy() else {
+                super.sendEvent(event)
+                return
+            }
+            ignoresMouseEvents = true
+            MouseEventReplay.mark(copiedEvent)
+            copiedEvent.post(tap: .cghidEventTap)
+
+            // Keep the transparent window out of hit testing while Quartz routes
+            // the copied wheel event, then restore interaction if the Island is
+            // still open. State changes during the delay remain authoritative.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+                guard let self, self.shouldAcceptMouseEvents() else { return }
+                self.ignoresMouseEvents = false
+            }
+            return
+        }
+
+        ignoresMouseEvents = true
+        let screenLocation = convertPoint(toScreen: locationInWindow)
+        DispatchQueue.main.async { [weak self] in
+            self?.repostMouseEvent(event, at: screenLocation)
+        }
     }
 
     private func repostMouseEvent(_ event: NSEvent, at screenLocation: NSPoint) {

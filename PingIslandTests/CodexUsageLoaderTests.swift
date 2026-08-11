@@ -146,6 +146,57 @@ final class CodexUsageLoaderTests: XCTestCase {
         XCTAssertEqual(snapshot?.windows.first?.roundedUsedPercentage, 13)
     }
 
+    func testLoadPrefersGeneralCodexBucketOverNewerModelSpecificBucket() throws {
+        let rootURL = temporaryRootURL(named: "codex-usage-general-bucket")
+        let rolloutURL = rootURL
+            .appendingPathComponent("2026/08/05", isDirectory: true)
+            .appendingPathComponent("rollout-multiple-limit-buckets.jsonl")
+
+        defer {
+            try? FileManager.default.removeItem(at: rootURL)
+        }
+
+        try writeRollout(
+            [
+                rolloutLine(
+                    timestamp: "2026-08-05T11:30:00.000Z",
+                    type: "event_msg",
+                    payload: [
+                        "type": "token_count",
+                        "rate_limits": [
+                            "limit_id": "codex",
+                            "primary": [
+                                "used_percent": 37.0,
+                                "window_minutes": 10_080,
+                            ],
+                        ],
+                    ]
+                ),
+                rolloutLine(
+                    timestamp: "2026-08-05T11:31:00.000Z",
+                    type: "event_msg",
+                    payload: [
+                        "type": "token_count",
+                        "rate_limits": [
+                            "limit_id": "codex_bengalfox",
+                            "limit_name": "GPT-5.3-Codex-Spark",
+                            "primary": [
+                                "used_percent": 0.0,
+                                "window_minutes": 10_080,
+                            ],
+                        ],
+                    ]
+                ),
+            ],
+            to: rolloutURL
+        )
+
+        let snapshot = try CodexUsageLoader.load(fromRootURL: rootURL)
+
+        XCTAssertEqual(snapshot?.limitID, "codex")
+        XCTAssertEqual(snapshot?.windows.first?.roundedUsedPercentage, 37)
+    }
+
     func testLoadFormatsNonStandardWindowLengths() throws {
         let rootURL = temporaryRootURL(named: "codex-usage-labels")
         let rolloutURL = rootURL

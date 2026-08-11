@@ -556,6 +556,33 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
     nonisolated func normalizedForCodexRouting(sessionId: String? = nil) -> SessionClientInfo {
         var normalized = self
 
+        let normalizedProfileID = normalized.profileID?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        let normalizedOrigin = normalized.origin?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        let normalizedThreadSource = normalized.threadSource?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        let hasCodexAppIdentity = normalizedProfileID == "codex-app"
+            || normalized.bundleIdentifier == "com.openai.codex"
+            || normalized.launchURL?.lowercased().hasPrefix("codex://") == true
+        let hasInteractiveTerminalRouting = normalized.terminalBundleIdentifier?.nonEmpty != nil
+            || normalized.terminalProgram?.nonEmpty != nil
+            || normalized.terminalSessionIdentifier?.nonEmpty != nil
+            || normalized.iTermSessionIdentifier?.nonEmpty != nil
+            || normalized.tmuxSessionIdentifier?.nonEmpty != nil
+            || normalized.tmuxPaneIdentifier?.nonEmpty != nil
+        let isExplicitCLIOrigin = normalizedOrigin == "cli" || normalizedThreadSource == "cli"
+
+        if normalized.kind == .codexCLI,
+           hasCodexAppIdentity,
+           !hasInteractiveTerminalRouting,
+           !isExplicitCLIOrigin {
+            normalized.kind = .codexApp
+        }
+
         switch normalized.kind {
         case .codexCLI:
             if normalized.profileID == nil {
