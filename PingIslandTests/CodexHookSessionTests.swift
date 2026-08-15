@@ -3,17 +3,23 @@ import XCTest
 @testable import Ping_Island
 
 final class CodexHookSessionTests: XCTestCase {
-    func testCodexSessionStartWithoutMessageIsKept() async {
+    func testCodexAppSessionStartWithoutMessageStaysIdleUntilPrompt() async {
         let sessionId = "codex-session-start-\(UUID().uuidString)"
         let store = SessionStore.shared
 
         await store.process(.hookReceived(makeCodexSessionStartEvent(sessionId: sessionId)))
 
-        let session = await store.session(for: sessionId)
-        XCTAssertNotNil(session)
-        XCTAssertEqual(session?.provider, .codex)
-        XCTAssertEqual(session?.phase, .processing)
-        XCTAssertEqual(session?.clientInfo.kind, .codexApp)
+        let startedSession = await store.session(for: sessionId)
+        XCTAssertNotNil(startedSession)
+        XCTAssertEqual(startedSession?.provider, .codex)
+        XCTAssertEqual(startedSession?.phase, .idle)
+        XCTAssertEqual(startedSession?.clientInfo.kind, .codexApp)
+        XCTAssertFalse(startedSession?.needsAttention ?? true)
+
+        await store.process(.hookReceived(makeCodexUserPromptSubmitEvent(sessionId: sessionId)))
+
+        let promptedSession = await store.session(for: sessionId)
+        XCTAssertEqual(promptedSession?.phase, .processing)
 
         await store.process(.sessionArchived(sessionId: sessionId))
     }
@@ -23,6 +29,7 @@ final class CodexHookSessionTests: XCTestCase {
         let store = SessionStore.shared
 
         await store.process(.hookReceived(makeCodexSessionStartEvent(sessionId: sessionId)))
+        await store.process(.hookReceived(makeCodexUserPromptSubmitEvent(sessionId: sessionId)))
         await store.process(.hookReceived(
             HookEvent(
                 sessionId: sessionId,
@@ -96,7 +103,7 @@ final class CodexHookSessionTests: XCTestCase {
             sessionId: sessionId,
             cwd: "/tmp/project",
             event: "SessionStart",
-            status: "starting",
+            status: "waiting_for_input",
             provider: .codex,
             clientInfo: SessionClientInfo.codexApp(threadId: sessionId),
             pid: nil,
@@ -106,6 +113,24 @@ final class CodexHookSessionTests: XCTestCase {
             toolUseId: nil,
             notificationType: nil,
             message: nil
+        )
+    }
+
+    private func makeCodexUserPromptSubmitEvent(sessionId: String) -> HookEvent {
+        HookEvent(
+            sessionId: sessionId,
+            cwd: "/tmp/project",
+            event: "UserPromptSubmit",
+            status: "processing",
+            provider: .codex,
+            clientInfo: SessionClientInfo.codexApp(threadId: sessionId),
+            pid: nil,
+            tty: nil,
+            tool: nil,
+            toolInput: nil,
+            toolUseId: nil,
+            notificationType: nil,
+            message: "Investigate the session popup."
         )
     }
 

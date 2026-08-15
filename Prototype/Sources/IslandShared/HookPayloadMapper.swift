@@ -56,9 +56,11 @@ public enum HookPayloadMapper {
             ? nil
             : detectedIntervention
         let status = detectStatus(
+            provider: source,
             eventType: eventType,
             payload: payload,
             clientKind: clientKind,
+            terminalContext: terminalContext,
             intervention: intervention
         )
         let expectsResponse = runtimeConfig.routePromptsToTerminal
@@ -427,9 +429,11 @@ public enum HookPayloadMapper {
     }
 
     private static func detectStatus(
+        provider: AgentProvider,
         eventType: String,
         payload: [String: Any],
         clientKind: String?,
+        terminalContext: TerminalContext,
         intervention: InterventionRequest?
     ) -> SessionStatus? {
         if let text = payload["status"] as? String {
@@ -462,6 +466,14 @@ public enum HookPayloadMapper {
         if clientKind == "codebuddy-cli",
            isCodeBuddyCLIAskUserQuestionNotification(eventType: eventType, payload: payload) {
             return SessionStatus(kind: .waitingForInput)
+        }
+        if provider == .codex,
+           eventType == "SessionStart",
+           clientKind?.contains("cli") != true,
+           terminalContext.tty == nil,
+           terminalContext.terminalProgram == nil,
+           terminalContext.terminalBundleID == nil {
+            return SessionStatus(kind: .idle)
         }
         let lowered = eventType.lowercased()
         if lowered.contains("permission") || lowered.contains("approval") {

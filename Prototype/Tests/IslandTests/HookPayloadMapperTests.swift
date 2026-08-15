@@ -333,6 +333,36 @@ func doesNotInferCodexAppBundleFromCodexCliTerminalProgram() throws {
 }
 
 @Test
+func mapsCodexSessionStartAsIdleLifecycleEvent() throws {
+    let payload = """
+    {
+      "hook_event_name": "SessionStart",
+      "session_id": "codex-new-thread"
+    }
+    """.data(using: .utf8)!
+
+    let envelope = HookPayloadMapper.makeEnvelope(
+        source: .codex,
+        arguments: ["island-bridge", "--source", "codex"],
+        environment: ["PWD": "/tmp/demo"],
+        stdinData: payload
+    )
+
+    #expect(envelope.status?.kind == .idle)
+    #expect(envelope.intervention == nil)
+    #expect(!envelope.expectsResponse)
+
+    let cliEnvelope = HookPayloadMapper.makeEnvelope(
+        source: .codex,
+        arguments: ["island-bridge", "--source", "codex"],
+        environment: ["PWD": "/tmp/demo", "TERM_PROGRAM": "codex"],
+        stdinData: payload
+    )
+
+    #expect(cliEnvelope.status?.kind == .thinking)
+}
+
+@Test
 func mapsClaudeIDEAndRemoteContextFromEnvironment() throws {
     let payload = """
     {

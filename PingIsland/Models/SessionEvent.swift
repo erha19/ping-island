@@ -614,6 +614,15 @@ extension HookEvent {
             return .idle
         }
 
+        // Codex App emits SessionStart as soon as a blank thread is created.
+        // That lifecycle event is not a request for user input; the following
+        // UserPromptSubmit event will move the session into processing.
+        if provider == .codex,
+           clientInfo.kind == .codexApp,
+           event == "SessionStart" {
+            return .idle
+        }
+
         switch status {
         case "waiting_for_approval":
             if shouldSuppressApprovalHandling {
