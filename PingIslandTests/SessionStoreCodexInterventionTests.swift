@@ -340,7 +340,7 @@ final class SessionStoreCodexInterventionTests: XCTestCase {
         await store.process(.sessionArchived(sessionId: sessionId))
     }
 
-    func testCodexFinalIdleSnapshotMarksSessionCompletedReady() async {
+    func testCodexFinalIdleSnapshotRemainsIdleAndLeavesStaleActivePreview() async {
         let sessionId = "codex-final-idle-\(UUID().uuidString)"
         let store = SessionStore.shared
         let startedAt = Date()
@@ -406,10 +406,19 @@ final class SessionStoreCodexInterventionTests: XCTestCase {
         )
 
         let session = await store.session(for: sessionId)
-        XCTAssertEqual(session?.phase, .waitingForInput)
+        XCTAssertEqual(session?.phase, .idle)
         XCTAssertEqual(session?.createdAt, startedAt)
         XCTAssertNil(session?.intervention)
         XCTAssertTrue(session.map(SessionCompletionStateEvaluator.isCompletedReadySession) ?? false)
+
+        guard var staleSession = session else {
+            XCTFail("Expected completed Codex session")
+            return
+        }
+        staleSession.lastActivity = Date().addingTimeInterval(-(31 * 60))
+        XCTAssertFalse(staleSession.needsAttention)
+        XCTAssertTrue(staleSession.shouldAutoArchiveFromPrimaryUI)
+        XCTAssertTrue(IslandExpandedRouteResolver.activePreviewSessions(from: [staleSession]).isEmpty)
 
         await store.process(.sessionArchived(sessionId: sessionId))
     }

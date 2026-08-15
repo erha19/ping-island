@@ -2112,13 +2112,15 @@ actor SessionStore {
         session: SessionState,
         incomingPhase: SessionPhase,
         referenceDate: Date,
-        previousLastActivity: Date?
+        previousLastActivity: Date?,
+        hasCodexTurnCompletionEvidence: Bool = false
     ) -> Bool {
         guard session.phase.isActive else { return false }
         guard incomingPhase == .idle else { return false }
         if session.provider == .codex {
-            // Codex rollout/app-server idle describes a quiet turn, not a finished client session.
-            return true
+            // Shallow Codex idle refreshes can describe a quiet turn. A full snapshot with a
+            // completed assistant reply is stronger evidence that the active turn has finished.
+            return !hasCodexTurnCompletionEvidence
         }
         return sessionHasLiveExecutionEvidence(session)
     }
@@ -3694,7 +3696,11 @@ actor SessionStore {
             createdAt: snapshot.createdAt
         )
         session.createdAt = mergedCreatedAt(existing: session.createdAt, incoming: snapshot.createdAt)
-        let snapshotPhase = resolvedCodexSnapshotPhase(snapshot, currentSession: session)
+        let snapshotPhase = snapshot.phase
+        let hasCodexTurnCompletionEvidence = snapshotPhase == .idle
+            && !snapshot.isTurnInterrupted
+            && snapshot.intervention == nil
+            && snapshot.hasCompletedAssistantReply
 
         session.provider = .codex
         session.clientInfo = normalizedClientInfo(
@@ -3739,7 +3745,8 @@ actor SessionStore {
             session: session,
             incomingPhase: snapshotPhase,
             referenceDate: snapshot.updatedAt,
-            previousLastActivity: existingLastActivity
+            previousLastActivity: existingLastActivity,
+            hasCodexTurnCompletionEvidence: hasCodexTurnCompletionEvidence
         ) {
             // Keep the fresher active state until a stronger non-idle signal arrives.
         } else if shouldPreserveActivePhaseFromStaleCodexRefresh(
@@ -3773,7 +3780,8 @@ actor SessionStore {
             session: session,
             incomingPhase: snapshotPhase,
             referenceDate: snapshot.updatedAt,
-            previousLastActivity: existingLastActivity
+            previousLastActivity: existingLastActivity,
+            hasCodexTurnCompletionEvidence: hasCodexTurnCompletionEvidence
         ) {
             session.lastActivity = existingLastActivity ?? snapshot.updatedAt
         } else {
@@ -3818,27 +3826,6 @@ actor SessionStore {
         if existed {
             publishState()
         }
-    }
-
-    private func resolvedCodexSnapshotPhase(
-        _ snapshot: CodexThreadSnapshot,
-        currentSession: SessionState?
-    ) -> SessionPhase {
-        guard snapshot.phase == .idle else {
-            return snapshot.phase
-        }
-        if case .some = currentSession?.intervention {
-            return snapshot.phase
-        }
-        if case .some = snapshot.intervention {
-            return snapshot.phase
-        }
-        guard !snapshot.isTurnInterrupted,
-              snapshot.hasCompletedAssistantReply else {
-            return snapshot.phase
-        }
-
-        return .waitingForInput
     }
 
     private func shouldPreserveExternalCodexIntervention(
