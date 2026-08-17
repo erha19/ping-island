@@ -2858,7 +2858,9 @@ actor SessionStore {
         guard shouldRecordClaudeFamilyTranscriptUsage(for: session),
               let transcriptPath = session.clientInfo.sessionFilePath?.trimmingCharacters(in: .whitespacesAndNewlines),
               !transcriptPath.isEmpty,
-              let snapshot = try? ClaudeTranscriptUsageLoader.load(from: URL(fileURLWithPath: transcriptPath)) else {
+              let snapshot = await ClaudeTranscriptUsageReader.shared.snapshot(
+                  for: URL(fileURLWithPath: transcriptPath)
+              ) else {
             return
         }
 

@@ -24,6 +24,7 @@ This file is a routing layer for coding agents working in this repo. Keep it sho
 - Main state hub: `PingIsland/Services/State/SessionStore.swift`
 - Session association cache: `PingIsland/Services/State/SessionAssociationStore.swift`
 - Usage/quota snapshots for Claude status-line caches, Claude-family transcript token totals, and Codex rollout logs: `PingIsland/Services/Usage/`
+  - Claude-family transcript token totals are tailed incrementally by `ClaudeTranscriptUsageReader`, which skips reopening unchanged files, rebuilds only after replacement/truncation, defers half-written trailing records, and carries a streaming FNV-1a digest so `AgentUsageStore` deduplication stays stable. Keep cumulative totals for the whole transcript, and do not return to whole-file reparsing for ordinary appends.
 - Native runtime rollout scaffold: `PingIsland/Services/Runtime/`, `PingIsland/Core/FeatureFlags.swift`
 - Session bridge for UI: `PingIsland/Services/Session/SessionMonitor.swift`
 - Notch state and layout: `PingIsland/Core/NotchViewModel.swift`, `PingIsland/UI/Views/NotchView.swift`
