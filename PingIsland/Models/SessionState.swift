@@ -1006,6 +1006,22 @@ struct SessionState: Equatable, Identifiable, Sendable {
         }
     }
 
+    /// Whether the Island holds a prompt that exists nowhere else.
+    ///
+    /// When prompts are routed to the terminal the bridge does not block and the client
+    /// renders its own approval, so the Island's copy is informational. Otherwise the
+    /// bridge is blocking on this decision and the Island is the only surface that can
+    /// resolve it — withholding its presentation would stall the agent behind nothing
+    /// but a closed-notch indicator. Errs toward reporting ownership, since surfacing a
+    /// prompt unnecessarily is recoverable and hiding one is not.
+    ///
+    /// - Parameter routePromptsToTerminal: Effective value of the routing setting.
+    /// - Returns: `true` when this prompt must not be withheld from the user.
+    nonisolated func islandOwnsBlockingPrompt(routePromptsToTerminal: Bool) -> Bool {
+        guard needsApprovalResponse || needsQuestionResponse else { return false }
+        return !(routePromptsToTerminal || suppressInAppPromptControls)
+    }
+
     /// Whether Island should hide prompt response controls and behave as a
     /// notification-only surface for the current prompt.
     nonisolated func shouldSuppressInAppPromptControls(routePromptsToTerminal: Bool) -> Bool {

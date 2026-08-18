@@ -60,6 +60,15 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
     var tmuxPaneIdentifier: String?
     var processName: String?
 
+    /// Bundle identifier of the app hosting this session, when one was recorded.
+    ///
+    /// Terminal- and IDE-hosted sessions record `terminalBundleIdentifier`; app-server
+    /// clients record `bundleIdentifier` instead. `terminalProgram` is deliberately not
+    /// consulted, since it can hold a stale value inherited from the launching shell.
+    var hostBundleIdentifier: String? {
+        terminalBundleIdentifier ?? bundleIdentifier
+    }
+
     nonisolated init(
         kind: SessionClientKind,
         profileID: String? = nil,
