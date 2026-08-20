@@ -29,6 +29,8 @@
 "当前没有正在运行或需要处理的会话时，自动隐藏 Island" = "Automatically hide Island when there are no running sessions or conversations needing attention";
 "智能抑制" = "Smart suppression";
 "当前正在看终端时，不自动弹出通知面板" = "Do not auto-open the notification panel while you are already looking at the terminal";
+"查看会话应用时抑制" = "Suppress while the session's app is focused";
+"正在查看会话所在的终端或 IDE 时，不自动弹出审批、提问与完成面板，也不播放提示音；仅 Island 可回应的审批仍会弹出" = "Do not auto-open approvals, questions or completion panels, and do not play a sound, while you are looking at the terminal or IDE running that session. Approvals only Island can answer still appear.";
 "完成时自动展开会话" = "Auto-open completed sessions";
 "消息完成后自动弹出结果面板；关闭后只保留刘海状态提示和提示音" = "Automatically open the result panel when a reply is finished. When off, keep only the notch status cue and sound.";
 "上下文压缩时自动展开提醒" = "Auto-open context compression alerts";

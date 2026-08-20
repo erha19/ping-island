@@ -426,6 +426,7 @@ final class AppSettingsStore: ObservableObject {
         static let autoHideWhenIdle = "autoHideWhenIdle"
         static let autoCollapseOnLeave = "autoCollapseOnLeave"
         static let smartSuppression = "smartSuppression"
+        static let suppressWhenSessionHostFocused = "suppressWhenSessionHostFocused"
         static let autoOpenCompletionPanel = "autoOpenCompletionPanel"
         static let autoOpenCompactedNotificationPanel = "autoOpenCompactedNotificationPanel"
         static let showAgentDetail = "showAgentDetail"
@@ -685,6 +686,23 @@ final class AppSettingsStore: ObservableObject {
             guard !isBootstrapping else { return }
             defaults.set(smartSuppression, forKey: Keys.smartSuppression)
             recordTelemetrySettingChange(key: Keys.smartSuppression, value: smartSuppression.description)
+        }
+    }
+
+    /// Withhold automatic surfaces while the session's own terminal or IDE is frontmost.
+    ///
+    /// Separate from `smartSuppression`, which asks only whether a terminal window is
+    /// visible somewhere on the current space. Frontmost-host focus is a different
+    /// question with a different blast radius — it also governs approvals, questions and
+    /// sounds — so it is opt-in rather than folded into the existing toggle.
+    @Published var suppressWhenSessionHostFocused: Bool {
+        didSet {
+            guard !isBootstrapping else { return }
+            defaults.set(suppressWhenSessionHostFocused, forKey: Keys.suppressWhenSessionHostFocused)
+            recordTelemetrySettingChange(
+                key: Keys.suppressWhenSessionHostFocused,
+                value: suppressWhenSessionHostFocused.description
+            )
         }
     }
 
@@ -1444,6 +1462,13 @@ final class AppSettingsStore: ObservableObject {
             exists: persistedKeys.contains(Keys.smartSuppression),
             default: true
         ))
+        /// Opt-in: leaving this off keeps every existing install's behaviour unchanged.
+        _suppressWhenSessionHostFocused = Published(initialValue: Self.boolValue(
+            from: defaults,
+            key: Keys.suppressWhenSessionHostFocused,
+            exists: persistedKeys.contains(Keys.suppressWhenSessionHostFocused),
+            default: false
+        ))
         _autoOpenCompletionPanel = Published(initialValue: Self.boolValue(
             from: defaults,
             key: Keys.autoOpenCompletionPanel,
@@ -1697,6 +1722,11 @@ enum AppSettings {
     static var smartSuppression: Bool {
         get { shared.smartSuppression }
         set { shared.smartSuppression = newValue }
+    }
+
+    static var suppressWhenSessionHostFocused: Bool {
+        get { shared.suppressWhenSessionHostFocused }
+        set { shared.suppressWhenSessionHostFocused = newValue }
     }
 
     static var autoOpenCompletionPanel: Bool {

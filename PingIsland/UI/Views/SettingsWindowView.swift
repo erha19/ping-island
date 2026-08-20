@@ -3109,6 +3109,13 @@ private struct SettingsPanelContentView: View {
                 SettingsLineDivider()
 
                 SettingsToggleLine(
+                    title: "查看会话应用时抑制",
+                    subtitle: "正在查看会话所在的终端或 IDE 时，不自动弹出审批、提问与完成面板，也不播放提示音；仅 Island 可回应的审批仍会弹出",
+                    isOn: $settings.suppressWhenSessionHostFocused
+                )
+                SettingsLineDivider()
+
+                SettingsToggleLine(
                     title: "完成时自动展开会话",
                     subtitle: "消息完成后自动弹出结果面板；关闭后只保留刘海状态提示和提示音",
                     isOn: $settings.autoOpenCompletionPanel

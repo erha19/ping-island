@@ -28,6 +28,9 @@ struct ProcessTreeBuilder: Sendable {
     nonisolated static let shared = ProcessTreeBuilder()
     nonisolated static let logger = Logger(subsystem: "com.wudanwu.pingisland", category: "ProcessTree")
 
+    /// Guards the parent-chain walks against cycles in a stale snapshot.
+    private nonisolated static let maximumAncestorWalkDepth = 20
+
     struct SSHCarrierMatch: Equatable, Sendable {
         let sshPid: Int
         let terminalPid: Int
@@ -71,6 +74,41 @@ struct ProcessTreeBuilder: Sendable {
         while current > 1 && depth < 20 {
             guard let info = tree[current] else { break }
             if info.command.lowercased().contains("tmux") {
+                return true
+            }
+            current = info.ppid
+            depth += 1
+        }
+
+        return false
+    }
+
+    /// Whether `ancestorPid` appears anywhere in the parent chain of `pid`.
+    ///
+    /// Resolving a session's host app by process name is unreliable for IDE-hosted
+    /// terminals: the agent binary itself can live inside the IDE's extension
+    /// directory (for example `~/.vscode/extensions/…/claude`), so a name match lands
+    /// on the agent instead of the app, and helper processes match too. Looking for a
+    /// specific pid in the parent chain sidesteps naming altogether.
+    ///
+    /// - Parameters:
+    ///   - ancestorPid: Candidate ancestor, typically a frontmost application's pid.
+    ///   - pid: Process to walk upward from.
+    ///   - tree: Process snapshot to walk.
+    /// - Returns: `true` when `ancestorPid` is a strict ancestor of `pid`.
+    nonisolated func isAncestor(_ ancestorPid: Int, of pid: Int, tree: [Int: ProcessInfo]) -> Bool {
+        guard ancestorPid > 1, pid != ancestorPid else {
+            return false
+        }
+
+        var current = pid
+        var depth = 0
+
+        while current > 1 && depth < Self.maximumAncestorWalkDepth {
+            guard let info = tree[current] else {
+                return false
+            }
+            if info.ppid == ancestorPid {
                 return true
             }
             current = info.ppid

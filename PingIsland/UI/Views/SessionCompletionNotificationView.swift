@@ -182,6 +182,28 @@ final class SessionCompletionNotificationRegistry {
 enum SessionCompletionNotificationPolicy {
     private static let notificationRecencyWindow: TimeInterval = 60
 
+    /// Whether a completion panel should be withheld because the user is already
+    /// looking at the app hosting that session.
+    ///
+    /// Host-focus suppression covers this surface too: the panel is noise when the
+    /// result is already visible in the session's own window. Suppressed notifications
+    /// are consumed rather than deferred, so one does not surface minutes later once the
+    /// user has moved on.
+    ///
+    /// - Parameters:
+    ///   - session: Session the notification belongs to.
+    ///   - suppressionEnabled: Whether the user opted into host-focus suppression.
+    /// - Returns: `true` when the notification should be dropped.
+    static func shouldSuppressForFocusedHost(
+        session: SessionState,
+        suppressionEnabled: Bool
+    ) -> Bool {
+        guard suppressionEnabled else { return false }
+        return TerminalVisibilityDetector.isSessionHostFrontmost(
+            hostBundleIdentifier: session.clientInfo.hostBundleIdentifier
+        )
+    }
+
     static func shouldQueueCompletedNotification(
         for session: SessionState,
         previousPhase: SessionPhase?,

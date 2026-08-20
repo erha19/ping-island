@@ -729,6 +729,34 @@ class NotchViewModel: ObservableObject {
             || (isFullscreenEdgeRevealActive && status != .opened)
     }
 
+    /// Decide whether attention-driven content should stay out of the Island.
+    ///
+    /// Smart suppression exists so the Island does not surface a prompt the user is
+    /// already looking at. When the session's own host app is frontmost — a terminal,
+    /// a tmux pane, or an IDE hosting the agent — its approval UI is already on
+    /// screen, and expanding the Island would split one interaction across two places.
+    ///
+    /// Ownership is the limit on that reasoning. If the bridge is blocking and the
+    /// Island holds the only copy of the prompt, the host is showing nothing to defer
+    /// to, and withholding the presentation would stall the agent behind a closed-notch
+    /// indicator. Suppression applies only to prompts the user can still act on where
+    /// they are already looking.
+    ///
+    /// - Parameters:
+    ///   - suppressionEnabled: Whether the user opted into host-focus suppression.
+    ///   - isSessionHostFocused: Whether the session's own host app is frontmost.
+    ///   - islandOwnsBlockingPrompt: Whether the Island holds the only copy of a prompt
+    ///     the bridge is blocking on.
+    /// - Returns: `true` when the presentation should be withheld.
+    nonisolated static func shouldSuppressManualAttentionPresentation(
+        suppressionEnabled: Bool,
+        isSessionHostFocused: Bool,
+        islandOwnsBlockingPrompt: Bool
+    ) -> Bool {
+        guard !islandOwnsBlockingPrompt else { return false }
+        return suppressionEnabled && isSessionHostFocused
+    }
+
     var closedPresentationOffsetY: CGFloat {
         shouldHideWindowPresentation ? -(closedHeight + 12) : 0
     }
