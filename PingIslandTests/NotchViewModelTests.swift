@@ -920,6 +920,121 @@ final class NotchViewModelTests: XCTestCase {
         )
     }
 
+    // MARK: - Coexist with other notch apps
+
+    func testCoexistModeHidesClosedNotchButStillShowsAttention() async {
+        let original = AppSettings.coexistWithOtherNotchApps
+        defer { AppSettings.coexistWithOtherNotchApps = original }
+
+        let viewModel = await MainActor.run {
+            NotchViewModel(
+                deviceNotchRect: .zero,
+                screenRect: CGRect(x: 0, y: 0, width: 1440, height: 900),
+                windowHeight: 320,
+                hasPhysicalNotch: false,
+                enableEventMonitoring: false,
+                observeSystemEnvironment: false,
+                fullscreenActivityProvider: { _ in false },
+                fullscreenBrowserHiddenProvider: { _ in false },
+                autoHideWhenIdleProvider: { false }
+            )
+        }
+
+        await MainActor.run {
+            AppSettings.coexistWithOtherNotchApps = true
+
+            // Idle/closed yields the notch (window orderOut) to other notch apps.
+            XCTAssertEqual(viewModel.status, .closed)
+            XCTAssertTrue(
+                viewModel.shouldHideWindowPresentation,
+                "Coexist + closed should yield the notch"
+            )
+
+            // Real attention still opens and stays visible (window orderFront).
+            viewModel.notchOpen(reason: .notification)
+            XCTAssertEqual(viewModel.status, .opened)
+            XCTAssertFalse(
+                viewModel.shouldHideWindowPresentation,
+                "Coexist + attention should still show the notch"
+            )
+
+            // After attention resolves, the notch yields again.
+            viewModel.notchClose()
+            XCTAssertEqual(viewModel.status, .closed)
+            XCTAssertTrue(
+                viewModel.shouldHideWindowPresentation,
+                "Closed after attention should yield the notch again"
+            )
+        }
+    }
+
+    func testCoexistModeOffKeepsDefaultClosedPresentation() async {
+        let original = AppSettings.coexistWithOtherNotchApps
+        defer { AppSettings.coexistWithOtherNotchApps = original }
+
+        let viewModel = await MainActor.run {
+            NotchViewModel(
+                deviceNotchRect: .zero,
+                screenRect: CGRect(x: 0, y: 0, width: 1440, height: 900),
+                windowHeight: 320,
+                hasPhysicalNotch: false,
+                enableEventMonitoring: false,
+                observeSystemEnvironment: false,
+                fullscreenActivityProvider: { _ in false },
+                fullscreenBrowserHiddenProvider: { _ in false },
+                autoHideWhenIdleProvider: { false }
+            )
+        }
+
+        await MainActor.run {
+            AppSettings.coexistWithOtherNotchApps = false
+            XCTAssertEqual(viewModel.status, .closed)
+            XCTAssertFalse(
+                viewModel.shouldHideWindowPresentation,
+                "Default (off) closed notch should stay visible — no regression"
+            )
+        }
+    }
+
+    func testCoexistModeToggleFlipsWindowPresentationAtRuntime() async {
+        let original = AppSettings.coexistWithOtherNotchApps
+        defer { AppSettings.coexistWithOtherNotchApps = original }
+
+        let viewModel = await MainActor.run {
+            NotchViewModel(
+                deviceNotchRect: .zero,
+                screenRect: CGRect(x: 0, y: 0, width: 1440, height: 900),
+                windowHeight: 320,
+                hasPhysicalNotch: false,
+                enableEventMonitoring: false,
+                observeSystemEnvironment: false,
+                fullscreenActivityProvider: { _ in false },
+                fullscreenBrowserHiddenProvider: { _ in false },
+                autoHideWhenIdleProvider: { false }
+            )
+        }
+
+        await MainActor.run {
+            AppSettings.coexistWithOtherNotchApps = false
+            XCTAssertFalse(
+                viewModel.shouldHideWindowPresentation,
+                "Off → notch visible"
+            )
+
+            AppSettings.coexistWithOtherNotchApps = true
+            XCTAssertTrue(
+                viewModel.shouldHideWindowPresentation,
+                "Toggle on at runtime → immediately yield (orderOut)"
+            )
+
+            AppSettings.coexistWithOtherNotchApps = false
+            XCTAssertFalse(
+                viewModel.shouldHideWindowPresentation,
+                "Toggle off at runtime → immediately show (orderFront)"
+            )
+        }
+    }
+
     private func makeSession(id: String) -> SessionState {
         SessionState(
             sessionId: id,

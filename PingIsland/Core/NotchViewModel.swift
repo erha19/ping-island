@@ -813,6 +813,7 @@ class NotchViewModel: ObservableObject {
     }
 
     func performDeferredHoverOpenIfNeeded() {
+        guard !AppSettings.coexistWithOtherNotchApps else { return }
         guard isHovering else { return }
         guard status == .closed || status == .popping else { return }
         notchOpen(reason: .hover)
