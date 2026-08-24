@@ -1802,6 +1802,12 @@ final class DetachedIslandWindowController: NSWindowController, NSWindowDelegate
 
     private func isCompletionNotificationPresentable(_ notification: SessionCompletionNotification) -> Bool {
         guard !isCompletionNotificationConsumed(notification) else { return false }
+        guard !SessionCompletionNotificationPolicy.shouldSuppressForFocusedHost(
+            session: notification.session,
+            suppressionEnabled: AppSettings.suppressWhenSessionHostFocused
+        ) else {
+            return false
+        }
         guard SessionCompletionNotificationPolicy.hasRecentNotificationActivity(notification.session) else {
             return false
         }
@@ -2021,11 +2027,11 @@ final class DetachedIslandWindowController: NSWindowController, NSWindowDelegate
 
     private func shouldPlayNotificationSound(for sessions: [SessionState]) async -> Bool {
         for session in sessions {
-            guard let pid = session.pid else {
-                return true
-            }
-
-            let isFocused = await TerminalVisibilityDetector.isSessionFocused(sessionPid: pid)
+            let isFocused = await TerminalVisibilityDetector.isSessionFocused(
+                hostBundleIdentifier: session.clientInfo.hostBundleIdentifier,
+                sessionPid: session.pid,
+                hostFocusResolutionEnabled: AppSettings.suppressWhenSessionHostFocused
+            )
             if !isFocused {
                 return true
             }

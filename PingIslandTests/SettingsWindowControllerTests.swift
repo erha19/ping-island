@@ -15,15 +15,15 @@ final class SettingsWindowControllerTests: XCTestCase {
 
     func testSettingsOptionsAndMascotCopyHaveEnglishTranslations() throws {
         let english = try localizationDictionary(named: "en")
-        let keys = SettingsCategory.allCases.flatMap { [$0.title, $0.subtitle] }
-            + UsageValueMode.allCases.map(\.title)
-            + AutoRoutePromptsIdleDelay.allCases.map(\.title)
-            + FloatingPetSizeMode.allCases.flatMap { [$0.title, $0.subtitle] }
-            + SubagentVisibilityMode.allCases.flatMap { [$0.title, $0.subtitle] }
-            + NotchPetStyle.allCases.flatMap { [$0.title, $0.subtitle] }
-            + MascotClient.allCases.flatMap { [$0.title, $0.subtitle] }
-            + MascotKind.allCases.flatMap { [$0.title, $0.subtitle] }
-            + MascotStatus.allCases.map(\.displayName)
+        var keys: [String] = SettingsCategory.allCases.flatMap { [$0.title, $0.subtitle] }
+        keys += UsageValueMode.allCases.map(\.title)
+        keys += AutoRoutePromptsIdleDelay.allCases.map(\.title)
+        keys += FloatingPetSizeMode.allCases.flatMap { [$0.title, $0.subtitle] }
+        keys += SubagentVisibilityMode.allCases.flatMap { [$0.title, $0.subtitle] }
+        keys += NotchPetStyle.allCases.flatMap { [$0.title, $0.subtitle] }
+        keys += MascotClient.allCases.flatMap { [$0.title, $0.subtitle] }
+        keys += MascotKind.allCases.flatMap { [$0.title, $0.subtitle] }
+        keys += MascotStatus.allCases.map(\.displayName)
 
         for key in Set(keys).filter(containsHanCharacter) {
             let translation = try XCTUnwrap(english[key], "Missing English translation for \(key)")

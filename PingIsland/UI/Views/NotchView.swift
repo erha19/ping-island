@@ -1074,6 +1074,33 @@ struct NotchView: View {
             return
         }
 
+        /// Resolving the host can walk the process tree, so skip it entirely while the
+        /// setting is off.
+        guard settings.suppressWhenSessionHostFocused else {
+            presentManualAttention(for: targetSession)
+            return
+        }
+
+        Task { @MainActor in
+            let isSessionHostFocused = await TerminalVisibilityDetector.isSessionHostFocused(
+                hostBundleIdentifier: targetSession.clientInfo.hostBundleIdentifier,
+                sessionPid: targetSession.pid
+            )
+            guard !NotchViewModel.shouldSuppressManualAttentionPresentation(
+                suppressionEnabled: settings.suppressWhenSessionHostFocused,
+                isSessionHostFocused: isSessionHostFocused,
+                islandOwnsBlockingPrompt: targetSession.islandOwnsBlockingPrompt(
+                    routePromptsToTerminal: settings.effectiveRoutePromptsToTerminal
+                )
+            ) else {
+                return
+            }
+
+            presentManualAttention(for: targetSession)
+        }
+    }
+
+    private func presentManualAttention(for targetSession: SessionState) {
         if targetSession.needsPromptNotification {
             viewModel.presentNotificationAttention()
             return
@@ -1332,6 +1359,12 @@ struct NotchView: View {
 
     private func isCompletionNotificationPresentable(_ notification: SessionCompletionNotification) -> Bool {
         guard !isCompletionNotificationConsumed(notification) else { return false }
+        guard !SessionCompletionNotificationPolicy.shouldSuppressForFocusedHost(
+            session: notification.session,
+            suppressionEnabled: settings.suppressWhenSessionHostFocused
+        ) else {
+            return false
+        }
         guard SessionCompletionNotificationPolicy.hasRecentNotificationActivity(notification.session) else {
             return false
         }
@@ -1577,12 +1610,11 @@ struct NotchView: View {
     /// Returns true if ANY session is not actively focused
     private func shouldPlayNotificationSound(for sessions: [SessionState]) async -> Bool {
         for session in sessions {
-            guard let pid = session.pid else {
-                // No PID means we can't check focus, assume not focused
-                return true
-            }
-
-            let isFocused = await TerminalVisibilityDetector.isSessionFocused(sessionPid: pid)
+            let isFocused = await TerminalVisibilityDetector.isSessionFocused(
+                hostBundleIdentifier: session.clientInfo.hostBundleIdentifier,
+                sessionPid: session.pid,
+                hostFocusResolutionEnabled: settings.suppressWhenSessionHostFocused
+            )
             if !isFocused {
                 return true
             }

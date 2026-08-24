@@ -13,6 +13,23 @@ final class AppSettingsPersistenceTests: XCTestCase {
         return defaults
     }
 
+    /// Host-focus suppression is a separate opt-in from `smartSuppression`, so an
+    /// install that never touches it behaves exactly as before. Guarding the default
+    /// here means a later flip to `true` cannot slip through unnoticed.
+    func testHostFocusSuppressionDefaultsOffAndPersists() {
+        let defaults = makeDefaults()
+        let store = makeStore(defaults: defaults)
+
+        XCTAssertFalse(store.suppressWhenSessionHostFocused)
+        XCTAssertTrue(store.smartSuppression, "the terminal-visibility setting keeps its own default")
+
+        store.suppressWhenSessionHostFocused = true
+        XCTAssertTrue(defaults.bool(forKey: "suppressWhenSessionHostFocused"))
+
+        let reloaded = makeStore(defaults: defaults)
+        XCTAssertTrue(reloaded.suppressWhenSessionHostFocused)
+    }
+
     private func makeStore(defaults: UserDefaults) -> AppSettingsStore {
         let store = AppSettingsStore(defaults: defaults)
         Self.retainedStores.append(store)
