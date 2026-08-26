@@ -19,6 +19,9 @@ struct ClaudeTranscriptUsageAccumulator: Sendable {
     var totals = AgentUsageTokenTotals()
     var latestUsageDate: Date?
     var hash: UInt64 = Self.initialHash
+    /// `message.id` of the last record folded into `totals`, so one API response split
+    /// across several JSONL lines is counted once. See `absorb(line:)`.
+    var lastUsageMessageID: String?
 
     var contentHash: String {
         String(format: "%016llx", hash)
@@ -44,6 +47,21 @@ struct ClaudeTranscriptUsageAccumulator: Sendable {
               let lineTotals = ClaudeTranscriptUsageLoader.usageTotals(from: object) else {
             return
         }
+
+        /// Claude Code writes one assistant response as several JSONL lines, one per
+        /// content block (thinking / text / tool_use), and repeats the identical
+        /// `message.usage` on each. The usage belongs to the API call, not the block,
+        /// so only the first line of a run counts.
+        ///
+        /// Those lines are always consecutive, so remembering the previous id is
+        /// equivalent to a full seen-set here and keeps this accumulator O(1) — it is
+        /// carried across incremental reads by `ClaudeTranscriptUsageReader`, where an
+        /// unbounded set would grow with the transcript.
+        let messageID = ClaudeTranscriptUsageLoader.usageMessageID(from: object)
+        if let messageID, messageID == lastUsageMessageID {
+            return
+        }
+        lastUsageMessageID = messageID
 
         totals.add(lineTotals)
         if let lineDate = ClaudeTranscriptUsageLoader.timestamp(from: object["timestamp"]),
@@ -383,18 +401,38 @@ enum ClaudeTranscriptUsageLoader {
             ?? integer(from: payload["totalTokenCount"])
             ?? integer(from: payload["total"])
             ?? 0
-        let input = baseInput + cacheCreation + cacheRead
-        let resolvedTotal = total > 0 ? total : input + output
+        /// Cache reads are excluded from the billable total on purpose: the same cached
+        /// prompt is re-read on every turn, so summing it counts one document hundreds
+        /// of times. It is carried separately for display and pricing.
+        let resolvedTotal = total > 0 ? total : baseInput + cacheCreation + output
 
-        guard input > 0 || output > 0 || resolvedTotal > 0 else {
+        guard baseInput > 0 || cacheCreation > 0 || cacheRead > 0
+            || output > 0 || resolvedTotal > 0 else {
             return nil
         }
 
         return AgentUsageTokenTotals(
-            input: input,
+            input: baseInput,
+            cacheCreation: cacheCreation,
+            cacheRead: cacheRead,
             output: output,
             total: resolvedTotal
         )
+    }
+
+    /// Identifier of the API response a transcript line belongs to. `nil` for providers
+    /// that omit it, in which case the caller must not deduplicate.
+    fileprivate nonisolated static func usageMessageID(from object: [String: Any]) -> String? {
+        guard let message = object["message"] as? [String: Any] else {
+            return nil
+        }
+        let identifier = (message["id"] as? String)
+            ?? (message["message_id"] as? String)
+            ?? (message["messageId"] as? String)
+        guard let identifier, !identifier.isEmpty else {
+            return nil
+        }
+        return identifier
     }
 
     fileprivate nonisolated static func jsonObject(for line: String) -> [String: Any]? {

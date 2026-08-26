@@ -24,7 +24,14 @@ final class ClaudeTranscriptUsageLoaderTests: XCTestCase {
 
         let snapshot = try XCTUnwrap(ClaudeTranscriptUsageLoader.load(from: transcriptURL))
 
-        XCTAssertEqual(snapshot.tokenTotals, AgentUsageTokenTotals(input: 15, output: 5, total: 20))
+        // Cache tiers stay separate: `input` is the uncached 10, and the 3 cache-read
+        // tokens are excluded from `total` because they are a re-read, not new spend.
+        XCTAssertEqual(
+            snapshot.tokenTotals,
+            AgentUsageTokenTotals(input: 10, cacheCreation: 2, cacheRead: 3, output: 5, total: 17)
+        )
+        XCTAssertEqual(snapshot.tokenTotals.billableInput, 12)
+        XCTAssertEqual(snapshot.tokenTotals.contextProcessed, 15)
         XCTAssertEqual(snapshot.sourceFilePath, transcriptURL.path)
         XCTAssertFalse(snapshot.contentHash.isEmpty)
     }
@@ -87,6 +94,106 @@ final class ClaudeTranscriptUsageLoaderTests: XCTestCase {
         ], to: transcriptURL)
 
         XCTAssertNil(try ClaudeTranscriptUsageLoader.load(from: transcriptURL))
+    }
+
+    func testLoadCountsOneAPIResponseOnceWhenSplitAcrossContentBlocks() throws {
+        let transcriptURL = temporaryTranscriptURL(named: "split-blocks")
+        defer { try? FileManager.default.removeItem(at: transcriptURL.deletingLastPathComponent()) }
+
+        // Claude Code writes one assistant response as several lines, one per content
+        // block, each repeating the same `message.usage`.
+        let usage: [String: Any] = [
+            "input_tokens": 4,
+            "cache_creation_input_tokens": 100,
+            "cache_read_input_tokens": 50_000,
+            "output_tokens": 20,
+        ]
+        try writeJSONLLines([
+            [
+                "timestamp": "2026-04-10T00:00:00.000Z",
+                "type": "assistant",
+                "requestId": "req_1",
+                "message": [
+                    "id": "msg_1",
+                    "role": "assistant",
+                    "content": [["type": "thinking", "thinking": "..."]],
+                    "usage": usage,
+                ],
+            ],
+            [
+                "timestamp": "2026-04-10T00:00:01.000Z",
+                "type": "assistant",
+                "requestId": "req_1",
+                "message": [
+                    "id": "msg_1",
+                    "role": "assistant",
+                    "content": [["type": "tool_use", "id": "t1", "name": "Bash"]],
+                    "usage": usage,
+                ],
+            ],
+        ], to: transcriptURL)
+
+        let snapshot = try XCTUnwrap(ClaudeTranscriptUsageLoader.load(from: transcriptURL))
+
+        XCTAssertEqual(
+            snapshot.tokenTotals,
+            AgentUsageTokenTotals(
+                input: 4,
+                cacheCreation: 100,
+                cacheRead: 50_000,
+                output: 20,
+                total: 124
+            )
+        )
+    }
+
+    func testLoadCountsDistinctResponsesSeparately() throws {
+        let transcriptURL = temporaryTranscriptURL(named: "distinct-responses")
+        defer { try? FileManager.default.removeItem(at: transcriptURL.deletingLastPathComponent()) }
+
+        // Guards the O(1) dedup: only a *repeat* of the previous id collapses. Two real
+        // responses must both count, and an id reappearing after another one still counts.
+        func line(id: String, at timestamp: String) -> [String: Any] {
+            [
+                "timestamp": timestamp,
+                "type": "assistant",
+                "message": [
+                    "id": id,
+                    "role": "assistant",
+                    "usage": ["input_tokens": 5, "output_tokens": 1],
+                ],
+            ]
+        }
+        try writeJSONLLines([
+            line(id: "msg_a", at: "2026-04-10T00:00:00.000Z"),
+            line(id: "msg_b", at: "2026-04-10T00:00:01.000Z"),
+            line(id: "msg_a", at: "2026-04-10T00:00:02.000Z"),
+        ], to: transcriptURL)
+
+        let snapshot = try XCTUnwrap(ClaudeTranscriptUsageLoader.load(from: transcriptURL))
+
+        XCTAssertEqual(snapshot.tokenTotals.input, 15)
+        XCTAssertEqual(snapshot.tokenTotals.output, 3)
+    }
+
+    func testLoadStillCountsEveryLineWhenProviderOmitsMessageID() throws {
+        let transcriptURL = temporaryTranscriptURL(named: "no-message-id")
+        defer { try? FileManager.default.removeItem(at: transcriptURL.deletingLastPathComponent()) }
+
+        // Providers without `message.id` (Qoder and friends) must not be deduplicated,
+        // or their per-line totals would be silently dropped.
+        let line: [String: Any] = [
+            "timestamp": "2026-04-10T00:00:00.000Z",
+            "message": [
+                "role": "assistant",
+                "usage": ["inputTokens": 7, "outputTokens": 4, "totalTokens": 11],
+            ],
+        ]
+        try writeJSONLLines([line, line], to: transcriptURL)
+
+        let snapshot = try XCTUnwrap(ClaudeTranscriptUsageLoader.load(from: transcriptURL))
+
+        XCTAssertEqual(snapshot.tokenTotals, AgentUsageTokenTotals(input: 14, output: 8, total: 22))
     }
 
     func testRecordTranscriptUsageDoesNotDoubleCountRepeatedReads() async throws {

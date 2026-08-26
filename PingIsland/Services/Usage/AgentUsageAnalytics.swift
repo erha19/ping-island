@@ -30,32 +30,85 @@ enum AgentUsageRange: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
+/// Token counters split by billing tier.
+///
+/// The three input tiers are priced very differently (cache reads are an order of
+/// magnitude cheaper than fresh input), and a long agent session re-reads its whole
+/// cached prompt on every turn, so folding them into one number overstates consumption
+/// by orders of magnitude. Keep them apart and let each consumer pick the right one.
 struct AgentUsageTokenTotals: Codable, Equatable, Sendable {
+    /// Fresh input that missed the cache (`input_tokens`).
     var input: Int
+    /// Tokens written into the prompt cache (`cache_creation_input_tokens`).
+    var cacheCreation: Int
+    /// Cached tokens re-read on this turn (`cache_read_input_tokens`). Not new
+    /// consumption: the same context is re-read every turn, so this grows with turn
+    /// count, not with how much was actually sent.
+    var cacheRead: Int
     var output: Int
     var total: Int
 
-    nonisolated init(input: Int = 0, output: Int = 0, total: Int = 0) {
+    nonisolated init(
+        input: Int = 0,
+        cacheCreation: Int = 0,
+        cacheRead: Int = 0,
+        output: Int = 0,
+        total: Int = 0
+    ) {
         self.input = max(0, input)
+        self.cacheCreation = max(0, cacheCreation)
+        self.cacheRead = max(0, cacheRead)
         self.output = max(0, output)
         self.total = max(0, total)
     }
 
+    private enum CodingKeys: String, CodingKey {
+        case input
+        case cacheCreation
+        case cacheRead
+        case output
+        case total
+    }
+
+    /// Legacy ledgers predate the cache tiers; they decode with both cache counters at
+    /// zero rather than failing.
+    nonisolated init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        input = try container.decodeIfPresent(Int.self, forKey: .input) ?? 0
+        cacheCreation = try container.decodeIfPresent(Int.self, forKey: .cacheCreation) ?? 0
+        cacheRead = try container.decodeIfPresent(Int.self, forKey: .cacheRead) ?? 0
+        output = try container.decodeIfPresent(Int.self, forKey: .output) ?? 0
+        total = try container.decodeIfPresent(Int.self, forKey: .total) ?? 0
+    }
+
     nonisolated mutating func add(_ other: AgentUsageTokenTotals) {
         input += max(0, other.input)
+        cacheCreation += max(0, other.cacheCreation)
+        cacheRead += max(0, other.cacheRead)
         output += max(0, other.output)
         total += max(0, other.total)
+    }
+
+    /// Input the provider actually bills as new work. Excludes cache reads.
+    nonisolated var billableInput: Int {
+        input + cacheCreation
+    }
+
+    /// Everything the model read this turn, cache hits included. A diagnostic for how
+    /// large the context has grown, not a consumption figure.
+    nonisolated var contextProcessed: Int {
+        input + cacheCreation + cacheRead
     }
 
     nonisolated var resolvedTotal: Int {
         if total > 0 {
             return total
         }
-        return input + output
+        return billableInput + output
     }
 
     nonisolated var hasTokens: Bool {
-        input > 0 || output > 0 || total > 0
+        input > 0 || cacheCreation > 0 || cacheRead > 0 || output > 0 || total > 0
     }
 }
 
@@ -63,15 +116,21 @@ struct AgentUsageTokenSourceBaseline: Codable, Equatable, Sendable {
     var totals: AgentUsageTokenTotals
     var fileSize: UInt64?
     var contentHash: String?
+    /// Scale `totals` was recorded on. `nil` marks a pre-v2 baseline whose counters are
+    /// not comparable with a freshly parsed snapshot, so it must be re-baselined rather
+    /// than subtracted. Optional, so legacy ledgers keep decoding.
+    var schemaVersion: Int?
 
     nonisolated init(
         totals: AgentUsageTokenTotals,
         fileSize: UInt64? = nil,
-        contentHash: String? = nil
+        contentHash: String? = nil,
+        schemaVersion: Int? = AgentUsageDocument.currentSchemaVersion
     ) {
         self.totals = totals
         self.fileSize = fileSize
         self.contentHash = contentHash
+        self.schemaVersion = schemaVersion
     }
 }
 
@@ -200,18 +259,29 @@ struct AgentUsageDiagnosticsSnapshot: Equatable, Sendable {
 
 struct AgentUsageTokenPricing: Equatable, Sendable {
     let inputUSDPerMillion: Double
+    let cacheWriteUSDPerMillion: Double
+    let cacheReadUSDPerMillion: Double
     let outputUSDPerMillion: Double
     let label: String
 
+    /// Prices each input tier at its own rate. Charging cache reads at the full input
+    /// rate overstates cost by roughly an order of magnitude on long sessions, where
+    /// they dominate the token count.
     nonisolated func estimateUSD(for totals: AgentUsageTokenTotals) -> Double {
         (Double(totals.input) / 1_000_000 * inputUSDPerMillion)
+            + (Double(totals.cacheCreation) / 1_000_000 * cacheWriteUSDPerMillion)
+            + (Double(totals.cacheRead) / 1_000_000 * cacheReadUSDPerMillion)
             + (Double(totals.output) / 1_000_000 * outputUSDPerMillion)
     }
 }
 
 enum AgentUsageCostEstimator {
+    /// Cache tiers follow the published multipliers against the blended input rate:
+    /// writes cost 1.25x, reads 0.1x.
     nonisolated static let blendedCodexClaudePricing = AgentUsageTokenPricing(
         inputUSDPerMillion: 2.375,
+        cacheWriteUSDPerMillion: 2.96875,
+        cacheReadUSDPerMillion: 0.2375,
         outputUSDPerMillion: 14.50,
         label: "Codex / Claude Code 均价"
     )
@@ -583,17 +653,25 @@ struct AgentUsageDailyBucket: Codable, Equatable, Sendable {
 }
 
 struct AgentUsageDocument: Codable, Equatable, Sendable {
+    /// Bumped when stored token counters change meaning. Version 2 split cache
+    /// creation/read out of `input`; anything older holds counters on the merged scale
+    /// and cannot be converted, only discarded.
+    nonisolated static let currentSchemaVersion = 2
+
+    var schemaVersion: Int
     var buckets: [String: AgentUsageDailyBucket]
     var seenToolEventIDs: Set<String>
     var codexTokenBaselines: [String: CodexTokenUsage]
     var tokenBaselines: [String: AgentUsageTokenSourceBaseline]
 
     nonisolated init(
+        schemaVersion: Int = AgentUsageDocument.currentSchemaVersion,
         buckets: [String: AgentUsageDailyBucket] = [:],
         seenToolEventIDs: Set<String> = [],
         codexTokenBaselines: [String: CodexTokenUsage] = [:],
         tokenBaselines: [String: AgentUsageTokenSourceBaseline] = [:]
     ) {
+        self.schemaVersion = schemaVersion
         self.buckets = buckets
         self.seenToolEventIDs = seenToolEventIDs
         self.codexTokenBaselines = codexTokenBaselines
@@ -607,6 +685,7 @@ struct AgentUsageDocument: Codable, Equatable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
+        case schemaVersion
         case buckets
         case seenToolEventIDs
         case codexTokenBaselines
@@ -615,6 +694,7 @@ struct AgentUsageDocument: Codable, Equatable, Sendable {
 
     nonisolated init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        schemaVersion = try container.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
         buckets = try container.decodeIfPresent([String: AgentUsageDailyBucket].self, forKey: .buckets) ?? [:]
         seenToolEventIDs = try container.decodeIfPresent(Set<String>.self, forKey: .seenToolEventIDs) ?? []
         codexTokenBaselines = try container.decodeIfPresent([String: CodexTokenUsage].self, forKey: .codexTokenBaselines) ?? [:]
@@ -629,10 +709,43 @@ struct AgentUsageDocument: Codable, Equatable, Sendable {
                 tokenBaselines[migratedKey] = AgentUsageTokenSourceBaseline(totals: usage.totals)
             }
         }
+
+        migrateTokenLedgerIfNeeded()
+    }
+
+    /// Drops token counters recorded on a pre-v2 scale while keeping everything that is
+    /// still valid: session records, tool counts, activity heatmap.
+    ///
+    /// Baselines are kept rather than deleted. They carry no schema version, which tells
+    /// `recordTokenUsage` to re-baseline against the new scale without emitting a delta;
+    /// deleting them would instead replay each transcript's whole lifetime total into
+    /// today. Their counters are zeroed so a stale scale can never reach a subtraction.
+    nonisolated mutating func migrateTokenLedgerIfNeeded() {
+        guard schemaVersion < Self.currentSchemaVersion else {
+            return
+        }
+
+        for (day, var bucket) in buckets {
+            bucket.tokenTotals = AgentUsageTokenTotals()
+            for (sessionID, var record) in bucket.sessionRecords {
+                record.tokenTotals = AgentUsageTokenTotals()
+                bucket.sessionRecords[sessionID] = record
+            }
+            buckets[day] = bucket
+        }
+
+        for (sourceKey, var baseline) in tokenBaselines {
+            baseline.totals = AgentUsageTokenTotals()
+            baseline.schemaVersion = nil
+            tokenBaselines[sourceKey] = baseline
+        }
+
+        schemaVersion = Self.currentSchemaVersion
     }
 
     nonisolated func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(schemaVersion, forKey: .schemaVersion)
         try container.encode(buckets, forKey: .buckets)
         try container.encode(seenToolEventIDs, forKey: .seenToolEventIDs)
         try container.encode(codexTokenBaselines, forKey: .codexTokenBaselines)
@@ -838,10 +951,22 @@ actor AgentUsageStore {
             contentHash: sourceContentHash
         )
 
+        /// A pre-v2 baseline holds counters on the old merged scale. Subtracting from it
+        /// would clamp every component to zero and silently stop recording, so absorb it
+        /// as a re-baseline: the new value is already stored above, and no delta is
+        /// emitted for the span that straddles the schema change.
+        if let previous, previous.schemaVersion == nil {
+            self.document = document
+            scheduleSave()
+            return
+        }
+
         let delta: AgentUsageTokenTotals
         if let previous, !didReset {
             delta = AgentUsageTokenTotals(
                 input: max(0, currentTotals.input - previous.totals.input),
+                cacheCreation: max(0, currentTotals.cacheCreation - previous.totals.cacheCreation),
+                cacheRead: max(0, currentTotals.cacheRead - previous.totals.cacheRead),
                 output: max(0, currentTotals.output - previous.totals.output),
                 total: max(0, currentTotals.total - previous.totals.total)
             )
@@ -1104,9 +1229,35 @@ actor AgentUsageStore {
         }
         let cutoffKey = Self.dayKey(for: cutoff, calendar: calendar)
         document.buckets = document.buckets.filter { key, _ in key >= cutoffKey }
+        /// Baselines are one entry per transcript and were never pruned, so they grew
+        /// without bound. Drop those whose source file is gone — but only once the map
+        /// is large enough to be worth it: this runs on every recorded update, and the
+        /// check costs one stat per entry.
+        if document.tokenBaselines.count > Self.tokenBaselinePruneThreshold {
+            document.tokenBaselines = document.tokenBaselines.filter { sourceKey, _ in
+                guard let filePath = Self.transcriptPath(fromSourceKey: sourceKey) else {
+                    return true
+                }
+                return FileManager.default.fileExists(atPath: filePath)
+            }
+        }
         if document.seenToolEventIDs.count > 50_000 {
             document.seenToolEventIDs.removeAll(keepingCapacity: true)
         }
+    }
+
+    /// Baseline count above which stale-entry pruning becomes worth its stat calls.
+    private nonisolated static let tokenBaselinePruneThreshold = 512
+
+    /// Last path component of a `transcript|provider|session|path` source key, or `nil`
+    /// for key shapes that carry no path (Codex thread ids).
+    private nonisolated static func transcriptPath(fromSourceKey sourceKey: String) -> String? {
+        let parts = sourceKey.split(separator: "|", omittingEmptySubsequences: false)
+        guard parts.count == 4, parts[0] == "transcript" else {
+            return nil
+        }
+        let path = String(parts[3])
+        return path.hasPrefix("/") ? path : nil
     }
 
     private nonisolated func didTokenSourceReset(

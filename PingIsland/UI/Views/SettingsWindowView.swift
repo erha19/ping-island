@@ -1174,9 +1174,10 @@ private struct AgentUsageSummaryCards: View {
             title: "Token 消耗",
             value: AgentUsageFormat.compactTokenCount(snapshot.tokenTotals.resolvedTotal),
             subtitle: AppLocalization.format(
-                "输入 %@ / 输出 %@",
-                AgentUsageFormat.compactTokenCount(snapshot.tokenTotals.input),
-                AgentUsageFormat.compactTokenCount(snapshot.tokenTotals.output)
+                "输入 %@ / 输出 %@ / 缓存重读 %@",
+                AgentUsageFormat.compactTokenCount(snapshot.tokenTotals.billableInput),
+                AgentUsageFormat.compactTokenCount(snapshot.tokenTotals.output),
+                AgentUsageFormat.compactTokenCount(snapshot.tokenTotals.cacheRead)
             ),
             trendValues: snapshot.trendPoints.map(\.tokenTotal),
             tint: SettingsCategory.analytics.tint
@@ -1878,13 +1879,20 @@ private struct AgentUsageTokenSplitLine: View {
         HStack(spacing: 16) {
             AgentUsageTokenPill(
                 title: "输入 Token",
-                value: AgentUsageFormat.compactTokenCount(totals.input),
+                value: AgentUsageFormat.compactTokenCount(totals.billableInput),
                 tint: TerminalColors.blue
             )
             AgentUsageTokenPill(
                 title: "输出 Token",
                 value: AgentUsageFormat.compactTokenCount(totals.output),
                 tint: TerminalColors.amber
+            )
+            /// Cache reads are re-reads of context already sent, so they sit apart from
+            /// the billable columns rather than inflating the input pill.
+            AgentUsageTokenPill(
+                title: "缓存重读",
+                value: AgentUsageFormat.compactTokenCount(totals.cacheRead),
+                tint: TerminalColors.green
             )
         }
         .padding(.vertical, 12)

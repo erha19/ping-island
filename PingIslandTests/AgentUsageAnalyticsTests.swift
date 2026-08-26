@@ -225,6 +225,128 @@ final class AgentUsageAnalyticsTests: XCTestCase {
         XCTAssertEqual(bucket.tokenTotals.resolvedTotal, 15)
     }
 
+    func testLegacyDocumentDropsPreV2TokenCountersButKeepsActivityHistory() throws {
+        // A pre-v2 ledger: no schemaVersion, and token counters recorded on the old
+        // merged scale where cache reads were folded into `input`.
+        let data = try XCTUnwrap(
+            """
+            {
+              "buckets": {
+                "2026-04-10": {
+                  "day": "2026-04-10",
+                  "sessionIDsByAgent": {"Claude Code": ["claude-1"]},
+                  "toolCounts": {"Read": 4},
+                  "tokenTotals": {"input": 81756491, "output": 398236, "total": 82154727},
+                  "activityCount": 7
+                }
+              },
+              "seenToolEventIDs": [],
+              "codexTokenBaselines": {},
+              "tokenBaselines": {
+                "transcript|claude|s1|/tmp/does-not-exist.jsonl": {
+                  "totals": {"input": 79458365, "output": 388469, "total": 79846834},
+                  "fileSize": 1024,
+                  "contentHash": "abc"
+                }
+              }
+            }
+            """.data(using: .utf8)
+        )
+
+        let document = try JSONDecoder().decode(AgentUsageDocument.self, from: data)
+
+        XCTAssertEqual(document.schemaVersion, AgentUsageDocument.currentSchemaVersion)
+
+        // Inflated token counters are gone...
+        let bucket = try XCTUnwrap(document.buckets["2026-04-10"])
+        XCTAssertEqual(bucket.tokenTotals, AgentUsageTokenTotals())
+
+        // ...while the parts that were never wrong survive.
+        XCTAssertEqual(bucket.sessionIDsByAgent["Claude Code"], ["claude-1"])
+        XCTAssertEqual(bucket.toolCounts["Read"], 4)
+        XCTAssertEqual(bucket.activityCount, 7)
+
+        // The baseline is retained but marked legacy, so the next read re-baselines
+        // instead of replaying the transcript's lifetime total into today.
+        let baseline = try XCTUnwrap(
+            document.tokenBaselines["transcript|claude|s1|/tmp/does-not-exist.jsonl"]
+        )
+        XCTAssertNil(baseline.schemaVersion)
+        XCTAssertEqual(baseline.totals, AgentUsageTokenTotals())
+    }
+
+    func testLegacyBaselineIsRebaselinedWithoutEmittingADelta() async throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let now = Date(timeIntervalSince1970: 1_775_520_000)
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ping-island-usage-migration-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+        let fileURL = rootURL.appendingPathComponent("usage.json")
+
+        let legacy = """
+        {
+          "buckets": {},
+          "seenToolEventIDs": [],
+          "codexTokenBaselines": {},
+          "tokenBaselines": {
+            "transcript|claude|s1|\(rootURL.path)/session.jsonl": {
+              "totals": {"input": 79458365, "output": 388469, "total": 79846834}
+            }
+          }
+        }
+        """
+        try legacy.write(to: fileURL, atomically: true, encoding: .utf8)
+        FileManager.default.createFile(atPath: rootURL.appendingPathComponent("session.jsonl").path, contents: Data("{}\n".utf8))
+
+        let store = AgentUsageStore(fileURL: fileURL, calendar: calendar)
+        let clientInfo = SessionClientInfo(kind: .claudeCode, profileID: "claude", name: "Claude Code")
+
+        // First read after the upgrade must record nothing: subtracting a stale scale
+        // would clamp to zero anyway, and treating it as a fresh source would dump the
+        // whole transcript into today.
+        await store.recordTokenUsage(
+            provider: .claude,
+            clientInfo: clientInfo,
+            sessionID: "s1",
+            sourceKey: "transcript|claude|s1|\(rootURL.path)/session.jsonl",
+            totals: AgentUsageTokenTotals(input: 100, cacheCreation: 20, cacheRead: 5_000, output: 30, total: 150),
+            capturedAt: now,
+            now: now
+        )
+        let afterMigration = await store.snapshot(range: .today, now: now)
+        XCTAssertEqual(afterMigration.tokenTotals, AgentUsageTokenTotals())
+
+        // The next read is a normal delta against the re-established baseline.
+        await store.recordTokenUsage(
+            provider: .claude,
+            clientInfo: clientInfo,
+            sessionID: "s1",
+            sourceKey: "transcript|claude|s1|\(rootURL.path)/session.jsonl",
+            totals: AgentUsageTokenTotals(input: 150, cacheCreation: 20, cacheRead: 9_000, output: 45, total: 215),
+            capturedAt: now,
+            now: now
+        )
+        let afterDelta = await store.snapshot(range: .today, now: now)
+        XCTAssertEqual(afterDelta.tokenTotals.input, 50)
+        XCTAssertEqual(afterDelta.tokenTotals.cacheRead, 4_000)
+        XCTAssertEqual(afterDelta.tokenTotals.output, 15)
+    }
+
+    func testCostEstimatorPricesCacheReadsBelowFreshInput() {
+        // One million cache-read tokens must not cost the same as one million fresh
+        // input tokens; that equivalence is what inflated the spend estimate.
+        let cacheHeavy = AgentUsageTokenTotals(cacheRead: 1_000_000)
+        let freshInput = AgentUsageTokenTotals(input: 1_000_000)
+
+        let cacheCost = AgentUsageCostEstimator.estimateUSD(for: cacheHeavy)
+        let inputCost = AgentUsageCostEstimator.estimateUSD(for: freshInput)
+
+        XCTAssertEqual(cacheCost, inputCost * 0.1, accuracy: 0.0001)
+        XCTAssertLessThan(cacheCost, inputCost)
+    }
+
     func testSnapshotRankingsAreLimitedToTopFive() {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
