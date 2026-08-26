@@ -10,6 +10,24 @@ import Combine
 import SwiftUI
 
 class NotchWindowController: NSWindowController {
+    enum WindowOrderAction: Equatable {
+        case none
+        case orderFront
+        case restoreOnActiveSpace
+    }
+
+    enum WindowPresentationUpdateSource: Equatable {
+        case stateChange
+        case environmentChange
+        case activeSpaceChange
+    }
+
+    struct WindowPresentationPlan: Equatable {
+        let orderAction: WindowOrderAction
+        let ignoresMouseEvents: Bool
+        let shouldActivateApplication: Bool
+    }
+
     let viewModel: NotchViewModel
     private let fullWindowFrame: NSRect
     private var cancellables = Set<AnyCancellable>()
@@ -60,7 +78,11 @@ class NotchWindowController: NSWindowController {
             .receive(on: DispatchQueue.main)
             .sink { [weak self, weak notchWindow, weak viewModel] _ in
                 guard let self, let notchWindow, let viewModel else { return }
-                self.updateWindowPresentation(window: notchWindow, viewModel: viewModel)
+                self.updateWindowPresentation(
+                    window: notchWindow,
+                    viewModel: viewModel,
+                    updateSource: .stateChange
+                )
             }
             .store(in: &cancellables)
 
@@ -68,7 +90,11 @@ class NotchWindowController: NSWindowController {
             .receive(on: DispatchQueue.main)
             .sink { [weak self, weak notchWindow, weak viewModel] _ in
                 guard let self, let notchWindow, let viewModel else { return }
-                self.updateWindowPresentation(window: notchWindow, viewModel: viewModel)
+                self.updateWindowPresentation(
+                    window: notchWindow,
+                    viewModel: viewModel,
+                    updateSource: .stateChange
+                )
             }
             .store(in: &cancellables)
 
@@ -76,7 +102,11 @@ class NotchWindowController: NSWindowController {
             .receive(on: DispatchQueue.main)
             .sink { [weak self, weak notchWindow, weak viewModel] _ in
                 guard let self, let notchWindow, let viewModel else { return }
-                self.updateWindowPresentation(window: notchWindow, viewModel: viewModel)
+                self.updateWindowPresentation(
+                    window: notchWindow,
+                    viewModel: viewModel,
+                    updateSource: .environmentChange
+                )
             }
             .store(in: &cancellables)
 
@@ -84,7 +114,11 @@ class NotchWindowController: NSWindowController {
             .receive(on: DispatchQueue.main)
             .sink { [weak self, weak notchWindow, weak viewModel] _ in
                 guard let self, let notchWindow, let viewModel else { return }
-                self.updateWindowPresentation(window: notchWindow, viewModel: viewModel)
+                self.updateWindowPresentation(
+                    window: notchWindow,
+                    viewModel: viewModel,
+                    updateSource: .environmentChange
+                )
             }
             .store(in: &cancellables)
 
@@ -92,7 +126,11 @@ class NotchWindowController: NSWindowController {
             .receive(on: DispatchQueue.main)
             .sink { [weak self, weak notchWindow, weak viewModel] _ in
                 guard let self, let notchWindow, let viewModel else { return }
-                self.updateWindowPresentation(window: notchWindow, viewModel: viewModel)
+                self.updateWindowPresentation(
+                    window: notchWindow,
+                    viewModel: viewModel,
+                    updateSource: .environmentChange
+                )
             }
             .store(in: &cancellables)
 
@@ -100,7 +138,11 @@ class NotchWindowController: NSWindowController {
             .receive(on: DispatchQueue.main)
             .sink { [weak self, weak notchWindow, weak viewModel] _ in
                 guard let self, let notchWindow, let viewModel else { return }
-                self.updateWindowPresentation(window: notchWindow, viewModel: viewModel)
+                self.updateWindowPresentation(
+                    window: notchWindow,
+                    viewModel: viewModel,
+                    updateSource: .environmentChange
+                )
             }
             .store(in: &cancellables)
 
@@ -108,23 +150,11 @@ class NotchWindowController: NSWindowController {
             .receive(on: DispatchQueue.main)
             .sink { [weak self, weak notchWindow, weak viewModel] _ in
                 guard let self, let notchWindow, let viewModel else { return }
-                self.updateWindowPresentation(window: notchWindow, viewModel: viewModel)
-            }
-            .store(in: &cancellables)
-
-        viewModel.$isFullscreenBrowserHiddenActive
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self, weak notchWindow, weak viewModel] _ in
-                guard let self, let notchWindow, let viewModel else { return }
-                self.updateWindowPresentation(window: notchWindow, viewModel: viewModel)
-            }
-            .store(in: &cancellables)
-
-        viewModel.$isIdleAutoHiddenActive
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self, weak notchWindow, weak viewModel] _ in
-                guard let self, let notchWindow, let viewModel else { return }
-                self.updateWindowPresentation(window: notchWindow, viewModel: viewModel)
+                self.updateWindowPresentation(
+                    window: notchWindow,
+                    viewModel: viewModel,
+                    updateSource: .stateChange
+                )
             }
             .store(in: &cancellables)
 
@@ -133,13 +163,34 @@ class NotchWindowController: NSWindowController {
             .sink { [weak self, weak notchWindow, weak viewModel] mode in
                 guard let self, let notchWindow, let viewModel else { return }
                 viewModel.updateQuietBackgroundPresentationState(isActive: mode == .quietBackground)
-                self.updateWindowPresentation(window: notchWindow, viewModel: viewModel)
+                self.updateWindowPresentation(
+                    window: notchWindow,
+                    viewModel: viewModel,
+                    updateSource: .environmentChange
+                )
+            }
+            .store(in: &cancellables)
+
+        NSWorkspace.shared.notificationCenter
+            .publisher(for: NSWorkspace.activeSpaceDidChangeNotification)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self, weak notchWindow, weak viewModel] _ in
+                guard let self, let notchWindow, let viewModel else { return }
+                self.updateWindowPresentation(
+                    window: notchWindow,
+                    viewModel: viewModel,
+                    updateSource: .activeSpaceChange
+                )
             }
             .store(in: &cancellables)
 
         // Start with ignoring mouse events (closed state)
         notchWindow.ignoresMouseEvents = true
-        updateWindowPresentation(window: notchWindow, viewModel: viewModel)
+        updateWindowPresentation(
+            window: notchWindow,
+            viewModel: viewModel,
+            updateSource: .stateChange
+        )
 
         // Perform boot animation after a brief delay
         if performBootAnimation {
@@ -153,7 +204,11 @@ class NotchWindowController: NSWindowController {
         fatalError("init(coder:) has not been implemented")
     }
 
-    private func updateWindowPresentation(window: NotchPanel, viewModel: NotchViewModel) {
+    private func updateWindowPresentation(
+        window: NotchPanel,
+        viewModel: NotchViewModel,
+        updateSource: WindowPresentationUpdateSource
+    ) {
         let shouldHideWindow = viewModel.shouldHideWindowPresentation
 
         if shouldHideWindow {
@@ -168,19 +223,64 @@ class NotchWindowController: NSWindowController {
             window.setFrame(fullWindowFrame, display: true)
         }
 
-        if !window.isVisible {
+        let plan = Self.windowPresentationPlan(
+            status: viewModel.status,
+            openReason: viewModel.openReason,
+            isVisible: window.isVisible,
+            isOnActiveSpace: window.isOnActiveSpace,
+            updateSource: updateSource
+        )
+
+        switch plan.orderAction {
+        case .none:
+            break
+        case .orderFront:
             window.orderFront(nil)
+        case .restoreOnActiveSpace:
+            // Clear stale visible ordering before restoring the all-Spaces panel.
+            if window.isVisible {
+                window.orderOut(nil)
+            }
+            window.orderFrontRegardless()
         }
 
-        switch viewModel.status {
-        case .opened:
-            window.ignoresMouseEvents = false
-            if viewModel.openReason != .notification {
-                NSApp.activate(ignoringOtherApps: false)
-                window.makeKey()
-            }
-        case .closed, .popping:
-            window.ignoresMouseEvents = true
+        window.ignoresMouseEvents = plan.ignoresMouseEvents
+        if plan.shouldActivateApplication {
+            NSApp.activate(ignoringOtherApps: false)
+            window.makeKey()
         }
+    }
+
+    static func windowPresentationPlan(
+        status: NotchStatus,
+        openReason: NotchOpenReason,
+        isVisible: Bool,
+        isOnActiveSpace: Bool,
+        updateSource: WindowPresentationUpdateSource
+    ) -> WindowPresentationPlan {
+        let orderAction: WindowOrderAction
+        if updateSource == .activeSpaceChange && !isOnActiveSpace {
+            orderAction = .restoreOnActiveSpace
+        } else {
+            orderAction = isVisible ? .none : .orderFront
+        }
+
+        let isNotificationOpen: Bool
+        if case .notification = openReason {
+            isNotificationOpen = true
+        } else {
+            isNotificationOpen = false
+        }
+
+        // Space recovery must preserve the foreground app in the newly active Space.
+        let shouldActivateApplication = status == .opened
+            && !isNotificationOpen
+            && updateSource == .stateChange
+
+        return WindowPresentationPlan(
+            orderAction: orderAction,
+            ignoresMouseEvents: status != .opened,
+            shouldActivateApplication: shouldActivateApplication
+        )
     }
 }
