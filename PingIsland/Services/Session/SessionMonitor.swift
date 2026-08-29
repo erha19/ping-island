@@ -849,7 +849,8 @@ class SessionMonitor: ObservableObject {
         let primaryVisibleSessions = sessions.filter {
             !$0.shouldHideFromPrimaryUI && $0.shouldDisplaySubagent(in: visibilityMode)
         }
-        let dedupedSessions = deduplicateSameProjectClaudeSessions(from: primaryVisibleSessions)
+        let dedupedSessions = SameWorkspaceSessionSupersession
+            .removingSupersededSessions(from: primaryVisibleSessions)
         return dedupedSessions.filter { candidate in
             guard shouldCheckDuplicateVisibility(for: candidate) else {
                 return true
@@ -859,37 +860,6 @@ class SessionMonitor: ObservableObject {
                 candidate.shouldHideAsDuplicateCodexPlaceholder(comparedTo: other)
                     || candidate.shouldHideAsDuplicateOpenCodeChildSession(comparedTo: other)
             }
-        }
-    }
-
-    /// When Claude is resumed or restarted, concurrent hook events can create multiple
-    /// sessions for the same project before endOrphanedSessions has a chance to clean up.
-    /// Keep only the most recently active session per provider + cwd pair.
-    private func deduplicateSameProjectClaudeSessions(
-        from sessions: [SessionState]
-    ) -> [SessionState] {
-        var bestByKey: [String: SessionState] = [:]
-        var order: [String] = []
-
-        for session in sessions {
-            guard session.provider == .claude else { continue }
-            let cwd = session.cwd
-            guard !cwd.isEmpty else { continue }
-            let key = "\(session.provider.rawValue):\(cwd)"
-            if let existing = bestByKey[key] {
-                if session.lastActivity > existing.lastActivity {
-                    bestByKey[key] = session
-                }
-            } else {
-                bestByKey[key] = session
-                order.append(key)
-            }
-        }
-
-        var keep = Set(bestByKey.values.map(\.sessionId))
-        return sessions.filter { session in
-            guard session.provider == .claude, !session.cwd.isEmpty else { return true }
-            return keep.contains(session.sessionId)
         }
     }
 

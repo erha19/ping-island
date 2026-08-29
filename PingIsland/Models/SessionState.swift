@@ -203,6 +203,27 @@ struct SessionState: Equatable, Identifiable, Sendable {
         needsApprovalResponse || needsQuestionResponse || suppressInAppPromptControls
     }
 
+    /// Whether the session is provably still executing: the newest chat item is a
+    /// thinking block or a running tool call.
+    ///
+    /// Used as liveness evidence when deciding whether a session may be archived or
+    /// hidden in favour of a newer session in the same workspace, and when deciding
+    /// whether an apparently idle hook event should end an active phase.
+    nonisolated var hasLiveExecutionEvidence: Bool {
+        for item in chatItems.reversed() {
+            switch item.type {
+            case .thinking:
+                return true
+            case .toolCall(let tool):
+                return tool.status == .running
+            case .assistant, .user, .interrupted:
+                return false
+            }
+        }
+
+        return false
+    }
+
     /// The active permission context, if any
     nonisolated var activePermission: PermissionContext? {
         if case .waitingForApproval(let ctx) = phase {

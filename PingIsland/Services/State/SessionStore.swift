@@ -2122,22 +2122,7 @@ actor SessionStore {
             // completed assistant reply is stronger evidence that the active turn has finished.
             return !hasCodexTurnCompletionEvidence
         }
-        return sessionHasLiveExecutionEvidence(session)
-    }
-
-    private func sessionHasLiveExecutionEvidence(_ session: SessionState) -> Bool {
-        for item in session.chatItems.reversed() {
-            switch item.type {
-            case .thinking:
-                return true
-            case .toolCall(let tool):
-                return tool.status == .running
-            case .assistant, .user, .interrupted:
-                return false
-            }
-        }
-
-        return false
+        return session.hasLiveExecutionEvidence
     }
 
     private func mergedLastActivity(
@@ -2597,40 +2582,27 @@ actor SessionStore {
     /// same provider + cwd that look orphaned (process died without sending Stop).
     /// This prevents duplicate-looking sessions in the expanded list when the user
     /// quits and restarts Claude in the same project.
+    ///
+    /// `SameWorkspaceSessionSupersession` owns which sessions may be replaced, and
+    /// `SessionMonitor` applies the same rule to the primary list. Sessions with a
+    /// live process, live execution evidence, a pending intervention, or an ended
+    /// result are never archived here: several agents running in one directory is a
+    /// supported setup.
     private func endOrphanedSessions(
         sameProviderAs session: SessionState,
         newSessionId: String
     ) {
-        let provider = session.provider
-        let cwd = session.cwd
-        guard !cwd.isEmpty else { return }
-        guard provider == .claude else { return }
-        guard session.ingress != .nativeRuntime else { return }
-        // Qwen command hooks do not expose the owning CLI PID, while their stable
-        // session IDs explicitly support multiple sessions in the same workspace.
-        // Treating a second Qwen session as restart evidence would evict the first
-        // legitimate session as soon as both emit hooks.
-        guard !session.clientInfo.isQwenCodeClient else { return }
+        guard let workspaceKey = SameWorkspaceSessionSupersession.workspaceKey(for: session) else {
+            return
+        }
 
         var idsToArchive: [String] = []
         for (existingId, existing) in sessions {
             guard existingId != newSessionId else { continue }
-            guard existing.provider == provider else { continue }
-            guard existing.cwd == cwd else { continue }
-            guard existing.phase != .ended else { continue }
-            guard !existing.needsManualAttention else { continue }
-
-            // Don't archive a session that still has live execution evidence
-            // (running tools or thinking in progress) — it may be a legitimate
-            // concurrent instance, like a Qoder parent session with a child.
-            if sessionHasLiveExecutionEvidence(existing) { continue }
-
-            // Don't archive sessions whose process is still alive — two
-            // legitimate Claude instances can run in the same cwd concurrently.
-            if let pid = existing.pid, pid > 0,
-               Darwin.kill(pid_t(pid), 0) == 0 {
+            guard SameWorkspaceSessionSupersession.workspaceKey(for: existing) == workspaceKey else {
                 continue
             }
+            guard SameWorkspaceSessionSupersession.canBeSuperseded(existing) else { continue }
 
             idsToArchive.append(existingId)
         }
@@ -2658,11 +2630,11 @@ actor SessionStore {
             guard idleSeconds >= 30 else { continue }
 
             if let pid = session.pid, pid > 0 {
-                if Darwin.kill(pid_t(pid), 0) != 0 && errno == ESRCH {
+                if !SessionProcessLiveness.isAlive(pid) {
                     markSessionEnded(&session)
                     sessions[sessionId] = session
                 }
-            } else if session.phase.isActive, !sessionHasLiveExecutionEvidence(session) {
+            } else if session.phase.isActive, !session.hasLiveExecutionEvidence {
                 // No PID available but session looks idle with no live evidence.
                 // Transition from processing/compacting to idle so it doesn't
                 // appear stuck as "working" indefinitely.
@@ -2719,7 +2691,7 @@ actor SessionStore {
             let endedReap = session.phase == .ended
             let pidIsDead: Bool = {
                 guard let pid = session.pid, pid > 0 else { return false }
-                return Darwin.kill(pid_t(pid), 0) != 0 && errno == ESRCH
+                return !SessionProcessLiveness.isAlive(pid)
             }()
             guard endedReap || pidIsDead else { continue }
 

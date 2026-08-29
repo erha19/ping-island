@@ -46,12 +46,7 @@ struct NotchView: View {
     @State private var isVisible: Bool = false
     @State private var isHovering: Bool = false
     @State private var isBouncing: Bool = false
-    @State private var hasPrimedSoundTransitions: Bool = false
-    @State private var previousProcessingIds: Set<String> = []
-    @State private var previousAttentionSoundIds: Set<String> = []
-    @State private var previousCompletionSoundIds: Set<String> = []
-    @State private var previousTaskErrorIds: Set<String> = []
-    @State private var previousResourceLimitIds: Set<String> = []
+    @State private var soundEdgeTracker = SessionSoundEdgeTracker()
     @State private var previousCompletionNotificationPhases: [String: SessionPhase] = [:]
     @State private var completionNotificationQueue: [SessionCompletionNotification] = []
     @State private var activeCompletionNotification: SessionCompletionNotification?
@@ -1450,85 +1445,8 @@ struct NotchView: View {
     }
 
     private func handleSessionSoundTransitions(_ instances: [SessionState]) {
-        if !hasPrimedSoundTransitions {
-            previousProcessingIds = Set(
-                instances
-                    .filter(\.phase.contributesToProcessingSoundEdge)
-                    .map(\.stableId)
-            )
-            previousAttentionSoundIds = Set(
-                instances
-                    .filter(SessionAttentionSoundEvaluator.shouldContributeToAttentionSoundEdge)
-                    .map(\.stableId)
-            )
-            previousCompletionSoundIds = Set(
-                instances
-                    .filter { SessionCompletionStateEvaluator.isCompletedReadySession($0) }
-                    .map(\.stableId)
-            )
-            previousTaskErrorIds = Set(
-                instances.flatMap { session in
-                    session.completedErrorToolIDs.map { "\(session.sessionId):\($0)" }
-                }
-            )
-            previousResourceLimitIds = Set(
-                instances
-                    .filter { $0.phase == .compacting }
-                    .map(\.stableId)
-            )
-            hasPrimedSoundTransitions = true
-            return
-        }
-
-        let processingSessions = instances.filter(\.phase.contributesToProcessingSoundEdge)
-        let attentionSessions = instances.filter(
-            SessionAttentionSoundEvaluator.shouldContributeToAttentionSoundEdge
-        )
-        let completedSessions = instances.filter { SessionCompletionStateEvaluator.isCompletedReadySession($0) }
-        let resourceLimitedSessions = instances.filter {
-            $0.phase == .compacting
-        }
-
-        let newProcessingIds = Set(processingSessions.map(\.stableId))
-        let newAttentionIds = Set(attentionSessions.map(\.stableId))
-        let newCompletedIds = Set(completedSessions.map(\.stableId))
-        let newTaskErrorIds = Set(
-            instances.flatMap { session in
-                session.completedErrorToolIDs.map { "\(session.sessionId):\($0)" }
-            }
-        )
-        let newResourceLimitIds = Set(resourceLimitedSessions.map(\.stableId))
-        let errorDeltaIds = newTaskErrorIds.subtracting(previousTaskErrorIds)
-        let errorSessions = instances.filter { session in
-            session.completedErrorToolIDs.contains { errorDeltaIds.contains("\(session.sessionId):\($0)") }
-        }
-        let completionDeltaIds = newCompletedIds.subtracting(previousCompletionSoundIds)
-        let newlyCompletedSessions = completedSessions.filter { session in
-            completionDeltaIds.contains(session.stableId)
-        }
-
-        let isNewAttention = !newAttentionIds.subtracting(previousAttentionSoundIds).isEmpty
-        let isNewCompletion = !completionDeltaIds.isEmpty
-        let isNewTaskError = !errorDeltaIds.isEmpty
-        let isNewResourceLimit = !newResourceLimitIds.subtracting(previousResourceLimitIds).isEmpty
-
-        if isNewTaskError {
-            playEventSoundIfNeeded(.taskError, sessions: errorSessions)
-        } else if isNewResourceLimit {
-            playEventSoundIfNeeded(.resourceLimit, sessions: resourceLimitedSessions)
-        } else if isNewAttention {
-            playEventSoundIfNeeded(.attentionRequired, sessions: attentionSessions)
-        } else if isNewCompletion {
-            playEventSoundIfNeeded(.taskCompleted, sessions: newlyCompletedSessions)
-        } else if !newProcessingIds.subtracting(previousProcessingIds).isEmpty {
-            playEventSoundIfNeeded(.processingStarted, sessions: processingSessions)
-        }
-
-        previousProcessingIds = newProcessingIds
-        previousAttentionSoundIds = newAttentionIds
-        previousCompletionSoundIds = newCompletedIds
-        previousTaskErrorIds = newTaskErrorIds
-        previousResourceLimitIds = newResourceLimitIds
+        guard let edge = soundEdgeTracker.edge(for: instances) else { return }
+        playEventSoundIfNeeded(edge.event, sessions: edge.sessions)
     }
 
     private func playEventSoundIfNeeded(_ event: NotificationEvent, sessions: [SessionState]) {
