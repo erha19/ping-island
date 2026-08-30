@@ -1897,7 +1897,9 @@ private enum RemoteBridgeMessageBuilder {
             sessionID: thread.id,
             cwd: thread.cwd,
             event: "RemoteCodexThreadUpdated",
-            status: "processing",
+            // SQLite exposes recent thread metadata, not live turn state. Real
+            // hooks remain authoritative for active and completed edges.
+            status: "idle",
             provider: AgentProvider.codex.rawValue,
             pid: nil,
             tty: nil,

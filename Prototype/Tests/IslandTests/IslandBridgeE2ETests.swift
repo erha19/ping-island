@@ -419,7 +419,7 @@ func remoteAgentForwardsCodexAppServerStateUpdates() async throws {
         #expect(event.type == "hook_event")
         #expect(event.payload.provider == "codex")
         #expect(event.payload.cwd == "/work/project")
-        #expect(event.payload.status == "processing")
+        #expect(event.payload.status == "idle")
         #expect(event.payload.message == "Remote Codex is editing files")
         #expect(event.payload.clientInfo.kind == "codexCLI")
         #expect(event.payload.clientInfo.transport == "ssh")
