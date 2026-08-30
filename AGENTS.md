@@ -30,6 +30,8 @@ This file is a routing layer for coding agents working in this repo. Keep it sho
   - One assistant response spans several transcript lines (one per content block) that each repeat the same `message.usage`; `ClaudeTranscriptUsageAccumulator` counts a `message.id` once per consecutive run. Those repeats are always adjacent, so keep this O(1) rather than introducing a seen-set that would grow with the transcript.
 - Native runtime rollout scaffold: `PingIsland/Services/Runtime/`, `PingIsland/Core/FeatureFlags.swift`
 - Session bridge for UI: `PingIsland/Services/Session/SessionMonitor.swift`
+- Claude-family transcript titles and last-message text: `PingIsland/Services/Session/ConversationParser.swift`
+  - Claude Code 2.x stopped writing `summary` records and now persists the title shown in its own UI as a `custom-title` record, rewritten on every turn. Take the newest one, keep the legacy `summary` path as a fallback for older transcripts and other Claude-compatible clients, and only fall back to the first user message when neither exists.
 - Notch state and layout: `PingIsland/Core/NotchViewModel.swift`, `PingIsland/UI/Views/NotchView.swift`
 - App-wide low-power policy for background polling, event monitoring, UI animation tiers, and silent update gating: `PingIsland/Core/EnergyGovernor.swift`
 - User idle protection for temporarily routing blocking approvals/questions back to terminals: `PingIsland/Core/UserIdleAutoProtection.swift`, `PingIsland/Core/Settings.swift`, `PingIsland/Services/Hooks/BridgeRuntimeConfigWriter.swift`

@@ -124,6 +124,7 @@ actor ConversationParser {
         let lines = content.components(separatedBy: "\n").filter { !$0.isEmpty }
 
         var summary: String?
+        var customTitle: String?
         var lastMessage: String?
         var lastMessageRole: String?
         var lastToolName: String?
@@ -199,17 +200,26 @@ actor ConversationParser {
                 }
             }
 
+            // Claude Code 2.x no longer emits `summary` lines; it persists the title
+            // shown in its own UI as a `custom-title` record, rewritten on every turn.
+            // Reverse iteration means the first hit is the newest title.
+            if customTitle == nil, type == "custom-title",
+               let titleText = json["customTitle"] as? String,
+               !titleText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                customTitle = titleText
+            }
+
             if summary == nil, type == "summary", let summaryText = json["summary"] as? String {
                 summary = summaryText
             }
 
-            if summary != nil && lastMessage != nil && foundLastUserMessage {
+            if (customTitle != nil || summary != nil) && lastMessage != nil && foundLastUserMessage {
                 break
             }
         }
 
         return ConversationInfo(
-            summary: summary,
+            summary: customTitle ?? summary,
             lastMessage: Self.truncateMessage(lastMessage, maxLength: 80),
             lastMessageRole: lastMessageRole,
             lastToolName: lastToolName,

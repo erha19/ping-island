@@ -248,7 +248,7 @@ struct SessionState: Equatable, Identifiable, Sendable {
         return sessionId
     }
 
-    /// Display title: summary > first user message > project name
+    /// Display title: session name > transcript title (Claude Code `custom-title`, legacy `summary`) > first user message > project name
     nonisolated var displayTitle: String {
         sessionName
             ?? SessionTextSanitizer.sanitizedDisplayText(conversationInfo.summary)
