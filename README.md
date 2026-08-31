@@ -139,7 +139,7 @@ Ping Island focuses on the moments that actually interrupt coding flow, then kee
 - **Act from the notch** - Approve tools, deny requests, and answer follow-up prompts without hunting through tabs.
 - **Claude Code auto-approve** - Turn on per-session auto-approval when you want Claude Code to stop pausing on every permission request.
 - **One-click return** - Jump back to the right iTerm2, Ghostty, Terminal.app, tmux pane, or IDE window.
-- **SSH terminal support** - Bootstrap a remote PingIslandBridge over SSH, rewrite remote hooks to point back at your Mac, forward remote Codex app-server activity, and keep remote terminal activity visible in the same local Island UI.
+- **SSH terminal support** - Bootstrap a remote PingIslandBridge over SSH, rewrite remote hooks to point back at your Mac, forward remote Codex app-server activity and usage snapshots, and keep remote terminal activity visible in the same local Island UI.
 - **Multi-agent coverage** - Track Claude Code, Codex, Gemini CLI, Antigravity CLI, Hermes Agent, Pi Agent, Qwen Code, Kimi CLI, OpenClaw, OpenCode, Cursor, Qoder, Qoder CN, CodeBuddy, WorkBuddy, GitHub Copilot, and other compatible sessions in one place.
 - **OpenClaw gateway support** - Follow OpenClaw sessions from managed internal hooks, then refill the conversation from OpenClaw's local session transcripts so the Island UI can show the actual back-and-forth instead of a single inbound message.
 - **Codex hook + app-server sync** - Support Codex CLI hooks, live app-server threads, and rollout parsing fallback when needed.
@@ -302,7 +302,7 @@ Implementation details worth knowing:
 - Qwen Code hooks are installed into `~/.qwen/settings.json`; the bridge follows the official event names and uses `Stop` / `SessionEnd` / `Notification` messages to surface popup-ready summaries in Island.
 - Kimi CLI hooks are installed into `~/.kimi/config.toml`; Ping Island preserves unrelated TOML content and maps Kimi `Stop` to turn completion while `SessionEnd` closes the session.
 - OpenCode is wired through a generated plugin file under `~/.config/opencode/plugins/` and enabled from the documented global config at `~/.config/opencode/opencode.json`; legacy `config.json` entries are still recognized for cleanup.
-- Remote SSH hosts can bootstrap `PingIslandBridge`, rewrite remote Claude-compatible hooks to target that bridge, and forward remote events back into the local Ping Island UI.
+- Remote SSH hosts can bootstrap `PingIslandBridge`, rewrite remote Claude-compatible hooks to target that bridge, and forward remote events plus Codex usage snapshots back into the local Ping Island UI.
 - Focus routing spans iTerm2, Ghostty, Terminal.app, tmux, and VS Code-compatible IDE extensions.
 
 ## Requirements

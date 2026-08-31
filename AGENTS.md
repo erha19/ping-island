@@ -51,6 +51,7 @@ This file is a routing layer for coding agents working in this repo. Keep it sho
 - Remote SSH forwarding and remote-host management: `PingIsland/Services/Remote/`
   - Remote hosts can bootstrap a bridge on the SSH target, rewrite remote hooks, install managed plugin-directory integrations such as Hermes under the remote home directory, and attach a bidirectional forwarding channel back into PingIsland
   - The remote bridge forwards recent Codex app-server thread activity from the SSH target's `~/.codex/state_*.sqlite` through the existing remote hook-event channel
+  - The remote bridge also tails recent Codex rollout quota snapshots and emits `codex_usage` messages. Keep local and remote snapshots source-qualified, choose the newest `capturedAt` for the account-wide usage UI, and resend the current remote snapshot whenever a control client attaches.
 - Provider/client routing: bridge envelopes are normalized in `PingIsland/Services/Hooks/HookSocketServer.swift`, stored on `SessionState`, and launched via `PingIsland/Services/Window/SessionLauncher.swift`
 - Client profile registry: installable hook clients and runtime client branding / recognition are centralized in `PingIsland/Models/ClientProfile.swift`
 - VS Code-compatible IDE focus extension install / URI launch: `PingIsland/Services/Window/IDEExtensionInstaller.swift`, `PingIsland/Services/Window/TerminalSessionFocuser.swift`

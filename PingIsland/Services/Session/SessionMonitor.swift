@@ -140,6 +140,11 @@ class SessionMonitor: ObservableObject {
         }
         RemoteConnectorManager.shared.start(
             onEvent: handleHookEvent,
+            onCodexUsage: { [weak self] snapshot in
+                Task { @MainActor in
+                    await self?.applyRemoteCodexUsageSnapshot(snapshot)
+                }
+            },
             onPermissionFailure: { sessionId, toolUseId in
                 Task {
                     await SessionStore.shared.process(
@@ -336,7 +341,6 @@ class SessionMonitor: ObservableObject {
                 UsageSnapshotCacheStore.saveClaude(claudeSnapshot)
             }
             if let codexSnapshot {
-                UsageSnapshotCacheStore.saveCodex(codexSnapshot)
                 let sessionTitle: String?
                 if let threadID = codexSnapshot.threadID {
                     sessionTitle = await SessionStore.shared.session(for: threadID)?.displayTitle
@@ -350,9 +354,42 @@ class SessionMonitor: ObservableObject {
             }
 
             self.claudeUsageSnapshot = claudeSnapshot ?? cachedClaudeSnapshot
-            self.codexUsageSnapshot = codexSnapshot ?? cachedCodexSnapshot
+            let preferredCodexSnapshot = CodexUsageSnapshot.newest([
+                self.codexUsageSnapshot,
+                codexSnapshot,
+                cachedCodexSnapshot,
+            ])
+            if let preferredCodexSnapshot {
+                UsageSnapshotCacheStore.saveCodex(preferredCodexSnapshot)
+            }
+            self.codexUsageSnapshot = preferredCodexSnapshot
             self.syncCodexThreadDiscovery(using: self.codexUsageSnapshot)
         }
+    }
+
+    private func applyRemoteCodexUsageSnapshot(_ snapshot: CodexUsageSnapshot) async {
+        guard shouldRefreshUsage, AppSettings.showUsage else { return }
+
+        let sessionTitle: String?
+        if let threadID = snapshot.threadID {
+            sessionTitle = await SessionStore.shared.session(for: threadID)?.displayTitle
+        } else {
+            sessionTitle = nil
+        }
+        await AgentUsageStore.shared.recordCodexUsageSnapshot(
+            snapshot,
+            sessionTitle: sessionTitle
+        )
+
+        let preferredSnapshot = CodexUsageSnapshot.newest([
+            codexUsageSnapshot,
+            snapshot,
+        ])
+        if let preferredSnapshot {
+            UsageSnapshotCacheStore.saveCodex(preferredSnapshot)
+        }
+        codexUsageSnapshot = preferredSnapshot
+        syncCodexThreadDiscovery(using: codexUsageSnapshot)
     }
 
     // MARK: - Native Runtime
@@ -1238,7 +1275,9 @@ class SessionMonitor: ObservableObject {
     }
 
     private func syncCodexThreadDiscovery(using snapshot: CodexUsageSnapshot?) {
-        guard let threadID = snapshot?.threadID else { return }
+        guard let snapshot,
+              !snapshot.isRemoteSource,
+              let threadID = snapshot.threadID else { return }
 
         Task {
             let alreadyTracked = await SessionStore.shared.containsSession(threadID)

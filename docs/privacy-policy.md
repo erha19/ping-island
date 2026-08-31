@@ -63,8 +63,9 @@ You can manage these permissions in macOS System Settings.
 If you enable remote SSH support, Ping Island uses the SSH target information
 you provide to connect to the selected host, install or remove the remote bridge
 when requested, and forward session events back to the local Ping Island app.
-Remote SSH information and forwarded session events are used for this feature
-and are not sent to the developer.
+For Codex, forwarded data can also include the latest quota-window and token-
+activity snapshot found in the remote rollout log. Remote SSH information and
+forwarded data are used for this feature and are not sent to the developer.
 
 ## Diagnostics
 

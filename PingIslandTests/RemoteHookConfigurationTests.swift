@@ -2,6 +2,50 @@ import XCTest
 @testable import Ping_Island
 
 final class RemoteHookConfigurationTests: XCTestCase {
+    func testRemoteCodexUsageMessageRoundTripsSnapshot() throws {
+        let snapshot = CodexUsageSnapshot(
+            sourceFilePath: "/root/.codex/sessions/rollout.jsonl",
+            capturedAt: Date(timeIntervalSince1970: 1_788_183_296),
+            planType: "pro",
+            limitID: "codex",
+            tokenUsage: CodexTokenUsage(inputTokens: 1_200, outputTokens: 345, totalTokens: 1_545),
+            windows: [
+                CodexUsageWindow(
+                    key: "primary",
+                    label: "5h",
+                    usedPercentage: 17,
+                    leftPercentage: 83,
+                    windowMinutes: 300,
+                    resetsAt: Date(timeIntervalSince1970: 1_788_183_296)
+                )
+            ]
+        )
+        let message = RemoteCodexUsageMessage(type: "codex_usage", payload: snapshot)
+
+        let decoded = try JSONDecoder().decode(
+            RemoteCodexUsageMessage.self,
+            from: JSONEncoder().encode(message)
+        )
+
+        XCTAssertEqual(decoded, message)
+    }
+
+    func testRemoteCodexUsageSourcePathIncludesSSHEndpoint() {
+        let endpoint = RemoteEndpoint(
+            displayName: "Development host",
+            sshTarget: "root@example.test",
+            sshPort: 3006
+        )
+
+        XCTAssertEqual(
+            RemoteConnectorManager.remoteUsageSourcePath(
+                "/root/.codex/sessions/rollout.jsonl",
+                endpoint: endpoint
+            ),
+            "ssh://root@example.test:3006/root/.codex/sessions/rollout.jsonl"
+        )
+    }
+
     func testRemoteBootstrapPrepareCommandStopsRunningAgentBeforeReplacingBridge() {
         let command = RemoteConnectorManager.remoteBootstrapPrepareCommand(
             installRoot: "/root/.ping-island",

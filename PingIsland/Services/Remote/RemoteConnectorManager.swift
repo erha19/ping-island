@@ -15,6 +15,7 @@ final class RemoteConnectorManager: ObservableObject {
     private let persistenceKey = "RemoteConnectorManager.endpoints.v1"
 
     private var eventHandler: (@Sendable (HookEvent) -> Void)?
+    private var codexUsageHandler: (@Sendable (CodexUsageSnapshot) -> Void)?
     private var permissionFailureHandler: (@Sendable (_ sessionId: String, _ toolUseId: String) -> Void)?
     private var connectors: [UUID: RemoteAttachConnector] = [:]
     private var pendingRequests = RemotePendingRequestStore()
@@ -31,9 +32,11 @@ final class RemoteConnectorManager: ObservableObject {
 
     func start(
         onEvent: @escaping @Sendable (HookEvent) -> Void,
+        onCodexUsage: (@Sendable (CodexUsageSnapshot) -> Void)? = nil,
         onPermissionFailure: (@Sendable (_ sessionId: String, _ toolUseId: String) -> Void)? = nil
     ) {
         eventHandler = onEvent
+        codexUsageHandler = onCodexUsage
         permissionFailureHandler = onPermissionFailure
 
         guard !hasStarted else { return }
@@ -577,6 +580,22 @@ final class RemoteConnectorManager: ObservableObject {
             }
             setState(for: endpointID, phase: .connected, detail: "远程转发已连接", agentVersion: hello.version)
 
+        case .codexUsage(let usageMessage):
+            let endpoint = endpoint(for: endpointID)
+            let remoteSource = Self.remoteUsageSourcePath(
+                usageMessage.payload.sourceFilePath,
+                endpoint: endpoint
+            )
+            let snapshot = CodexUsageSnapshot(
+                sourceFilePath: remoteSource,
+                capturedAt: usageMessage.payload.capturedAt,
+                planType: usageMessage.payload.planType,
+                limitID: usageMessage.payload.limitID,
+                tokenUsage: usageMessage.payload.tokenUsage,
+                windows: usageMessage.payload.windows
+            )
+            codexUsageHandler?(snapshot)
+
         case .hookEvent(let eventMessage):
             let payload = eventMessage.payload
             guard let provider = SessionProvider(rawValue: payload.provider) else {
@@ -644,6 +663,16 @@ final class RemoteConnectorManager: ObservableObject {
 
             eventHandler?(event)
         }
+    }
+
+    nonisolated static func remoteUsageSourcePath(
+        _ sourceFilePath: String,
+        endpoint: RemoteEndpoint?
+    ) -> String {
+        guard let endpoint else { return sourceFilePath }
+        let prefix = endpoint.sshURL?.absoluteString ?? "ssh://\(endpoint.sshDisplayTarget)"
+        let separator = sourceFilePath.hasPrefix("/") ? "" : "/"
+        return "\(prefix)\(separator)\(sourceFilePath)"
     }
 
     private func handleDisconnect(endpointID: UUID, error: Error?) {
@@ -1965,6 +1994,7 @@ private final class RemoteAttachConnector {
 private enum RemoteInboundMessage: Decodable {
     case hello(RemoteDaemonHello)
     case hookEvent(RemoteHookEventMessage)
+    case codexUsage(RemoteCodexUsageMessage)
 
     private enum CodingKeys: String, CodingKey {
         case type
@@ -1978,10 +2008,17 @@ private enum RemoteInboundMessage: Decodable {
             self = .hello(try RemoteDaemonHello(from: decoder))
         case "hook_event":
             self = .hookEvent(try RemoteHookEventMessage(from: decoder))
+        case "codex_usage":
+            self = .codexUsage(try RemoteCodexUsageMessage(from: decoder))
         default:
             throw RemoteConnectorError.invalidRemoteMessage
         }
     }
+}
+
+struct RemoteCodexUsageMessage: Codable, Equatable, Sendable {
+    let type: String
+    let payload: CodexUsageSnapshot
 }
 
 private struct SSHExecutionResult {
