@@ -49,12 +49,13 @@ final class KiroIntegrationTests: XCTestCase {
 
     func testKiroHookFileUsesV1SchemaAndNonBlockingEvents() throws {
         let profile = try XCTUnwrap(ClientProfileRegistry.managedHookProfile(id: "kiro-hooks"))
+        XCTAssertEqual(HookInstallSelection.defaultSelection(for: profile).enabledEventNames, ["PostToolUse"])
         let configuration = HookInstaller.managedKiroHookConfiguration(for: profile)
         let hooks = try XCTUnwrap(configuration["hooks"] as? [[String: Any]])
 
         XCTAssertEqual(configuration["version"] as? String, "v1")
-        XCTAssertEqual(hooks.map { $0["trigger"] as? String }, ["SessionStart", "UserPromptSubmit", "PostToolUse", "Stop"])
-        XCTAssertEqual(hooks[2]["matcher"] as? String, ".*")
+        XCTAssertEqual(hooks.map { $0["trigger"] as? String }, ["PostToolUse"])
+        XCTAssertEqual(hooks[0]["matcher"] as? String, ".*")
         for hook in hooks {
             let action = try XCTUnwrap(hook["action"] as? [String: Any])
             XCTAssertEqual(action["type"] as? String, "command")

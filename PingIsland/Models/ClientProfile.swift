@@ -136,7 +136,13 @@ struct HookInstallSelection: Sendable, Equatable {
     var enabledEventNames: Set<String>
 
     static func defaultSelection(for profile: ManagedHookClientProfile) -> HookInstallSelection {
-        HookInstallSelection(enabledEventNames: Set(profile.events.map(\.name)))
+        // Kiro's lifecycle hooks do not consistently provide a usable session
+        // payload in the IDE. PostToolUse is the event that reliably carries
+        // Kiro's session ID, so keep it aligned with Cursor's tool-only model.
+        if profile.id == "kiro-hooks" {
+            return HookInstallSelection(enabledEventNames: ["PostToolUse"])
+        }
+        return HookInstallSelection(enabledEventNames: Set(profile.events.map(\.name)))
     }
 
     func filteredEvents(for profile: ManagedHookClientProfile) -> [HookInstallEventDescriptor] {
