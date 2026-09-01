@@ -5,7 +5,7 @@ import Foundation
 ///
 /// Two layers ask that question and must answer it identically:
 /// - `SessionStore.endOrphanedSessions` archives superseded sessions when a new
-///   session starts in the same `provider + cwd`.
+///   session starts in the same `provider + client family + cwd`.
 /// - `SessionMonitor.filteredVisibleSessions` hides them from the primary list
 ///   during the window before the store's liveness sweep catches up.
 ///
@@ -31,7 +31,27 @@ enum SameWorkspaceSessionSupersession {
         guard !session.clientInfo.isQwenCodeClient else { return nil }
         let cwd = session.cwd
         guard !cwd.isEmpty else { return nil }
-        return "\(session.provider.rawValue):\(cwd)"
+        return "\(session.provider.rawValue):\(clientFamily(for: session.clientInfo)):\(cwd)"
+    }
+
+    /// Kiro and OpenClaw share the Claude-compatible bridge protocol, but not
+    /// a card lifecycle. An old OpenClaw error must never be refreshed or
+    /// replaced by a Kiro event from the same workspace.
+    private nonisolated static func clientFamily(for clientInfo: SessionClientInfo) -> String {
+        let profileID = clientInfo.profileID?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        let threadSource = clientInfo.threadSource?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+
+        if profileID == "kiro" || threadSource == "kiro-hooks" {
+            return "kiro"
+        }
+        if clientInfo.isOpenClawGatewayClient {
+            return "openclaw"
+        }
+        return "shared"
     }
 
     /// Whether a newer session sharing this session's workspace key may replace it.

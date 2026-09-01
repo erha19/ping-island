@@ -51,6 +51,7 @@ enum HookInstallEntryTemplate: Sendable {
 
 enum ManagedHookInstallationKind: Sendable, Equatable {
     case jsonHooks
+    case kiroHookFile
     case pluginFile
     case pluginDirectory
     case hookDirectory
@@ -278,7 +279,7 @@ struct ManagedHookClientProfile: Identifiable, Sendable {
     }
 
     nonisolated var supportsEventSelection: Bool {
-        installationKind == .jsonHooks && !events.isEmpty
+        (installationKind == .jsonHooks || installationKind == .kiroHookFile) && !events.isEmpty
     }
 
     nonisolated var availableEventCategories: [HookInstallEventCategory] {
@@ -294,6 +295,8 @@ struct ManagedHookClientProfile: Identifiable, Sendable {
         switch installationKind {
         case .jsonHooks:
             return "这会重新写入 %@ 的 Island hooks 配置，并保留其他非 Island hooks。"
+        case .kiroHookFile:
+            return "这会重新生成 %@ 的 Ping Island hook 文件。"
         case .pluginFile:
             return "这会重新生成 %@ 的 Island 插件文件，并覆盖旧的 Island 托管版本。"
         case .pluginDirectory:
@@ -625,6 +628,33 @@ enum ClientProfileRegistry {
                 HookInstallEventDescriptor(name: "AfterTool", templates: [.matcher(".*")]),
                 HookInstallEventDescriptor(name: "Notification", templates: [.plain]),
                 HookInstallEventDescriptor(name: "PreCompress", templates: [.plain]),
+            ]
+        ),
+        ManagedHookClientProfile(
+            id: "kiro-hooks",
+            title: "Kiro",
+            subtitle: "管理 ~/.kiro/hooks/ping-island.json，按 Kiro v1 hooks 协议接入 Island",
+            installationKind: .kiroHookFile,
+            alwaysVisibleInSettings: true,
+            localAppBundleIdentifiers: ["dev.kiro.desktop"],
+            iconSymbolName: "sparkles",
+            configurationRelativePath: ".kiro/hooks/ping-island.json",
+            bridgeSource: "claude",
+            bridgeExtraArguments: [
+                "--client-kind", "kiro",
+                "--client-name", "Kiro",
+                "--client-bundle-id", "dev.kiro.desktop",
+                "--client-origin", "cli",
+                "--client-originator", "Kiro",
+                "--thread-source", "kiro-hooks"
+            ],
+            defaultEnabled: false,
+            brand: .neutral,
+            events: [
+                HookInstallEventDescriptor(name: "SessionStart", templates: [.plain]),
+                HookInstallEventDescriptor(name: "UserPromptSubmit", templates: [.plain]),
+                HookInstallEventDescriptor(name: "PostToolUse", templates: [.matcher(".*")]),
+                HookInstallEventDescriptor(name: "Stop", templates: [.plain]),
             ]
         ),
         ManagedHookClientProfile(
@@ -1363,6 +1393,21 @@ enum ClientProfileRegistry {
             bundleIdentifiers: ["ai.opencode.desktop"]
         ),
         SessionClientProfile(
+            id: "kiro",
+            provider: .claude,
+            family: .claudeHooks,
+            kind: .custom,
+            displayName: "Kiro",
+            assistantLabelMode: .badgeLabel,
+            brand: .neutral,
+            defaultBundleIdentifier: "dev.kiro.desktop",
+            defaultOrigin: "cli",
+            recognizedKinds: ["kiro", "kiro-cli", "kiro_cli", "kiro cli"],
+            exactAliases: ["kiro", "kiro-cli", "kiro cli"],
+            keywordAliases: ["kiro", "kiro cli"],
+            bundleIdentifiers: ["dev.kiro.desktop"]
+        ),
+        SessionClientProfile(
             id: "gemini",
             provider: .gemini,
             family: .geminiHooks,
@@ -1499,6 +1544,20 @@ enum ClientProfileRegistry {
             exactBundleIdentifiers: ["com.todesktop.230313mzl4w4u92", "com.todesktop.230313mzl4w4u92.helper"],
             bundleIdentifierKeywords: ["todesktop", "cursor"],
             appNameKeywords: ["cursor"]
+        ),
+        ManagedIDEExtensionProfile(
+            id: "kiro-extension",
+            title: "Kiro",
+            subtitle: "安装 Ping Island，支持终端精准聚焦",
+            alwaysVisibleInSettings: true,
+            localAppBundleIdentifiers: ["dev.kiro.desktop"],
+            iconSymbolName: "sparkles",
+            extensionRootRelativePath: ".kiro/extensions",
+            extensionRegistryRelativePath: ".kiro/extensions/extensions.json",
+            uriScheme: "kiro",
+            exactBundleIdentifiers: ["dev.kiro.desktop", "dev.kiro.desktop.helper"],
+            bundleIdentifierKeywords: ["kiro"],
+            appNameKeywords: ["kiro"]
         ),
         ManagedIDEExtensionProfile(
             id: "codebuddy-extension",

@@ -307,7 +307,11 @@ actor SessionLauncher {
             return false
         }
         guard session.clientInfo.prefersAppNavigation else { return false }
+        // Kiro hosts its integrated terminal on the VS Code process.  Prefer the
+        // Kiro app/extension route before attempting to focus that terminal, or
+        // a click on a Kiro session will activate VS Code instead.
         return session.clientInfo.kind == .codexApp
+            || session.clientInfo.profileID?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "kiro"
     }
 
     private func allowsAppFallback(for session: SessionState) -> Bool {
