@@ -835,6 +835,10 @@ private final class RemoteAgentService: @unchecked Sendable {
     private let hookSocketPath: String
     private let controlSocketPath: String
     private let queue = DispatchQueue(label: "com.wudanwu.pingisland.remote-agent", qos: .userInitiated)
+    private let codexUsageQueue = DispatchQueue(
+        label: "com.wudanwu.pingisland.remote-agent.codex-usage",
+        qos: .utility
+    )
 
     private var hookServerSocket: Int32 = -1
     private var controlServerSocket: Int32 = -1
@@ -849,6 +853,8 @@ private final class RemoteAgentService: @unchecked Sendable {
     private var codexUsageSource: DispatchSourceTimer?
     private var deliveredCodexThreadUpdates: [String: Int64] = [:]
     private var deliveredCodexUsageSnapshot: RemoteCodexUsageSnapshot?
+    private var codexUsagePollInFlight = false
+    private var codexUsageForceDeliveryPending = false
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
 
@@ -953,14 +959,28 @@ private final class RemoteAgentService: @unchecked Sendable {
     }
 
     private func pollCodexUsage(force: Bool = false) {
-        let codexHome = Self.homeDirectory.appendingPathComponent(".codex", isDirectory: true)
-        guard let snapshot = RemoteCodexUsagePoller.loadLatestSnapshot(codexHome: codexHome),
-              force || snapshot != deliveredCodexUsageSnapshot else {
-            return
-        }
+        codexUsageForceDeliveryPending = codexUsageForceDeliveryPending || force
+        guard !codexUsagePollInFlight else { return }
 
-        deliveredCodexUsageSnapshot = snapshot
-        enqueue(RemoteCodexUsageMessage(type: "codex_usage", payload: snapshot))
+        codexUsagePollInFlight = true
+        let codexHome = Self.homeDirectory.appendingPathComponent(".codex", isDirectory: true)
+        codexUsageQueue.async { [weak self] in
+            let snapshot = RemoteCodexUsagePoller.loadLatestSnapshot(codexHome: codexHome)
+            self?.queue.async { [weak self] in
+                guard let self else { return }
+                self.codexUsagePollInFlight = false
+
+                let shouldForceDelivery = self.codexUsageForceDeliveryPending
+                self.codexUsageForceDeliveryPending = false
+                guard let snapshot,
+                      shouldForceDelivery || snapshot != self.deliveredCodexUsageSnapshot else {
+                    return
+                }
+
+                self.deliveredCodexUsageSnapshot = snapshot
+                self.enqueue(RemoteCodexUsageMessage(type: "codex_usage", payload: snapshot))
+            }
+        }
     }
 
     private nonisolated static var homeDirectory: URL {
@@ -1320,8 +1340,8 @@ private enum RemoteCodexStatePoller {
 }
 
 private enum RemoteCodexUsagePoller {
-    private static let candidateScanLimit = 24
-    private static let maxBytesPerFile = 4 * 1024 * 1024
+    private static let candidateScanLimit = 8
+    private static let maxBytesPerFile = 1 * 1024 * 1024
     private static let cacheLock = NSLock()
     nonisolated(unsafe) private static var cachedResult: CachedResult?
 
