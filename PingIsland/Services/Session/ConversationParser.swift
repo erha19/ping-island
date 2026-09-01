@@ -54,6 +54,7 @@ actor ConversationParser {
     private enum TranscriptFormat {
         case claudeLike
         case openClaw
+        case kiro
         case codeBuddyHistory
     }
 
@@ -111,6 +112,8 @@ actor ConversationParser {
             parseContent(content)
         case .openClaw:
             parseOpenClawContent(content)
+        case .kiro:
+            parseKiroContent(content)
         case .codeBuddyHistory:
             parseCodeBuddyHistory(filePath: sessionFile)
         }
@@ -450,13 +453,16 @@ actor ConversationParser {
         let lines = newContent.components(separatedBy: "\n")
         var newMessages: [ChatMessage] = []
 
-        if transcriptFormat == .openClaw {
+        if transcriptFormat == .openClaw || transcriptFormat == .kiro {
             for line in lines where !line.isEmpty {
                 guard let lineData = line.data(using: .utf8),
-                      let json = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
-                      let message = parseOpenClawMessageLine(json) else {
+                      let json = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any] else {
                     continue
                 }
+                let message = transcriptFormat == .kiro
+                    ? parseKiroMessageLine(json)
+                    : parseOpenClawMessageLine(json)
+                guard let message else { continue }
                 newMessages.append(message)
                 state.messages.append(message)
             }
@@ -595,11 +601,36 @@ actor ConversationParser {
             return claudePath
         }
 
+        if let kiroPath = kiroSessionFilePath(sessionId: sessionId) {
+            return kiroPath
+        }
+
         if let fallbackOpenClawPath = latestOpenClawSessionFilePath(preferredPath: nil) {
             return fallbackOpenClawPath
         }
 
         return claudePath
+    }
+
+    private static func kiroSessionFilePath(sessionId: String) -> String? {
+        let root = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".kiro/sessions", isDirectory: true)
+        guard let directories = try? FileManager.default.contentsOfDirectory(
+            at: root,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        ) else {
+            return nil
+        }
+        for directory in directories {
+            let candidate = directory
+                .appendingPathComponent(sessionId, isDirectory: true)
+                .appendingPathComponent("messages.jsonl")
+            if FileManager.default.fileExists(atPath: candidate.path) {
+                return candidate.path
+            }
+        }
+        return nil
     }
 
     private static func latestOpenClawSessionFilePath(preferredPath: String?) -> String? {
@@ -642,6 +673,10 @@ actor ConversationParser {
             return .openClaw
         }
 
+        if filePath.contains("/.kiro/sessions/") && filePath.hasSuffix("/messages.jsonl") {
+            return .kiro
+        }
+
         if filePath.hasSuffix("/index.json") || URL(fileURLWithPath: filePath).lastPathComponent == "index.json" {
             return .codeBuddyHistory
         }
@@ -681,6 +716,30 @@ actor ConversationParser {
             summary: nil,
             lastMessage: Self.truncateMessage(lastMessage, maxLength: 80),
             lastMessageRole: lastMessageRole,
+            lastToolName: nil,
+            firstUserMessage: firstUserMessage,
+            lastUserMessageDate: lastUserMessageDate
+        )
+    }
+
+    private func parseKiroContent(_ content: String) -> ConversationInfo {
+        let messages = content.components(separatedBy: "\n").compactMap { line -> ChatMessage? in
+            guard let data = line.data(using: .utf8),
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                return nil
+            }
+            return parseKiroMessageLine(json)
+        }
+
+        let firstUserMessage = messages.first(where: { $0.role == .user })
+            .flatMap { Self.truncateMessage($0.textContent, maxLength: 50) }
+        let lastUserMessageDate = messages.last(where: { $0.role == .user })?.timestamp
+        let lastMessage = messages.last(where: { !$0.textContent.isEmpty })
+
+        return ConversationInfo(
+            summary: nil,
+            lastMessage: Self.truncateMessage(lastMessage?.textContent, maxLength: 80),
+            lastMessageRole: lastMessage?.role.rawValue,
             lastToolName: nil,
             firstUserMessage: firstUserMessage,
             lastUserMessageDate: lastUserMessageDate
@@ -1770,6 +1829,31 @@ actor ConversationParser {
 
         guard !blocks.isEmpty else { return nil }
         return ChatMessage(id: id, role: role, timestamp: timestamp, content: blocks)
+    }
+
+    private func parseKiroMessageLine(_ json: [String: Any]) -> ChatMessage? {
+        guard let id = json["id"] as? String,
+              let payload = json["payload"] as? [String: Any],
+              let type = payload["type"] as? String,
+              type == "user" || type == "assistant",
+              let content = payload["content"] as? String,
+              let sanitized = SessionTextSanitizer.sanitizedDisplayText(content) else {
+            return nil
+        }
+
+        let timestamp: Date = {
+            guard let string = json["timestamp"] as? String else { return Date() }
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            return formatter.date(from: string) ?? Date()
+        }()
+
+        return ChatMessage(
+            id: id,
+            role: type == "user" ? .user : .assistant,
+            timestamp: timestamp,
+            content: [.text(sanitized)]
+        )
     }
 
     private func parseToolUse(_ block: [String: Any]) -> ToolUseBlock? {
