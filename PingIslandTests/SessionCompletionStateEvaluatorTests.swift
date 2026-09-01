@@ -31,6 +31,7 @@ final class SessionCompletionStateEvaluatorTests: XCTestCase {
         XCTAssertEqual(first.assistantItemId, "assistant-1")
     }
 
+    @MainActor
     func testCompletionNotificationRegistryUsesSharedCompletionKeyLogic() {
         let registry = SessionCompletionNotificationRegistry.shared
         var session = SessionState(
