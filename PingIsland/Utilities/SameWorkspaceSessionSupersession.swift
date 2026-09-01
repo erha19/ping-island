@@ -25,10 +25,12 @@ enum SameWorkspaceSessionSupersession {
     nonisolated static func workspaceKey(for session: SessionState) -> String? {
         guard session.provider == .claude else { return nil }
         guard session.ingress != .nativeRuntime else { return nil }
-        // Qwen command hooks do not expose the owning CLI PID, while their stable
-        // session IDs explicitly support several sessions per workspace, so a Qwen
-        // session neither supersedes a sibling nor gets superseded by one.
-        guard !session.clientInfo.isQwenCodeClient else { return nil }
+        // Qwen and Kiro hooks do not expose the owning CLI PID, while their
+        // stable session IDs explicitly support several sessions per workspace.
+        // Neither client may supersede a sibling just because it reported later.
+        guard !session.clientInfo.isQwenCodeClient,
+              session.clientInfo.profileID != "kiro",
+              session.clientInfo.threadSource != "kiro-hooks" else { return nil }
         let cwd = session.cwd
         guard !cwd.isEmpty else { return nil }
         return "\(session.provider.rawValue):\(clientFamily(for: session.clientInfo)):\(cwd)"
