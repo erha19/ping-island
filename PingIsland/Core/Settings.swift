@@ -257,6 +257,7 @@ enum FloatingPetSizeMode: String, CaseIterable, Identifiable {
     case automatic
     case standard
     case large
+    case extraLarge
 
     var id: String { rawValue }
 
@@ -268,6 +269,8 @@ enum FloatingPetSizeMode: String, CaseIterable, Identifiable {
             return "标准"
         case .large:
             return "较大"
+        case .extraLarge:
+            return "超大"
         }
     }
 
@@ -279,6 +282,8 @@ enum FloatingPetSizeMode: String, CaseIterable, Identifiable {
             return "固定为旧版悬浮宠物尺寸"
         case .large:
             return "在所有显示器上放大宠物形象"
+        case .extraLarge:
+            return "固定为 1.75 倍，明显放大宠物形象"
         }
     }
 }

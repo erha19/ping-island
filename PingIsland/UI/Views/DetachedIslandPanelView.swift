@@ -10,10 +10,12 @@ struct DetachedIslandPetMetrics: Equatable {
     let badgeOffset: CGSize
     let floatingUsageBoltVerticalOffset: CGFloat
 
-    static let standard = DetachedIslandPetMetrics(scale: 1)
+    static let minimumScale: CGFloat = 1
+    static let maximumScale: CGFloat = 1.75
+    static let standard = DetachedIslandPetMetrics(scale: minimumScale)
 
     init(scale: CGFloat) {
-        let sanitizedScale = min(max(scale, 1), 1.22)
+        let sanitizedScale = min(max(scale, Self.minimumScale), Self.maximumScale)
         self.scale = sanitizedScale
         self.petVisualFrame = 74 * sanitizedScale
         self.petHitFrame = 92 * sanitizedScale
@@ -71,6 +73,8 @@ enum DetachedIslandPanelMetrics {
             return automaticResolutionScale(for: screenRect)
         case .large:
             return max(1.16, automaticResolutionScale(for: screenRect))
+        case .extraLarge:
+            return DetachedIslandPetMetrics.maximumScale
         }
     }
 

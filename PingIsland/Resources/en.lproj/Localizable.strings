@@ -653,7 +653,7 @@
 "马上就好" = "Almost there";
 "设置展示模式示意图，以及没有活跃或待处理会话时刘海/悬浮宠物使用的默认形象。" = "Choose the mascot shown in presentation previews and used by the notch or floating pet when no session is active or needs attention.";
 "宠物大小" = "Mascot size";
-"自动模式会根据当前显示器分辨率调整；也可以固定为标准尺寸或始终放大。" = "Automatic mode adjusts to the current display resolution. You can also keep the mascot at standard size or always enlarge it.";
+"自动模式会根据当前显示器分辨率调整；也可以固定为标准、较大或超大尺寸。" = "Automatic mode adjusts to the current display resolution. You can also choose a fixed standard, larger, or extra-large size.";
 "空闲时自动保留到终端" = "Keep in terminal automatically when idle";
 "键盘和鼠标静默达到设定时长后临时开启上方策略；恢复活跃后回到手动设置。" = "Temporarily enable the policy above after keyboard and mouse inactivity reaches the selected duration. Manual settings resume when activity returns.";
 "静默时长" = "Idle duration";
@@ -708,9 +708,11 @@
 "1 小时" = "1 hour";
 "标准" = "Standard";
 "较大" = "Larger";
+"超大" = "Extra Large";
 "按显示器分辨率调整，高分屏会更醒目" = "Adjust to the display resolution for better visibility on high-density screens";
 "固定为旧版悬浮宠物尺寸" = "Use the original floating mascot size";
 "在所有显示器上放大宠物形象" = "Enlarge the mascot on every display";
+"固定为 1.75 倍，明显放大宠物形象" = "Use a fixed 1.75x scale for a noticeably larger mascot";
 "不显示" = "Hidden";
 "主列表里隐藏挂靠在主 Agent 下的子 Agent 项" = "Hide sub-agent items attached to their main agent in the primary list";
 "主列表里将明确的子 Agent 挂靠在主 Agent 下展示" = "Show explicit sub-agents under their main agent in the primary list";

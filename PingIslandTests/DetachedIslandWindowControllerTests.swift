@@ -437,6 +437,29 @@ final class DetachedIslandWindowControllerTests: XCTestCase {
         XCTAssertEqual(petMetrics.petHitFrame, 106.72, accuracy: 0.5)
     }
 
+    func testFloatingPetSizeModeCanForceExtraLargeSizeOnAnyResolution() {
+        let screenFrames = [
+            CGRect(x: 0, y: 0, width: 1440, height: 900),
+            CGRect(x: 0, y: 0, width: 2560, height: 1440)
+        ]
+
+        for screenFrame in screenFrames {
+            let petMetrics = DetachedIslandPanelMetrics.petMetrics(
+                for: screenFrame,
+                sizeMode: .extraLarge
+            )
+
+            XCTAssertEqual(petMetrics.scale, 1.75, accuracy: 0.001)
+            XCTAssertEqual(petMetrics.mascotDisplaySize, 80.5, accuracy: 0.5)
+            XCTAssertEqual(petMetrics.petHitFrame, 161, accuracy: 0.5)
+        }
+    }
+
+    func testFloatingPetMetricsClampToSupportedScaleRange() {
+        XCTAssertEqual(DetachedIslandPetMetrics(scale: 0.5).scale, 1, accuracy: 0.001)
+        XCTAssertEqual(DetachedIslandPetMetrics(scale: 2).scale, 1.75, accuracy: 0.001)
+    }
+
     func testActiveCountOnlyTracksActiveSessions() {
         let sessions = [
             makeSession(id: "processing", phase: .processing),

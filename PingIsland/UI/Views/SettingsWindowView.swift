@@ -3235,7 +3235,7 @@ private struct SettingsPanelContentView: View {
                     SettingsLineDivider()
                     SettingsInfoLine(
                         title: "宠物大小",
-                        subtitle: "自动模式会根据当前显示器分辨率调整；也可以固定为标准尺寸或始终放大。"
+                        subtitle: "自动模式会根据当前显示器分辨率调整；也可以固定为标准、较大或超大尺寸。"
                     ) {
                         FloatingPetSizeModePicker(mode: $settings.floatingPetSizeMode)
                     }
@@ -6598,6 +6598,8 @@ private struct IslandSurfaceModePreviewScene: View {
             return 1
         case .large:
             return 1.16
+        case .extraLarge:
+            return DetachedIslandPetMetrics.maximumScale
         }
     }
 }

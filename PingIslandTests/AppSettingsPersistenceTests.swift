@@ -349,13 +349,13 @@ final class AppSettingsPersistenceTests: XCTestCase {
 
         XCTAssertEqual(store.floatingPetSizeMode, .automatic)
 
-        store.floatingPetSizeMode = .large
+        store.floatingPetSizeMode = .extraLarge
 
         let reloadedStore = makeStore(defaults: defaults)
-        XCTAssertEqual(reloadedStore.floatingPetSizeMode, .large)
+        XCTAssertEqual(reloadedStore.floatingPetSizeMode, .extraLarge)
         XCTAssertEqual(
             defaults.string(forKey: AppSettingsDefaultKeys.floatingPetSizeMode),
-            FloatingPetSizeMode.large.rawValue
+            FloatingPetSizeMode.extraLarge.rawValue
         )
     }
 
