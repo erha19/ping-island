@@ -1830,7 +1830,9 @@ struct HookInstaller {
     static func managedKiroHookConfiguration(for profile: ManagedHookClientProfile) -> [String: Any] {
         managedKiroHookConfiguration(
             for: profile,
-            command: bridgeCommand(source: profile.bridgeSource, extraArguments: profile.bridgeExtraArguments)
+            command: kiroSidecarCommand(
+                bridgeCommand(source: profile.bridgeSource, extraArguments: profile.bridgeExtraArguments)
+            )
         )
     }
 
@@ -1846,7 +1848,11 @@ struct HookInstaller {
                 "action": [
                     "type": "command",
                     "command": command
-                ]
+                ],
+                // Kiro sends stdout/stderr from command hooks back into the agent
+                // conversation. The bridge is intentionally observational, so keep
+                // it quiet and bounded even if its local socket is unavailable.
+                "timeout": 10
             ]
             if case .matcher(let matcher)? = event.templates.first {
                 hook["matcher"] = matcher
@@ -2034,6 +2040,10 @@ struct HookInstaller {
         return ([launcherPath, "--source", source] + extraArguments)
             .map(shellQuotedIfNeeded)
             .joined(separator: " ")
+    }
+
+    private static func kiroSidecarCommand(_ command: String) -> String {
+        "\(command) >/dev/null 2>&1 || true"
     }
 
     private static func containsManagedHooks(at url: URL, profile: ManagedHookClientProfile? = nil) -> Bool {

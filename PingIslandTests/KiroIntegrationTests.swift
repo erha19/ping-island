@@ -59,6 +59,8 @@ final class KiroIntegrationTests: XCTestCase {
             let action = try XCTUnwrap(hook["action"] as? [String: Any])
             XCTAssertEqual(action["type"] as? String, "command")
             XCTAssertTrue((action["command"] as? String)?.contains("--client-kind kiro") == true)
+            XCTAssertTrue((action["command"] as? String)?.contains(">/dev/null 2>&1 || true") == true)
+            XCTAssertEqual(hook["timeout"] as? Int, 10)
         }
     }
 }
