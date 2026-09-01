@@ -642,6 +642,8 @@ enum ClientProfileRegistry {
             subtitle: "管理 ~/.kiro/hooks/ping-island.json，按 Kiro v1 hooks 协议接入 Island",
             installationKind: .kiroHookFile,
             alwaysVisibleInSettings: true,
+            logoAssetName: "KiroLogo",
+            prefersBundledLogoOverAppIcon: true,
             localAppBundleIdentifiers: ["dev.kiro.desktop"],
             iconSymbolName: "sparkles",
             configurationRelativePath: ".kiro/hooks/ping-island.json",

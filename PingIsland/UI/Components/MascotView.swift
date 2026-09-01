@@ -27,6 +27,7 @@ enum MascotClient: String, CaseIterable, Identifiable, Sendable {
     case trae
     case copilot
     case kimi
+    case kiro
 
     static let allCases: [MascotClient] = [
         .claude,
@@ -42,6 +43,7 @@ enum MascotClient: String, CaseIterable, Identifiable, Sendable {
         .codebuddy,
         .copilot,
         .kimi,
+        .kiro,
     ]
 
     var id: String { rawValue }
@@ -76,6 +78,8 @@ enum MascotClient: String, CaseIterable, Identifiable, Sendable {
             return "Copilot"
         case .kimi:
             return "Kimi CLI"
+        case .kiro:
+            return "Kiro"
         }
     }
 
@@ -109,6 +113,8 @@ enum MascotClient: String, CaseIterable, Identifiable, Sendable {
             return "GitHub Copilot Hooks 客户端"
         case .kimi:
             return "Kimi CLI 官方 hooks 与默认 Kimi 形象"
+        case .kiro:
+            return "Kiro IDE hooks 与紫色幽灵向导"
         }
     }
 
@@ -142,6 +148,8 @@ enum MascotClient: String, CaseIterable, Identifiable, Sendable {
             return .copilot
         case .kimi:
             return .kimi
+        case .kiro:
+            return .kiro
         }
     }
 
@@ -187,6 +195,8 @@ enum MascotClient: String, CaseIterable, Identifiable, Sendable {
                 .codex
             case "kimi":
                 .kimi
+            case "kiro":
+                .kiro
             default:
                 nil
             }
@@ -221,6 +231,10 @@ enum MascotClient: String, CaseIterable, Identifiable, Sendable {
             }
             if clientInfo.resolvedProfile(for: provider)?.id == "qwen-code" {
                 self = .qwen
+                return
+            }
+            if clientInfo.resolvedProfile(for: provider)?.id == "kiro" {
+                self = .kiro
                 return
             }
             switch provider {
@@ -274,6 +288,7 @@ enum MascotKind: String, CaseIterable, Identifiable, Sendable {
     case codebuddy
     case copilot
     case kimi
+    case kiro
 
     var id: String { rawValue }
 
@@ -305,6 +320,8 @@ enum MascotKind: String, CaseIterable, Identifiable, Sendable {
             return "Copilot"
         case .kimi:
             return "Kimi CLI"
+        case .kiro:
+            return "Kiro"
         }
     }
 
@@ -336,6 +353,8 @@ enum MascotKind: String, CaseIterable, Identifiable, Sendable {
             return "黑框眼镜机器人"
         case .kimi:
             return "Kimi 蓝色键盘球"
+        case .kiro:
+            return "紫色幽灵向导"
         }
     }
 
@@ -367,6 +386,8 @@ enum MascotKind: String, CaseIterable, Identifiable, Sendable {
             return Color(red: 1.0, green: 0.56, blue: 0.28)
         case .kimi:
             return Color(red: 0.96, green: 0.30, blue: 0.42)
+        case .kiro:
+            return Color(red: 0.56, green: 0.28, blue: 0.96)
         }
     }
 
@@ -519,7 +540,12 @@ struct MascotView: View {
 
     @ViewBuilder
     private func canvasScene(interval: TimeInterval, mode: MascotRenderMode, time: TimeInterval?) -> some View {
-        if let time {
+        if kind == .kiro {
+            Image("KiroLogo")
+                .resizable()
+                .scaledToFit()
+                .frame(width: size, height: size)
+        } else if let time {
             canvasFrame(time: time, mode: mode)
                 .drawingGroup(opaque: false)  // Enable GPU caching for complex pixel art
         } else {
@@ -621,6 +647,8 @@ struct MascotView: View {
             drawCopilot(in: context, canvasSize: canvasSize, time: time, mode: mode)
         case .kimi:
             drawKimi(in: context, canvasSize: canvasSize, time: time, mode: mode)
+        case .kiro:
+            drawClaude(in: context, canvasSize: canvasSize, time: time, mode: mode)
         }
     }
 
