@@ -541,16 +541,33 @@ struct MascotView: View {
     @ViewBuilder
     private func canvasScene(interval: TimeInterval, mode: MascotRenderMode, time: TimeInterval?) -> some View {
         if kind == .kiro {
-            Image("KiroLogo")
-                .resizable()
-                .scaledToFit()
-                .frame(width: size, height: size)
+            if let time {
+                kiroMascotFrame(time: time, mode: mode)
+            } else {
+                TimelineView(.periodic(from: .now, by: interval)) { context in
+                    kiroMascotFrame(time: context.date.timeIntervalSinceReferenceDate, mode: mode)
+                }
+            }
         } else if let time {
             canvasFrame(time: time, mode: mode)
                 .drawingGroup(opaque: false)  // Enable GPU caching for complex pixel art
         } else {
             animatedCanvas(interval: interval, mode: mode)
         }
+    }
+
+    private func kiroMascotFrame(time: TimeInterval, mode: MascotRenderMode) -> some View {
+        let cadence: Double = mode == .working ? 4.2 : 2.3
+        let amplitude = size * (mode == .working ? 0.075 : 0.045)
+        let bob = CGFloat(sin(time * cadence)) * amplitude
+        let tilt = Double(sin(time * cadence * 0.62)) * (mode == .working ? 3.0 : 1.5)
+
+        return Image("KiroLogo")
+            .resizable()
+            .scaledToFit()
+            .frame(width: size, height: size)
+            .offset(y: bob)
+            .rotationEffect(.degrees(tilt))
     }
 
     /// Adaptive refresh rate based on animation complexity.

@@ -970,15 +970,29 @@ struct InstanceRow: View {
     }
 
     private func statusBadge(symbol: String) -> some View {
-        Text(symbol)
-            .font(.system(size: 8, weight: .black))
-            .foregroundColor(statusAccentColor)
+        Group {
+            if session.clientInfo.resolvedProfile(for: session.provider)?.id == "kiro" {
+                Image("KiroLogo")
+                    .resizable()
+                    .scaledToFit()
+                    .padding(1.5)
+            } else {
+                Text(symbol)
+                    .font(.system(size: 8, weight: .black))
+                    .foregroundColor(statusAccentColor)
+            }
+        }
             .frame(width: 14, height: 14)
             .background(Color.black.opacity(0.92))
             .clipShape(Circle())
             .overlay(
                 Circle()
-                    .strokeBorder(statusAccentColor.opacity(0.35), lineWidth: 1)
+                    .strokeBorder(
+                        session.clientInfo.resolvedProfile(for: session.provider)?.id == "kiro"
+                            ? Color(red: 0.56, green: 0.28, blue: 0.96).opacity(0.7)
+                            : statusAccentColor.opacity(0.35),
+                        lineWidth: 1
+                    )
             )
     }
 
