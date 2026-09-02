@@ -801,9 +801,12 @@ struct MascotView: View {
         }
 
         let ghostRows: [(CGFloat, CGFloat, CGFloat)] = [
-            (13.3, 4.3, 8.4), (12.3, 3.6, 9.8), (11.3, 3.4, 10.2),
-            (10.3, 3.4, 10.2), (9.3, 3.7, 9.6), (8.3, 3.9, 9.2),
-            (7.3, 4.3, 8.4), (6.3, 4.9, 7.2)
+            // Fill the cap first so the head reads white, not as a hollow outline,
+            // at the 16–18pt session-card size.
+            (4.3, 7.3, 2.4), (5.3, 6.2, 4.6), (6.3, 5.2, 6.6),
+            (7.3, 4.5, 8.0), (8.3, 4.0, 9.0), (9.3, 3.7, 9.6),
+            (10.3, 3.4, 10.2), (11.3, 3.4, 10.2), (12.3, 3.6, 9.8),
+            (13.3, 4.3, 8.4)
         ]
         for row in ghostRows {
             context.fill(
