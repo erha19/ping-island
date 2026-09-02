@@ -540,34 +540,12 @@ struct MascotView: View {
 
     @ViewBuilder
     private func canvasScene(interval: TimeInterval, mode: MascotRenderMode, time: TimeInterval?) -> some View {
-        if kind == .kiro {
-            if let time {
-                kiroMascotFrame(time: time, mode: mode)
-            } else {
-                TimelineView(.periodic(from: .now, by: interval)) { context in
-                    kiroMascotFrame(time: context.date.timeIntervalSinceReferenceDate, mode: mode)
-                }
-            }
-        } else if let time {
+        if let time {
             canvasFrame(time: time, mode: mode)
                 .drawingGroup(opaque: false)  // Enable GPU caching for complex pixel art
         } else {
             animatedCanvas(interval: interval, mode: mode)
         }
-    }
-
-    private func kiroMascotFrame(time: TimeInterval, mode: MascotRenderMode) -> some View {
-        let cadence: Double = mode == .working ? 4.2 : 2.3
-        let amplitude = size * (mode == .working ? 0.075 : 0.045)
-        let bob = CGFloat(sin(time * cadence)) * amplitude
-        let tilt = Double(sin(time * cadence * 0.62)) * (mode == .working ? 3.0 : 1.5)
-
-        return Image("KiroLogo")
-            .resizable()
-            .scaledToFit()
-            .frame(width: size, height: size)
-            .offset(y: bob)
-            .rotationEffect(.degrees(tilt))
     }
 
     /// Adaptive refresh rate based on animation complexity.
@@ -665,7 +643,7 @@ struct MascotView: View {
         case .kimi:
             drawKimi(in: context, canvasSize: canvasSize, time: time, mode: mode)
         case .kiro:
-            drawClaude(in: context, canvasSize: canvasSize, time: time, mode: mode)
+            drawKiro(in: context, canvasSize: canvasSize, time: time, mode: mode)
         }
     }
 
@@ -775,6 +753,69 @@ struct MascotView: View {
 
         if mode == .warning {
             drawAlertGlyph(in: context, space: space, x: 11.7 + motion.shake, y: 2.2, color: kind.alertColor)
+        }
+    }
+
+    /// Purple hooded pixel mascot for Kiro. Keeping it Canvas-based makes its
+    /// scale and idle/working/warning motion consistent with Claude and Codex.
+    private func drawKiro(
+        in context: GraphicsContext,
+        canvasSize: CGSize,
+        time: TimeInterval,
+        mode: MascotRenderMode
+    ) {
+        let space = PixelSpace(canvasSize, logicalWidth: 17, logicalHeight: 15, yOffset: 1.5)
+        let motion = motionValues(for: mode, time: time)
+        let cloak = Color(red: 0.46, green: 0.17, blue: 0.82)
+        let cloakLight = Color(red: 0.66, green: 0.37, blue: 1.0)
+        let cloakDark = Color(red: 0.22, green: 0.07, blue: 0.42)
+        let face = Color(red: 0.95, green: 0.91, blue: 1.0)
+        let eye = Color(red: 0.12, green: 0.05, blue: 0.24)
+        let keyboardBase = Color(red: 0.17, green: 0.12, blue: 0.26)
+        let keyboardKey = Color(red: 0.63, green: 0.39, blue: 0.98)
+
+        drawShadow(in: context, space: space, centerX: 8.5, y: 15.7, width: 8.0 - abs(motion.bounce) * 0.3, opacity: 0.25)
+
+        if mode == .working {
+            drawKeyboard(
+                in: context,
+                space: space,
+                y: 13.0,
+                base: keyboardBase,
+                key: keyboardKey,
+                highlight: .white,
+                flashIndex: keyboardFlashIndex(time: time)
+            )
+        }
+
+        // Hood and cloak silhouette.
+        let cloakRows: [(CGFloat, CGFloat, CGFloat)] = [
+            (13.8, 4.0, 9.0), (12.8, 3.2, 10.6), (11.8, 2.8, 11.4),
+            (10.8, 3.2, 10.6), (9.8, 3.8, 9.4), (8.8, 4.2, 8.6),
+            (7.8, 4.7, 7.6), (6.8, 5.5, 6.0), (5.8, 6.3, 4.4)
+        ]
+        for row in cloakRows {
+            context.fill(
+                Path(space.rect(row.1 + motion.shake, row.0 + motion.vertical, row.2 * motion.squashX, 1 * motion.squashY)),
+                with: .color(cloak)
+            )
+        }
+
+        // Pointed hood, face opening, and asymmetric folds for a readable wizard silhouette.
+        context.fill(Path(space.rect(7.1 + motion.shake, 4.8 + motion.vertical, 2.8, 1.0)), with: .color(cloakLight))
+        context.fill(Path(space.rect(5.7 + motion.shake, 5.8 + motion.vertical, 5.6, 4.2)), with: .color(cloakDark))
+        context.fill(Path(space.rect(6.4 + motion.shake, 6.5 + motion.vertical, 4.2, 3.4)), with: .color(face))
+        context.fill(Path(space.rect(4.0 + motion.shake, 10.4 + motion.vertical, 1.4, 2.1)), with: .color(cloakLight.opacity(0.78)))
+        context.fill(Path(space.rect(11.8 + motion.shake, 10.7 + motion.vertical, 1.4, 2.0)), with: .color(cloakDark))
+        context.fill(Path(space.rect(5.0 + motion.shake, 13.7 + motion.vertical, 1.1, 1.1)), with: .color(cloakDark))
+        context.fill(Path(space.rect(10.9 + motion.shake, 13.7 + motion.vertical, 1.1, 1.1)), with: .color(cloakDark))
+
+        let eyeHeight: CGFloat = mode == .idle ? 0.45 : (mode == .warning ? 1.1 : blinkHeight(time: time, closedHeight: 0.2, openHeight: 1.1))
+        context.fill(Path(space.rect(7.0 + motion.shake, 7.8 + motion.vertical, 0.8, eyeHeight)), with: .color(eye))
+        context.fill(Path(space.rect(9.2 + motion.shake, 7.8 + motion.vertical, 0.8, eyeHeight)), with: .color(eye))
+
+        if mode == .warning {
+            drawAlertGlyph(in: context, space: space, x: 12.2 + motion.shake, y: 2.1, color: kind.alertColor)
         }
     }
 
