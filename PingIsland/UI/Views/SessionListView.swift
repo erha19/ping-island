@@ -684,6 +684,10 @@ struct InstanceRow: View {
         session.needsApprovalResponse
     }
 
+    private var isKiroSession: Bool {
+        session.clientInfo.resolvedProfile(for: session.provider)?.id == "kiro"
+    }
+
     /// Whether the pending tool requires interactive input (not just approve/deny)
     private var isInteractiveTool: Bool {
         if session.needsQuestionResponse {
@@ -941,20 +945,54 @@ struct InstanceRow: View {
 
     @ViewBuilder
     private var avatarStatusBadge: some View {
-        switch session.phase {
-        case .processing, .compacting, .waitingForApproval:
-            animatedStatusBadge
-        case .waitingForInput:
-            Circle()
-                .fill(statusAccentColor)
-                .frame(width: 10, height: 10)
-                .overlay(
-                    Circle()
-                        .strokeBorder(Color.black.opacity(0.8), lineWidth: 2)
-                )
-        case .idle, .ended:
-            EmptyView()
+        if isKiroSession, session.phase != .idle, session.phase != .ended {
+            kiroBreathingStatusBadge
+        } else {
+            switch session.phase {
+            case .processing, .compacting, .waitingForApproval:
+                animatedStatusBadge
+            case .waitingForInput:
+                Circle()
+                    .fill(statusAccentColor)
+                    .frame(width: 10, height: 10)
+                    .overlay(
+                        Circle()
+                            .strokeBorder(Color.black.opacity(0.8), lineWidth: 2)
+                    )
+            case .idle, .ended:
+                EmptyView()
+            }
         }
+    }
+
+    /// Kiro deliberately uses one stable star that breathes, rather than the
+    /// generic spinner sequence (whose dot frame resembles an app icon).
+    @ViewBuilder
+    private var kiroBreathingStatusBadge: some View {
+        if energyGovernor.policy.animationLevel == .staticFrames {
+            kiroStatusBadge(scale: 1, opacity: 0.92)
+        } else {
+            TimelineView(.periodic(from: .now, by: statusBadgeInterval)) { context in
+                let pulse = (sin(context.date.timeIntervalSinceReferenceDate * 4.6) + 1) / 2
+                kiroStatusBadge(
+                    scale: 0.82 + CGFloat(pulse) * 0.24,
+                    opacity: 0.52 + Double(pulse) * 0.48
+                )
+            }
+        }
+    }
+
+    private func kiroStatusBadge(scale: CGFloat, opacity: Double) -> some View {
+        let purple = Color(red: 0.56, green: 0.28, blue: 0.96)
+        return Text("✦")
+            .font(.system(size: 9, weight: .black))
+            .foregroundColor(purple.opacity(opacity))
+            .scaleEffect(scale)
+            .frame(width: 14, height: 14)
+            .background(Color.black.opacity(0.92))
+            .clipShape(Circle())
+            .overlay(Circle().strokeBorder(purple.opacity(0.48), lineWidth: 1))
+            .shadow(color: purple.opacity(opacity * 0.55), radius: 2)
     }
 
     @ViewBuilder
@@ -1000,7 +1038,7 @@ struct InstanceRow: View {
         if isWaitingForApproval {
             return TerminalColors.amber
         }
-        if session.clientInfo.resolvedProfile(for: session.provider)?.id == "kiro" {
+        if isKiroSession {
             return Color(red: 0.56, green: 0.28, blue: 0.96)
         }
         switch session.phase {
