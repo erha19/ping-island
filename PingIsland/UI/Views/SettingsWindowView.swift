@@ -3340,6 +3340,13 @@ private struct SettingsPanelContentView: View {
                     subtitle: "hover 展开的预览面板会在鼠标离开后自动关闭",
                     isOn: $settings.autoCollapseOnLeave
                 )
+                SettingsLineDivider()
+
+                SettingsToggleLine(
+                    title: "与其他刘海应用共存",
+                    subtitle: "空闲时让出刘海并停止悬停/点击展开，交给 NotchNest 等其它刘海工具；Agent 需要审批或追问时仍会接管刘海",
+                    isOn: $settings.coexistWithOtherNotchApps
+                )
             }
 
             SettingsSectionCard(title: "应用") {

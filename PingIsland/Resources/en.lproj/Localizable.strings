@@ -35,6 +35,8 @@
 "上下文压缩后自动弹出提示；关闭后只保留刘海状态提示和提示音" = "Automatically open an alert after context is compacted. When off, keep only the notch status cue and sound.";
 "鼠标离开时自动收起" = "Auto-collapse on mouse leave";
 "hover 展开的预览面板会在鼠标离开后自动关闭" = "Automatically close the hover preview panel when the mouse leaves";
+"与其他刘海应用共存" = "Coexist with other notch apps";
+"空闲时让出刘海并停止悬停/点击展开，交给 NotchNest 等其它刘海工具；Agent 需要审批或追问时仍会接管刘海" = "Yield the notch when idle and stop hover/click expansion, leaving it to other notch tools such as NotchNest; agents still take over the notch for approvals or follow-ups";
 "应用" = "App";
 "退出应用" = "Quit app";
 "立即关闭 Island" = "Quit Island immediately";

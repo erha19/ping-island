@@ -550,8 +550,10 @@ class NotchViewModel: ObservableObject {
             notchClose()
         }
 
-        // Start hover timer to auto-expand after a short dwell
-        if isHovering && (status == .closed || status == .popping) {
+        // Start hover timer to auto-expand after a short dwell.
+        // In coexistence mode, never auto-open on hover so other notch apps
+        // (e.g. NotchNest) can own the notch while Ping Island is idle.
+        if isHovering && (status == .closed || status == .popping) && !AppSettings.coexistWithOtherNotchApps {
             let workItem = DispatchWorkItem { [weak self] in
                 self?.performDeferredHoverOpenIfNeeded()
             }
@@ -584,7 +586,7 @@ class NotchViewModel: ObservableObject {
         case .closed, .popping:
             if detachmentTriggerScreenRect.contains(location) {
                 beginDockedDetachmentTracking(source: .closed, startLocation: location)
-            } else if isPointInHoverTrigger(location) {
+            } else if isPointInHoverTrigger(location) && !AppSettings.coexistWithOtherNotchApps {
                 notchOpen(reason: .click)
             }
         }
@@ -707,6 +709,9 @@ class NotchViewModel: ObservableObject {
         if presentationMode == .detached {
             return true
         }
+        if AppSettings.coexistWithOtherNotchApps && status != .opened {
+            return true
+        }
         if isFullscreenBrowserHiddenActive {
             return true
         }
@@ -808,6 +813,7 @@ class NotchViewModel: ObservableObject {
     }
 
     func performDeferredHoverOpenIfNeeded() {
+        guard !AppSettings.coexistWithOtherNotchApps else { return }
         guard isHovering else { return }
         guard status == .closed || status == .popping else { return }
         notchOpen(reason: .hover)
