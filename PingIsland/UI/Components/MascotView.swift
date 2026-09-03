@@ -643,7 +643,17 @@ struct MascotView: View {
         case .kimi:
             drawKimi(in: context, canvasSize: canvasSize, time: time, mode: mode)
         case .kiro:
-            drawKiro(in: context, canvasSize: canvasSize, time: time, mode: mode)
+            // Kiro's compact 2pt grid otherwise fills the full 18pt avatar.
+            // Scale just this mascot down by 10%, preserving the other designs.
+            var kiroContext = context
+            let centerX = canvasSize.width / 2
+            let centerY = canvasSize.height / 2
+            kiroContext.concatenate(
+                CGAffineTransform(translationX: centerX, y: centerY)
+                    .scaledBy(x: 0.9, y: 0.9)
+                    .translatedBy(x: -centerX, y: -centerY)
+            )
+            drawKiro(in: kiroContext, canvasSize: canvasSize, time: time, mode: mode)
         }
     }
 
@@ -792,11 +802,10 @@ struct MascotView: View {
         // left-side floating arm, two tall eyes, and three soft lower waves.
         let outlinePixels: [(CGFloat, CGFloat, CGFloat, CGFloat)] = [
             (3, 0, 3, 1), (2, 1, 5, 1), (1, 2, 6, 3),
-            // Keep the contour clear of the right eye.  Starting this segment
-            // below the eye also makes the ghost read at the same scale as the
-            // other session mascots instead of as an 18pt square sprite.
-            (1, 4, 1, 3), (7, 5, 1, 2), (2, 7, 1, 1),
-            (3, 8, 1, 1), (5, 8, 1, 1), (6, 7, 1, 1)
+            // Do not put a contour pixel on the right side of the face: it is
+            // visually read as a third eye at session-avatar scale.
+            (1, 4, 1, 3), (2, 7, 1, 1),
+            (3, 8, 1, 1), (5, 8, 1, 1)
         ]
         for pixel in outlinePixels {
             context.fill(
@@ -807,7 +816,9 @@ struct MascotView: View {
 
         let ghostRows: [(CGFloat, CGFloat, CGFloat)] = [
             (1, 3, 3), (2, 2, 5), (3, 1, 5), (4, 1, 6),
-            (5, 1, 6), (6, 2, 5), (7, 3, 1), (7, 5, 1)
+            (5, 1, 6), (6, 2, 5),
+            // Three separate lower waves, matching the official Ghost.
+            (7, 2, 1), (7, 4, 1), (7, 6, 1)
         ]
         for row in ghostRows {
             context.fill(
@@ -819,8 +830,6 @@ struct MascotView: View {
         context.fill(Path(space.rect(1.0 + motion.shake, 4.5 + motion.vertical, 1.25, 2.0)), with: .color(ghost))
         context.fill(Path(space.rect(1.4 + motion.shake, 6.0 + motion.vertical, 1.4, 1.0)), with: .color(ghost))
         context.fill(Path(space.rect(6.5 + motion.shake, 4.0 + motion.vertical, 0.8, 2.2)), with: .color(ghost))
-        context.fill(Path(space.rect(3.0 + motion.shake, 7.0 + motion.vertical, 1.0, 1.0)), with: .color(ghost))
-        context.fill(Path(space.rect(5.0 + motion.shake, 7.0 + motion.vertical, 1.0, 1.0)), with: .color(ghost))
 
         let eyeHeight: CGFloat = mode == .idle ? 0.45 : (mode == .warning ? 1.1 : blinkHeight(time: time, closedHeight: 0.2, openHeight: 1.1))
         context.fill(Path(space.rect(3.2 + motion.shake, 3.3 + motion.vertical, 0.75, eyeHeight)), with: .color(eye))
