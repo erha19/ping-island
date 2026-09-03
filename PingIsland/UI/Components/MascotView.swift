@@ -763,22 +763,23 @@ struct MascotView: View {
         time: TimeInterval,
         mode: MascotRenderMode
     ) {
-        let space = PixelSpace(canvasSize, logicalWidth: 17, logicalHeight: 15, yOffset: 1.5)
+        // Use a compact 9×9 canvas so the Ghost has crisp 2pt pixels at the
+        // 18pt session-avatar size instead of collapsing into thin scan lines.
+        let space = PixelSpace(canvasSize, logicalWidth: 9, logicalHeight: 9, yOffset: 0)
         let motion = motionValues(for: mode, time: time)
         let ghost = Color(red: 0.98, green: 0.97, blue: 1.0)
-        let ghostShade = Color(red: 0.78, green: 0.69, blue: 0.96)
         let purple = Color(red: 0.50, green: 0.19, blue: 0.92)
         let eye = Color(red: 0.10, green: 0.05, blue: 0.18)
         let keyboardBase = Color(red: 0.17, green: 0.12, blue: 0.26)
         let keyboardKey = Color(red: 0.63, green: 0.39, blue: 0.98)
 
-        drawShadow(in: context, space: space, centerX: 8.5, y: 15.7, width: 8.0 - abs(motion.bounce) * 0.3, opacity: 0.25)
+        drawShadow(in: context, space: space, centerX: 4.5, y: 9.35, width: 6.2 - abs(motion.bounce) * 0.25, opacity: 0.22)
 
         if mode == .working {
             drawKeyboard(
                 in: context,
                 space: space,
-                y: 13.0,
+                y: 8.1,
                 base: keyboardBase,
                 key: keyboardKey,
                 highlight: .white,
@@ -787,11 +788,12 @@ struct MascotView: View {
         }
 
         // A one-pixel purple contour only — no colored background behind the ghost.
+        // The silhouette intentionally follows Kiro's official Ghost: round cap,
+        // left-side floating arm, two tall eyes, and three soft lower waves.
         let outlinePixels: [(CGFloat, CGFloat, CGFloat, CGFloat)] = [
-            (4.2, 5.3, 1.0, 7.2), (5.2, 4.3, 1.0, 1.0), (6.2, 3.3, 5.2, 1.0),
-            (11.4, 4.3, 1.0, 1.0), (12.4, 5.3, 1.0, 7.0), (3.0, 9.8, 1.0, 2.8),
-            (2.2, 11.0, 1.0, 1.2), (5.0, 13.8, 1.4, 1.0), (7.3, 14.2, 1.5, 0.8),
-            (9.7, 13.8, 1.4, 1.0), (11.2, 12.8, 1.1, 1.0)
+            (3, 0, 3, 1), (2, 1, 5, 1), (1, 2, 7, 3),
+            (0, 4, 1, 3), (7, 3, 1, 4), (1, 7, 2, 1),
+            (3, 8, 1, 1), (5, 8, 1, 1), (6, 7, 1, 1)
         ]
         for pixel in outlinePixels {
             context.fill(
@@ -801,12 +803,8 @@ struct MascotView: View {
         }
 
         let ghostRows: [(CGFloat, CGFloat, CGFloat)] = [
-            // Fill the cap first so the head reads white, not as a hollow outline,
-            // at the 16–18pt session-card size.
-            (4.3, 7.3, 2.4), (5.3, 6.2, 4.6), (6.3, 5.2, 6.6),
-            (7.3, 4.5, 8.0), (8.3, 4.0, 9.0), (9.3, 3.7, 9.6),
-            (10.3, 3.4, 10.2), (11.3, 3.4, 10.2), (12.3, 3.6, 9.8),
-            (13.3, 4.3, 8.4)
+            (1, 3, 3), (2, 2, 5), (3, 1, 5), (4, 1, 6),
+            (5, 1, 6), (6, 2, 5), (7, 3, 1), (7, 5, 1)
         ]
         for row in ghostRows {
             context.fill(
@@ -814,20 +812,19 @@ struct MascotView: View {
                 with: .color(ghost)
             )
         }
-        // Two raised arms and a wavy lower edge make the ghost legible at small sizes.
-        context.fill(Path(space.rect(2.9 + motion.shake, 10.0 + motion.vertical, 2.0, 1.9)), with: .color(ghost))
-        context.fill(Path(space.rect(2.3 + motion.shake, 11.1 + motion.vertical, 2.0, 1.1)), with: .color(ghost))
-        context.fill(Path(space.rect(11.5 + motion.shake, 9.3 + motion.vertical, 1.9, 3.0)), with: .color(ghost))
-        context.fill(Path(space.rect(4.9 + motion.shake, 13.0 + motion.vertical, 1.5, 1.3)), with: .color(ghost))
-        context.fill(Path(space.rect(7.2 + motion.shake, 13.5 + motion.vertical, 1.6, 0.8)), with: .color(ghostShade))
-        context.fill(Path(space.rect(9.7 + motion.shake, 13.0 + motion.vertical, 1.5, 1.3)), with: .color(ghost))
+        // The raised left arm and three lower waves are the Ghost's signature shape.
+        context.fill(Path(space.rect(0.5 + motion.shake, 4.5 + motion.vertical, 1.5, 2.0)), with: .color(ghost))
+        context.fill(Path(space.rect(1.0 + motion.shake, 6.0 + motion.vertical, 1.8, 1.0)), with: .color(ghost))
+        context.fill(Path(space.rect(7.0 + motion.shake, 4.0 + motion.vertical, 0.9, 2.2)), with: .color(ghost))
+        context.fill(Path(space.rect(3.0 + motion.shake, 7.0 + motion.vertical, 1.0, 1.0)), with: .color(ghost))
+        context.fill(Path(space.rect(5.0 + motion.shake, 7.0 + motion.vertical, 1.0, 1.0)), with: .color(ghost))
 
         let eyeHeight: CGFloat = mode == .idle ? 0.45 : (mode == .warning ? 1.1 : blinkHeight(time: time, closedHeight: 0.2, openHeight: 1.1))
-        context.fill(Path(space.rect(6.6 + motion.shake, 8.0 + motion.vertical, 0.9, eyeHeight)), with: .color(eye))
-        context.fill(Path(space.rect(9.4 + motion.shake, 8.0 + motion.vertical, 0.9, eyeHeight)), with: .color(eye))
+        context.fill(Path(space.rect(3.2 + motion.shake, 3.3 + motion.vertical, 0.75, eyeHeight)), with: .color(eye))
+        context.fill(Path(space.rect(5.1 + motion.shake, 3.3 + motion.vertical, 0.75, eyeHeight)), with: .color(eye))
 
         if mode == .warning {
-            drawAlertGlyph(in: context, space: space, x: 12.2 + motion.shake, y: 2.1, color: kind.alertColor)
+            drawAlertGlyph(in: context, space: space, x: 6.5 + motion.shake, y: 0.2, color: kind.alertColor)
         }
     }
 
