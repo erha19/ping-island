@@ -797,15 +797,17 @@ struct MascotView: View {
             )
         }
 
-        // A one-pixel purple contour only — no colored background behind the ghost.
+        // A half-cell purple contour (one physical pixel at this sprite's grid)
+        // only — no colored background behind the ghost.
         // The silhouette intentionally follows Kiro's official Ghost: round cap,
         // left-side floating arm, two tall eyes, and three soft lower waves.
         let outlinePixels: [(CGFloat, CGFloat, CGFloat, CGFloat)] = [
-            (3, 0, 3, 1), (2, 1, 5, 1), (1, 2, 6, 3),
-            // Do not put a contour pixel on the right side of the face: it is
-            // visually read as a third eye at session-avatar scale.
-            (1, 4, 1, 3), (2, 7, 1, 1),
-            (3, 8, 1, 1), (5, 8, 1, 1)
+            // Rounded cap.
+            (3, 0, 3, 0.5), (2, 0.5, 1, 0.5), (6, 0.5, 1, 0.5),
+            // Deliberately retain a balanced, fine contour on both sides.
+            (1.5, 1, 0.5, 6), (7, 1.5, 0.5, 5.5),
+            // Three short contour marks beneath the three lower waves.
+            (2, 7.5, 1, 0.5), (4, 7.5, 1, 0.5), (6, 7.5, 1, 0.5)
         ]
         for pixel in outlinePixels {
             context.fill(
@@ -815,7 +817,10 @@ struct MascotView: View {
         }
 
         let ghostRows: [(CGFloat, CGFloat, CGFloat)] = [
-            (1, 3, 3), (2, 2, 5), (3, 1, 5), (4, 1, 6),
+            (1, 3, 3), (2, 2, 5),
+            // The white face extends past the right eye; this cell must never
+            // be purple, otherwise it reads as an extra purple eye pixel.
+            (3, 1, 6), (4, 1, 6),
             (5, 1, 6), (6, 2, 5),
             // Three separate lower waves, matching the official Ghost.
             (7, 2, 1), (7, 4, 1), (7, 6, 1)
