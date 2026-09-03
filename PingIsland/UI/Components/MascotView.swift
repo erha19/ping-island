@@ -114,7 +114,7 @@ enum MascotClient: String, CaseIterable, Identifiable, Sendable {
         case .kimi:
             return "Kimi CLI 官方 hooks 与默认 Kimi 形象"
         case .kiro:
-            return "Kiro IDE hooks 与紫色幽灵向导"
+            return "Kiro IDE hooks 与紫色描边白色幽灵"
         }
     }
 
@@ -354,7 +354,7 @@ enum MascotKind: String, CaseIterable, Identifiable, Sendable {
         case .kimi:
             return "Kimi 蓝色键盘球"
         case .kiro:
-            return "紫色幽灵向导"
+            return "紫色描边白色幽灵"
         }
     }
 
