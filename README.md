@@ -57,7 +57,7 @@
   <img src="docs/images/mascots/copilot.gif" width="36" alt="GitHub Copilot mascot" title="GitHub Copilot">
 </p>
 <p align="center">
-  <sub>Claude Code · Codex · Gemini CLI · Antigravity CLI · Hermes Agent · Pi Agent · Qwen Code · Kimi CLI · OpenClaw · OpenCode · Cursor · Qoder · Qoder CN · CodeBuddy · GitHub Copilot</sub>
+  <sub>Claude Code · Codex · Gemini CLI · Antigravity CLI · Hermes Agent · Pi Agent · Qwen Code · Kimi CLI · OpenClaw · OpenCode · Cursor · Qoder IDE · Qoder CN IDE · CodeBuddy · GitHub Copilot</sub>
 </p>
 
 <a id="lets-try-it"></a>
@@ -139,11 +139,12 @@ Ping Island focuses on the moments that actually interrupt coding flow, then kee
 - **Act from the notch** - Approve tools, deny requests, and answer follow-up prompts without hunting through tabs.
 - **Claude Code auto-approve** - Turn on per-session auto-approval when you want Claude Code to stop pausing on every permission request.
 - **One-click return** - Jump back to the right iTerm2, Ghostty, Terminal.app, tmux pane, or IDE window.
-- **SSH terminal support** - Bootstrap a remote PingIslandBridge over SSH, rewrite remote hooks to point back at your Mac, forward remote Codex app-server activity, and keep remote terminal activity visible in the same local Island UI.
-- **Multi-agent coverage** - Track Claude Code, Codex, Gemini CLI, Antigravity CLI, Hermes Agent, Pi Agent, Qwen Code, Kimi CLI, OpenClaw, OpenCode, Cursor, Qoder, Qoder CN, CodeBuddy, WorkBuddy, GitHub Copilot, and other compatible sessions in one place.
+- **SSH terminal support** - Bootstrap a remote PingIslandBridge over SSH, rewrite remote hooks to point back at your Mac, forward remote Codex app-server activity and usage snapshots, and keep remote terminal activity visible in the same local Island UI.
+- **Multi-agent coverage** - Track Claude Code, Codex, Gemini CLI, Antigravity CLI, Hermes Agent, Pi Agent, Qwen Code, Kimi CLI, OpenClaw, OpenCode, Cursor, Qoder IDE, Qoder CN IDE, CodeBuddy, WorkBuddy, GitHub Copilot, and other compatible sessions in one place.
 - **OpenClaw gateway support** - Follow OpenClaw sessions from managed internal hooks, then refill the conversation from OpenClaw's local session transcripts so the Island UI can show the actual back-and-forth instead of a single inbound message.
 - **Codex hook + app-server sync** - Support Codex CLI hooks, live app-server threads, and rollout parsing fallback when needed.
-- **Custom sounds** - Pick per-event macOS sounds or import local sound packs for your own notification style.
+- **Experience themes** - Choose PingIsland native, macOS, or Pixel (with two classic palettes); themes coordinate window chrome, icons, controls, motion, and semantic audio.
+- **Custom sounds** - Pick per-event macOS sounds or import local sound packs without changing the selected visual experience.
 - **Custom agent mascots** - Give each client its own animated mascot override across the notch, session list, and hover UI.
 - **Buddy detach in v0.5.0+** - Drag the active Buddy out of the notch so it can stay nearby as an independent floating companion.
 - **Hermes courier-fox mascot** - Hermes Agent uses a gold courier fox with a winged helmet and satchel so plugin-hook sessions stay visually distinct from the Claude/Qwen family.
@@ -167,7 +168,7 @@ Ping Island focuses on the moments that actually interrupt coding flow, then kee
 | OpenClaw | Managed internal hooks plus local transcript refresh | OpenClaw terminal host | Fast hook status, transcript backfill, message/session state |
 | OpenCode | Generated plugin file under `~/.config/opencode/plugins/` | OpenCode app and terminal host | Plugin event forwarding into the shared Island UI |
 | Cursor | Claude-compatible hooks plus optional VS Code-compatible focus extension | Cursor project window and active terminal | IDE routing, terminal focus, Claude-family session tracking |
-| Qoder / Qoder CN / Qoder CLI / Qoder CN CLI / QoderWork | Managed hook profiles in `~/.qoder/settings.json`, `~/.qoder-cn/settings.json`, and `~/.qoderwork/settings.json` | Qoder and Qoder CN windows, terminal, and supported IDE extension paths | Separate regional IDE/CLI identities, approvals where supported, notify-only handling for desktop IDEs and QoderWork |
+| Qoder IDE / Qoder CN IDE / Qoder CLI / Qoder CN CLI / QoderWork | Managed hook profiles in `~/.qoder/settings.json`, `~/.qoder-cn/settings.json`, and `~/.qoderwork/settings.json` | Qoder IDE and Qoder CN IDE windows, terminal, and supported IDE extension paths | Separate regional IDE/CLI identities, approvals where supported, notify-only handling for desktop IDEs and QoderWork |
 | CodeBuddy / WorkBuddy | Managed hook profiles plus optional VS Code-compatible focus extension | App windows, terminal, and supported IDE extension paths | Claude-family session tracking, client-aware jump-back, follow-up visibility |
 | GitHub Copilot | Copilot hook protocol | Compatible terminal hosts | Copilot CLI / agent hook event status |
 
@@ -204,14 +205,49 @@ Ping Island currently ships a 4-category settings panel:
 - **General** - launch at login and baseline app behavior
 - **Display** - notch display target and placement behavior
 - **Mascot** - client mascot previews, per-client overrides, animation states
-- **Sound** - event-specific sounds, sound pack mode, sound pack import
+- **Sound** - experience-theme selection, event-specific sounds, sound pack mode, sound pack import
+
+## Experience Themes
+
+Ping Island includes three built-in experience themes under `Settings -> Sound -> Experience theme`:
+
+| Theme | What it changes | Recommended audio |
+| --- | --- | --- |
+| **PingIsland native** | The project's dark glass surfaces, rounded controls, and original visual language | Original built-in 8-bit mapping plus new semantic moments |
+| **macOS** | Native titlebar and traffic lights, full-height source-list sidebar, outline SF Symbols, system materials, and semantic controls | macOS system sounds |
+| **Pixel** | Silkscreen type, pixel grid surfaces, square controls, and code-rendered pixel icons | AgentIsland game-style 8-bit mapping |
+
+Pixel includes **Arcade Neon** and **Game Boy Olive** palettes. They share one
+component, motion, and sound implementation; changing the palette does not reset
+your sound selection.
+
+Themes are more than a color preset: the same theme supplies visual tokens,
+confirmation-action appearance, motion timing, lifecycle sound mappings, and
+auxiliary cues. In addition to the five configurable notification stages,
+themes cover launch, new sessions, approvals, waiting reminders, rapid submits,
+and usage warning/recovery edges.
+
+The screen-attached notch remains canonical black across every theme. Theme
+selection changes Settings and theme-aware detached surfaces, but never recolors
+the macOS notch area.
+
+All three themes share the same native Settings window shell, so dragging,
+traffic lights, resizing and full-screen behavior remain consistent. The
+PingIsland, macOS and Pixel families then render distinct sidebar rows, icons,
+surfaces and controls inside that shell. Category selection updates immediately;
+heavier refresh work is deferred, cancellable and cached.
+
+Choosing a theme applies its recommended sound mode. You can then switch to a
+local CESP/OpenPeon sound pack; this changes audio only and does not replace the
+active visual or interaction theme. See [the theme architecture and extension
+guide](docs/experience-themes.md) for the contributor-facing contract.
 
 ## Custom Sounds
 
 Ping Island currently supports three sound modes under `Settings -> Sound`:
 
 - **System sounds** - choose a macOS sound for each event.
-- **Built-in 8-bit** - use Island's bundled retro sound set, including the fixed client startup sound.
+- **Built-in 8-bit** - use Island's bundled retro sound set, including themed startup and action feedback.
 - **Sound pack** - load a local OpenPeon / CESP-compatible pack from disk.
 
 ### Quick setup
@@ -284,7 +320,7 @@ Sound packs can use `.wav`, `.mp3`, or `.ogg` files. If a selected pack does not
 ## How It Works
 
 ```text
-Claude / Codex / Gemini CLI / Antigravity CLI / Hermes Agent / Pi Agent / Qwen Code / Kimi CLI / OpenCode / Cursor / Qoder / Qoder CN / CodeBuddy / WorkBuddy / Copilot / ...
+Claude / Codex / Gemini CLI / Antigravity CLI / Hermes Agent / Pi Agent / Qwen Code / Kimi CLI / OpenCode / Cursor / Qoder IDE / Qoder CN IDE / CodeBuddy / WorkBuddy / Copilot / ...
   -> hook or app-server event
     -> Ping Island monitor + normalization layer
       -> SessionStore
@@ -302,7 +338,7 @@ Implementation details worth knowing:
 - Qwen Code hooks are installed into `~/.qwen/settings.json`; the bridge follows the official event names and uses `Stop` / `SessionEnd` / `Notification` messages to surface popup-ready summaries in Island.
 - Kimi CLI hooks are installed into `~/.kimi/config.toml`; Ping Island preserves unrelated TOML content and maps Kimi `Stop` to turn completion while `SessionEnd` closes the session.
 - OpenCode is wired through a generated plugin file under `~/.config/opencode/plugins/` and enabled from the documented global config at `~/.config/opencode/opencode.json`; legacy `config.json` entries are still recognized for cleanup.
-- Remote SSH hosts can bootstrap `PingIslandBridge`, rewrite remote Claude-compatible hooks to target that bridge, and forward remote events back into the local Ping Island UI.
+- Remote SSH hosts can bootstrap `PingIslandBridge`, rewrite remote Claude-compatible hooks to target that bridge, and forward remote events plus Codex usage snapshots back into the local Ping Island UI.
 - Focus routing spans iTerm2, Ghostty, Terminal.app, tmux, and VS Code-compatible IDE extensions.
 
 ## Requirements

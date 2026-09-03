@@ -154,17 +154,17 @@ enum Island8BitSound: String, CaseIterable, Identifiable {
     static let allOrdered: [Island8BitSound] = Island8BitSound.allCases.sorted { $0.label < $1.label }
 }
 
-struct OpenPeonSoundEntry: Decodable, Equatable {
+struct OpenPeonSoundEntry: Decodable, Equatable, Sendable {
     let file: String
     let label: String?
     let sha256: String?
 }
 
-struct OpenPeonCategoryManifest: Decodable, Equatable {
+struct OpenPeonCategoryManifest: Decodable, Equatable, Sendable {
     let sounds: [OpenPeonSoundEntry]
 }
 
-struct OpenPeonManifest: Decodable, Equatable {
+struct OpenPeonManifest: Decodable, Equatable, Sendable {
     let cespVersion: String
     let name: String
     let displayName: String?
@@ -182,7 +182,7 @@ struct OpenPeonManifest: Decodable, Equatable {
     }
 }
 
-struct SoundPack: Identifiable, Equatable {
+struct SoundPack: Identifiable, Equatable, Sendable {
     let rootURL: URL
     let manifest: OpenPeonManifest
 
@@ -204,6 +204,76 @@ struct SoundPack: Identifiable, Equatable {
     }
 }
 
+private enum SoundPackScanner {
+    nonisolated static func load(importedPaths: [String]) -> [SoundPack] {
+        var dedupedRoots: [String: URL] = [:]
+        let importedRoots = importedPaths.map { URL(fileURLWithPath: $0, isDirectory: true) }
+
+        for url in discoverPackRoots() + importedRoots {
+            let standardized = url.standardizedFileURL
+            dedupedRoots[standardized.path] = standardized
+        }
+
+        return dedupedRoots.values.compactMap(loadPack(at:))
+            .sorted {
+                if $0.displayName == $1.displayName {
+                    return $0.rootURL.path < $1.rootURL.path
+                }
+                return $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
+            }
+    }
+
+    nonisolated static func loadPack(at rootURL: URL) -> SoundPack? {
+        let manifestURL = rootURL.appendingPathComponent("openpeon.json")
+        guard FileManager.default.fileExists(atPath: manifestURL.path) else { return nil }
+
+        do {
+            let data = try Data(contentsOf: manifestURL)
+            let manifest = try JSONDecoder().decode(OpenPeonManifest.self, from: data)
+            guard manifest.cespVersion.hasPrefix("1.") else {
+                return nil
+            }
+            return SoundPack(rootURL: rootURL, manifest: manifest)
+        } catch {
+            return nil
+        }
+    }
+
+    private nonisolated static func discoverPackRoots() -> [URL] {
+        let fileManager = FileManager.default
+        let home = fileManager.homeDirectoryForCurrentUser
+        let currentDirectory = URL(fileURLWithPath: fileManager.currentDirectoryPath, isDirectory: true)
+        let candidateDirectories = [
+            home.appendingPathComponent(".openpeon/packs", isDirectory: true),
+            home.appendingPathComponent(".claude/hooks/peon-ping/packs", isDirectory: true),
+            currentDirectory.appendingPathComponent(".claude/hooks/peon-ping/packs", isDirectory: true)
+        ]
+
+        return candidateDirectories.flatMap { directory -> [URL] in
+            guard fileManager.fileExists(atPath: directory.path) else { return [] }
+            return packDirectories(in: directory)
+        }
+    }
+
+    private nonisolated static func packDirectories(in directory: URL) -> [URL] {
+        guard let enumerator = FileManager.default.enumerator(
+            at: directory,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles, .skipsPackageDescendants]
+        ) else {
+            return []
+        }
+
+        var roots: [URL] = []
+        for case let url as URL in enumerator {
+            guard url.lastPathComponent == "openpeon.json" else { continue }
+            roots.append(url.deletingLastPathComponent())
+            enumerator.skipDescendants()
+        }
+        return roots
+    }
+}
+
 @MainActor
 final class SoundPackCatalog: NSObject, ObservableObject, NSSoundDelegate {
     static let shared = SoundPackCatalog()
@@ -219,25 +289,21 @@ final class SoundPackCatalog: NSObject, ObservableObject, NSSoundDelegate {
 
     private override init() {
         super.init()
-        refresh()
     }
 
     func refresh() {
-        var dedupedRoots: [String: URL] = [:]
-        for url in discoverPackRoots() + importedPackRoots() {
-            let standardized = url.standardizedFileURL
-            dedupedRoots[standardized.path] = standardized
+        availablePacks = SoundPackScanner.load(importedPaths: importedPackPaths)
+    }
+
+    func refreshInBackground() async {
+        let paths = importedPackPaths
+        let packs = await Task.detached(priority: .userInitiated) {
+            SoundPackScanner.load(importedPaths: paths)
+        }.value
+        guard !Task.isCancelled else { return }
+        if availablePacks != packs {
+            availablePacks = packs
         }
-
-        let packs = dedupedRoots.values.compactMap(loadPack(at:))
-            .sorted {
-                if $0.displayName == $1.displayName {
-                    return $0.rootURL.path < $1.rootURL.path
-                }
-                return $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
-            }
-
-        availablePacks = packs
     }
 
     func importPack() -> Bool {
@@ -251,12 +317,12 @@ final class SoundPackCatalog: NSObject, ObservableObject, NSSoundDelegate {
         guard panel.runModal() == .OK, let url = panel.url?.standardizedFileURL else {
             return false
         }
-        guard loadPack(at: url) != nil else {
+        guard SoundPackScanner.loadPack(at: url) != nil else {
             NSSound.beep()
             return false
         }
 
-        var paths = Set(importedPackRoots().map(\.path))
+        var paths = Set(importedPackPaths)
         paths.insert(url.path)
         defaults.set(Array(paths).sorted(), forKey: Keys.importedPackPaths)
         refresh()
@@ -314,63 +380,8 @@ final class SoundPackCatalog: NSObject, ObservableObject, NSSoundDelegate {
         AppSoundPlayback.shared.clearIfActive(sound)
     }
 
-    private func importedPackRoots() -> [URL] {
-        let paths = defaults.stringArray(forKey: Keys.importedPackPaths) ?? []
-        return paths.map { URL(fileURLWithPath: $0, isDirectory: true) }
-    }
-
-    private func discoverPackRoots() -> [URL] {
-        let fm = FileManager.default
-        let home = fm.homeDirectoryForCurrentUser
-        let cwd = URL(fileURLWithPath: fm.currentDirectoryPath, isDirectory: true)
-
-        let candidateDirectories = [
-            home.appendingPathComponent(".openpeon/packs", isDirectory: true),
-            home.appendingPathComponent(".claude/hooks/peon-ping/packs", isDirectory: true),
-            cwd.appendingPathComponent(".claude/hooks/peon-ping/packs", isDirectory: true)
-        ]
-
-        var roots: [URL] = []
-        for directory in candidateDirectories where fileExists(directory) {
-            roots.append(contentsOf: packDirectories(in: directory))
-        }
-        return roots
-    }
-
-    private func packDirectories(in directory: URL) -> [URL] {
-        let fm = FileManager.default
-        guard let enumerator = fm.enumerator(
-            at: directory,
-            includingPropertiesForKeys: [.isDirectoryKey],
-            options: [.skipsHiddenFiles, .skipsPackageDescendants]
-        ) else {
-            return []
-        }
-
-        var roots: [URL] = []
-        for case let url as URL in enumerator {
-            guard url.lastPathComponent == "openpeon.json" else { continue }
-            roots.append(url.deletingLastPathComponent())
-            enumerator.skipDescendants()
-        }
-
-        return roots
-    }
-
-    private func loadPack(at rootURL: URL) -> SoundPack? {
-        let manifestURL = rootURL.appendingPathComponent("openpeon.json")
-        guard fileExists(manifestURL) else { return nil }
-
-        do {
-            let data = try Data(contentsOf: manifestURL)
-            let manifest = try JSONDecoder().decode(OpenPeonManifest.self, from: data)
-            guard manifest.cespVersion.hasPrefix("1.") else {
-                return nil
-            }
-            return SoundPack(rootURL: rootURL, manifest: manifest)
-        } catch {
-            return nil
-        }
+    private var importedPackPaths: [String] {
+        defaults.stringArray(forKey: Keys.importedPackPaths) ?? []
     }
 
     private func resolvedSoundURL(for entry: OpenPeonSoundEntry, in pack: SoundPack) -> URL? {

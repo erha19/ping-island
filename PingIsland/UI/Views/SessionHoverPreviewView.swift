@@ -496,30 +496,31 @@ private struct HoverApprovalCard: View {
                 HoverTerminalRoutedPromptNotice(session: session)
             } else {
                 HStack(spacing: 8) {
-                    Button(AppLocalization.string("Deny")) {
+                    ConfirmationActionButton(
+                        title: AppLocalization.string("Deny"),
+                        role: .deny
+                    ) {
                         sessionMonitor.denyPermission(sessionId: session.sessionId, reason: nil)
                         onActionCompleted()
                     }
-                    .buttonStyle(HoverApprovalButtonStyle(background: Color.white.opacity(0.1)))
 
                     if let sessionAction = session.scopedApprovalAction {
-                        Button(AppLocalization.string(sessionAction.buttonTitleKey)) {
+                        ConfirmationActionButton(
+                            title: AppLocalization.string(sessionAction.buttonTitleKey),
+                            role: .scopedApproval
+                        ) {
                             sessionMonitor.approvePermission(sessionId: session.sessionId, forSession: true)
                             onActionCompleted()
                         }
-                        .buttonStyle(
-                            HoverApprovalButtonStyle(
-                                background: TerminalColors.blue.opacity(0.26),
-                                foreground: .white.opacity(0.95)
-                            )
-                        )
                     }
 
-                    Button(AppLocalization.string("Allow")) {
+                    ConfirmationActionButton(
+                        title: AppLocalization.string("Allow"),
+                        role: .approve
+                    ) {
                         sessionMonitor.approvePermission(sessionId: session.sessionId)
                         onActionCompleted()
                     }
-                    .buttonStyle(HoverApprovalButtonStyle(background: Color.white.opacity(0.92), foreground: .black))
                 }
             }
         }
@@ -579,15 +580,14 @@ private struct HoverQuestionInterventionCard: View {
                     }
                 }
             } else if intervention.metadata["responseMode"] == "external_only" {
-                Button {
+                ConfirmationActionButton(
+                    title: AppLocalization.format("打开 %@", session.interactionDisplayName),
+                    role: .neutral
+                ) {
                     Task {
                         _ = await SessionLauncher.shared.activate(session)
                     }
                 }
-                label: {
-                    Text(verbatim: AppLocalization.format("打开 %@", session.interactionDisplayName))
-                }
-                .buttonStyle(HoverApprovalButtonStyle(background: Color.white.opacity(0.9), foreground: .black))
             } else if intervention.supportsInlineResponse {
                 let secondaryActionTitle: String? = if session.clientInfo.prefersAnsweredQuestionFollowupAction {
                     AppLocalization.format("打开 %@", session.interactionDisplayName)
@@ -628,15 +628,14 @@ private struct HoverQuestionInterventionCard: View {
                     }
                 )
             } else {
-                Button {
+                ConfirmationActionButton(
+                    title: AppLocalization.format("打开 %@ 回答", session.interactionDisplayName),
+                    role: .neutral
+                ) {
                     Task {
                         _ = await SessionLauncher.shared.activateClientApplication(session)
                     }
                 }
-                label: {
-                    Text(verbatim: AppLocalization.format("打开 %@ 回答", session.interactionDisplayName))
-                }
-                .buttonStyle(HoverApprovalButtonStyle(background: Color.white.opacity(0.9), foreground: .black))
             }
         }
         .padding(.top, 12)
@@ -657,23 +656,6 @@ private struct HoverTerminalRoutedPromptNotice: View {
         .foregroundColor(.white.opacity(0.64))
         .fixedSize(horizontal: false, vertical: true)
         .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
-private struct HoverApprovalButtonStyle: ButtonStyle {
-    let background: Color
-    var foreground: Color = .white
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.system(size: 12, weight: .semibold))
-            .foregroundColor(foreground.opacity(configuration.isPressed ? 0.75 : 1))
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(
-                Capsule()
-                    .fill(background.opacity(configuration.isPressed ? 0.82 : 1))
-            )
     }
 }
 

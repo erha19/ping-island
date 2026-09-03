@@ -2,6 +2,11 @@ import XCTest
 @testable import Ping_Island
 
 final class TerminalAppRegistryTests: XCTestCase {
+    func testQoderIDEProcessNamesKeepLegacyAliases() {
+        XCTAssertTrue(TerminalAppRegistry.isTerminal("/Applications/Qoder IDE.app/Contents/MacOS/Qoder"))
+        XCTAssertTrue(TerminalAppRegistry.isTerminal("/Applications/Qoder CN.app/Contents/MacOS/Qoder CN"))
+    }
+
     func testDoesNotInferCodexProgramAsTerminalHostBundle() {
         XCTAssertNil(
             TerminalAppRegistry.inferredBundleIdentifier(forTerminalProgram: "codex")

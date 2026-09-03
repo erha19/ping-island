@@ -108,7 +108,7 @@ final class QoderCLIVersionDetectionTests: XCTestCase {
     func testQoderCNSharedSettingsKeepDesktopAndCLIHooksIndependent() throws {
         let desktopProfile = try XCTUnwrap(ClientProfileRegistry.managedHookProfile(id: "qoder-cn-hooks"))
         let cliProfile = try XCTUnwrap(ClientProfileRegistry.managedHookProfile(id: "qoder-cn-cli-hooks"))
-        let desktopCommand = "/Users/test/.ping-island/bin/ping-island-bridge --source claude --client-kind qoder-cn --client-name 'Qoder CN' --client-originator 'Qoder CN'"
+        let desktopCommand = "/Users/test/.ping-island/bin/ping-island-bridge --source claude --client-kind qoder-cn --client-name 'Qoder CN IDE' --client-originator 'Qoder CN IDE'"
         let cliCommand = "/Users/test/.ping-island/bin/ping-island-bridge --source claude --client-kind qoder-cn-cli --client-name 'Qoder CN CLI' --client-origin cli --client-originator 'Qoder CN'"
 
         let desktopData = HookInstaller.updatedConfigurationData(

@@ -20,6 +20,22 @@ private let cornerRadiusInsets = (
 private let compactCenterContentInset: CGFloat = 14
 private let minimumClosedNotchFullContentWidth: CGFloat = 96
 
+/// The screen-attached notch is stable product chrome rather than a theme
+/// surface. Settings and detached panels may change theme, while this
+/// presentation keeps the canonical black appearance and motion.
+enum DockedNotchVisualStyle {
+    static let surfaceColor = Color.black
+    static let topSeparatorColor = Color.black
+    static let openResponse: TimeInterval = 0.42
+    static let openDampingFraction: CGFloat = 0.8
+    static let closeResponse: TimeInterval = 0.45
+    static let closeDampingFraction: CGFloat = 1.0
+
+    static var contentTheme: IslandExperienceTheme {
+        PingIslandExperienceTheme.definition
+    }
+}
+
 struct OpenedPanelContentHeightPreferenceKey: PreferenceKey {
     static var defaultValue: CGFloat = 0
 
@@ -39,6 +55,7 @@ struct NotchView: View {
     @ObservedObject private var updateManager = UpdateManager.shared
     @ObservedObject private var settings = AppSettings.shared
     @ObservedObject private var screenSelector = ScreenSelector.shared
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var previousPendingIds: Set<String> = []
     @State private var manualAttentionTracker = SessionManualAttentionTracker()
     @State private var previousCompletedReadyIds: Set<String> = []
@@ -323,14 +340,28 @@ struct NotchView: View {
         )
     }
 
-    // Animation springs
-    private let openAnimation = Animation.spring(response: 0.42, dampingFraction: 0.8, blendDuration: 0)
-    private let closeAnimation = Animation.spring(response: 0.45, dampingFraction: 1.0, blendDuration: 0)
+    // The docked notch keeps its established motion across experience themes.
+    private var openAnimation: Animation {
+        .spring(
+            response: DockedNotchVisualStyle.openResponse,
+            dampingFraction: DockedNotchVisualStyle.openDampingFraction,
+            blendDuration: 0
+        )
+    }
+
+    private var closeAnimation: Animation {
+        .spring(
+            response: DockedNotchVisualStyle.closeResponse,
+            dampingFraction: DockedNotchVisualStyle.closeDampingFraction,
+            blendDuration: 0
+        )
+    }
 
     // MARK: - Body
 
     var body: some View {
         instrumentedBody
+            .environment(\.islandExperienceTheme, DockedNotchVisualStyle.contentTheme)
     }
 
     private var presentedBody: some View {
@@ -548,11 +579,11 @@ struct NotchView: View {
             .frame(maxWidth: isOpened ? notchSize.width : nil, alignment: .top)
             .padding(.horizontal, horizontalInset)
             .padding([.horizontal, .bottom], isOpened ? 12 : 0)
-            .background(.black)
+            .background(DockedNotchVisualStyle.surfaceColor)
             .clipShape(currentNotchShape)
             .overlay(alignment: .top) {
                 Rectangle()
-                    .fill(.black)
+                    .fill(DockedNotchVisualStyle.topSeparatorColor)
                     .frame(height: 1)
                     .padding(.horizontal, topCornerRadius)
             }
@@ -562,16 +593,16 @@ struct NotchView: View {
                 maxHeight: isOpened ? notchSize.height : nil,
                 alignment: .top
             )
-            .animation(isOpened ? openAnimation : closeAnimation, value: viewModel.status)
-            .animation(viewModel.closedNotchResizeAnimation, value: notchSize)
-            .animation(.smooth, value: activityCoordinator.expandingActivity)
-            .animation(.smooth, value: hasPendingPermission)
-            .animation(.smooth, value: hasHumanIntervention)
-            .animation(.smooth, value: hasCompletedReadyState)
-            .animation(.spring(response: 0.3, dampingFraction: 0.5), value: isBouncing)
+            .animation(reduceMotion ? nil : (isOpened ? openAnimation : closeAnimation), value: viewModel.status)
+            .animation(reduceMotion ? nil : viewModel.closedNotchResizeAnimation, value: notchSize)
+            .animation(reduceMotion ? nil : .smooth, value: activityCoordinator.expandingActivity)
+            .animation(reduceMotion ? nil : .smooth, value: hasPendingPermission)
+            .animation(reduceMotion ? nil : .smooth, value: hasHumanIntervention)
+            .animation(reduceMotion ? nil : .smooth, value: hasCompletedReadyState)
+            .animation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.5), value: isBouncing)
             .contentShape(Rectangle())
             .onHover { hovering in
-                withAnimation(.spring(response: 0.38, dampingFraction: 0.8)) {
+                withAnimation(reduceMotion ? nil : .spring(response: 0.38, dampingFraction: 0.8)) {
                     isHovering = hovering
                 }
             }

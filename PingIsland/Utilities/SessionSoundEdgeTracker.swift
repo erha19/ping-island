@@ -1,6 +1,6 @@
 import Foundation
 
-/// Turns successive snapshots of the visible session list into notification-sound
+/// Turns successive snapshots of the visible session list into semantic sound
 /// events.
 ///
 /// A sound must be caused by a session's own state changing. The list handed to the
@@ -19,7 +19,7 @@ import Foundation
 /// callers is evaluated against the terminals that caused the sound.
 struct SessionSoundEdgeTracker {
     struct Edge: Equatable {
-        let event: NotificationEvent
+        let event: AppSoundFeedbackEvent
         let sessions: [SessionState]
     }
 
@@ -51,6 +51,7 @@ struct SessionSoundEdgeTracker {
     private let retainedSessionLimit: Int
     private var records: [String: Record] = [:]
     private var playedCompletionKeys = Set<SessionCompletionKey>()
+    private var rapidSubmitTracker = RapidSubmitSoundTracker()
     private var sequence: UInt64 = 0
     private var hasPrimed = false
 
@@ -64,6 +65,7 @@ struct SessionSoundEdgeTracker {
     /// exist when a surface appears do not chime retroactively.
     mutating func prime(with sessions: [SessionState]) {
         hasPrimed = true
+        _ = rapidSubmitTracker.observe(sessions)
         absorb(sessions)
     }
 
@@ -79,6 +81,8 @@ struct SessionSoundEdgeTracker {
         var attentionSessions: [SessionState] = []
         var completedSessions: [SessionState] = []
         var processingSessions: [SessionState] = []
+        let newSessions = sessions.filter { records[$0.stableId] == nil }
+        let rapidSubmitSessions = rapidSubmitTracker.observe(sessions)
 
         for session in sessions {
             let previous = records[session.stableId]?.snapshot
@@ -116,8 +120,14 @@ struct SessionSoundEdgeTracker {
         if !completedSessions.isEmpty {
             return Edge(event: .taskCompleted, sessions: completedSessions)
         }
+        if !newSessions.isEmpty {
+            return Edge(event: .sessionStarted, sessions: newSessions)
+        }
         if !processingSessions.isEmpty {
             return Edge(event: .processingStarted, sessions: processingSessions)
+        }
+        if !rapidSubmitSessions.isEmpty {
+            return Edge(event: .rapidSubmit, sessions: rapidSubmitSessions)
         }
         return nil
     }

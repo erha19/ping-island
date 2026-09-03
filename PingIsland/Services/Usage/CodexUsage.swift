@@ -66,9 +66,24 @@ struct CodexUsageSnapshot: Equatable, Codable, Sendable {
         return UUID(uuidString: candidate) == nil ? nil : candidate
     }
 
+    nonisolated var isRemoteSource: Bool {
+        sourceFilePath.hasPrefix("ssh://")
+    }
+
     nonisolated
     var isEmpty: Bool {
         windows.isEmpty
+    }
+
+    nonisolated static func newest(_ snapshots: [CodexUsageSnapshot?]) -> CodexUsageSnapshot? {
+        snapshots.compactMap { $0 }.max { lhs, rhs in
+            let lhsDate = lhs.capturedAt ?? .distantPast
+            let rhsDate = rhs.capturedAt ?? .distantPast
+            if lhsDate == rhsDate {
+                return lhs.sourceFilePath.localizedStandardCompare(rhs.sourceFilePath) == .orderedAscending
+            }
+            return lhsDate < rhsDate
+        }
     }
 }
 

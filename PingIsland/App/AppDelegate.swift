@@ -12,6 +12,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var shouldRunHookWalkthroughAfterOnboarding = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        ExperienceThemeFontRegistry.registerBundledFonts()
+
         if launchConfiguration.shouldEnforceSingleInstance && !ensureSingleInstance() {
             NSApplication.shared.terminate(nil)
             return
@@ -27,6 +29,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if !launchConfiguration.isRunningTests {
             UpdateManager.shared.start()
             UserIdleAutoProtection.shared.start()
+            Task {
+                await SoundPackCatalog.shared.refreshInBackground()
+            }
             Task {
                 await TelemetryService.shared.start()
             }
@@ -88,7 +93,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             presentHookInstallOnboardingIfNeeded()
         }
 
-        // Play the fixed client startup sound for the bundled 8-bit theme.
+        // Route launch feedback through the selected experience and sound mode.
         Task { @MainActor in
             AppSettings.playClientStartupSound()
         }

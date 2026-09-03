@@ -16,7 +16,7 @@ final class HookInstallerTemporarySettingsTests: XCTestCase {
         XCTAssertNotNil(hooks["Stop"])
     }
 
-    func testCreateTemporaryQoderSettingsQuotesClientName() throws {
+    func testCreateTemporaryQoderCLISettingsQuotesClientName() throws {
         let settingsURL = try XCTUnwrap(HookInstaller.createTemporarySettingsFile(for: "qoder-cli-hooks"))
         defer { HookInstaller.removeTemporarySettingsFile(at: settingsURL) }
 
@@ -27,6 +27,20 @@ final class HookInstallerTemporarySettingsTests: XCTestCase {
         let command = try XCTUnwrap((preToolUse.first?["hooks"] as? [[String: Any]])?.first?["command"] as? String)
 
         XCTAssertTrue(command.contains("--client-name 'Qoder CLI'"), command)
+    }
+
+    func testCreateTemporaryQoderIDESettingsUsesRenamedClient() throws {
+        let settingsURL = try XCTUnwrap(HookInstaller.createTemporarySettingsFile(for: "qoder-hooks"))
+        defer { HookInstaller.removeTemporarySettingsFile(at: settingsURL) }
+
+        let data = try Data(contentsOf: settingsURL)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let hooks = try XCTUnwrap(json["hooks"] as? [String: Any])
+        let preToolUse = try XCTUnwrap(hooks["PreToolUse"] as? [[String: Any]])
+        let command = try XCTUnwrap((preToolUse.first?["hooks"] as? [[String: Any]])?.first?["command"] as? String)
+
+        XCTAssertTrue(command.contains("--client-name 'Qoder IDE'"), command)
+        XCTAssertTrue(command.contains("--client-originator 'Qoder IDE'"), command)
     }
 
     func testCreateTemporaryQoderCNSettingsUsesIndependentClientKind() throws {
@@ -41,5 +55,19 @@ final class HookInstallerTemporarySettingsTests: XCTestCase {
 
         XCTAssertTrue(command.contains("--client-kind qoder-cn-cli"), command)
         XCTAssertTrue(command.contains("--client-name 'Qoder CN CLI'"), command)
+    }
+
+    func testCreateTemporaryQoderCNIDESettingsUsesRenamedClient() throws {
+        let settingsURL = try XCTUnwrap(HookInstaller.createTemporarySettingsFile(for: "qoder-cn-hooks"))
+        defer { HookInstaller.removeTemporarySettingsFile(at: settingsURL) }
+
+        let data = try Data(contentsOf: settingsURL)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let hooks = try XCTUnwrap(json["hooks"] as? [String: Any])
+        let preToolUse = try XCTUnwrap(hooks["PreToolUse"] as? [[String: Any]])
+        let command = try XCTUnwrap((preToolUse.first?["hooks"] as? [[String: Any]])?.first?["command"] as? String)
+
+        XCTAssertTrue(command.contains("--client-name 'Qoder CN IDE'"), command)
+        XCTAssertTrue(command.contains("--client-originator 'Qoder CN IDE'"), command)
     }
 }

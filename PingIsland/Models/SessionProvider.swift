@@ -719,6 +719,7 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
             normalizedProfileID == "qoder-cn"
             || normalizedProfileID == "qoder-cn-cli"
             || normalizedName == "qoder cn"
+            || normalizedName == "qoder cn ide"
             || normalizedName == "qoder cn cli"
             || normalizedName == "qoderclicn"
             || normalizedOriginator == "qoder cn"
@@ -744,6 +745,7 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
             || normalized.bundleIdentifier?.lowercased() == "com.aliyun.lingma.ide"
             || normalized.ideHostProfile?.id == "qoder-cn-extension"
             || (normalizedProfileID == "qoder-cn" && !isQoderCNCLI)
+            || (normalizedName == "qoder cn ide" && !isQoderCNCLI)
         let hasQoderIDEHostEvidence =
             hostBundleIdentifier == "com.qoder.ide"
             || normalized.terminalBundleIdentifier?.lowercased() == "com.qoder.ide"
@@ -771,10 +773,9 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
             normalized.name = "QoderWork"
         } else if isQoderCNIDEHosted {
             normalized.profileID = "qoder-cn"
-            normalized.name = "Qoder CN"
+            normalized.name = "Qoder CN IDE"
         } else if isQoderIDEHosted {
             normalized.profileID = "qoder"
-            normalized.name = "Qoder"
         } else if isQoderCNCLI || (isTerminalHosted && isQoderCNClient) {
             normalized.profileID = "qoder-cn-cli"
             normalized.name = "Qoder CN CLI"
@@ -787,7 +788,10 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
             normalized.name = "Qoder CLI"
         } else if normalized.profileID == nil, normalized.name == nil {
             normalized.profileID = "qoder"
-            normalized.name = "Qoder"
+        }
+
+        if normalized.profileID?.lowercased() == "qoder" {
+            normalized.name = "Qoder IDE"
         }
 
         return normalized

@@ -442,4 +442,41 @@ final class AgentUsageAnalyticsTests: XCTestCase {
         XCTAssertEqual(snapshot.topSessionThisWeek?.tokenTotals, AgentUsageTokenTotals(input: 75, output: 30, total: 105))
         XCTAssertEqual(snapshot.topSessionThisWeek?.title, "Display token usage by session title")
     }
+
+    func testRemoteCodexUsageSnapshotsKeepIndependentHostBaselines() async throws {
+        let directoryURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ping-island-remote-agent-usage-\(UUID().uuidString)", isDirectory: true)
+        let fileURL = directoryURL.appendingPathComponent("usage.json")
+        defer {
+            try? FileManager.default.removeItem(at: directoryURL)
+        }
+
+        let store = AgentUsageStore(fileURL: fileURL)
+        let capturedAt = Date()
+        let rolloutName = "rollout-2026-08-31T00-00-00-019db9a7-336a-7b62-9288-7304c3d2d4b9.jsonl"
+        let firstHostPath = "ssh://root@first.example:3006/root/.codex/sessions/\(rolloutName)"
+        let secondHostPath = "ssh://root@second.example:3006/root/.codex/sessions/\(rolloutName)"
+
+        for sourcePath in [firstHostPath, secondHostPath] {
+            await store.recordCodexUsageSnapshot(CodexUsageSnapshot(
+                sourceFilePath: sourcePath,
+                capturedAt: capturedAt,
+                planType: "pro",
+                limitID: "codex",
+                tokenUsage: CodexTokenUsage(inputTokens: 100, outputTokens: 50, totalTokens: 150),
+                windows: []
+            ))
+            await store.recordCodexUsageSnapshot(CodexUsageSnapshot(
+                sourceFilePath: sourcePath,
+                capturedAt: capturedAt,
+                planType: "pro",
+                limitID: "codex",
+                tokenUsage: CodexTokenUsage(inputTokens: 125, outputTokens: 60, totalTokens: 185),
+                windows: []
+            ))
+        }
+
+        let snapshot = await store.snapshot(range: .today, now: capturedAt)
+        XCTAssertEqual(snapshot.tokenTotals, AgentUsageTokenTotals(input: 50, output: 20, total: 70))
+    }
 }

@@ -923,7 +923,7 @@ enum ClientProfileRegistry {
         ),
         ManagedHookClientProfile(
             id: "qoder-hooks",
-            title: "Qoder",
+            title: "Qoder IDE",
             subtitle: "管理 ~/.qoder/settings.json，支持 Qoder IDE 会话、提问与权限提醒事件",
             logoAssetName: "QoderLogo",
             prefersBundledLogoOverAppIcon: true,
@@ -931,7 +931,11 @@ enum ClientProfileRegistry {
             iconSymbolName: "bolt.horizontal.circle.fill",
             configurationRelativePath: ".qoder/settings.json",
             bridgeSource: "claude",
-            bridgeExtraArguments: ["--client-kind", "qoder"],
+            bridgeExtraArguments: [
+                "--client-kind", "qoder",
+                "--client-name", "Qoder IDE",
+                "--client-originator", "Qoder IDE"
+            ],
             defaultEnabled: true,
             brand: .qoder,
             events: [
@@ -976,7 +980,7 @@ enum ClientProfileRegistry {
         ),
         ManagedHookClientProfile(
             id: "qoder-cn-hooks",
-            title: "Qoder CN",
+            title: "Qoder CN IDE",
             subtitle: "管理 ~/.qoder-cn/settings.json，支持 Qoder CN IDE 会话、提问与权限提醒事件",
             logoAssetName: "QoderCNLogo",
             prefersBundledLogoOverAppIcon: true,
@@ -986,8 +990,8 @@ enum ClientProfileRegistry {
             bridgeSource: "claude",
             bridgeExtraArguments: [
                 "--client-kind", "qoder-cn",
-                "--client-name", "Qoder CN",
-                "--client-originator", "Qoder CN"
+                "--client-name", "Qoder CN IDE",
+                "--client-originator", "Qoder CN IDE"
             ],
             defaultEnabled: true,
             brand: .qoder,
@@ -1165,13 +1169,13 @@ enum ClientProfileRegistry {
             provider: .claude,
             family: .claudeHooks,
             kind: .qoder,
-            displayName: "Qoder",
+            displayName: "Qoder IDE",
             assistantLabelMode: .badgeLabel,
             brand: .qoder,
             defaultBundleIdentifier: nil,
             defaultOrigin: nil,
             recognizedKinds: ["qoder", "qoder-client", "qoder_client", "qoder client"],
-            exactAliases: ["qoder", "qoder-client", "qoder client"],
+            exactAliases: ["qoder", "qoder-ide", "qoder ide", "qoder-client", "qoder client"],
             keywordAliases: ["qoder"],
             bundleIdentifiers: ["com.qoder.ide"]
         ),
@@ -1210,13 +1214,13 @@ enum ClientProfileRegistry {
             provider: .claude,
             family: .claudeHooks,
             kind: .qoder,
-            displayName: "Qoder CN",
+            displayName: "Qoder CN IDE",
             assistantLabelMode: .badgeLabel,
             brand: .qoder,
             defaultBundleIdentifier: "com.aliyun.lingma.ide",
             defaultOrigin: nil,
             recognizedKinds: ["qoder-cn", "qoder_cn", "qoder cn", "qodercn", "qoder_cn_client"],
-            exactAliases: ["qoder-cn", "qoder cn", "qodercn"],
+            exactAliases: ["qoder-cn", "qoder cn", "qoder cn ide", "qodercn"],
             keywordAliases: ["qoder cn", "qodercn"],
             bundleIdentifiers: ["com.aliyun.lingma.ide"]
         ),
@@ -1315,7 +1319,7 @@ enum ClientProfileRegistry {
             provider: .claude,
             family: .claudeHooks,
             kind: .qoder,
-            displayName: "Qoder",
+            displayName: "Qoder IDE",
             assistantLabelMode: .badgeLabel,
             brand: .qoder,
             defaultBundleIdentifier: nil,
@@ -1606,7 +1610,7 @@ enum ClientProfileRegistry {
         ),
         ManagedIDEExtensionProfile(
             id: "qoder-extension",
-            title: "Qoder",
+            title: "Qoder IDE",
             subtitle: "安装 Ping Island，支持会话跳转与终端精准聚焦",
             logoAssetName: "QoderLogo",
             prefersBundledLogoOverAppIcon: true,
@@ -1618,11 +1622,11 @@ enum ClientProfileRegistry {
             uriScheme: "qoder",
             exactBundleIdentifiers: ["com.qoder.ide"],
             bundleIdentifierKeywords: ["qoder.ide"],
-            appNameKeywords: ["qoder"]
+            appNameKeywords: ["qoder ide", "qoder"]
         ),
         ManagedIDEExtensionProfile(
             id: "qoder-cn-extension",
-            title: "Qoder CN",
+            title: "Qoder CN IDE",
             subtitle: "安装 Ping Island，支持会话跳转与终端精准聚焦",
             logoAssetName: "QoderCNLogo",
             prefersBundledLogoOverAppIcon: true,
@@ -1634,7 +1638,7 @@ enum ClientProfileRegistry {
             uriScheme: "qoder-cn",
             exactBundleIdentifiers: ["com.aliyun.lingma.ide"],
             bundleIdentifierKeywords: ["aliyun.lingma.ide"],
-            appNameKeywords: ["qoder cn", "qodercn"]
+            appNameKeywords: ["qoder cn ide", "qoder cn", "qodercn"]
         ),
     ]
 

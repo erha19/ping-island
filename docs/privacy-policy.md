@@ -37,8 +37,8 @@ such as:
 - Project, terminal, tmux, IDE, SSH, and session identifiers used to show the
   right session and jump back to the right workspace.
 - Configuration files for supported local tools, including Claude Code, Codex,
-  Gemini CLI, Qwen Code, Hermes Agent, OpenClaw, OpenCode, Cursor, Qoder,
-  CodeBuddy, WorkBuddy, GitHub Copilot, and compatible hook-driven tools.
+  Gemini CLI, Qwen Code, Hermes Agent, OpenClaw, OpenCode, Cursor, Qoder IDE,
+  Qoder CN IDE, CodeBuddy, WorkBuddy, GitHub Copilot, and compatible hook-driven tools.
 - User preferences such as display mode, sounds, shortcuts, mascot settings,
   and integration settings.
 
@@ -63,8 +63,9 @@ You can manage these permissions in macOS System Settings.
 If you enable remote SSH support, Ping Island uses the SSH target information
 you provide to connect to the selected host, install or remove the remote bridge
 when requested, and forward session events back to the local Ping Island app.
-Remote SSH information and forwarded session events are used for this feature
-and are not sent to the developer.
+For Codex, forwarded data can also include the latest quota-window and token-
+activity snapshot found in the remote rollout log. Remote SSH information and
+forwarded data are used for this feature and are not sent to the developer.
 
 ## Diagnostics
 

@@ -80,24 +80,50 @@ final class ClientProfileIconTests: XCTestCase {
     }
 
     func testQoderIDEHookProfileKeepsSeparateImplementation() throws {
-        let qoderProfile = try XCTUnwrap(ClientProfileRegistry.managedHookProfile(id: "qoder-hooks"))
-        let qoderEvents = Set(qoderProfile.events.map(\.name))
+        let hookProfile = try XCTUnwrap(ClientProfileRegistry.managedHookProfile(id: "qoder-hooks"))
+        let runtimeProfile = try XCTUnwrap(ClientProfileRegistry.runtimeProfile(id: "qoder"))
+        let extensionProfile = try XCTUnwrap(ClientProfileRegistry.ideExtensionProfile(id: "qoder-extension"))
+        let qoderEvents = Set(hookProfile.events.map(\.name))
 
         XCTAssertTrue(qoderEvents.contains("PostToolUseFailure"))
         XCTAssertFalse(qoderEvents.contains("SessionStart"))
-        XCTAssertNil(qoderProfile.events.first { $0.name == "PermissionRequest" }?.timeout)
-        XCTAssertEqual(qoderProfile.bridgeExtraArguments, ["--client-kind", "qoder"])
+        XCTAssertNil(hookProfile.events.first { $0.name == "PermissionRequest" }?.timeout)
+        XCTAssertEqual(
+            hookProfile.bridgeExtraArguments,
+            [
+                "--client-kind", "qoder",
+                "--client-name", "Qoder IDE",
+                "--client-originator", "Qoder IDE"
+            ]
+        )
+        XCTAssertEqual(hookProfile.title, "Qoder IDE")
+        XCTAssertEqual(runtimeProfile.displayName, "Qoder IDE")
+        XCTAssertEqual(extensionProfile.title, "Qoder IDE")
+        XCTAssertEqual(extensionProfile.uriScheme, "qoder")
+        XCTAssertEqual(extensionProfile.localAppBundleIdentifiers, ["com.qoder.ide"])
     }
 
     func testQoderCNProfilesUseIndependentIdentityAndSharedConfiguration() throws {
         let desktopProfile = try XCTUnwrap(ClientProfileRegistry.managedHookProfile(id: "qoder-cn-hooks"))
         let cliProfile = try XCTUnwrap(ClientProfileRegistry.managedHookProfile(id: "qoder-cn-cli-hooks"))
+        let runtimeProfile = try XCTUnwrap(ClientProfileRegistry.runtimeProfile(id: "qoder-cn"))
         let extensionProfile = try XCTUnwrap(ClientProfileRegistry.ideExtensionProfile(id: "qoder-cn-extension"))
 
         XCTAssertEqual(desktopProfile.configurationRelativePaths, [".qoder-cn/settings.json"])
         XCTAssertEqual(cliProfile.configurationRelativePaths, desktopProfile.configurationRelativePaths)
         XCTAssertEqual(desktopProfile.localAppBundleIdentifiers, ["com.aliyun.lingma.ide"])
         XCTAssertEqual(extensionProfile.localAppBundleIdentifiers, ["com.aliyun.lingma.ide"])
+        XCTAssertEqual(desktopProfile.title, "Qoder CN IDE")
+        XCTAssertEqual(
+            desktopProfile.bridgeExtraArguments,
+            [
+                "--client-kind", "qoder-cn",
+                "--client-name", "Qoder CN IDE",
+                "--client-originator", "Qoder CN IDE"
+            ]
+        )
+        XCTAssertEqual(runtimeProfile.displayName, "Qoder CN IDE")
+        XCTAssertEqual(extensionProfile.title, "Qoder CN IDE")
         XCTAssertEqual(extensionProfile.uriScheme, "qoder-cn")
         XCTAssertEqual(extensionProfile.extensionRootRelativePaths, [".qoder-cn/extensions"])
         XCTAssertEqual(

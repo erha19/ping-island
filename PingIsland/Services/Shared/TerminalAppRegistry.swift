@@ -99,7 +99,9 @@ struct TerminalAppRegistry: Sendable {
         "Trae",
         "CodeBuddy",
         "WorkBuddy",
+        "Qoder IDE",
         "Qoder",
+        "Qoder CN IDE",
         "Qoder CN",
         "QoderWork",
         "zed"

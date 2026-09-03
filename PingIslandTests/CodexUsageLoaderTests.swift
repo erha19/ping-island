@@ -2,6 +2,26 @@ import XCTest
 @testable import Ping_Island
 
 final class CodexUsageLoaderTests: XCTestCase {
+    func testNewestSnapshotPrefersMostRecentlyCapturedUsage() {
+        let older = CodexUsageSnapshot(
+            sourceFilePath: "/local/rollout.jsonl",
+            capturedAt: Date(timeIntervalSince1970: 100),
+            planType: "pro",
+            limitID: "codex",
+            windows: []
+        )
+        let newer = CodexUsageSnapshot(
+            sourceFilePath: "ssh://dev@example.test:2222/root/.codex/sessions/rollout.jsonl",
+            capturedAt: Date(timeIntervalSince1970: 200),
+            planType: "pro",
+            limitID: "codex",
+            windows: []
+        )
+
+        XCTAssertEqual(CodexUsageSnapshot.newest([older, nil, newer]), newer)
+        XCTAssertEqual(CodexUsageSnapshot.newest([newer, older]), newer)
+    }
+
     func testLoadParsesLastTokenCountRateLimits() throws {
         let rootURL = temporaryRootURL(named: "codex-usage")
         let rolloutURL = rootURL

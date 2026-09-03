@@ -12,6 +12,15 @@ private final class AccessibilityStatusProbe {
     }
 }
 
+@MainActor
+private final class SettingsCategoryRefreshProbe {
+    var soundRefreshCount = 0
+
+    func refreshSoundPacks() async {
+        soundRefreshCount += 1
+    }
+}
+
 final class SettingsPanelViewModelTests: XCTestCase {
     private func makeDefaults(testName: String = #function) -> UserDefaults {
         let suiteName = "PingIslandTests.SettingsPanelViewModel.\(testName).\(UUID().uuidString)"
@@ -93,5 +102,36 @@ final class SettingsPanelViewModelTests: XCTestCase {
             XCTAssertEqual(probe.promptValues, [true])
             XCTAssertEqual(openSettingsCount, 0)
         }
+    }
+
+    func testCategoryRefreshSkipsRepeatedWorkUntilCacheExpires() async {
+        let defaults = makeDefaults()
+
+        await Task { @MainActor in
+            let probe = SettingsCategoryRefreshProbe()
+            var now = Date(timeIntervalSince1970: 1_000)
+            let viewModel = SettingsPanelViewModel(
+                qoderCLIHookRefreshStatusProvider: { nil },
+                qoderCLIHookRefreshNoticeDefaults: defaults,
+                accessibilityStatusProvider: { _ in false },
+                accessibilitySettingsOpener: {},
+                categoryRefreshInterval: 5,
+                categoryRefreshClock: { now },
+                soundPackRefreshProvider: {
+                    await probe.refreshSoundPacks()
+                }
+            )
+
+            await viewModel.refresh(for: .sound)
+            await viewModel.refresh(for: .sound)
+            XCTAssertEqual(probe.soundRefreshCount, 1)
+
+            now = now.addingTimeInterval(6)
+            await viewModel.refresh(for: .sound)
+            XCTAssertEqual(probe.soundRefreshCount, 2)
+
+            await viewModel.refresh(for: .sound, force: true)
+            XCTAssertEqual(probe.soundRefreshCount, 3)
+        }.value
     }
 }

@@ -188,25 +188,31 @@ struct CodexSessionView: View {
 
     private func approvalButtons(_ intervention: SessionIntervention) -> some View {
         HStack(spacing: 8) {
-            Button(AppLocalization.string("Allow Once")) {
+            ConfirmationActionButton(
+                title: AppLocalization.string("Allow Once"),
+                role: .approve
+            ) {
                 sessionMonitor.approvePermission(sessionId: session.sessionId)
                 viewModel.exitChat()
             }
-            .buttonStyle(CodexCapsuleButtonStyle(background: Color.white.opacity(0.9), foreground: .black))
 
             if intervention.offersSessionScopedApproval {
-                Button(AppLocalization.string("Always Allow")) {
+                ConfirmationActionButton(
+                    title: AppLocalization.string("Always Allow"),
+                    role: .scopedApproval
+                ) {
                     sessionMonitor.approvePermission(sessionId: session.sessionId, forSession: true)
                     viewModel.exitChat()
                 }
-                .buttonStyle(CodexCapsuleButtonStyle(background: TerminalColors.blue.opacity(0.28)))
             }
 
-            Button(AppLocalization.string("Deny")) {
+            ConfirmationActionButton(
+                title: AppLocalization.string("Deny"),
+                role: .deny
+            ) {
                 sessionMonitor.denyPermission(sessionId: session.sessionId, reason: nil)
                 viewModel.exitChat()
             }
-            .buttonStyle(CodexCapsuleButtonStyle(background: Color.white.opacity(0.1)))
         }
     }
 

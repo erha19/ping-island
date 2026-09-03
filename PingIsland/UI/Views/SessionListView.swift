@@ -1634,50 +1634,32 @@ struct InlineApprovalButtons: View {
             .opacity(showChatButton ? 1 : 0)
             .scaleEffect(showChatButton ? 1 : 0.8)
 
-            Button {
-                onReject()
-            } label: {
-                Text(AppLocalization.string("Deny"))
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundColor(.white.opacity(0.6))
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Color.white.opacity(0.1))
-                    .clipShape(Capsule())
-            }
-            .buttonStyle(.plain)
+            ConfirmationActionButton(
+                title: AppLocalization.string("Deny"),
+                role: .deny,
+                compact: true,
+                action: onReject
+            )
             .opacity(showDenyButton ? 1 : 0)
             .scaleEffect(showDenyButton ? 1 : 0.8)
 
             if let sessionAction {
-                Button {
-                    onApproveForSession()
-                } label: {
-                    Text(AppLocalization.string(sessionAction.compactButtonTitleKey))
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundColor(.white.opacity(0.86))
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(TerminalColors.blue.opacity(0.24))
-                        .clipShape(Capsule())
-                }
-                .buttonStyle(.plain)
+                ConfirmationActionButton(
+                    title: AppLocalization.string(sessionAction.compactButtonTitleKey),
+                    role: .scopedApproval,
+                    compact: true,
+                    action: onApproveForSession
+                )
                 .opacity(showSessionButton ? 1 : 0)
                 .scaleEffect(showSessionButton ? 1 : 0.8)
             }
 
-            Button {
-                onApprove()
-            } label: {
-                Text(AppLocalization.string("Allow"))
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundColor(.black)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Color.white.opacity(0.9))
-                    .clipShape(Capsule())
-            }
-            .buttonStyle(.plain)
+            ConfirmationActionButton(
+                title: AppLocalization.string("Allow"),
+                role: .approve,
+                compact: true,
+                action: onApprove
+            )
             .opacity(showAllowButton ? 1 : 0)
             .scaleEffect(showAllowButton ? 1 : 0.8)
         }

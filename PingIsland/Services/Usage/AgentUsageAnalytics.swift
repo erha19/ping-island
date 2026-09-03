@@ -900,7 +900,9 @@ actor AgentUsageStore {
             return
         }
 
-        let sourceKey = snapshot.threadID ?? snapshot.sourceFilePath
+        let sourceKey = snapshot.isRemoteSource
+            ? snapshot.sourceFilePath
+            : (snapshot.threadID ?? snapshot.sourceFilePath)
         await recordTokenUsage(
             provider: .codex,
             clientInfo: .codexCLI(),

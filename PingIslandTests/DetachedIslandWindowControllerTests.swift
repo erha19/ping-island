@@ -322,6 +322,9 @@ final class DetachedIslandWindowControllerTests: XCTestCase {
     }
 
     func testDefaultPetAnchorUsesBottomTrailingVisibleFrameInsets() {
+        let originalScale = AppSettings.floatingPetScale
+        AppSettings.floatingPetScale = 1
+        defer { AppSettings.floatingPetScale = originalScale }
         let visibleFrame = CGRect(x: 100, y: 60, width: 960, height: 640)
 
         let anchor = DetachedIslandWindowController.defaultPetAnchor(in: visibleFrame)
@@ -331,6 +334,9 @@ final class DetachedIslandWindowControllerTests: XCTestCase {
     }
 
     func testDefaultPetAnchorCanAlignToActiveWindowBottomTrailingCorner() {
+        let originalScale = AppSettings.floatingPetScale
+        AppSettings.floatingPetScale = 1
+        defer { AppSettings.floatingPetScale = originalScale }
         let visibleFrame = CGRect(x: 80, y: 40, width: 1200, height: 800)
         let activeWindowFrame = CGRect(x: 320, y: 180, width: 640, height: 420)
 
@@ -361,6 +367,9 @@ final class DetachedIslandWindowControllerTests: XCTestCase {
     }
 
     func testStoredFloatingPetAnchorClampsBackIntoVisibleFrame() {
+        let originalScale = AppSettings.floatingPetScale
+        AppSettings.floatingPetScale = 1
+        defer { AppSettings.floatingPetScale = originalScale }
         let visibleFrame = CGRect(x: 0, y: 0, width: 400, height: 240)
         let storedAnchor = FloatingPetAnchor(xRatio: 1.4, yRatio: -0.3)
 
@@ -374,9 +383,9 @@ final class DetachedIslandWindowControllerTests: XCTestCase {
     }
 
     func testFloatingPetUsesStandardSizeOnBaselineResolution() {
-        let originalSizeMode = AppSettings.floatingPetSizeMode
-        AppSettings.floatingPetSizeMode = .automatic
-        defer { AppSettings.floatingPetSizeMode = originalSizeMode }
+        let originalScale = AppSettings.floatingPetScale
+        AppSettings.floatingPetScale = 1
+        defer { AppSettings.floatingPetScale = originalScale }
         let viewModel = makeViewModel(screenRect: CGRect(x: 0, y: 0, width: 1440, height: 900))
 
         let layout = DetachedIslandContentModel.layout(
@@ -392,13 +401,13 @@ final class DetachedIslandWindowControllerTests: XCTestCase {
         XCTAssertEqual(layout.petFrame.height, 92, accuracy: 0.5)
     }
 
-    func testFloatingPetScalesUpOnHighResolutionDisplays() {
-        let originalSizeMode = AppSettings.floatingPetSizeMode
-        AppSettings.floatingPetSizeMode = .automatic
-        defer { AppSettings.floatingPetSizeMode = originalSizeMode }
+    func testFloatingPetUsesCustomScaleAcrossDisplays() {
+        let originalScale = AppSettings.floatingPetScale
+        AppSettings.floatingPetScale = 1.4
+        defer { AppSettings.floatingPetScale = originalScale }
         let highResolutionFrame = CGRect(x: 0, y: 0, width: 2560, height: 1440)
         let viewModel = makeViewModel(screenRect: highResolutionFrame)
-        let petMetrics = DetachedIslandPanelMetrics.petMetrics(for: highResolutionFrame)
+        let petMetrics = DetachedIslandPanelMetrics.petMetrics()
 
         let layout = DetachedIslandContentModel.layout(
             for: [],
@@ -407,34 +416,38 @@ final class DetachedIslandWindowControllerTests: XCTestCase {
             bubblePlacement: .topLeft
         )
 
-        XCTAssertGreaterThan(petMetrics.scale, 1)
-        XCTAssertLessThanOrEqual(petMetrics.scale, 1.22)
+        XCTAssertEqual(petMetrics.scale, 1.4, accuracy: 0.001)
         XCTAssertEqual(layout.containerSize.width, 92 * petMetrics.scale, accuracy: 0.5)
         XCTAssertEqual(layout.containerSize.height, 92 * petMetrics.scale, accuracy: 0.5)
         XCTAssertEqual(layout.petAnchorInWindow.x, layout.containerSize.width / 2, accuracy: 0.5)
         XCTAssertEqual(layout.petAnchorInWindow.y, layout.containerSize.height / 2, accuracy: 0.5)
     }
 
-    func testFloatingPetSizeModeCanForceStandardSizeOnHighResolutionDisplays() {
-        let highResolutionFrame = CGRect(x: 0, y: 0, width: 2560, height: 1440)
-        let petMetrics = DetachedIslandPanelMetrics.petMetrics(
-            for: highResolutionFrame,
-            sizeMode: .standard
-        )
+    func testFloatingPetScaleSupportsStandardSize() {
+        let petMetrics = DetachedIslandPanelMetrics.petMetrics(scale: 1)
 
         XCTAssertEqual(petMetrics.scale, 1, accuracy: 0.001)
         XCTAssertEqual(petMetrics.petHitFrame, 92, accuracy: 0.5)
     }
 
-    func testFloatingPetSizeModeCanForceLargerSizeOnBaselineResolution() {
-        let baselineFrame = CGRect(x: 0, y: 0, width: 1440, height: 900)
-        let petMetrics = DetachedIslandPanelMetrics.petMetrics(
-            for: baselineFrame,
-            sizeMode: .large
-        )
+    func testFloatingPetScaleSupportsIntermediateSize() {
+        let petMetrics = DetachedIslandPanelMetrics.petMetrics(scale: 1.16)
 
         XCTAssertEqual(petMetrics.scale, 1.16, accuracy: 0.001)
         XCTAssertEqual(petMetrics.petHitFrame, 106.72, accuracy: 0.5)
+    }
+
+    func testFloatingPetScaleSupportsMaximumSize() {
+        let petMetrics = DetachedIslandPanelMetrics.petMetrics(scale: 1.75)
+
+        XCTAssertEqual(petMetrics.scale, 1.75, accuracy: 0.001)
+        XCTAssertEqual(petMetrics.mascotDisplaySize, 80.5, accuracy: 0.5)
+        XCTAssertEqual(petMetrics.petHitFrame, 161, accuracy: 0.5)
+    }
+
+    func testFloatingPetMetricsClampToSupportedScaleRange() {
+        XCTAssertEqual(DetachedIslandPetMetrics(scale: 0.5).scale, 1, accuracy: 0.001)
+        XCTAssertEqual(DetachedIslandPetMetrics(scale: 2).scale, 1.75, accuracy: 0.001)
     }
 
     func testActiveCountOnlyTracksActiveSessions() {

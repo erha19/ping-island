@@ -835,6 +835,10 @@ private final class RemoteAgentService: @unchecked Sendable {
     private let hookSocketPath: String
     private let controlSocketPath: String
     private let queue = DispatchQueue(label: "com.wudanwu.pingisland.remote-agent", qos: .userInitiated)
+    private let codexUsageQueue = DispatchQueue(
+        label: "com.wudanwu.pingisland.remote-agent.codex-usage",
+        qos: .utility
+    )
 
     private var hookServerSocket: Int32 = -1
     private var controlServerSocket: Int32 = -1
@@ -846,7 +850,11 @@ private final class RemoteAgentService: @unchecked Sendable {
     private var pendingRequests: [UUID: PendingRemoteBridgeRequest] = [:]
     private var queuedMessages: [Data] = []
     private var codexStateSource: DispatchSourceTimer?
+    private var codexUsageSource: DispatchSourceTimer?
     private var deliveredCodexThreadUpdates: [String: Int64] = [:]
+    private var deliveredCodexUsageSnapshot: RemoteCodexUsageSnapshot?
+    private var codexUsagePollInFlight = false
+    private var codexUsageForceDeliveryPending = false
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
 
@@ -882,6 +890,7 @@ private final class RemoteAgentService: @unchecked Sendable {
         controlAcceptSource?.resume()
 
         startCodexStatePolling()
+        startCodexUsagePolling()
     }
 
     private func makeListeningSocket(path: String) throws -> Int32 {
@@ -936,6 +945,41 @@ private final class RemoteAgentService: @unchecked Sendable {
             guard thread.updatedAtMs > (deliveredCodexThreadUpdates[thread.id] ?? 0) else { continue }
             deliveredCodexThreadUpdates[thread.id] = thread.updatedAtMs
             enqueue(RemoteBridgeMessageBuilder.message(from: thread))
+        }
+    }
+
+    private func startCodexUsagePolling() {
+        let source = DispatchSource.makeTimerSource(queue: queue)
+        source.schedule(deadline: .now() + 1, repeating: 15)
+        source.setEventHandler { [weak self] in
+            self?.pollCodexUsage()
+        }
+        codexUsageSource = source
+        source.resume()
+    }
+
+    private func pollCodexUsage(force: Bool = false) {
+        codexUsageForceDeliveryPending = codexUsageForceDeliveryPending || force
+        guard !codexUsagePollInFlight else { return }
+
+        codexUsagePollInFlight = true
+        let codexHome = Self.homeDirectory.appendingPathComponent(".codex", isDirectory: true)
+        codexUsageQueue.async { [weak self] in
+            let snapshot = RemoteCodexUsagePoller.loadLatestSnapshot(codexHome: codexHome)
+            self?.queue.async { [weak self] in
+                guard let self else { return }
+                self.codexUsagePollInFlight = false
+
+                let shouldForceDelivery = self.codexUsageForceDeliveryPending
+                self.codexUsageForceDeliveryPending = false
+                guard let snapshot,
+                      shouldForceDelivery || snapshot != self.deliveredCodexUsageSnapshot else {
+                    return
+                }
+
+                self.deliveredCodexUsageSnapshot = snapshot
+                self.enqueue(RemoteCodexUsageMessage(type: "codex_usage", payload: snapshot))
+            }
         }
     }
 
@@ -1012,6 +1056,7 @@ private final class RemoteAgentService: @unchecked Sendable {
 
         controlClientSocket = clientSocket
         sendHello()
+        pollCodexUsage(force: true)
         flushQueuedMessages()
 
         controlClientReadSource = DispatchSource.makeReadSource(fileDescriptor: clientSocket, queue: queue)
@@ -1188,6 +1233,35 @@ private struct RemoteCodexThread: Equatable {
     let updatedAtMs: Int64
 }
 
+private struct RemoteCodexUsageWindow: Codable, Equatable {
+    let key: String
+    let label: String
+    let usedPercentage: Double
+    let leftPercentage: Double
+    let windowMinutes: Int
+    let resetsAt: Date?
+}
+
+private struct RemoteCodexTokenUsage: Codable, Equatable {
+    let inputTokens: Int
+    let outputTokens: Int
+    let totalTokens: Int
+}
+
+private struct RemoteCodexUsageSnapshot: Codable, Equatable {
+    let sourceFilePath: String
+    let capturedAt: Date?
+    let planType: String?
+    let limitID: String?
+    let tokenUsage: RemoteCodexTokenUsage?
+    let windows: [RemoteCodexUsageWindow]
+}
+
+private struct RemoteCodexUsageMessage: Codable {
+    let type: String
+    let payload: RemoteCodexUsageSnapshot
+}
+
 private enum RemoteCodexStatePoller {
     static func readRecentThreads(codexHome: URL, updatedSinceMs: Int64) -> [RemoteCodexThread] {
         guard let stateURL = newestStateDatabase(in: codexHome),
@@ -1262,6 +1336,263 @@ private enum RemoteCodexStatePoller {
 
     private static func nullableTextExpression(_ name: String, columns: Set<String>) -> String {
         columns.contains(name) ? "NULLIF(\(name), '')" : "NULL"
+    }
+}
+
+private enum RemoteCodexUsagePoller {
+    private static let candidateScanLimit = 8
+    private static let maxBytesPerFile = 1 * 1024 * 1024
+    private static let cacheLock = NSLock()
+    nonisolated(unsafe) private static var cachedResult: CachedResult?
+
+    private struct Candidate {
+        let fileURL: URL
+        let modifiedAt: Date
+        let fileSize: UInt64
+    }
+
+    private struct CachedResult {
+        let fingerprint: String
+        let snapshot: RemoteCodexUsageSnapshot?
+    }
+
+    static func loadLatestSnapshot(codexHome: URL) -> RemoteCodexUsageSnapshot? {
+        let sessionsURL = codexHome.appendingPathComponent("sessions", isDirectory: true)
+        guard let enumerator = FileManager.default.enumerator(
+            at: sessionsURL,
+            includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey, .isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return nil
+        }
+
+        var candidates: [Candidate] = []
+        for case let fileURL as URL in enumerator {
+            guard fileURL.lastPathComponent.hasPrefix("rollout-"),
+                  fileURL.pathExtension == "jsonl",
+                  let values = try? fileURL.resourceValues(
+                    forKeys: [.contentModificationDateKey, .fileSizeKey, .isRegularFileKey]
+                  ),
+                  values.isRegularFile == true else {
+                continue
+            }
+
+            candidates.append(Candidate(
+                fileURL: fileURL,
+                modifiedAt: values.contentModificationDate ?? .distantPast,
+                fileSize: UInt64(max(0, values.fileSize ?? 0))
+            ))
+        }
+
+        let recentCandidates = Array(candidates.sorted { lhs, rhs in
+            if lhs.modifiedAt == rhs.modifiedAt {
+                return lhs.fileURL.path.localizedStandardCompare(rhs.fileURL.path) == .orderedDescending
+            }
+            return lhs.modifiedAt > rhs.modifiedAt
+        }.prefix(candidateScanLimit))
+
+        let fingerprint = cacheFingerprint(codexHome: codexHome, candidates: recentCandidates)
+        if let cached = cachedSnapshot(for: fingerprint) {
+            return cached
+        }
+
+        var bestSnapshot: RemoteCodexUsageSnapshot?
+        var bestCapturedAt = Date.distantPast
+        for candidate in recentCandidates {
+            guard let snapshot = loadLatestSnapshot(from: candidate) else { continue }
+            let capturedAt = snapshot.capturedAt ?? candidate.modifiedAt
+            if capturedAt > bestCapturedAt {
+                bestSnapshot = snapshot
+                bestCapturedAt = capturedAt
+            }
+        }
+        cache(snapshot: bestSnapshot, for: fingerprint)
+        return bestSnapshot
+    }
+
+    private static func cachedSnapshot(for fingerprint: String) -> RemoteCodexUsageSnapshot?? {
+        cacheLock.lock()
+        defer { cacheLock.unlock() }
+        guard let cachedResult, cachedResult.fingerprint == fingerprint else { return nil }
+        return cachedResult.snapshot
+    }
+
+    private static func cache(snapshot: RemoteCodexUsageSnapshot?, for fingerprint: String) {
+        cacheLock.lock()
+        cachedResult = CachedResult(fingerprint: fingerprint, snapshot: snapshot)
+        cacheLock.unlock()
+    }
+
+    private static func cacheFingerprint(codexHome: URL, candidates: [Candidate]) -> String {
+        var parts = [codexHome.resolvingSymlinksInPath().path]
+        parts.reserveCapacity(candidates.count + 1)
+        for candidate in candidates {
+            parts.append([
+                candidate.fileURL.resolvingSymlinksInPath().path,
+                String(candidate.modifiedAt.timeIntervalSinceReferenceDate),
+                String(candidate.fileSize),
+            ].joined(separator: "|"))
+        }
+        return parts.joined(separator: "\n")
+    }
+
+    private static func loadLatestSnapshot(from candidate: Candidate) -> RemoteCodexUsageSnapshot? {
+        guard candidate.fileSize > 0,
+              let contents = readSuffixText(
+                from: candidate.fileURL,
+                fileSize: candidate.fileSize,
+                maxBytes: maxBytesPerFile
+              ) else {
+            return nil
+        }
+
+        var legacySnapshot: RemoteCodexUsageSnapshot?
+        for line in contents.split(separator: "\n", omittingEmptySubsequences: false).reversed() {
+            guard line.contains("\"token_count\""),
+                  line.contains("\"rate_limits\""),
+                  let snapshot = snapshot(
+                    from: String(line),
+                    filePath: candidate.fileURL.path,
+                    fallbackTimestamp: candidate.modifiedAt
+                  ) else {
+                continue
+            }
+            if snapshot.limitID == "codex" {
+                return snapshot
+            }
+            if snapshot.limitID == nil, legacySnapshot == nil {
+                legacySnapshot = snapshot
+            }
+        }
+        return legacySnapshot
+    }
+
+    private static func readSuffixText(from fileURL: URL, fileSize: UInt64, maxBytes: Int) -> String? {
+        guard let handle = try? FileHandle(forReadingFrom: fileURL) else { return nil }
+        defer { try? handle.close() }
+
+        let readSize = min(fileSize, UInt64(maxBytes))
+        let offset = fileSize - readSize
+        do {
+            try handle.seek(toOffset: offset)
+            guard let data = try handle.read(upToCount: Int(readSize)) else { return nil }
+            var text = String(decoding: data, as: UTF8.self)
+            if offset > 0, let newline = text.firstIndex(of: "\n") {
+                text = String(text[text.index(after: newline)...])
+            }
+            return text
+        } catch {
+            return nil
+        }
+    }
+
+    private static func snapshot(
+        from line: String,
+        filePath: String,
+        fallbackTimestamp: Date
+    ) -> RemoteCodexUsageSnapshot? {
+        guard let data = line.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              object["type"] as? String == "event_msg" else {
+            return nil
+        }
+
+        let payload = object["payload"] as? [String: Any] ?? [:]
+        guard payload["type"] as? String == "token_count",
+              let rateLimits = payload["rate_limits"] as? [String: Any] else {
+            return nil
+        }
+
+        let windows = ["primary", "secondary"].compactMap { key in
+            usageWindow(for: key, in: rateLimits)
+        }
+        guard !windows.isEmpty else { return nil }
+
+        return RemoteCodexUsageSnapshot(
+            sourceFilePath: filePath,
+            capturedAt: timestamp(from: object["timestamp"]) ?? fallbackTimestamp,
+            planType: string(from: rateLimits["plan_type"]),
+            limitID: string(from: rateLimits["limit_id"]),
+            tokenUsage: tokenUsage(from: payload["info"]),
+            windows: windows
+        )
+    }
+
+    private static func usageWindow(
+        for key: String,
+        in rateLimits: [String: Any]
+    ) -> RemoteCodexUsageWindow? {
+        guard let payload = rateLimits[key] as? [String: Any],
+              let usedPercentage = number(from: payload["used_percent"]),
+              let windowMinutes = integer(from: payload["window_minutes"]) else {
+            return nil
+        }
+
+        return RemoteCodexUsageWindow(
+            key: key,
+            label: windowLabel(forMinutes: windowMinutes),
+            usedPercentage: usedPercentage,
+            leftPercentage: max(0, 100 - usedPercentage),
+            windowMinutes: windowMinutes,
+            resetsAt: date(from: payload["resets_at"])
+        )
+    }
+
+    private static func windowLabel(forMinutes minutes: Int) -> String {
+        let days = minutes / 1_440
+        let hours = (minutes % 1_440) / 60
+        let remainingMinutes = minutes % 60
+        if days > 0, hours == 0, remainingMinutes == 0 { return "\(days)d" }
+        if days > 0, hours > 0 { return "\(days)d \(hours)h" }
+        if hours > 0, remainingMinutes == 0 { return "\(hours)h" }
+        if hours > 0 { return "\(hours)h \(remainingMinutes)m" }
+        return "\(minutes)m"
+    }
+
+    private static func tokenUsage(from value: Any?) -> RemoteCodexTokenUsage? {
+        guard let info = value as? [String: Any],
+              let usage = info["total_token_usage"] as? [String: Any] else {
+            return nil
+        }
+        let input = integer(from: usage["input_tokens"])
+            ?? integer(from: usage["prompt_tokens"])
+            ?? 0
+        let output = integer(from: usage["output_tokens"])
+            ?? integer(from: usage["completion_tokens"])
+            ?? 0
+        let total = integer(from: usage["total_tokens"]) ?? max(0, input + output)
+        guard input > 0 || output > 0 || total > 0 else { return nil }
+        return RemoteCodexTokenUsage(inputTokens: input, outputTokens: output, totalTokens: total)
+    }
+
+    private static func timestamp(from value: Any?) -> Date? {
+        guard let value = value as? String else { return nil }
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.date(from: value)
+    }
+
+    private static func number(from value: Any?) -> Double? {
+        if let number = value as? NSNumber { return number.doubleValue }
+        if let string = value as? String { return Double(string) }
+        return nil
+    }
+
+    private static func integer(from value: Any?) -> Int? {
+        if let number = value as? NSNumber { return number.intValue }
+        if let string = value as? String { return Int(string) }
+        return nil
+    }
+
+    private static func date(from value: Any?) -> Date? {
+        guard let seconds = number(from: value) else { return nil }
+        return Date(timeIntervalSince1970: seconds)
+    }
+
+    private static func string(from value: Any?) -> String? {
+        if let string = value as? String { return string.isEmpty ? nil : string }
+        if let number = value as? NSNumber { return number.stringValue }
+        return nil
     }
 }
 

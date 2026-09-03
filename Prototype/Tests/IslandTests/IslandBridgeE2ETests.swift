@@ -427,6 +427,60 @@ func remoteAgentForwardsCodexAppServerStateUpdates() async throws {
     }
 }
 
+@Test
+func remoteAgentForwardsCodexUsageSnapshots() async throws {
+    try await withTemporaryDirectory { directory in
+        let executable = try TestRuntime.executableURL(named: "PingIslandBridge")
+        let rolloutURL = directory
+            .appending(path: ".codex/sessions/2026/08/31", directoryHint: .isDirectory)
+            .appending(path: "rollout-remote-codex-thread.jsonl")
+        try FileManager.default.createDirectory(
+            at: rolloutURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try Data("""
+        {"timestamp":"2026-08-31T12:34:56.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1200,"output_tokens":345,"total_tokens":1545}},"rate_limits":{"limit_id":"codex","plan_type":"pro","primary":{"used_percent":17,"window_minutes":300,"resets_at":1788183296},"secondary":{"used_percent":29,"window_minutes":10080,"resets_at":1788788096}}}}
+        """.utf8).write(to: rolloutURL)
+
+        let socketID = UUID().uuidString.prefix(8)
+        let hookSocketPath = "/tmp/pi-\(socketID)-h.sock"
+        let controlSocketPath = "/tmp/pi-\(socketID)-c.sock"
+        let service = try RunningProcess(
+            executableURL: executable,
+            arguments: [
+                "--mode", "remote-agent-service",
+                "--hook-socket", hookSocketPath,
+                "--control-socket", controlSocketPath
+            ],
+            environment: ["HOME": directory.path()]
+        )
+        defer {
+            service.terminate()
+            _ = service.waitForExit()
+            try? FileManager.default.removeItem(atPath: hookSocketPath)
+            try? FileManager.default.removeItem(atPath: controlSocketPath)
+        }
+
+        try await waitUntil(description: "remote agent service should create control socket") {
+            FileManager.default.fileExists(atPath: controlSocketPath)
+        }
+
+        let message = try await readRemoteMessage(
+            controlSocketPath: controlSocketPath,
+            as: TestRemoteCodexUsageMessage.self,
+            description: "remote Codex usage message",
+            matching: { $0.type == "codex_usage" }
+        )
+
+        #expect(message.payload.sourceFilePath == rolloutURL.path())
+        #expect(message.payload.planType == "pro")
+        #expect(message.payload.limitID == "codex")
+        #expect(message.payload.tokenUsage?.totalTokens == 1_545)
+        #expect(message.payload.windows.map(\.label) == ["5h", "7d"])
+        #expect(message.payload.windows.map(\.usedPercentage) == [17, 29])
+    }
+}
+
 private func bridgeTestEnvironment(_ values: [String: String] = [:]) -> [String: String] {
     var environment = values
     environment[BridgeRuntimeConfig.configPathEnvironmentKey] =
@@ -476,6 +530,20 @@ private func readRemoteHookEvent(
     controlSocketPath: String,
     matching predicate: @escaping (TestRemoteHookEventMessage) -> Bool
 ) async throws -> TestRemoteHookEventMessage {
+    try await readRemoteMessage(
+        controlSocketPath: controlSocketPath,
+        as: TestRemoteHookEventMessage.self,
+        description: "remote Codex hook event",
+        matching: predicate
+    )
+}
+
+private func readRemoteMessage<Message: Decodable>(
+    controlSocketPath: String,
+    as type: Message.Type,
+    description: String,
+    matching predicate: @escaping (Message) -> Bool
+) async throws -> Message {
     let fd = socket(AF_UNIX, SOCK_STREAM, 0)
     guard fd >= 0 else { throw POSIXError(.EIO) }
     defer { close(fd) }
@@ -508,9 +576,9 @@ private func readRemoteHookEvent(
             while let newline = buffer.firstRange(of: Data([0x0A])) {
                 let line = buffer.subdata(in: 0..<newline.lowerBound)
                 buffer.removeSubrange(0...newline.lowerBound)
-                if let event = try? decoder.decode(TestRemoteHookEventMessage.self, from: line),
-                   predicate(event) {
-                    return event
+                if let message = try? decoder.decode(type, from: line),
+                   predicate(message) {
+                    return message
                 }
             }
         } else {
@@ -518,7 +586,7 @@ private func readRemoteHookEvent(
         }
     }
 
-    throw TestSupportError.timedOut("remote Codex hook event")
+    throw TestSupportError.timedOut(description)
 }
 
 private struct TestRemoteHookEventMessage: Decodable {
@@ -539,6 +607,28 @@ private struct TestRemoteHookClientInfoPayload: Decodable {
     let kind: String
     let transport: String?
     let sessionFilePath: String?
+}
+
+private struct TestRemoteCodexUsageMessage: Decodable {
+    let type: String
+    let payload: TestRemoteCodexUsageSnapshot
+}
+
+private struct TestRemoteCodexUsageSnapshot: Decodable {
+    let sourceFilePath: String
+    let planType: String?
+    let limitID: String?
+    let tokenUsage: TestRemoteCodexTokenUsage?
+    let windows: [TestRemoteCodexUsageWindow]
+}
+
+private struct TestRemoteCodexTokenUsage: Decodable {
+    let totalTokens: Int
+}
+
+private struct TestRemoteCodexUsageWindow: Decodable {
+    let label: String
+    let usedPercentage: Double
 }
 
 private func runSQLite(databaseURL: URL, sql: String) throws {

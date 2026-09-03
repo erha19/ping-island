@@ -480,7 +480,7 @@ final class SessionStateTests: XCTestCase {
 
         XCTAssertEqual(session.scopedApprovalAction, .autoApprove)
         XCTAssertTrue(session.supportsSessionScopedApproval)
-        XCTAssertEqual(session.clientInfo.ideHostBadgeLabel(for: .claude), "Qoder 终端")
+        XCTAssertEqual(session.clientInfo.ideHostBadgeLabel(for: .claude), "Qoder IDE 终端")
     }
 
     func testQoderWaitingForApprovalDoesNotExposeClaudeAutoApproveAction() {
@@ -853,6 +853,16 @@ final class SessionStateTests: XCTestCase {
         )
     }
 
+    func testQoderIDELaunchURLKeepsQoderScheme() {
+        XCTAssertEqual(
+            SessionClientInfo.appLaunchURL(
+                bundleIdentifier: "com.qoder.ide",
+                workspacePath: "/tmp/project"
+            ),
+            "qoder://file/tmp/project"
+        )
+    }
+
     func testQoderCNLaunchURLUsesIndependentScheme() {
         XCTAssertEqual(
             SessionClientInfo.appLaunchURL(
@@ -1015,7 +1025,7 @@ final class SessionStateTests: XCTestCase {
         )
 
         XCTAssertTrue(session.usesTitleOnlySubagentPresentation)
-        XCTAssertEqual(session.subagentClientTypeBadgeText, "Qoder")
+        XCTAssertEqual(session.subagentClientTypeBadgeText, "Qoder IDE")
     }
 
     func testSubagentVisibilityModeHidesExplicitChildrenWhenDisabled() {
@@ -1553,13 +1563,15 @@ final class SessionStateTests: XCTestCase {
             kind: .qoder,
             profileID: "qoder",
             name: "Qoder",
+            launchURL: "qoder://file/tmp/project",
             terminalBundleIdentifier: "com.qoder.ide"
         ).normalizedForClaudeRouting()
 
         XCTAssertEqual(normalized.profileID, "qoder")
-        XCTAssertEqual(normalized.name, "Qoder")
-        XCTAssertEqual(normalized.badgeLabel(for: .claude), "Qoder")
-        XCTAssertEqual(normalized.interactionLabel(for: .claude), "Qoder")
+        XCTAssertEqual(normalized.name, "Qoder IDE")
+        XCTAssertEqual(normalized.badgeLabel(for: .claude), "Qoder IDE")
+        XCTAssertEqual(normalized.interactionLabel(for: .claude), "Qoder IDE")
+        XCTAssertEqual(normalized.launchURL, "qoder://file/tmp/project")
     }
 
     func testIDEHostedQoderCLIMetadataNormalizesBackToIDEIdentity() {
@@ -1573,9 +1585,20 @@ final class SessionStateTests: XCTestCase {
         ).normalizedForClaudeRouting()
 
         XCTAssertEqual(normalized.profileID, "qoder")
-        XCTAssertEqual(normalized.name, "Qoder")
-        XCTAssertEqual(normalized.badgeLabel(for: .claude), "Qoder")
-        XCTAssertEqual(normalized.interactionLabel(for: .claude), "Qoder")
+        XCTAssertEqual(normalized.name, "Qoder IDE")
+        XCTAssertEqual(normalized.badgeLabel(for: .claude), "Qoder IDE")
+        XCTAssertEqual(normalized.interactionLabel(for: .claude), "Qoder IDE")
+    }
+
+    func testLegacyQoderProfileWithoutHostNormalizesToQoderIDE() {
+        let normalized = SessionClientInfo(
+            kind: .qoder,
+            profileID: "qoder",
+            name: "Qoder"
+        ).normalizedForClaudeRouting()
+
+        XCTAssertEqual(normalized.profileID, "qoder")
+        XCTAssertEqual(normalized.name, "Qoder IDE")
     }
 
     func testQoderCNDesktopAndCLINormalizeToIndependentProfiles() {
@@ -1595,7 +1618,8 @@ final class SessionStateTests: XCTestCase {
         ).normalizedForClaudeRouting()
 
         XCTAssertEqual(desktop.profileID, "qoder-cn")
-        XCTAssertEqual(desktop.name, "Qoder CN")
+        XCTAssertEqual(desktop.name, "Qoder CN IDE")
+        XCTAssertEqual(desktop.badgeLabel(for: .claude), "Qoder CN IDE")
         XCTAssertEqual(desktop.ideHostProfile?.id, "qoder-cn-extension")
         XCTAssertTrue(desktop.isQoderNotifyOnlyIDEClient)
         XCTAssertFalse(desktop.isQoderCLIClient)
@@ -1603,6 +1627,16 @@ final class SessionStateTests: XCTestCase {
         XCTAssertEqual(cli.name, "Qoder CN CLI")
         XCTAssertTrue(cli.isQoderCLIClient)
         XCTAssertTrue(cli.supportsCustomAskUserQuestionInput)
+    }
+
+    func testQoderCNIDENameNormalizesWithoutBundleMetadata() {
+        let normalized = SessionClientInfo(
+            kind: .qoder,
+            name: "Qoder CN IDE"
+        ).normalizedForClaudeRouting()
+
+        XCTAssertEqual(normalized.profileID, "qoder-cn")
+        XCTAssertEqual(normalized.name, "Qoder CN IDE")
     }
 
     func testQoderWorkDoesNotResolveToIDEExtensionHost() {

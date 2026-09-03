@@ -40,6 +40,13 @@ struct AppLocalizedRootView<Content: View>: View {
     var body: some View {
         content
             .environment(\.locale, settings.locale)
+            .environment(
+                \.islandExperienceTheme,
+                ExperienceThemeRegistry.theme(
+                    for: settings.experienceThemeID,
+                    pixelPalette: settings.pixelThemePaletteID
+                )
+            )
     }
 }
 

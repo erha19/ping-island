@@ -1,7 +1,7 @@
 import XCTest
 @testable import Ping_Island
 
-/// Coverage for the notification-sound edge detector.
+/// Coverage for the semantic sound edge detector.
 ///
 /// The Island's primary list is filtered, deduplicated, and sorted before it
 /// reaches these surfaces, so a session can enter or leave it without its own
@@ -96,7 +96,7 @@ final class SessionSoundEdgeTrackerTests: XCTestCase {
         )
     }
 
-    func testProcessingEdgeCarriesOnlyTheSessionThatStarted() {
+    func testNewProcessingSessionUsesSessionStartedCue() {
         var tracker = SessionSoundEdgeTracker()
         tracker.prime(with: [session(id: "a", pid: 1, phase: .processing)])
 
@@ -105,7 +105,7 @@ final class SessionSoundEdgeTrackerTests: XCTestCase {
             session(id: "b", pid: 2, phase: .processing)
         ])
 
-        XCTAssertEqual(edge?.event, .processingStarted)
+        XCTAssertEqual(edge?.event, .sessionStarted)
         XCTAssertEqual(
             edge?.sessions.map(\.sessionId),
             ["b"],
@@ -133,7 +133,7 @@ final class SessionSoundEdgeTrackerTests: XCTestCase {
         var tracker = SessionSoundEdgeTracker()
         tracker.prime(with: [a])
 
-        var events: [NotificationEvent] = []
+        var events: [AppSoundFeedbackEvent] = []
         // The list can only show one of the two, and which one it shows changes
         // every time the other reports activity.
         for index in 0..<12 {
@@ -145,7 +145,7 @@ final class SessionSoundEdgeTrackerTests: XCTestCase {
 
         XCTAssertEqual(
             events,
-            [.processingStarted],
+            [.sessionStarted],
             "Only the first sighting of the second session is a real edge; the remaining swaps are list churn"
         )
     }
@@ -336,7 +336,7 @@ final class SessionSoundEdgeTrackerTests: XCTestCase {
 
         XCTAssertEqual(
             tracker.edge(for: [session(id: "a", pid: 1, phase: .processing)])?.event,
-            .processingStarted,
+            .sessionStarted,
             "Retention is bounded, so a long-absent session is eventually treated as new again"
         )
     }

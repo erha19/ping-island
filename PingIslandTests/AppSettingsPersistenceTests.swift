@@ -141,6 +141,63 @@ final class AppSettingsPersistenceTests: XCTestCase {
         XCTAssertEqual(defaults.string(forKey: "codexSubagentVisibilityMode"), SubagentVisibilityMode.visible.rawValue)
     }
 
+    func testExperienceThemePersistsAndAppliesItsRecommendedSoundMode() {
+        let defaults = makeDefaults()
+        let store = makeStore(defaults: defaults)
+
+        XCTAssertEqual(store.experienceThemeID, .appDefault)
+        XCTAssertEqual(defaults.string(forKey: "experienceThemeID"), ExperienceThemeID.standard.rawValue)
+
+        store.applyExperienceTheme(.pixel)
+
+        let reloadedStore = makeStore(defaults: defaults)
+        XCTAssertEqual(reloadedStore.experienceThemeID, .pixel)
+        XCTAssertEqual(reloadedStore.soundThemeMode, .island8Bit)
+        XCTAssertEqual(reloadedStore.island8BitTaskCompletedSound, .completeDing)
+        XCTAssertEqual(reloadedStore.island8BitTaskErrorSound, .errorBuzz)
+        XCTAssertEqual(reloadedStore.island8BitResourceLimitSound, .hurt)
+        XCTAssertEqual(defaults.string(forKey: "experienceThemeID"), ExperienceThemeID.pixel.rawValue)
+    }
+
+    func testUnknownExperienceThemeFallsBackToAndPersistsPingIsland() {
+        let defaults = makeDefaults()
+        defaults.set("retired-theme", forKey: "experienceThemeID")
+
+        let store = makeStore(defaults: defaults)
+
+        XCTAssertEqual(store.experienceThemeID, .appDefault)
+        XCTAssertEqual(defaults.string(forKey: "experienceThemeID"), ExperienceThemeID.standard.rawValue)
+    }
+
+    func testMacOSThemeAppliesSystemSounds() {
+        let defaults = makeDefaults()
+        let store = makeStore(defaults: defaults)
+
+        store.applyExperienceTheme(.macOS)
+
+        XCTAssertEqual(store.experienceThemeID, .macOS)
+        XCTAssertEqual(store.soundThemeMode, .builtIn)
+        XCTAssertEqual(store.processingStartSound, .tink)
+        XCTAssertEqual(store.taskCompletedSound, .blow)
+        XCTAssertEqual(store.taskErrorSound, .basso)
+    }
+
+    func testPixelPalettePersistsIndependentlyFromThemeFamily() {
+        let defaults = makeDefaults()
+        let store = makeStore(defaults: defaults)
+
+        store.pixelThemePaletteID = .gameBoyOlive
+        store.applyExperienceTheme(.pixel)
+
+        let reloadedStore = makeStore(defaults: defaults)
+        XCTAssertEqual(reloadedStore.experienceThemeID, .pixel)
+        XCTAssertEqual(reloadedStore.pixelThemePaletteID, .gameBoyOlive)
+        XCTAssertEqual(
+            defaults.string(forKey: "pixelThemePaletteID"),
+            PixelThemePaletteID.gameBoyOlive.rawValue
+        )
+    }
+
     func testSubagentVisibilityModeFallsBackToLegacyCodexKey() {
         let defaults = makeDefaults()
         defaults.set(SubagentVisibilityMode.hidden.rawValue, forKey: "codexSubagentVisibilityMode")
@@ -343,20 +400,50 @@ final class AppSettingsPersistenceTests: XCTestCase {
         XCTAssertEqual(defaults.string(forKey: AppSettingsDefaultKeys.surfaceMode), IslandSurfaceMode.floatingPet.rawValue)
     }
 
-    func testFloatingPetSizeModePersists() {
+    func testFloatingPetScalePersistsAndClampsToSupportedRange() {
         let defaults = makeDefaults()
         let store = makeStore(defaults: defaults)
 
-        XCTAssertEqual(store.floatingPetSizeMode, .automatic)
+        XCTAssertEqual(store.floatingPetScale, 1, accuracy: 0.001)
 
-        store.floatingPetSizeMode = .large
+        store.floatingPetScale = 1.35
 
         let reloadedStore = makeStore(defaults: defaults)
-        XCTAssertEqual(reloadedStore.floatingPetSizeMode, .large)
+        XCTAssertEqual(reloadedStore.floatingPetScale, 1.35, accuracy: 0.001)
         XCTAssertEqual(
-            defaults.string(forKey: AppSettingsDefaultKeys.floatingPetSizeMode),
-            FloatingPetSizeMode.large.rawValue
+            defaults.double(forKey: AppSettingsDefaultKeys.floatingPetScale),
+            1.35,
+            accuracy: 0.001
         )
+
+        store.floatingPetScale = 0.5
+        XCTAssertEqual(store.floatingPetScale, 1, accuracy: 0.001)
+
+        store.floatingPetScale = 2
+        XCTAssertEqual(store.floatingPetScale, 1.75, accuracy: 0.001)
+    }
+
+    func testLegacyFloatingPetSizeModesMigrateToCustomScale() {
+        let expectedScales: [String: Double] = [
+            "automatic": 1,
+            "standard": 1,
+            "large": 1.16,
+            "extraLarge": 1.75
+        ]
+
+        for (legacyMode, expectedScale) in expectedScales {
+            let defaults = makeDefaults(testName: "\(#function).\(legacyMode)")
+            defaults.set(legacyMode, forKey: AppSettingsDefaultKeys.legacyFloatingPetSizeMode)
+
+            let store = makeStore(defaults: defaults)
+
+            XCTAssertEqual(store.floatingPetScale, expectedScale, accuracy: 0.001)
+            XCTAssertEqual(
+                defaults.double(forKey: AppSettingsDefaultKeys.floatingPetScale),
+                expectedScale,
+                accuracy: 0.001
+            )
+        }
     }
 
     func testPreviewMascotKindPersists() {

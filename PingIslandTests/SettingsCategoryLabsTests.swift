@@ -34,5 +34,6 @@ final class SettingsCategoryLabsTests: XCTestCase {
         XCTAssertEqual(SettingsCategory.labs.title, "实验室")
         XCTAssertEqual(SettingsCategory.labs.subtitle, "试验性特性")
         XCTAssertEqual(SettingsCategory.labs.icon, "flask.fill")
+        XCTAssertEqual(SettingsCategory.labs.macOSIcon, "flask")
     }
 }

@@ -94,7 +94,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         )
         let window = SettingsPanelWindow(
             contentRect: NSRect(origin: .zero, size: defaultContentSize),
-            styleMask: [.borderless, .resizable],
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
@@ -103,21 +103,40 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         window.title = ""
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
-        window.isMovableByWindowBackground = false
+        window.isMovableByWindowBackground = true
+        // The SwiftUI theme owns the full window surface, including the area
+        // behind the native traffic lights. Keep the AppKit shell transparent
+        // so it cannot introduce a fixed titlebar color between themes.
         window.isOpaque = false
+        window.appearance = nil
         window.backgroundColor = .clear
-        window.hasShadow = false
+        window.hasShadow = true
         window.minSize = minimumContentSize
         window.maxSize = maximumContentSize
-        window.setContentSize(defaultContentSize)
         window.identifier = NSUserInterfaceItemIdentifier("settings.window")
-        window.center()
-        window.toolbar = nil
+        let toolbar = NSToolbar(identifier: "settings.toolbar")
+        toolbar.allowsUserCustomization = false
+        toolbar.autosavesConfiguration = false
+        toolbar.displayMode = .iconOnly
+        toolbar.sizeMode = .regular
+        toolbar.showsBaselineSeparator = false
+        toolbar.isVisible = true
+        window.toolbar = toolbar
+        window.toolbarStyle = .unified
         window.showsToolbarButton = false
         window.titlebarSeparatorStyle = .none
-        window.collectionBehavior = [.fullScreenAuxiliary, .moveToActiveSpace]
+        // Attaching a toolbar changes the content layout rect, so size the
+        // window only after its complete titlebar hierarchy is installed.
+        window.setContentSize(defaultContentSize)
+        window.center()
+        window.collectionBehavior = [.fullScreenPrimary, .moveToActiveSpace]
         window.tabbingMode = .disallowed
         window.isReleasedWhenClosed = false
+
+        window.standardWindowButton(.closeButton)?.isHidden = false
+        window.standardWindowButton(.miniaturizeButton)?.isHidden = false
+        window.standardWindowButton(.zoomButton)?.isHidden = false
+        window.standardWindowButton(.zoomButton)?.isEnabled = true
 
         super.init(window: window)
 
@@ -126,9 +145,6 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             SettingsWindowView(
                 onClose: { [weak self] in
                     self?.dismiss()
-                },
-                onMinimize: { [weak self] in
-                    self?.window?.miniaturize(nil)
                 }
             )
         }
