@@ -791,8 +791,11 @@ struct MascotView: View {
         // The silhouette intentionally follows Kiro's official Ghost: round cap,
         // left-side floating arm, two tall eyes, and three soft lower waves.
         let outlinePixels: [(CGFloat, CGFloat, CGFloat, CGFloat)] = [
-            (3, 0, 3, 1), (2, 1, 5, 1), (1, 2, 7, 3),
-            (0, 4, 1, 3), (7, 3, 1, 4), (1, 7, 2, 1),
+            (3, 0, 3, 1), (2, 1, 5, 1), (1, 2, 6, 3),
+            // Keep the contour clear of the right eye.  Starting this segment
+            // below the eye also makes the ghost read at the same scale as the
+            // other session mascots instead of as an 18pt square sprite.
+            (1, 4, 1, 3), (7, 5, 1, 2), (2, 7, 1, 1),
             (3, 8, 1, 1), (5, 8, 1, 1), (6, 7, 1, 1)
         ]
         for pixel in outlinePixels {
@@ -813,9 +816,9 @@ struct MascotView: View {
             )
         }
         // The raised left arm and three lower waves are the Ghost's signature shape.
-        context.fill(Path(space.rect(0.5 + motion.shake, 4.5 + motion.vertical, 1.5, 2.0)), with: .color(ghost))
-        context.fill(Path(space.rect(1.0 + motion.shake, 6.0 + motion.vertical, 1.8, 1.0)), with: .color(ghost))
-        context.fill(Path(space.rect(7.0 + motion.shake, 4.0 + motion.vertical, 0.9, 2.2)), with: .color(ghost))
+        context.fill(Path(space.rect(1.0 + motion.shake, 4.5 + motion.vertical, 1.25, 2.0)), with: .color(ghost))
+        context.fill(Path(space.rect(1.4 + motion.shake, 6.0 + motion.vertical, 1.4, 1.0)), with: .color(ghost))
+        context.fill(Path(space.rect(6.5 + motion.shake, 4.0 + motion.vertical, 0.8, 2.2)), with: .color(ghost))
         context.fill(Path(space.rect(3.0 + motion.shake, 7.0 + motion.vertical, 1.0, 1.0)), with: .color(ghost))
         context.fill(Path(space.rect(5.0 + motion.shake, 7.0 + motion.vertical, 1.0, 1.0)), with: .color(ghost))
 
