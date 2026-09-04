@@ -845,6 +845,23 @@ final class RemoteConnectorManager: ObservableObject {
                     contents: updatedData,
                     password: password
                 )
+            case .kiroHookFile:
+                let remoteConfigPath = Self.remoteConfigurationPath(
+                    relativePath: profile.configurationRelativePaths[0],
+                    homeDirectory: probe.homeDirectory
+                )
+                let configuration = HookInstaller.managedKiroHookConfiguration(
+                    for: profile,
+                    command: remoteCommand
+                )
+                let data = try JSONSerialization.data(withJSONObject: configuration, options: [.prettyPrinted, .sortedKeys])
+                try await RemoteSSHCommandRunner.writeRemoteFileViaSSH(
+                    target: endpoint.sshTarget,
+                    port: endpoint.sshPort,
+                    remotePath: remoteConfigPath,
+                    contents: data,
+                    password: password
+                )
             case .hookDirectory:
                 let remoteDirectoryPath = Self.remoteConfigurationPath(
                     relativePath: profile.configurationRelativePaths[0],
@@ -1020,6 +1037,20 @@ final class RemoteConnectorManager: ObservableObject {
                     remotePath: remoteConfigPath,
                     contents: updatedData,
                     password: password
+                )
+
+            case .kiroHookFile:
+                let remoteConfigPath = Self.remoteConfigurationPath(
+                    relativePath: profile.configurationRelativePaths[0],
+                    homeDirectory: probe.homeDirectory
+                )
+                _ = try await RemoteSSHCommandRunner.runSSH(
+                    target: endpoint.sshTarget,
+                    port: endpoint.sshPort,
+                    password: password,
+                    remoteCommand: "rm -f \(quoted(remoteConfigPath))",
+                    acceptNewHostKey: true,
+                    allowFailure: true
                 )
 
             case .hookDirectory:
@@ -1647,7 +1678,7 @@ final class RemoteConnectorManager: ObservableObject {
         switch profile.installationKind {
         case .hookDirectory:
             paths = [configurationPath, NSString(string: configurationPath).deletingLastPathComponent]
-        case .jsonHooks, .pluginFile, .tomlHooks:
+        case .jsonHooks, .kiroHookFile, .pluginFile, .tomlHooks:
             paths = [NSString(string: configurationPath).deletingLastPathComponent]
         case .pluginDirectory:
             paths = [

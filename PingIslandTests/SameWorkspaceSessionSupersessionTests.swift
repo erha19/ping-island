@@ -64,6 +64,28 @@ final class SameWorkspaceSessionSupersessionTests: XCTestCase {
         )
     }
 
+    private var kiroClient: SessionClientInfo {
+        SessionClientInfo(
+            kind: .custom,
+            profileID: "kiro",
+            name: "Kiro",
+            origin: "cli",
+            originator: "Kiro",
+            threadSource: "kiro-hooks"
+        )
+    }
+
+    private var openClawClient: SessionClientInfo {
+        SessionClientInfo(
+            kind: .custom,
+            profileID: "openclaw",
+            name: "OpenClaw",
+            origin: "gateway",
+            originator: "OpenClaw",
+            threadSource: "openclaw-hooks"
+        )
+    }
+
     // MARK: - Concurrent sessions
 
     func testTwoLiveSessionsInOneDirectoryBothStayVisible() {
@@ -110,6 +132,48 @@ final class SameWorkspaceSessionSupersessionTests: XCTestCase {
             Set(visible.map(\.sessionId)),
             ["qwen-older", "qwen-newer"],
             "Qwen hooks carry no CLI PID, so liveness cannot be proven; their stable session IDs already allow several sessions per workspace"
+        )
+    }
+
+    func testConcurrentKiroSessionsAreNeverCollapsed() {
+        let first = session(id: "kiro-first", clientInfo: kiroClient, phase: .processing, activityOffset: 0)
+        let second = session(id: "kiro-second", clientInfo: kiroClient, phase: .processing, activityOffset: 5)
+
+        let visible = SameWorkspaceSessionSupersession.removingSupersededSessions(
+            from: [first, second],
+            isProcessAlive: { _ in false }
+        )
+
+        XCTAssertEqual(
+            Set(visible.map(\.sessionId)),
+            ["kiro-first", "kiro-second"],
+            "Kiro session IDs identify independent IDE conversations even though hooks do not provide a CLI PID"
+        )
+    }
+
+    func testKiroAndOpenClawNeverShareWorkspaceSupersessionDomain() {
+        let openClawError = session(
+            id: "openclaw-error",
+            clientInfo: openClawClient,
+            phase: .idle,
+            activityOffset: 0
+        )
+        let kiro = session(
+            id: "kiro-new",
+            clientInfo: kiroClient,
+            phase: .processing,
+            activityOffset: 5
+        )
+
+        let visible = SameWorkspaceSessionSupersession.removingSupersededSessions(
+            from: [openClawError, kiro],
+            isProcessAlive: { _ in false }
+        )
+
+        XCTAssertEqual(
+            Set(visible.map(\.sessionId)),
+            ["openclaw-error", "kiro-new"],
+            "Kiro activity must not refresh or replace an OpenClaw card in the same workspace"
         )
     }
 

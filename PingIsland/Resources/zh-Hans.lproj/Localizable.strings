@@ -779,6 +779,8 @@
 "管理 ~/.qoder-cn/settings.json，按 Claude Code hooks 协议接入 qoderclicn" = "管理 ~/.qoder-cn/settings.json，按 Claude Code hooks 协议接入 qoderclicn";
 "管理 ~/.kimi-code/config.toml，按 Kimi CLI 官方 hooks 协议接入 Island" = "管理 ~/.kimi-code/config.toml，按 Kimi CLI 官方 hooks 协议接入 Island";
 "这会重新写入 %@ 的 Island hooks TOML 配置，并保留其他非 Island 设置。" = "这会重新写入 %@ 的 Island hooks TOML 配置，并保留其他非 Island 设置。";
+"Kiro IDE hooks 与紫色描边白色幽灵" = "Kiro IDE hooks 与紫色描边白色幽灵";
+"紫色描边白色幽灵" = "紫色描边白色幽灵";
 
 // 体验主题
 "体验主题" = "体验主题";

@@ -550,7 +550,11 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
         if kind == .codexCLI {
             return false
         }
-        return kind == .codexApp || launchURL != nil || bundleIdentifier == "com.openai.codex"
+        let normalizedProfileID = profileID?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return kind == .codexApp
+            || launchURL != nil
+            || bundleIdentifier == "com.openai.codex"
+            || normalizedProfileID == "kiro"
     }
 
     nonisolated func normalizedForCodexRouting(sessionId: String? = nil) -> SessionClientInfo {

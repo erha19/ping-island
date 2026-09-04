@@ -881,6 +881,8 @@ struct HookInstaller {
         switch profile.installationKind {
         case .jsonHooks:
             return profile.configurationURLs.contains { containsManagedHooks(at: $0, profile: profile) }
+        case .kiroHookFile:
+            return profile.configurationURLs.contains { containsManagedKiroHookFile(at: $0, profile: profile) }
         case .pluginFile:
             return profile.configurationURLs.contains { containsManagedPlugin(at: $0, profile: profile) }
                 && isManagedPluginEnabled(profile)
@@ -923,6 +925,10 @@ struct HookInstaller {
             for url in installationTargets(for: profile) {
                 updateHooks(at: url, profile: profile)
             }
+        case .kiroHookFile:
+            for url in installationTargets(for: profile) {
+                writeManagedKiroHookFile(at: url, profile: profile)
+            }
         case .pluginFile:
             for url in installationTargets(for: profile) {
                 writeManagedPlugin(at: url, profile: profile)
@@ -961,6 +967,10 @@ struct HookInstaller {
         case .jsonHooks:
             for url in profile.configurationURLs {
                 removeManagedHooks(at: url, profile: profile)
+            }
+        case .kiroHookFile:
+            for url in profile.configurationURLs {
+                removeManagedKiroHookFile(at: url, profile: profile)
             }
         case .pluginFile:
             for url in profile.configurationURLs {
@@ -1813,6 +1823,67 @@ struct HookInstaller {
         try? Data(content.utf8).write(to: url, options: .atomic)
     }
 
+    private static func writeManagedKiroHookFile(at url: URL, profile: ManagedHookClientProfile) {
+        writeJSONObject(managedKiroHookConfiguration(for: profile), to: url)
+    }
+
+    static func managedKiroHookConfiguration(for profile: ManagedHookClientProfile) -> [String: Any] {
+        managedKiroHookConfiguration(
+            for: profile,
+            command: kiroSidecarCommand(
+                bridgeCommand(source: profile.bridgeSource, extraArguments: profile.bridgeExtraArguments)
+            )
+        )
+    }
+
+    static func managedKiroHookConfiguration(
+        for profile: ManagedHookClientProfile,
+        command: String
+    ) -> [String: Any] {
+        let hooks = effectiveEvents(for: profile).map { event -> [String: Any] in
+            var hook: [String: Any] = [
+                "name": "Ping Island \(event.name)",
+                "description": "Forward Kiro \(event.name) activity to Ping Island.",
+                "trigger": event.name,
+                "action": [
+                    "type": "command",
+                    "command": command
+                ],
+                // Kiro sends stdout/stderr from command hooks back into the agent
+                // conversation. The bridge is intentionally observational, so keep
+                // it quiet and bounded even if its local socket is unavailable.
+                "timeout": 10
+            ]
+            if case .matcher(let matcher)? = event.templates.first {
+                hook["matcher"] = matcher
+            }
+            return hook
+        }
+        return ["version": "v1", "hooks": hooks]
+    }
+
+    private static func removeManagedKiroHookFile(at url: URL, profile: ManagedHookClientProfile) {
+        guard containsManagedKiroHookFile(at: url, profile: profile) else {
+            return
+        }
+        try? FileManager.default.removeItem(at: url)
+    }
+
+    private static func containsManagedKiroHookFile(at url: URL, profile: ManagedHookClientProfile) -> Bool {
+        guard let data = try? Data(contentsOf: url),
+              let json = HookConfigParser.parseJSONObject(from: data),
+              let hooks = json["hooks"] as? [[String: Any]] else {
+            return false
+        }
+        return hooks.contains { hook in
+            guard let action = hook["action"] as? [String: Any],
+                  let command = action["command"] as? String else {
+                return false
+            }
+            return isIslandManagedHookCommand(command, for: profile)
+        }
+    }
+
     private static func removeManagedPlugin(at url: URL, profile: ManagedHookClientProfile) {
         guard containsManagedPlugin(at: url, profile: profile) else {
             return
@@ -1969,6 +2040,10 @@ struct HookInstaller {
         return ([launcherPath, "--source", source] + extraArguments)
             .map(shellQuotedIfNeeded)
             .joined(separator: " ")
+    }
+
+    private static func kiroSidecarCommand(_ command: String) -> String {
+        "\(command) >/dev/null 2>&1 || true"
     }
 
     private static func containsManagedHooks(at url: URL, profile: ManagedHookClientProfile? = nil) -> Bool {
@@ -3700,6 +3775,8 @@ struct HookInstaller {
         switch profile.installationKind {
         case .jsonHooks:
             updateHooks(at: url, profile: profile)
+        case .kiroHookFile:
+            writeManagedKiroHookFile(at: url, profile: profile)
         case .pluginFile:
             writeManagedPlugin(at: url, profile: profile)
             setManagedPluginEnabled(true, for: profile, customConfigURL: activationConfigURL, pluginURL: url)
@@ -3737,6 +3814,8 @@ struct HookInstaller {
             switch profile.installationKind {
             case .jsonHooks:
                 removeManagedHooks(at: url)
+            case .kiroHookFile:
+                removeManagedKiroHookFile(at: url, profile: profile)
             case .pluginFile:
                 removeManagedPlugin(at: url, profile: profile)
                 setManagedPluginEnabled(false, for: profile, customConfigURL: activationConfigURL, pluginURL: url)
@@ -3762,6 +3841,8 @@ struct HookInstaller {
         switch profile.installationKind {
         case .jsonHooks:
             return containsManagedHooks(at: url)
+        case .kiroHookFile:
+            return containsManagedKiroHookFile(at: url, profile: profile)
         case .pluginFile:
             return containsManagedPlugin(at: url, profile: profile)
         case .pluginDirectory:
@@ -3909,6 +3990,9 @@ struct HookInstaller {
                 json["hooks"] = hooks
             }
 
+        case .kiroHookFile:
+            break
+
         case .pluginFile:
             let targetPluginURL = pluginURL ?? profile.primaryConfigurationURL
             let pluginSpecifier = targetPluginURL.absoluteURL.absoluteString
@@ -3990,7 +4074,7 @@ struct HookInstaller {
 
     private static func customInstallationURL(for profile: ManagedHookClientProfile, baseDirectory: URL) -> URL {
         switch profile.installationKind {
-        case .jsonHooks, .pluginFile:
+        case .jsonHooks, .kiroHookFile, .pluginFile:
             return baseDirectory.appendingPathComponent(profile.primaryConfigurationURL.lastPathComponent)
         case .tomlHooks:
             return baseDirectory.appendingPathComponent(profile.primaryConfigurationURL.lastPathComponent)
@@ -4041,7 +4125,7 @@ struct HookInstaller {
                 return baseDirectory.deletingLastPathComponent().appendingPathComponent("opencode.json")
             }
             return baseDirectory.appendingPathComponent("opencode.json")
-        case .jsonHooks, .pluginDirectory, .tomlHooks:
+        case .jsonHooks, .kiroHookFile, .pluginDirectory, .tomlHooks:
             return nil
         case .hookDirectory:
             break
@@ -4061,7 +4145,7 @@ struct HookInstaller {
         switch profile.installationKind {
         case .pluginFile:
             return installedURL.deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("opencode.json")
-        case .jsonHooks, .pluginDirectory, .tomlHooks:
+        case .jsonHooks, .kiroHookFile, .pluginDirectory, .tomlHooks:
             return nil
         case .hookDirectory:
             break

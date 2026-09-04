@@ -27,6 +27,7 @@ enum MascotClient: String, CaseIterable, Identifiable, Sendable {
     case trae
     case copilot
     case kimi
+    case kiro
 
     static let allCases: [MascotClient] = [
         .claude,
@@ -42,6 +43,7 @@ enum MascotClient: String, CaseIterable, Identifiable, Sendable {
         .codebuddy,
         .copilot,
         .kimi,
+        .kiro,
     ]
 
     var id: String { rawValue }
@@ -76,6 +78,8 @@ enum MascotClient: String, CaseIterable, Identifiable, Sendable {
             return "Copilot"
         case .kimi:
             return "Kimi CLI"
+        case .kiro:
+            return "Kiro"
         }
     }
 
@@ -109,6 +113,8 @@ enum MascotClient: String, CaseIterable, Identifiable, Sendable {
             return "GitHub Copilot Hooks 客户端"
         case .kimi:
             return "Kimi CLI 官方 hooks 与默认 Kimi 形象"
+        case .kiro:
+            return "Kiro IDE hooks 与紫色描边白色幽灵"
         }
     }
 
@@ -142,6 +148,8 @@ enum MascotClient: String, CaseIterable, Identifiable, Sendable {
             return .copilot
         case .kimi:
             return .kimi
+        case .kiro:
+            return .kiro
         }
     }
 
@@ -187,6 +195,8 @@ enum MascotClient: String, CaseIterable, Identifiable, Sendable {
                 .codex
             case "kimi":
                 .kimi
+            case "kiro":
+                .kiro
             default:
                 nil
             }
@@ -221,6 +231,10 @@ enum MascotClient: String, CaseIterable, Identifiable, Sendable {
             }
             if clientInfo.resolvedProfile(for: provider)?.id == "qwen-code" {
                 self = .qwen
+                return
+            }
+            if clientInfo.resolvedProfile(for: provider)?.id == "kiro" {
+                self = .kiro
                 return
             }
             switch provider {
@@ -274,6 +288,7 @@ enum MascotKind: String, CaseIterable, Identifiable, Sendable {
     case codebuddy
     case copilot
     case kimi
+    case kiro
 
     var id: String { rawValue }
 
@@ -305,6 +320,8 @@ enum MascotKind: String, CaseIterable, Identifiable, Sendable {
             return "Copilot"
         case .kimi:
             return "Kimi CLI"
+        case .kiro:
+            return "Kiro"
         }
     }
 
@@ -336,6 +353,8 @@ enum MascotKind: String, CaseIterable, Identifiable, Sendable {
             return "黑框眼镜机器人"
         case .kimi:
             return "Kimi 蓝色键盘球"
+        case .kiro:
+            return "紫色描边白色幽灵"
         }
     }
 
@@ -367,6 +386,8 @@ enum MascotKind: String, CaseIterable, Identifiable, Sendable {
             return Color(red: 1.0, green: 0.56, blue: 0.28)
         case .kimi:
             return Color(red: 0.96, green: 0.30, blue: 0.42)
+        case .kiro:
+            return Color(red: 0.56, green: 0.28, blue: 0.96)
         }
     }
 
@@ -621,6 +642,18 @@ struct MascotView: View {
             drawCopilot(in: context, canvasSize: canvasSize, time: time, mode: mode)
         case .kimi:
             drawKimi(in: context, canvasSize: canvasSize, time: time, mode: mode)
+        case .kiro:
+            // Kiro's compact 2pt grid otherwise fills the full 18pt avatar.
+            // Scale just this mascot down by 10%, preserving the other designs.
+            var kiroContext = context
+            let centerX = canvasSize.width / 2
+            let centerY = canvasSize.height / 2
+            kiroContext.concatenate(
+                CGAffineTransform(translationX: centerX, y: centerY)
+                    .scaledBy(x: 0.9, y: 0.9)
+                    .translatedBy(x: -centerX, y: -centerY)
+            )
+            drawKiro(in: kiroContext, canvasSize: canvasSize, time: time, mode: mode)
         }
     }
 
@@ -730,6 +763,85 @@ struct MascotView: View {
 
         if mode == .warning {
             drawAlertGlyph(in: context, space: space, x: 11.7 + motion.shake, y: 2.2, color: kind.alertColor)
+        }
+    }
+
+    /// White Kiro ghost, rendered on the same pixel grid as the other mascots.
+    private func drawKiro(
+        in context: GraphicsContext,
+        canvasSize: CGSize,
+        time: TimeInterval,
+        mode: MascotRenderMode
+    ) {
+        // Use a compact 9×9 canvas so the Ghost has crisp 2pt pixels at the
+        // 18pt session-avatar size instead of collapsing into thin scan lines.
+        let space = PixelSpace(canvasSize, logicalWidth: 9, logicalHeight: 9, yOffset: 0)
+        let motion = motionValues(for: mode, time: time)
+        let ghost = Color(red: 0.98, green: 0.97, blue: 1.0)
+        let purple = Color(red: 0.50, green: 0.19, blue: 0.92)
+        let eye = Color(red: 0.10, green: 0.05, blue: 0.18)
+        let keyboardBase = Color(red: 0.17, green: 0.12, blue: 0.26)
+        let keyboardKey = Color(red: 0.63, green: 0.39, blue: 0.98)
+
+        drawShadow(in: context, space: space, centerX: 4.5, y: 9.35, width: 6.2 - abs(motion.bounce) * 0.25, opacity: 0.22)
+
+        if mode == .working {
+            drawKeyboard(
+                in: context,
+                space: space,
+                y: 8.1,
+                base: keyboardBase,
+                key: keyboardKey,
+                highlight: .white,
+                flashIndex: keyboardFlashIndex(time: time)
+            )
+        }
+
+        // A half-cell purple contour (one physical pixel at this sprite's grid)
+        // only — no colored background behind the ghost.
+        // The silhouette intentionally follows Kiro's official Ghost: round cap,
+        // left-side floating arm, two tall eyes, and three soft lower waves.
+        let outlinePixels: [(CGFloat, CGFloat, CGFloat, CGFloat)] = [
+            // Rounded cap.
+            (3, 0, 3, 0.5), (2, 0.5, 1, 0.5), (6, 0.5, 1, 0.5),
+            // Deliberately retain a balanced, fine contour on both sides.
+            (1.5, 1, 0.5, 6), (7, 1.5, 0.5, 5.5),
+            // Three short contour marks beneath the three lower waves.
+            (2, 7.5, 1, 0.5), (4, 7.5, 1, 0.5), (6, 7.5, 1, 0.5)
+        ]
+        for pixel in outlinePixels {
+            context.fill(
+                Path(space.rect(pixel.0 + motion.shake, pixel.1 + motion.vertical, pixel.2 * motion.squashX, pixel.3 * motion.squashY)),
+                with: .color(purple)
+            )
+        }
+
+        let ghostRows: [(CGFloat, CGFloat, CGFloat)] = [
+            (1, 3, 3), (2, 2, 5),
+            // The white face extends past the right eye; this cell must never
+            // be purple, otherwise it reads as an extra purple eye pixel.
+            (3, 1, 6), (4, 1, 6),
+            (5, 1, 6), (6, 2, 5),
+            // Three separate lower waves, matching the official Ghost.
+            (7, 2, 1), (7, 4, 1), (7, 6, 1)
+        ]
+        for row in ghostRows {
+            context.fill(
+                Path(space.rect(row.1 + motion.shake, row.0 + motion.vertical, row.2 * motion.squashX, 1 * motion.squashY)),
+                with: .color(ghost)
+            )
+        }
+        // The raised left arm and three lower waves are the Ghost's signature shape.
+        context.fill(Path(space.rect(1.0 + motion.shake, 4.5 + motion.vertical, 1.25, 2.0)), with: .color(ghost))
+        context.fill(Path(space.rect(1.4 + motion.shake, 6.0 + motion.vertical, 1.4, 1.0)), with: .color(ghost))
+        context.fill(Path(space.rect(6.5 + motion.shake, 4.0 + motion.vertical, 0.8, 2.2)), with: .color(ghost))
+
+        let eyeHeight: CGFloat = mode == .idle ? 0.45 : (mode == .warning ? 1.1 : blinkHeight(time: time, closedHeight: 0.2, openHeight: 1.1))
+        context.fill(Path(space.rect(3.2 + motion.shake, 3.3 + motion.vertical, 0.75, eyeHeight)), with: .color(eye))
+        context.fill(Path(space.rect(5.1 + motion.shake, 3.3 + motion.vertical, 0.75, eyeHeight)), with: .color(eye))
+
+        if mode == .warning {
+            drawAlertGlyph(in: context, space: space, x: 6.5 + motion.shake, y: 0.2, color: kind.alertColor)
         }
     }
 
