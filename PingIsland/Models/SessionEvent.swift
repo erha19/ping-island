@@ -169,6 +169,13 @@ extension HookEvent {
         "askfollowupquestion"
     ]
 
+    /// Oh My Pi's built-in question tool is `ask`; only OMP envelopes with the
+    /// generic `ask` tool name get question-tool treatment so other clients
+    /// are unaffected.
+    private nonisolated var isOmpQuestionToolEvent: Bool {
+        provider == .omp && normalizedToolNameForIntervention == "ask"
+    }
+
     private nonisolated func normalizedJSONValue(_ value: Any) -> Any {
         if let codable = value as? AnyCodable {
             return normalizedJSONValue(codable.value)
@@ -275,7 +282,8 @@ extension HookEvent {
         }
 
         return event == "PreToolUse"
-            && Self.questionToolNames.contains(normalizedToolNameForIntervention ?? "")
+            && (Self.questionToolNames.contains(normalizedToolNameForIntervention ?? "")
+                || isOmpQuestionToolEvent)
             && !(questionPayloads?.isEmpty ?? true)
     }
 
@@ -310,7 +318,8 @@ extension HookEvent {
     }
 
     nonisolated var isAnsweredAskUserQuestionEvent: Bool {
-        Self.questionToolNames.contains(normalizedToolNameForIntervention ?? "")
+        (Self.questionToolNames.contains(normalizedToolNameForIntervention ?? "")
+            || isOmpQuestionToolEvent)
             && hasQuestionAnswerPayload
     }
 
@@ -431,6 +440,7 @@ extension HookEvent {
                     ?? question["allowsMultiple"] as? Bool
                     ?? question["multiSelect"] as? Bool
                     ?? question["multiple"] as? Bool
+                    ?? question["multi"] as? Bool
                     ?? false,
                 allowsOther: allowsOther || clientInfo.supportsCustomAskUserQuestionInput,
                 isSecret: question["isSecret"] as? Bool

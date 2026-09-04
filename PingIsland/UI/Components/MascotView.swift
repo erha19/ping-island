@@ -27,6 +27,7 @@ enum MascotClient: String, CaseIterable, Identifiable, Sendable {
     case trae
     case copilot
     case kimi
+    case omp
 
     static let allCases: [MascotClient] = [
         .claude,
@@ -42,6 +43,7 @@ enum MascotClient: String, CaseIterable, Identifiable, Sendable {
         .codebuddy,
         .copilot,
         .kimi,
+        .omp,
     ]
 
     var id: String { rawValue }
@@ -76,6 +78,8 @@ enum MascotClient: String, CaseIterable, Identifiable, Sendable {
             return "Copilot"
         case .kimi:
             return "Kimi CLI"
+        case .omp:
+            return "Oh My Pi"
         }
     }
 
@@ -109,6 +113,8 @@ enum MascotClient: String, CaseIterable, Identifiable, Sendable {
             return "GitHub Copilot Hooks 客户端"
         case .kimi:
             return "Kimi CLI 官方 hooks 与默认 Kimi 形象"
+        case .omp:
+            return "Oh My Pi hook 客户端"
         }
     }
 
@@ -142,6 +148,8 @@ enum MascotClient: String, CaseIterable, Identifiable, Sendable {
             return .copilot
         case .kimi:
             return .kimi
+        case .omp:
+            return .omp
         }
     }
 
@@ -157,6 +165,8 @@ enum MascotClient: String, CaseIterable, Identifiable, Sendable {
             self = .kimi
         case .gemini:
             self = .gemini
+        case .omp:
+            self = .omp
         }
     }
 
@@ -187,6 +197,8 @@ enum MascotClient: String, CaseIterable, Identifiable, Sendable {
                 .codex
             case "kimi":
                 .kimi
+            case "omp":
+                .omp
             default:
                 nil
             }
@@ -234,6 +246,8 @@ enum MascotClient: String, CaseIterable, Identifiable, Sendable {
                 self = .kimi
             case .gemini:
                 self = .gemini
+            case .omp:
+                self = .omp
             }
         case .opencode:
             self = .opencode
@@ -243,6 +257,8 @@ enum MascotClient: String, CaseIterable, Identifiable, Sendable {
             self = .copilot
         case .kimi:
             self = .kimi
+        case .omp:
+            self = .omp
         case .claude:
             switch provider {
             case .codex:
@@ -255,6 +271,8 @@ enum MascotClient: String, CaseIterable, Identifiable, Sendable {
                 self = .kimi
             case .gemini:
                 self = .gemini
+            case .omp:
+                self = .omp
             }
         }
     }
@@ -274,6 +292,7 @@ enum MascotKind: String, CaseIterable, Identifiable, Sendable {
     case codebuddy
     case copilot
     case kimi
+    case omp
 
     var id: String { rawValue }
 
@@ -305,6 +324,8 @@ enum MascotKind: String, CaseIterable, Identifiable, Sendable {
             return "Copilot"
         case .kimi:
             return "Kimi CLI"
+        case .omp:
+            return "Oh My Pi"
         }
     }
 
@@ -336,6 +357,8 @@ enum MascotKind: String, CaseIterable, Identifiable, Sendable {
             return "黑框眼镜机器人"
         case .kimi:
             return "Kimi 蓝色键盘球"
+        case .omp:
+            return "Oh My Pi 终端伙伴"
         }
     }
 
@@ -367,6 +390,8 @@ enum MascotKind: String, CaseIterable, Identifiable, Sendable {
             return Color(red: 1.0, green: 0.56, blue: 0.28)
         case .kimi:
             return Color(red: 0.96, green: 0.30, blue: 0.42)
+        case .omp:
+            return TerminalColors.omp
         }
     }
 
@@ -621,6 +646,8 @@ struct MascotView: View {
             drawCopilot(in: context, canvasSize: canvasSize, time: time, mode: mode)
         case .kimi:
             drawKimi(in: context, canvasSize: canvasSize, time: time, mode: mode)
+        case .omp:
+            drawOmp(in: context, canvasSize: canvasSize, time: time, mode: mode)
         }
     }
 
@@ -1981,6 +2008,37 @@ struct MascotView: View {
             Path(roundedRect: space.rect(9.3 + motion.shake, eyeY, eyeWidth, eyeHeight * motion.squashY), cornerRadius: space.pixel * 0.6),
             with: .color(eye)
         )
+
+        if mode == .warning {
+            drawAlertGlyph(in: context, space: space, x: 12.0 + motion.shake, y: 2.0, color: kind.alertColor)
+        }
+    }
+
+    private func drawOmp(
+        in context: GraphicsContext,
+        canvasSize: CGSize,
+        time: TimeInterval,
+        mode: MascotRenderMode
+    ) {
+        let space = PixelSpace(canvasSize, logicalWidth: 16, logicalHeight: 14, yOffset: 2)
+        let motion = motionValues(for: mode, time: time)
+        let body = kind.alertColor
+        let dark = Color(red: 0.45, green: 0.22, blue: 0.08)
+        let eye = Color.white
+
+        drawShadow(in: context, space: space, centerX: 8, y: 15.5, width: 7.0 - abs(motion.bounce) * 0.2, opacity: 0.22)
+
+        let rows: [(CGFloat, CGFloat, CGFloat)] = [
+            (12, 4, 8), (11, 3, 10), (10, 2, 12), (9, 2, 12),
+            (8, 2, 12), (7, 2, 12), (6, 3, 10), (5, 4, 8)
+        ]
+        for row in rows {
+            context.fill(Path(space.rect(row.1 + motion.shake, row.0 + motion.vertical, row.2 * motion.squashX, 1 * motion.squashY)), with: .color(body))
+        }
+
+        context.fill(Path(space.rect(6.0 + motion.shake, 8.0 + motion.vertical, 1.2, 1.2)), with: .color(eye))
+        context.fill(Path(space.rect(9.8 + motion.shake, 8.0 + motion.vertical, 1.2, 1.2)), with: .color(eye))
+        context.fill(Path(space.rect(6.5 + motion.shake, 10.5 + motion.vertical, 4, 0.8)), with: .color(dark))
 
         if mode == .warning {
             drawAlertGlyph(in: context, space: space, x: 12.0 + motion.shake, y: 2.0, color: kind.alertColor)

@@ -6,6 +6,7 @@ enum SessionProvider: String, Codable, Equatable, Sendable {
     case copilot
     case kimi
     case gemini
+    case omp
 
     nonisolated var displayName: String {
         switch self {
@@ -19,6 +20,8 @@ enum SessionProvider: String, Codable, Equatable, Sendable {
             return "Kimi"
         case .gemini:
             return "Gemini"
+        case .omp:
+            return "Oh My Pi"
         }
     }
 }
@@ -38,6 +41,7 @@ enum SessionClientKind: String, Codable, Equatable, Sendable {
     case qoder
     case custom
     case unknown
+    case omp
 }
 
 struct SessionClientInfo: Codable, Equatable, Sendable {
@@ -122,6 +126,8 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
             return SessionClientInfo(kind: .custom, profileID: "kimi", name: "Kimi CLI", origin: "cli")
         case .gemini:
             return SessionClientInfo(kind: .custom, profileID: "gemini", name: "Gemini CLI", origin: "cli")
+        case .omp:
+            return SessionClientInfo(kind: .omp, profileID: "omp", name: "Oh My Pi", origin: "cli")
         }
     }
 
@@ -171,6 +177,8 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
             return .codex
         case .qoder:
             return .qoder
+        case .omp:
+            return .omp
         case .custom, .unknown:
             return .neutral
         }
@@ -628,7 +636,7 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
                 )
             }
 
-        case .claudeCode, .qoder, .custom, .unknown:
+        case .claudeCode, .qoder, .omp, .custom, .unknown:
             break
         }
 
@@ -1162,6 +1170,7 @@ struct SessionIntervention: Equatable, Identifiable, Sendable {
                     ?? question["allowsMultiple"] as? Bool
                     ?? question["multiSelect"] as? Bool
                     ?? question["multiple"] as? Bool
+                    ?? question["multi"] as? Bool
                     ?? false,
                 allowsOther: question["isOther"] as? Bool
                     ?? question["allowsOther"] as? Bool

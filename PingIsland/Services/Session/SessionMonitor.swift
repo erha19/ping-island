@@ -1353,6 +1353,8 @@ class SessionMonitor: ObservableObject {
             return event.status == "ended" || event.event == "Stop"
         case .gemini:
             return event.status == "ended"
+        case .omp:
+            return event.status == "ended" || event.event == "Stop"
         default:
             return false
         }

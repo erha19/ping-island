@@ -1123,6 +1123,8 @@ struct SessionState: Equatable, Identifiable, Sendable {
             return false
         case .gemini:
             return false
+        case .omp:
+            return false
         }
     }
 

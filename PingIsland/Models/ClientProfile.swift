@@ -33,6 +33,7 @@ enum SessionClientBrand: String, Codable, Equatable, Sendable {
     case copilot
     case neutral
     case kimi
+    case omp
 }
 
 enum SessionAssistantLabelMode: String, Sendable {
@@ -700,6 +701,28 @@ enum ClientProfileRegistry {
             events: []
         ),
         ManagedHookClientProfile(
+            id: "omp-hooks",
+            title: "Oh My Pi",
+            subtitle: "管理 ~/.omp/agent/hooks/pre/ping-island.ts，按 Oh My Pi 官方 hook 机制接入 Island",
+            installationKind: .pluginFile,
+            alwaysVisibleInSettings: true,
+            logoAssetName: "OMPLogo",
+            prefersBundledLogoOverAppIcon: true,
+            iconSymbolName: "terminal",
+            configurationRelativePath: ".omp/agent/hooks/pre/ping-island.ts",
+            bridgeSource: "omp",
+            bridgeExtraArguments: [
+                "--client-kind", "omp",
+                "--client-name", "Oh My Pi",
+                "--client-origin", "cli",
+                "--client-originator", "Oh My Pi",
+                "--thread-source", "omp-hooks"
+            ],
+            defaultEnabled: false,
+            brand: .omp,
+            events: []
+        ),
+        ManagedHookClientProfile(
             id: "qwen-code-hooks",
             title: "Qwen Code",
             subtitle: "管理 ~/.qwen/settings.json，按 Qwen Code 官方 hooks 协议接入 Island",
@@ -1322,6 +1345,21 @@ enum ClientProfileRegistry {
             bundleIdentifiers: []
         ),
         SessionClientProfile(
+            id: "omp",
+            provider: .omp,
+            family: .claudeHooks,
+            kind: .omp,
+            displayName: "Oh My Pi",
+            assistantLabelMode: .badgeLabel,
+            brand: .omp,
+            defaultBundleIdentifier: nil,
+            defaultOrigin: "cli",
+            recognizedKinds: ["omp", "oh-my-pi", "oh_my_pi", "oh my pi"],
+            exactAliases: ["omp", "oh-my-pi", "oh my pi"],
+            keywordAliases: ["omp", "oh my pi"],
+            bundleIdentifiers: []
+        ),
+        SessionClientProfile(
             id: "qwen-code",
             provider: .claude,
             family: .claudeHooks,
@@ -1668,6 +1706,8 @@ enum ClientProfileRegistry {
             return runtimeProfile(id: "kimi")
         case .gemini:
             return runtimeProfile(id: "gemini")
+        case .omp:
+            return runtimeProfile(id: "omp")
         }
     }
 

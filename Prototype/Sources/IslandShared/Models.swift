@@ -6,6 +6,7 @@ public enum AgentProvider: String, Codable, CaseIterable, Sendable {
     case copilot
     case kimi
     case gemini
+    case omp
 }
 
 public enum SessionStatusKind: String, Codable, CaseIterable, Sendable {

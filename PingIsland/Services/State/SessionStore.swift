@@ -274,6 +274,8 @@ actor SessionStore {
             )
         case .copilot:
             runtimeClientInfo = SessionClientInfo.default(for: .copilot)
+        case .omp:
+            runtimeClientInfo = SessionClientInfo.default(for: .omp)
         }
 
         let resolvedClientInfo = normalizedClientInfo(
@@ -4132,6 +4134,7 @@ actor SessionStore {
                     ?? question["allowsMultiple"] as? Bool
                     ?? question["multiSelect"] as? Bool
                     ?? question["multiple"] as? Bool
+                    ?? question["multi"] as? Bool
                     ?? false,
                 allowsOther: allowsOther || session.clientInfo.supportsCustomAskUserQuestionInput,
                 isSecret: question["isSecret"] as? Bool
@@ -4655,6 +4658,8 @@ actor SessionStore {
         case .kimi:
             return clientInfo
         case .gemini:
+            return clientInfo
+        case .omp:
             return clientInfo
         }
     }

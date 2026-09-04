@@ -411,7 +411,7 @@ struct CodexThreadInspectorView: View {
             } else if isLoading {
                 loadingText
             } else {
-                Text(appLocalized: "No thread details yet. Once Codex responds, the latest result will show here.")
+                Text(AppLocalization.format("No thread details yet. Once %@ responds, the latest result will show here.", session.providerDisplayName))
                     .font(.system(size: max(11, bodyFontSize - 1), weight: .medium))
                     .foregroundColor(.white.opacity(0.56))
             }
@@ -452,7 +452,7 @@ struct CodexThreadInspectorView: View {
     private var sectionTitle: String {
         switch mode {
         case .chat:
-            return AppLocalization.string("Latest thread result")
+            return AppLocalization.string("Latest result")
         case .hover:
             return AppLocalization.string("Session result")
         }
@@ -469,7 +469,7 @@ struct CodexThreadInspectorView: View {
     }
 
     private var loadingText: some View {
-        Text(appLocalized: "Loading thread details...")
+        Text(appLocalized: "Loading details...")
             .font(.system(size: max(11, bodyFontSize - 1), weight: .medium))
             .foregroundColor(.white.opacity(0.56))
     }

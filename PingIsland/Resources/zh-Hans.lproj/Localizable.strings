@@ -349,10 +349,10 @@
 "Message Claude..." = "给 Claude 发送消息...";
 "Message %@..." = "给 %@ 发送消息...";
 "Submit" = "提交";
-"Loading thread details..." = "正在加载线程详情...";
-"Latest thread result" = "最新线程结果";
+"Loading details..." = "正在加载详情...";
+"Latest result" = "最新结果";
 "Session result" = "会话结果";
-"No thread details yet. Once Codex responds, the latest result will show here." = "暂时还没有线程详情。等 Codex 回复后，最新结果会显示在这里。";
+"No thread details yet. Once %@ responds, the latest result will show here." = "暂时还没有线程详情。等 %@ 回复后，最新结果会显示在这里。";
 "Showing a shortened preview to keep Ping Island responsive. Open the client to view the full content." = "为保持 Ping Island 流畅，已显示精简预览。请打开客户端查看完整内容。";
 "Open Claude Code in tmux to enable messaging" = "在 tmux 中打开 Claude Code 以启用发消息";
 "Processing" = "处理中";
@@ -747,6 +747,9 @@
 "Qwen Code 官方 hooks 与薄荷围巾卡皮巴拉" = "Qwen Code 官方 hooks 与薄荷围巾卡皮巴拉";
 "OpenClaw Gateway hooks 与默认小龙虾形象" = "OpenClaw Gateway hooks 与默认小龙虾形象";
 "Kimi CLI 官方 hooks 与默认 Kimi 形象" = "Kimi CLI 官方 hooks 与默认 Kimi 形象";
+"Oh My Pi hook 客户端" = "Oh My Pi hook 客户端";
+"Oh My Pi 终端伙伴" = "Oh My Pi 终端伙伴";
+"管理 ~/.omp/agent/hooks/pre/ping-island.ts，按 Oh My Pi 官方 hook 机制接入 Island" = "管理 ~/.omp/agent/hooks/pre/ping-island.ts，按 Oh My Pi 官方 hook 机制接入 Island";
 "%@ %@ 空闲保护中" = "%@ %@ 空闲保护中";
 
 // 更新与更新日志文案

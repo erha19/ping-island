@@ -2045,6 +2045,8 @@ private enum RemoteBridgeMessageBuilder {
             return "kimi"
         case .gemini:
             return "gemini"
+        case .omp:
+            return explicitKind ?? "omp"
         }
     }
 

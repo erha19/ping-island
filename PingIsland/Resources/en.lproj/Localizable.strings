@@ -354,10 +354,10 @@
 "Message Claude..." = "Message Claude...";
 "Message %@..." = "Message %@...";
 "Submit" = "Submit";
-"Loading thread details..." = "Loading thread details...";
-"Latest thread result" = "Latest thread result";
+"Loading details..." = "Loading details...";
+"Latest result" = "Latest result";
 "Session result" = "Session result";
-"No thread details yet. Once Codex responds, the latest result will show here." = "No thread details yet. Once Codex responds, the latest result will show here.";
+"No thread details yet. Once %@ responds, the latest result will show here." = "No thread details yet. Once %@ responds, the latest result will show here.";
 "Showing a shortened preview to keep Ping Island responsive. Open the client to view the full content." = "Showing a shortened preview to keep Ping Island responsive. Open the client to view the full content.";
 "Open Claude Code in tmux to enable messaging" = "Open Claude Code in tmux to enable messaging";
 "Processing" = "Processing";
@@ -747,6 +747,9 @@
 "Qwen Code 官方 hooks 与薄荷围巾卡皮巴拉" = "Official Qwen Code hooks and the capybara with a mint scarf";
 "OpenClaw Gateway hooks 与默认小龙虾形象" = "OpenClaw Gateway hooks and the default crayfish mascot";
 "Kimi CLI 官方 hooks 与默认 Kimi 形象" = "Official Kimi CLI hooks and the default Kimi mascot";
+"Oh My Pi hook 客户端" = "Oh My Pi hook client";
+"Oh My Pi 终端伙伴" = "Oh My Pi terminal buddy";
+"管理 ~/.omp/agent/hooks/pre/ping-island.ts，按 Oh My Pi 官方 hook 机制接入 Island" = "Manage ~/.omp/agent/hooks/pre/ping-island.ts using Oh My Pi's official hook mechanism for Island";
 "%@ %@ 空闲保护中" = "%@ %@ with idle protection active";
 
 // Update and release notes copy

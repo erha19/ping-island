@@ -19,6 +19,19 @@ public enum HookPayloadMapper {
         "SubagentStop"
     ]
 
+    /// Oh My Pi's built-in question tool is named `ask` (Claude-compatible
+    /// clients use `AskUserQuestion`). Only treat the generic `ask` name as a
+    /// question tool for the OMP provider so other clients' `ask` tools are
+    /// not misclassified.
+    private static func isOmpQuestionToolEvent(provider: AgentProvider, payload: [String: Any]) -> Bool {
+        provider == .omp && normalizedToolName(from: payload) == "ask"
+    }
+
+    private static func isQuestionToolEvent(provider: AgentProvider, payload: [String: Any]) -> Bool {
+        questionToolNames.contains(normalizedToolName(from: payload) ?? "")
+            || isOmpQuestionToolEvent(provider: provider, payload: payload)
+    }
+
     public static func makeEnvelope(
         source: AgentProvider,
         arguments: [String],
@@ -123,7 +136,7 @@ public enum HookPayloadMapper {
         }
 
         switch provider {
-        case .claude, .gemini:
+        case .claude, .gemini, .omp:
             let clientKind = normalizedClientKind(from: metadata)
             if isAntigravityHookClient(clientKind) {
                 return antigravityStdoutPayload(response: response, decision: decision)
@@ -437,7 +450,7 @@ public enum HookPayloadMapper {
         intervention: InterventionRequest?
     ) -> SessionStatus? {
         if let text = payload["status"] as? String {
-            if hasAnsweredQuestionPayload(payload) {
+            if hasAnsweredQuestionPayload(payload, provider: provider) {
                 return answeredQuestionStatus(eventType: eventType)
             }
             return mapStatusString(text)
@@ -445,7 +458,7 @@ public enum HookPayloadMapper {
         if isGeminiHookClient(clientKind) {
             return geminiStatus(eventType: eventType, payload: payload)
         }
-        if hasAnsweredQuestionPayload(payload) {
+        if hasAnsweredQuestionPayload(payload, provider: provider) {
             return answeredQuestionStatus(eventType: eventType)
         }
         if let intervention {
@@ -551,7 +564,7 @@ public enum HookPayloadMapper {
             return true
         }
 
-        if hasAnsweredQuestionPayload(payload) {
+        if hasAnsweredQuestionPayload(payload, provider: provider) {
             return false
         }
 
@@ -828,7 +841,7 @@ public enum HookPayloadMapper {
             return nil
         }
 
-        if hasAnsweredQuestionPayload(payload) {
+        if hasAnsweredQuestionPayload(payload, provider: provider) {
             return nil
         }
 
@@ -856,8 +869,10 @@ public enum HookPayloadMapper {
             )
         }
 
+        let isQuestionTool = isQuestionToolEvent(provider: provider, payload: payload)
+
         if questionPayloads(from: payload)?.isEmpty == false,
-           questionToolNames.contains(normalizedToolName(from: payload) ?? ""),
+           isQuestionTool,
            !shouldSurfaceQuestionIntervention(
                 provider: provider,
                 eventType: eventType,
@@ -1737,8 +1752,14 @@ public enum HookPayloadMapper {
         return nil
     }
 
-    private static func hasAnsweredQuestionPayload(_ payload: [String: Any]) -> Bool {
-        guard questionToolNames.contains(normalizedToolName(from: payload) ?? "") else {
+    private static func hasAnsweredQuestionPayload(
+        _ payload: [String: Any],
+        provider: AgentProvider? = nil
+    ) -> Bool {
+        let normalizedTool = normalizedToolName(from: payload) ?? ""
+        let recognizedTool = questionToolNames.contains(normalizedTool)
+            || (provider == .omp && normalizedTool == "ask")
+        guard recognizedTool else {
             return false
         }
 
@@ -1832,7 +1853,7 @@ public enum HookPayloadMapper {
         payload: [String: Any],
         clientKind: String?
     ) -> Bool {
-        if hasAnsweredQuestionPayload(payload) {
+        if hasAnsweredQuestionPayload(payload, provider: provider) {
             return false
         }
 
@@ -2304,6 +2325,8 @@ private extension AgentProvider {
             return "Kimi"
         case .gemini:
             return "Gemini"
+        case .omp:
+            return "Oh My Pi"
         }
     }
 }

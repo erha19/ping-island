@@ -3324,3 +3324,137 @@ func unknownStopVariantFallsBackToCompleted() throws {
     #expect(envelope.eventType == "MysteryStopThing")
     #expect(envelope.status?.kind == .completed)
 }
+
+@Test
+func ompAskToolCreatesBlockingQuestionIntervention() throws {
+    let payload = """
+    {
+      "hook_event_name": "PreToolUse",
+      "session_id": "omp-question-1",
+      "tool_name": "Ask",
+      "tool_input": {
+        "questions": [
+          {
+            "id": "topic",
+            "header": "主题",
+            "question": "先选一个主题",
+            "options": [{"label": "A 方案"}, {"label": "B 方案"}]
+          }
+        ]
+      }
+    }
+    """.data(using: .utf8)!
+
+    let envelope = HookPayloadMapper.makeEnvelope(
+        source: .omp,
+        arguments: [
+            "island-bridge",
+            "--source", "omp",
+            "--client-kind", "omp",
+            "--client-name", "Oh My Pi",
+            "--thread-source", "omp-hooks"
+        ],
+        environment: ["PWD": "/tmp/demo"],
+        stdinData: payload
+    )
+
+    #expect(envelope.eventType == "PreToolUse")
+    #expect(envelope.status?.kind == .waitingForInput)
+    #expect(envelope.expectsResponse)
+    #expect(envelope.intervention?.kind == .question)
+    #expect(envelope.intervention?.message == "先选一个主题")
+}
+
+@Test
+func ompAskAnsweredNotificationDoesNotCreateIntervention() throws {
+    let payload = """
+    {
+      "hook_event_name": "PreToolUse",
+      "session_id": "omp-question-1",
+      "tool_name": "Ask",
+      "tool_input": {
+        "questions": [
+          {"id": "topic", "question": "先选一个主题", "options": [{"label": "A 方案"}]}
+        ],
+        "answers": {"先选一个主题": "A 方案"}
+      }
+    }
+    """.data(using: .utf8)!
+
+    let envelope = HookPayloadMapper.makeEnvelope(
+        source: .omp,
+        arguments: [
+            "island-bridge",
+            "--source", "omp",
+            "--client-kind", "omp",
+            "--client-name", "Oh My Pi"
+        ],
+        environment: ["PWD": "/tmp/demo"],
+        stdinData: payload
+    )
+
+    #expect(!envelope.expectsResponse)
+    #expect(envelope.intervention == nil)
+    #expect(envelope.status?.kind == .runningTool)
+}
+
+@Test
+func nonOmpAskToolIsNotTreatedAsQuestionTool() throws {
+    let payload = """
+    {
+      "hook_event_name": "PreToolUse",
+      "session_id": "claude-ask-1",
+      "tool_name": "Ask",
+      "tool_input": {
+        "questions": [
+          {"id": "topic", "question": "先选一个主题", "options": [{"label": "A 方案"}]}
+        ]
+      }
+    }
+    """.data(using: .utf8)!
+
+    let envelope = HookPayloadMapper.makeEnvelope(
+        source: .claude,
+        arguments: ["island-bridge", "--source", "claude"],
+        environment: ["PWD": "/tmp/demo"],
+        stdinData: payload
+    )
+
+    #expect(!envelope.expectsResponse)
+    #expect(envelope.intervention == nil)
+}
+
+@Test
+func ompQuestionAnswerStdoutPayloadUsesClaudeHookShape() throws {
+    let response = BridgeResponse(
+        requestID: UUID(),
+        decision: .answer(["先选一个主题": "A 方案"]),
+        updatedInput: [
+            "questions": .array([
+                .object([
+                    "id": .string("topic"),
+                    "question": .string("先选一个主题"),
+                    "options": .array([
+                        .object(["label": .string("A 方案")])
+                    ])
+                ])
+            ]),
+            "answers": .object(["先选一个主题": .string("A 方案")])
+        ]
+    )
+
+    let payload = HookPayloadMapper.stdoutPayload(
+        for: .omp,
+        response: response,
+        eventType: "PreToolUse",
+        metadata: ["client_kind": "omp"]
+    )
+
+    let json = try #require(JSONSerialization.jsonObject(with: Data(payload.utf8)) as? [String: Any])
+    let hookSpecificOutput = try #require(json["hookSpecificOutput"] as? [String: Any])
+    let decision = try #require(hookSpecificOutput["decision"] as? [String: Any])
+    #expect(decision["behavior"] as? String == "allow")
+    let updatedInput = try #require(decision["updatedInput"] as? [String: Any])
+    let answers = try #require(updatedInput["answers"] as? [String: String])
+    #expect(answers["先选一个主题"] == "A 方案")
+}
