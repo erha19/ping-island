@@ -415,19 +415,22 @@ struct MascotView: View {
     var size: CGFloat = 40
     var animationTime: TimeInterval?
     var isDragging: Bool = false
+    var animationSurface: MascotAnimationSurface = .standard
 
     init(
         kind: MascotKind,
         status: MascotStatus,
         size: CGFloat = 40,
         animationTime: TimeInterval? = nil,
-        isDragging: Bool = false
+        isDragging: Bool = false,
+        animationSurface: MascotAnimationSurface = .standard
     ) {
         self.kind = kind
         self.status = status
         self.size = size
         self.animationTime = animationTime
         self.isDragging = isDragging
+        self.animationSurface = animationSurface
     }
 
     init(
@@ -435,14 +438,16 @@ struct MascotView: View {
         status: MascotStatus,
         size: CGFloat = 40,
         animationTime: TimeInterval? = nil,
-        isDragging: Bool = false
+        isDragging: Bool = false,
+        animationSurface: MascotAnimationSurface = .standard
     ) {
         self.init(
             kind: MascotKind(provider: provider),
             status: status,
             size: size,
             animationTime: animationTime,
-            isDragging: isDragging
+            isDragging: isDragging,
+            animationSurface: animationSurface
         )
     }
 
@@ -530,25 +535,11 @@ struct MascotView: View {
     /// Adaptive refresh rate based on animation complexity.
     /// Visible pets need enough cadence for the time-based motion to read as animation.
     private func adaptiveInterval(for mode: MascotRenderMode) -> TimeInterval {
-        let baseInterval = switch mode {
-        case .idle:
-            1.0 / 12.0
-        case .working:
-            1.0 / 24.0
-        case .warning:
-            1.0 / 24.0
-        case .dragging:
-            1.0 / 30.0
-        }
-
-        switch energyGovernor.policy.animationLevel {
-        case .full:
-            return baseInterval
-        case .reduced:
-            return baseInterval * 1.6
-        case .staticFrames:
-            return baseInterval
-        }
+        MascotAnimationCadence.frameInterval(
+            for: mode,
+            surface: animationSurface,
+            animationLevel: energyGovernor.policy.animationLevel
+        )
     }
 
     private func animatedCanvas(interval: TimeInterval, mode: MascotRenderMode) -> some View {
@@ -2116,11 +2107,53 @@ struct MascotView: View {
     }
 }
 
-private enum MascotRenderMode {
+enum MascotAnimationSurface {
+    case standard
+    case detachedPet
+}
+
+enum MascotRenderMode {
     case idle
     case working
     case warning
     case dragging
+}
+
+struct MascotAnimationCadence {
+    nonisolated static func frameInterval(
+        for mode: MascotRenderMode,
+        surface: MascotAnimationSurface,
+        animationLevel: EnergyAnimationLevel
+    ) -> TimeInterval {
+        let baseInterval = switch mode {
+        case .idle:
+            1.0 / 12.0
+        case .working:
+            1.0 / 24.0
+        case .warning:
+            1.0 / 24.0
+        case .dragging:
+            1.0 / 30.0
+        }
+
+        let surfaceMultiplier: Double = switch (surface, mode) {
+        case (.detachedPet, .working):
+            // A detached working pet can remain visible for hours. Match the
+            // existing idle cadence while keeping attention and drag states fast.
+            2.0
+        default:
+            1.0
+        }
+
+        let energyMultiplier: Double = switch animationLevel {
+        case .full, .staticFrames:
+            1.0
+        case .reduced:
+            1.6
+        }
+
+        return baseInterval * surfaceMultiplier * energyMultiplier
+    }
 }
 
 private struct MascotMotion {

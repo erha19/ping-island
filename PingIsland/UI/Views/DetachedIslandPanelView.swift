@@ -1163,7 +1163,8 @@ private struct DetachedFloatingMascotView: View {
             kind: kind,
             status: status,
             size: renderSize,
-            isDragging: isDragging
+            isDragging: isDragging,
+            animationSurface: .detachedPet
         )
         .frame(width: renderSize, height: renderSize)
         .scaleEffect(displayScale)
