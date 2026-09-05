@@ -331,7 +331,8 @@ actor SessionStore {
             kind: .custom,
             profileID: "claude-desktop",
             name: "Claude Desktop",
-            bundleIdentifier: "com.anthropic.claudefordesktop",
+            bundleIdentifier: ClaudeDesktopSessionIndex.appBundleIdentifier,
+            launchURL: ClaudeDesktopSessionIndex.tabDeepLink(localSessionId: info.localSessionId),
             origin: "desktop",
             sessionFilePath: info.auditFilePath
         )
