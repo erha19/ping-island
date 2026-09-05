@@ -1131,6 +1131,44 @@ enum ClientProfileRegistry {
                 HookInstallEventDescriptor(name: "SessionEnd", templates: [.plain]),
             ]
         ),
+        // Kimi's desktop app runs a vendored kimi-code kernel (@moonshot-ai/agent-core)
+        // out of its own home, so its chat and agent turns speak the same hooks protocol
+        // as the CLI - only the config file lives inside the app's support directory.
+        // The app rewrites that file every time its daimon runner starts, so
+        // KimiAppHookGuard repairs the managed block whenever it disappears.
+        ManagedHookClientProfile(
+            id: "kimi-app-hooks",
+            title: "Kimi App",
+            subtitle: "管理 Kimi 桌面版内置 kimi-code 内核的 config.toml，聊天与 Agent 会话一并接入 Island",
+            installationKind: .tomlHooks,
+            alwaysVisibleInSettings: false,
+            logoAssetName: "KimiLogo",
+            prefersBundledLogoOverAppIcon: true,
+            localAppBundleIdentifiers: ["com.moonshot.kimichat"],
+            iconSymbolName: "moon.stars.fill",
+            configurationRelativePaths: [
+                KimiAppHookPaths.kernelConfigurationRelativePath
+            ],
+            bridgeSource: "kimi",
+            bridgeExtraArguments: [
+                "--client-kind", "kimi-app",
+                "--client-name", "Kimi App",
+                "--client-origin", "desktop",
+                "--client-originator", "Kimi App",
+                "--thread-source", "kimi-app-hooks"
+            ],
+            defaultEnabled: false,
+            brand: .kimi,
+            events: [
+                HookInstallEventDescriptor(name: "UserPromptSubmit", templates: [.plain]),
+                HookInstallEventDescriptor(name: "PreToolUse", templates: [.matcher("*")]),
+                HookInstallEventDescriptor(name: "PostToolUse", templates: [.matcher("*")]),
+                HookInstallEventDescriptor(name: "Notification", templates: [.matcher("*")]),
+                HookInstallEventDescriptor(name: "Stop", templates: [.plain]),
+                HookInstallEventDescriptor(name: "SessionStart", templates: [.plain]),
+                HookInstallEventDescriptor(name: "SessionEnd", templates: [.plain]),
+            ]
+        ),
     ]
 
     nonisolated static let runtimeProfiles: [SessionClientProfile] = [
@@ -1448,6 +1486,21 @@ enum ClientProfileRegistry {
             exactAliases: ["kimi", "kimi-cli", "kimi cli"],
             keywordAliases: ["kimi", "kimi cli"],
             bundleIdentifiers: []
+        ),
+        SessionClientProfile(
+            id: "kimi-app",
+            provider: .kimi,
+            family: .claudeHooks,
+            kind: .custom,
+            displayName: "Kimi App",
+            assistantLabelMode: .badgeLabel,
+            brand: .kimi,
+            defaultBundleIdentifier: "com.moonshot.kimichat",
+            defaultOrigin: "desktop",
+            recognizedKinds: ["kimi-app", "kimi_app", "kimi app", "kimi-desktop", "kimi desktop"],
+            exactAliases: ["kimi-app", "kimi app", "kimi-app-hooks", "kimi desktop"],
+            keywordAliases: ["kimi app", "kimi desktop"],
+            bundleIdentifiers: ["com.moonshot.kimichat"]
         ),
         SessionClientProfile(
             id: "codex-app",

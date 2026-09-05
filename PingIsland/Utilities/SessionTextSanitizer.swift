@@ -27,6 +27,14 @@ enum SessionTextSanitizer {
             with: "",
             options: .regularExpression
         )
+        // Kimi's desktop app prefixes every submitted turn with an awareness tag
+        // (`<meta awareness="low" timestamp="..." />`), which would otherwise become
+        // the session's visible title.
+        cleaned = cleaned.replacingOccurrences(
+            of: #"(?is)^\s*<meta\b[^>]*/>\s*"#,
+            with: "",
+            options: .regularExpression
+        )
         cleaned = cleaned.replacingOccurrences(
             of: #"(?is)<system-reminder>.*?</system-reminder>"#,
             with: " ",

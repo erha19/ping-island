@@ -722,7 +722,8 @@ private extension BridgeEnvelope {
             message: HookSocketServer.resolvedBridgeMessage(
                 eventType: eventType,
                 metadata: metadata,
-                preview: preview
+                preview: preview,
+                provider: provider.sessionProvider
             ),
             bridgeIntervention: intervention?.sessionIntervention(
                 fallbackID: metadata["tool_use_id"],
@@ -1196,6 +1197,23 @@ private extension BridgeProvider {
     }
 }
 
+/// Kimi spawns a throwaway kernel session per conversation purely to generate that
+/// conversation's title, and it fires the same hook lifecycle as a real turn. The
+/// kernel names those sessions with a `ctitle-` prefix (real conversations use
+/// `conv-`), so the prefix is a deterministic discriminator - no prompt-text
+/// heuristics, and it survives prompt wording or localization changes.
+enum KimiAuxiliaryHookFilter {
+    private nonisolated static let titleGenerationSessionPrefix = "ctitle-"
+
+    nonisolated static func isTitleGenerationSession(
+        provider: SessionProvider,
+        sessionId: String
+    ) -> Bool {
+        guard provider == .kimi else { return false }
+        return sessionId.hasPrefix(titleGenerationSessionPrefix)
+    }
+}
+
 struct CodexAuxiliaryHookFilter {
     private nonisolated static let titleGenerationPromptPrefix =
         "you are a helpful assistant. you will be presented with a user prompt"
@@ -1494,7 +1512,8 @@ class HookSocketServer {
     static func resolvedBridgeMessage(
         eventType: String,
         metadata: [String: String],
-        preview: String?
+        preview: String?,
+        provider: SessionProvider = .claude
     ) -> String? {
         func firstNonEmpty(_ values: String?...) -> String? {
             values.compactMap { value -> String? in
@@ -1512,11 +1531,39 @@ class HookSocketServer {
             )
         }
 
+        // Kimi's hooks carry the submitted turn under `prompt` rather than `message`,
+        // so without this fallback a Kimi session never learns its first user message
+        // and falls back to showing its working directory as the title.
+        if provider == .kimi, eventType == "UserPromptSubmit" {
+            return firstNonEmpty(
+                metadata["message"],
+                Self.plainTextFromPromptPayload(metadata["prompt"]),
+                preview
+            )
+        }
+
         return firstNonEmpty(
             metadata["message"],
             metadata["last_assistant_message"],
             preview
         )
+    }
+
+    /// Kimi sends the prompt as a JSON array of content blocks
+    /// (`[{"type":"text","text":"..."}]`). Fall back to the raw string when it is not
+    /// that shape, so an unexpected payload degrades to something readable.
+    nonisolated static func plainTextFromPromptPayload(_ payload: String?) -> String? {
+        guard let payload, !payload.isEmpty else { return nil }
+        guard let data = payload.data(using: .utf8),
+              let blocks = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+            return payload
+        }
+
+        let text = blocks
+            .compactMap { $0["text"] as? String }
+            .joined(separator: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.isEmpty ? nil : text
     }
 
     func start(onEvent: @escaping HookEventHandler, onPermissionFailure: PermissionFailureHandler? = nil) {
@@ -1888,6 +1935,17 @@ class HookSocketServer {
         if event.shouldFilterBeforeApprovalHandling {
             logger.debug(
                 "Filtering QoderWork non-responsive hook event=\(envelope.eventType, privacy: .public) session=\(event.sessionId.prefix(8), privacy: .public)"
+            )
+            sendAcknowledgement(for: envelope.id, to: clientSocket)
+            return
+        }
+
+        if KimiAuxiliaryHookFilter.isTitleGenerationSession(
+            provider: event.provider,
+            sessionId: event.sessionId
+        ) {
+            logger.debug(
+                "Ignoring Kimi title-generation hook event=\(envelope.eventType, privacy: .public) session=\(envelope.resolvedSessionID.prefix(8), privacy: .public)"
             )
             sendAcknowledgement(for: envelope.id, to: clientSocket)
             return

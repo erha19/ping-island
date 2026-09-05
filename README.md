@@ -165,6 +165,7 @@ Ping Island focuses on the moments that actually interrupt coding flow, then kee
 | Pi Agent | Official extension under `~/.pi/agent/extensions/ping_island/` | Pi Agent terminal host | Extension event forwarding, client-aware session tracking, terminal-cloud mascot |
 | Qwen Code | Official hooks in `~/.qwen/settings.json` | Compatible terminal hosts and remote SSH sessions | Permission prompts, notification popups, stop/session-end handling, remote hook forwarding |
 | Kimi CLI | Official `[[hooks]]` entries in `~/.kimi/config.toml` | Compatible terminal hosts | Tool activity, notifications, turn completion, session-end handling |
+| Kimi App | Official `[[hooks]]` entries in the bundled kimi-code kernel config under `~/Library/Application Support/kimi-desktop/` | Kimi desktop app | Chat and agent turns from the desktop app, with automatic repair when Kimi rewrites its kernel config |
 | OpenClaw | Managed internal hooks plus local transcript refresh | OpenClaw terminal host | Fast hook status, transcript backfill, message/session state |
 | OpenCode | Generated plugin file under `~/.config/opencode/plugins/` | OpenCode app and terminal host | Plugin event forwarding into the shared Island UI |
 | Cursor | Claude-compatible hooks plus optional VS Code-compatible focus extension | Cursor project window and active terminal | IDE routing, terminal focus, Claude-family session tracking |

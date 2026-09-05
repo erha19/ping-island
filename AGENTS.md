@@ -53,6 +53,7 @@ This file is a routing layer for coding agents working in this repo. Keep it sho
   - The remote bridge forwards recent Codex app-server thread activity from the SSH target's `~/.codex/state_*.sqlite` through the existing remote hook-event channel
 - Provider/client routing: bridge envelopes are normalized in `PingIsland/Services/Hooks/HookSocketServer.swift`, stored on `SessionState`, and launched via `PingIsland/Services/Window/SessionLauncher.swift`
 - Client profile registry: installable hook clients and runtime client branding / recognition are centralized in `PingIsland/Models/ClientProfile.swift`
+  - The Kimi desktop app is a separate target (`kimi-app-hooks`). It runs a vendored kimi-code kernel (`@moonshot-ai/agent-core`) out of `~/Library/Application Support/kimi-desktop/daimon-share/daimon/runtime/kimi-code/config.toml`, so chat and agent turns both speak the same hooks protocol as the CLI. That file is rewritten every time Kimi's daimon runner starts, which drops the managed block; `KimiAppHookGuard` polls it and reinstalls whenever the block goes missing. Sessions from this target carry `--client-kind kimi-app` so they resolve to the `kimi-app` runtime profile and badge as "Kimi App".
 - VS Code-compatible IDE focus extension install / URI launch: `PingIsland/Services/Window/IDEExtensionInstaller.swift`, `PingIsland/Services/Window/TerminalSessionFocuser.swift`
 - Session list UI: `PingIsland/UI/Views/SessionListView.swift`
 - Client mascot system: `PingIsland/UI/Components/MascotView.swift`, `PingIsland/UI/Views/MascotSettingsView.swift`
