@@ -166,6 +166,7 @@ Ping Island 关注的，是那些真正会打断编码节奏的时刻，并把�
 | Pi Agent | `~/.pi/agent/extensions/ping_island/` 下的官方 extension | Pi Agent 终端宿主 | Extension 事件转发、客户端识别、终端云团宠物 |
 | Qwen Code | `~/.qwen/settings.json` 中的官方 hooks | 兼容终端宿主、远程 SSH 会话 | 权限追问、通知弹窗、Stop / SessionEnd 处理、远程 hooks 转发 |
 | Kimi CLI | `~/.kimi/config.toml` 中的官方 `[[hooks]]` | 兼容终端宿主 | 工具活动、通知、回合完成、会话结束处理 |
+| Kimi App | `~/Library/Application Support/kimi-desktop/` 下内置 kimi-code 内核 config 中的官方 `[[hooks]]` | Kimi 桌面版 | 桌面版聊天与 Agent 回合，Kimi 重写内核配置后自动补装 |
 | OpenClaw | 托管 internal hooks + 本地 transcript 回填 | OpenClaw 终端宿主 | 快速 hook 状态、完整对话回填、消息 / 会话状态 |
 | OpenCode | `~/.config/opencode/plugins/` 下的托管插件文件 | OpenCode 应用、终端宿主 | 插件事件转发到同一套 Island UI |
 | Cursor | Claude 兼容 hooks + 可选 VS Code 兼容聚焦扩展 | Cursor 项目窗口、活跃终端 | IDE 路由、终端精准聚焦、Claude 家族会话跟踪 |

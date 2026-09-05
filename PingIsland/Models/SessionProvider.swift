@@ -197,13 +197,46 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
             || originator?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "qwen-code"
     }
 
+    /// Both the Kimi CLI and the Kimi desktop app run the same kimi-code kernel, so
+    /// they share the hook quirks this flag gates: hook payloads carry no message
+    /// content, and `Stop` marks turn end rather than session end.
     nonisolated var isKimiClient: Bool {
-        profileID == "kimi"
-            || threadSource?.lowercased() == "kimi-hooks"
-            || name?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "kimi cli"
-            || name?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "kimi-cli"
-            || originator?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "kimi cli"
-            || originator?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "kimi-cli"
+        let kimiProfileIDs: Set<String> = ["kimi", "kimi-app"]
+        let kimiThreadSources: Set<String> = ["kimi-hooks", "kimi-app-hooks"]
+        let kimiLabels: Set<String> = ["kimi cli", "kimi-cli", "kimi app", "kimi-app"]
+
+        func normalized(_ value: String?) -> String? {
+            value?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        }
+
+        if let profileID, kimiProfileIDs.contains(profileID) { return true }
+        if let threadSource = normalized(threadSource), kimiThreadSources.contains(threadSource) { return true }
+        if let name = normalized(name), kimiLabels.contains(name) { return true }
+        if let originator = normalized(originator), kimiLabels.contains(originator) { return true }
+        return false
+    }
+
+    /// The Kimi desktop app specifically, as opposed to the Kimi CLI.
+    ///
+    /// The two share a kernel but not a lifecycle: the CLI is one process per
+    /// conversation and dies with it, while the app keeps a long-lived kernel and
+    /// replays `SessionStart` for every conversation it restores at launch. Only
+    /// the app needs the carve-outs that stop those restored conversations from
+    /// being read as live work waiting on the user.
+    nonisolated var isKimiAppClient: Bool {
+        let appProfileIDs: Set<String> = ["kimi-app"]
+        let appThreadSources: Set<String> = ["kimi-app-hooks"]
+        let appLabels: Set<String> = ["kimi app", "kimi-app", "kimi desktop", "kimi-desktop"]
+
+        func normalized(_ value: String?) -> String? {
+            value?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        }
+
+        if let profileID, appProfileIDs.contains(profileID) { return true }
+        if let threadSource = normalized(threadSource), appThreadSources.contains(threadSource) { return true }
+        if let name = normalized(name), appLabels.contains(name) { return true }
+        if let originator = normalized(originator), appLabels.contains(originator) { return true }
+        return false
     }
 
     nonisolated var isCodeBuddyCLIClient: Bool {

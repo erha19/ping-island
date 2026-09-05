@@ -446,7 +446,7 @@ struct SessionState: Equatable, Identifiable, Sendable {
             return true
         }
 
-        if isLikelyEmptyClaudeHookSessionForUI {
+        if isLikelyEmptyRestoredHookSessionForUI {
             return true
         }
 
@@ -457,6 +457,17 @@ struct SessionState: Equatable, Identifiable, Sendable {
         return isLikelyEmptyCodexPlaceholderForUI
     }
 
+    /// A hook row that announces a session which has no conversation behind it yet.
+    ///
+    /// Two clients do this, for the same reason and with the same consequence: a
+    /// long-lived host replays `SessionStart` for something it restored rather than
+    /// for something the user just started. Such a row must not outrank a real
+    /// session from another provider in the same workspace - and for the Kimi app,
+    /// which never reports a session end, it would otherwise sit in the list forever.
+    nonisolated var isLikelyEmptyRestoredHookSessionForUI: Bool {
+        isLikelyEmptyClaudeHookSessionForUI || isLikelyEmptyKimiAppHookSessionForUI
+    }
+
     /// Claude Code extensions can emit SessionStart when an idle panel is restored even though
     /// no conversation or transcript exists. Do not let that provisional hook row outrank a
     /// real session from another provider in the same workspace.
@@ -464,6 +475,31 @@ struct SessionState: Equatable, Identifiable, Sendable {
         guard provider == .claude else { return false }
         guard ingress == .hookBridge else { return false }
         guard clientInfo.isPlainClaudeCodeRouting else { return false }
+        guard isQuiescentHookRowWithoutContentForUI else { return false }
+        return hasNoReadableTranscriptForUI
+    }
+
+    /// The Kimi desktop app replays SessionStart for every conversation its kernel
+    /// restores at launch, so opening the app resurrects every conversation the user
+    /// ever had as a separate row.
+    ///
+    /// `.idle` is what separates those from real work, and it is deliberately
+    /// stricter than the Claude rule's `idle || waitingForInput`. Restoring a
+    /// conversation only ever emits SessionStart, which lands as `.idle`; reaching
+    /// `.waitingForInput` takes a `Stop`, which means a turn actually ran. Leaning on
+    /// the phase rather than on the row's text matters here because Kimi ships no
+    /// transcript - if a `UserPromptSubmit` ever arrived without its prompt text, a
+    /// content-only test would hide a conversation the user had just used.
+    nonisolated var isLikelyEmptyKimiAppHookSessionForUI: Bool {
+        guard clientInfo.isKimiAppClient else { return false }
+        guard ingress == .hookBridge else { return false }
+        guard phase == .idle else { return false }
+        guard isQuiescentHookRowWithoutContentForUI else { return false }
+        return hasNoReadableTranscriptForUI
+    }
+
+    /// Idle or turn-ended, with nothing the user could read in the row.
+    private nonisolated var isQuiescentHookRowWithoutContentForUI: Bool {
         guard phase == .idle || phase == .waitingForInput else { return false }
         guard chatItems.isEmpty else { return false }
         guard case nil = intervention else { return false }
@@ -471,12 +507,14 @@ struct SessionState: Equatable, Identifiable, Sendable {
         guard previewText?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false else {
             return false
         }
-        guard conversationInfo.summary?.isEmpty != false,
-              conversationInfo.firstUserMessage?.isEmpty != false,
-              conversationInfo.lastMessage?.isEmpty != false else {
-            return false
-        }
+        return conversationInfo.summary?.isEmpty != false
+            && conversationInfo.firstUserMessage?.isEmpty != false
+            && conversationInfo.lastMessage?.isEmpty != false
+    }
 
+    /// True when no transcript backs this session - either none was reported, or the
+    /// reported one is gone from disk.
+    private nonisolated var hasNoReadableTranscriptForUI: Bool {
         guard let transcriptPath = clientInfo.sessionFilePath?
             .trimmingCharacters(in: .whitespacesAndNewlines),
               !transcriptPath.isEmpty else {

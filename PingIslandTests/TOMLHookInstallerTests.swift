@@ -168,4 +168,109 @@ final class TOMLHookInstallerTests: XCTestCase {
         XCTAssertTrue(rebuilt.contains("base_url"))
         XCTAssertFalse(rebuilt.contains("ping-island-bridge"))
     }
+
+    /// Kimi's desktop app keeps provider credentials and model definitions in the same
+    /// config.toml Island writes hooks into, so the merge must be strictly additive.
+    func testTOMLRebuildPreservesKimiAppKernelConfiguration() {
+        let existing = """
+        default_model = "k2d6-agent"
+        extra_skill_dirs = [ "/Users/test/Library/Application Support/kimi-desktop/daimon-share/daimon/skills" ]
+
+        [thinking]
+        enabled = true
+        effort = "max"
+
+        [loop_control]
+        max_steps_per_turn = 100
+
+        [providers.daimon-kimi-code]
+        type = "kimi"
+        api_key = "kernel-credential"
+        base_url = "https://agent-gw.kimi.com/coding/v1"
+
+        [models.k2d6-agent]
+        provider = "daimon-kimi-code"
+        model = "k2d6-agent"
+        max_context_size = 262144
+        capabilities = [ "thinking", "image_in", "video_in" ]
+        """
+
+        let managedHooks = [
+            TOMLHookConfigParser.TOMLHookEntry(
+                event: "Stop",
+                command: "/Users/test/.ping-island/bin/ping-island-bridge --source kimi --client-kind kimi-app",
+                matcher: "",
+                timeout: nil
+            )
+        ]
+
+        let rebuilt = TOMLHookConfigParser.rebuild(
+            segments: TOMLHookConfigParser.parse(existing),
+            newHooks: managedHooks
+        )
+
+        // Every kernel setting the app owns survives the merge.
+        XCTAssertTrue(rebuilt.contains("default_model = \"k2d6-agent\""))
+        XCTAssertTrue(rebuilt.contains("api_key = \"kernel-credential\""))
+        XCTAssertTrue(rebuilt.contains("base_url = \"https://agent-gw.kimi.com/coding/v1\""))
+        XCTAssertTrue(rebuilt.contains("[models.k2d6-agent]"))
+        XCTAssertTrue(rebuilt.contains("max_steps_per_turn = 100"))
+        XCTAssertTrue(rebuilt.contains("capabilities = [ \"thinking\", \"image_in\", \"video_in\" ]"))
+        XCTAssertTrue(TOMLHookConfigParser.containsManagedHooks(rebuilt))
+    }
+
+    /// The guard reinstalls after every Kimi rewrite, so repeated installs must not
+    /// stack duplicate managed blocks on top of each other.
+    func testTOMLRebuildIsIdempotentForRepeatedManagedInstalls() {
+        let managedHooks = [
+            TOMLHookConfigParser.TOMLHookEntry(
+                event: "Stop",
+                command: "/Users/test/.ping-island/bin/ping-island-bridge --source kimi --client-kind kimi-app",
+                matcher: "",
+                timeout: nil
+            ),
+            TOMLHookConfigParser.TOMLHookEntry(
+                event: "SessionStart",
+                command: "/Users/test/.ping-island/bin/ping-island-bridge --source kimi --client-kind kimi-app",
+                matcher: "",
+                timeout: nil
+            )
+        ]
+
+        var content = "default_model = \"k2d6-agent\"\n"
+        for _ in 0..<3 {
+            content = TOMLHookConfigParser.rebuild(
+                segments: TOMLHookConfigParser.parse(content),
+                newHooks: managedHooks
+            )
+        }
+
+        XCTAssertEqual(content.components(separatedBy: "[[hooks]]").count - 1, managedHooks.count)
+        XCTAssertTrue(content.contains("default_model = \"k2d6-agent\""))
+    }
+
+    /// A hook the user added by hand must outlive an Island install.
+    func testTOMLRebuildKeepsUserAuthoredHooks() {
+        let existing = """
+        [[hooks]]
+        event = "PreToolUse"
+        command = "/usr/local/bin/safety-check.sh"
+        matcher = "Shell"
+        """
+
+        let rebuilt = TOMLHookConfigParser.rebuild(
+            segments: TOMLHookConfigParser.parse(existing),
+            newHooks: [
+                TOMLHookConfigParser.TOMLHookEntry(
+                    event: "Stop",
+                    command: "/Users/test/.ping-island/bin/ping-island-bridge --source kimi",
+                    matcher: "",
+                    timeout: nil
+                )
+            ]
+        )
+
+        XCTAssertTrue(rebuilt.contains("/usr/local/bin/safety-check.sh"))
+        XCTAssertTrue(TOMLHookConfigParser.containsManagedHooks(rebuilt))
+    }
 }

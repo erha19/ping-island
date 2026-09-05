@@ -488,6 +488,15 @@ public enum HookPayloadMapper {
            terminalContext.terminalBundleID == nil {
             return SessionStatus(kind: .idle)
         }
+        // Kimi's desktop app keeps one long-lived kernel and replays SessionStart
+        // for every conversation it restores at launch, so the event announces a
+        // conversation, not a turn waiting on the user. The shared default maps
+        // SessionStart to `waiting_for_input`, which left every restored Kimi
+        // conversation permanently marked as needing attention. The CLI is
+        // unaffected: it is one process per conversation and ends with it.
+        if isKimiDesktopHookClient(clientKind), eventType == "SessionStart" {
+            return SessionStatus(kind: .idle)
+        }
         let lowered = eventType.lowercased()
         if lowered.contains("permission") || lowered.contains("approval") {
             return SessionStatus(kind: .waitingForApproval)
@@ -1671,6 +1680,18 @@ public enum HookPayloadMapper {
         switch clientKind {
         case "gemini", "gemini-cli", "gemini_cli", "gemini cli",
              "antigravity", "antigravity-cli", "antigravity_cli", "antigravity cli", "agy":
+            return true
+        default:
+            return false
+        }
+    }
+
+    /// The Kimi desktop app, as opposed to the Kimi CLI. Mirrors the
+    /// `kimi-app` runtime profile's recognized kinds.
+    private static func isKimiDesktopHookClient(_ clientKind: String?) -> Bool {
+        guard let clientKind else { return false }
+        switch clientKind {
+        case "kimi-app", "kimi_app", "kimi app", "kimi-desktop", "kimi desktop":
             return true
         default:
             return false

@@ -633,6 +633,16 @@ extension HookEvent {
             return .idle
         }
 
+        // The Kimi desktop app replays SessionStart for every conversation it
+        // restores when its kernel starts, so the event means "this conversation
+        // exists again", not "the user is waiting". Reading it as
+        // `waitingForInput` marked each restored conversation as needing
+        // attention, which permanently exempted it from the idle auto-archive.
+        // A real turn still arrives as UserPromptSubmit -> Stop.
+        if clientInfo.isKimiAppClient, event == "SessionStart" {
+            return .idle
+        }
+
         switch status {
         case "waiting_for_approval":
             if shouldSuppressApprovalHandling {

@@ -872,6 +872,13 @@ struct HookInstaller {
         uninstall(profile, persistPreference: true)
     }
 
+    /// Whether the user has this target switched on, regardless of whether its
+    /// configuration file currently carries the managed block. Used by guards that
+    /// repair configuration files rewritten by the host app.
+    static func isPreferred(_ profile: ManagedHookClientProfile) -> Bool {
+        preferredTargets().contains(profile.id)
+    }
+
     /// Check if any managed hooks are currently installed.
     static func isInstalled() -> Bool {
         ClientProfileRegistry.managedHookProfiles.contains { isInstalled($0) }
