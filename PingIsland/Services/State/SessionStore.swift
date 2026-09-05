@@ -101,6 +101,10 @@ actor SessionStore {
     private var livenessSweepTask: Task<Void, Never>?
     private let livenessSweepIntervalNs: UInt64 = 5_000_000_000
 
+    /// How long a hook session with no checkable process may stay quiet before it
+    /// is treated as over. See `expireStaleHookSessions`.
+    private static let hookSessionIdleExpiry: TimeInterval = 2 * 60 * 60
+
     // MARK: - Published State (for UI)
 
     /// Publisher for session state changes (nonisolated for Combine subscription from any context)
@@ -417,6 +421,21 @@ actor SessionStore {
             )
             return
         }
+        // A subagent event describes a *child*, not the parent's lifecycle. When
+        // the parent is no longer tracked there is nothing to attach it to, and
+        // creating a session here produces a shell with no transcript, no title,
+        // and no future events: the child has already stopped, so nothing will
+        // ever move it out of `processing` again. Observed as a `SubagentStop`
+        // landing three minutes after the parent's `Stop` had ended and reaped
+        // the session, re-creating it as a permanent "运行中" row.
+        if sessions[sessionId] == nil, Self.isSubagentLifecycleEvent(event.event) {
+            IslandTrace.emit(
+                "store.dropSubagentOrphan",
+                "session=\(IslandTrace.tag(sessionId)) event=\(event.event) cwd=\(IslandTrace.text(event.cwd, limit: 80))"
+            )
+            return
+        }
+
         var session = sessions[sessionId] ?? createSession(from: event)
 
         // Persist the session before await points so concurrent events (via actor
@@ -426,6 +445,10 @@ actor SessionStore {
         // session.
         let isNewSession = sessions[sessionId] == nil
         if isNewSession {
+            IslandTrace.emit(
+                "store.create",
+                "session=\(IslandTrace.tag(sessionId)) event=\(event.event) status=\(event.status) cwd=\(IslandTrace.text(event.cwd, limit: 80))"
+            )
             sessions[sessionId] = session
             endOrphanedSessions(sameProviderAs: session, newSessionId: sessionId)
             Task {
@@ -484,6 +507,7 @@ actor SessionStore {
 
         let wasCompletedReady = SessionCompletionStateEvaluator.isCompletedReadySession(session)
         let previousLastActivity = session.lastActivity
+        let phaseBeforeHook = session.phase
         if !(event.status == "ended" && session.phase == .ended) {
             session.lastActivity = Date()
         }
@@ -526,6 +550,10 @@ actor SessionStore {
                 preserveClaudeQuestion: false
             )
             sessions[sessionId] = session
+            IslandTrace.emit(
+                "hook.applied",
+                "session=\(IslandTrace.tag(sessionId)) event=\(event.event) status=\(event.status) from=\(IslandTrace.phase(phaseBeforeHook)) \(IslandTrace.snapshot(session))"
+            )
             syncLinkedQoderChildSessions(for: session)
             if session.clientInfo.isQwenCodeClient {
                 Self.logger.info(
@@ -565,7 +593,14 @@ actor SessionStore {
         let isRemoteCodexThreadSnapshot = event.provider == .codex
             && event.ingress == .remoteBridge
             && event.event == "RemoteCodexThreadUpdated"
-        let newPhase: SessionPhase = isRemoteCodexThreadSnapshot
+        // `SubagentStop` reports that a child finished. It says nothing about
+        // whether the parent is still working, so it must not move the parent's
+        // phase: the parent's own Stop had already landed, and a trailing
+        // SubagentStop dragged it back into `processing` with no further event
+        // coming to correct it. `SubagentStart` stays authoritative, because a
+        // parent that just spawned a child demonstrably is working.
+        let preservesExistingPhase = isRemoteCodexThreadSnapshot || event.event == "SubagentStop"
+        let newPhase: SessionPhase = preservesExistingPhase
             ? session.phase
             : inferredPhase
         if wasCompletedReady, newPhase == .processing {
@@ -707,6 +742,10 @@ actor SessionStore {
         )
 
         sessions[sessionId] = session
+        IslandTrace.emit(
+            "hook.applied",
+            "session=\(IslandTrace.tag(sessionId)) event=\(event.event) status=\(event.status) from=\(IslandTrace.phase(phaseBeforeHook)) \(IslandTrace.snapshot(session))"
+        )
         syncLinkedQoderChildSessions(for: session)
         if session.clientInfo.isQwenCodeClient {
             Self.logger.info(
@@ -913,16 +952,37 @@ actor SessionStore {
     /// Since Kimi hooks don't carry message text, we mark lastMessageRole as
     /// "assistant" implicitly so completion notifications and sounds work.
     private func processKimiHookCompletion(event: HookEvent, session: inout SessionState) {
-        guard event.event == "Stop" else { return }
-        guard session.lastMessageRole != "assistant" else { return }
-        session.conversationInfo = ConversationInfo(
-            summary: session.conversationInfo.summary,
-            lastMessage: session.conversationInfo.lastMessage,
-            lastMessageRole: "assistant",
-            lastToolName: session.conversationInfo.lastToolName,
-            firstUserMessage: session.conversationInfo.firstUserMessage,
-            lastUserMessageDate: session.conversationInfo.lastUserMessageDate
-        )
+        switch event.event {
+        case "UserPromptSubmit":
+            // Kimi ships no transcript for Island to read, so the submitted prompt is the
+            // only title source a Kimi session ever gets. Without it `displayTitle` falls
+            // through to the working directory, which for the desktop app is a throwaway
+            // timestamped task folder.
+            guard session.conversationInfo.firstUserMessage == nil else { return }
+            guard let message = Self.normalizedHookMessage(event.message), !message.isEmpty else { return }
+            session.conversationInfo = ConversationInfo(
+                summary: session.conversationInfo.summary,
+                lastMessage: session.conversationInfo.lastMessage,
+                lastMessageRole: session.conversationInfo.lastMessageRole,
+                lastToolName: session.conversationInfo.lastToolName,
+                firstUserMessage: message,
+                lastUserMessageDate: Date()
+            )
+
+        case "Stop":
+            guard session.lastMessageRole != "assistant" else { return }
+            session.conversationInfo = ConversationInfo(
+                summary: session.conversationInfo.summary,
+                lastMessage: session.conversationInfo.lastMessage,
+                lastMessageRole: "assistant",
+                lastToolName: session.conversationInfo.lastToolName,
+                firstUserMessage: session.conversationInfo.firstUserMessage,
+                lastUserMessageDate: session.conversationInfo.lastUserMessageDate
+            )
+
+        default:
+            break
+        }
     }
 
     /// Build chat history items from Hermes hook events so the conversation is
@@ -1901,14 +1961,34 @@ actor SessionStore {
         guard var session = sessions[payload.sessionId] else { return }
 
         if !payload.messages.isEmpty {
-            let shouldResumeEndedSession = payload.isIncremental
-                && payload.messages.contains(where: { $0.role == .user })
-            if session.phase != .ended || shouldResumeEndedSession {
+            IslandTrace.emit(
+                "file.update",
+                "session=\(IslandTrace.tag(payload.sessionId)) messages=\(payload.messages.count) incremental=\(payload.isIncremental) phase=\(IslandTrace.phase(session.phase))"
+            )
+        }
+
+        if !payload.messages.isEmpty {
+            // "The user started something" is the only transcript signal allowed
+            // to reopen a session the agent had finished, so it has to mean a
+            // user message this session has not already lived through. A payload
+            // can still carry the whole conversation — a transcript replaced on
+            // disk, or a parser that has no read offset yet after a restart —
+            // and every such payload contains the session's historical prompts.
+            // Testing only for "a user message is present" made that replay
+            // indistinguishable from real input, which is what resurrected
+            // finished sessions as permanently "working" rows.
+            //
+            // `lastActivity` is read before the assignment below moves it to now.
+            let previousLastActivity = session.lastActivity
+            let hasNewUserActivity = payload.isIncremental
+                && payload.messages.contains { $0.role == .user && $0.timestamp > previousLastActivity }
+            if session.phase != .ended || hasNewUserActivity {
                 session.lastActivity = Date()
             }
             promoteSessionForTranscriptActivity(
                 &session,
-                allowEndedResume: shouldResumeEndedSession
+                allowEndedResume: hasNewUserActivity,
+                hasUserActivity: hasNewUserActivity
             )
         }
 
@@ -2082,10 +2162,15 @@ actor SessionStore {
     /// waiting for a later hook heartbeat.
     private func promoteSessionForTranscriptActivity(
         _ session: inout SessionState,
-        allowEndedResume: Bool = false
+        allowEndedResume: Bool = false,
+        hasUserActivity: Bool = false
     ) {
         if session.phase == .ended {
             guard allowEndedResume else { return }
+            IslandTrace.emit(
+                "file.promote",
+                "session=\(IslandTrace.tag(session)) from=ended to=processing"
+            )
             session.phase = .processing
             return
         }
@@ -2094,13 +2179,30 @@ actor SessionStore {
         guard session.intervention == nil else { return }
 
         switch session.phase {
-        case .idle, .waitingForInput:
-            if session.phase.canTransition(to: .processing) {
-                session.phase = .processing
-            }
+        case .waitingForInput:
+            // `waitingForInput` is an explicit "the turn is over, you're up"
+            // from a Stop hook. The transcript write that carries the turn's
+            // final assistant message lands ~100ms *after* that hook, so any
+            // append is not evidence of new work — only the user starting
+            // something is. This mirrors the rule `.ended` already uses.
+            guard hasUserActivity else { return }
+            promote(&session)
+        case .idle:
+            // `idle` is inferred rather than reported, so any transcript
+            // movement is the best evidence available that work resumed.
+            promote(&session)
         case .processing, .compacting, .waitingForApproval, .ended:
             break
         }
+    }
+
+    private func promote(_ session: inout SessionState) {
+        guard session.phase.canTransition(to: .processing) else { return }
+        IslandTrace.emit(
+            "file.promote",
+            "session=\(IslandTrace.tag(session)) from=\(IslandTrace.phase(session.phase)) to=processing"
+        )
+        session.phase = .processing
     }
 
     private func resumedPhaseForFreshHookActivity(
@@ -2138,7 +2240,7 @@ actor SessionStore {
             // completed assistant reply is stronger evidence that the active turn has finished.
             return !hasCodexTurnCompletionEvidence
         }
-        return session.hasLiveExecutionEvidence
+        return session.hasLiveExecutionEvidence(asOf: referenceDate)
     }
 
     private func mergedLastActivity(
@@ -2624,6 +2726,12 @@ actor SessionStore {
         }
 
         for id in idsToArchive {
+            if let superseded = sessions[id] {
+                IslandTrace.emit(
+                    "store.supersede",
+                    "session=\(IslandTrace.tag(id)) replacedBy=\(IslandTrace.tag(newSessionId)) \(IslandTrace.snapshot(superseded))"
+                )
+            }
             sessions.removeValue(forKey: id)
             clearCodexSessionAliases(for: id)
             cancelPendingSync(sessionId: id)
@@ -2636,25 +2744,36 @@ actor SessionStore {
     /// sending a Stop event (crash, SIGKILL, terminal closed). End them so the bar
     /// doesn't keep showing dead sessions as still working.
     func pruneOrphanedSessions() {
+        expireStaleHookSessions()
+
         for (sessionId, var session) in sessions {
             guard session.provider == .claude else { continue }
             guard session.ingress != .nativeRuntime else { continue }
             guard session.phase != .ended else { continue }
             guard !session.needsManualAttention else { continue }
 
-            let idleSeconds = Date().timeIntervalSince(session.lastActivity)
+            let now = Date()
+            let idleSeconds = now.timeIntervalSince(session.lastActivity)
             guard idleSeconds >= 30 else { continue }
 
             if let pid = session.pid, pid > 0 {
-                if !SessionProcessLiveness.isAlive(pid) {
+                if !SessionProcessLiveness.isAlive(pid, lastSeenAlive: session.lastActivity) {
+                    IslandTrace.emit(
+                        "sweep.end",
+                        "session=\(IslandTrace.tag(sessionId)) reason=deadPid \(IslandTrace.snapshot(session, now: now))"
+                    )
                     markSessionEnded(&session)
                     sessions[sessionId] = session
                 }
-            } else if session.phase.isActive, !session.hasLiveExecutionEvidence {
+            } else if session.phase.isActive, !session.hasLiveExecutionEvidence(asOf: now) {
                 // No PID available but session looks idle with no live evidence.
                 // Transition from processing/compacting to idle so it doesn't
                 // appear stuck as "working" indefinitely.
                 if session.phase.canTransition(to: .idle) {
+                    IslandTrace.emit(
+                        "sweep.idle",
+                        "session=\(IslandTrace.tag(sessionId)) reason=noPidNoEvidence \(IslandTrace.snapshot(session, now: now))"
+                    )
                     session.phase = .idle
                     sessions[sessionId] = session
                 }
@@ -2662,13 +2781,57 @@ actor SessionStore {
         }
     }
 
-    private func markSessionEnded(_ session: inout SessionState) {
+    /// Events that report a *subagent's* lifecycle rather than the session's.
+    /// They may update an existing session's bookkeeping but must never bring a
+    /// session into existence.
+    nonisolated static func isSubagentLifecycleEvent(_ event: String) -> Bool {
+        event == "SubagentStart" || event == "SubagentStop"
+    }
+
+    /// End hook sessions that have gone quiet and have no process left to check.
+    ///
+    /// A CLI session always resolves itself: it emits `SessionEnd` when it exits, or
+    /// its pid dies and the liveness sweep reaps it. A desktop client offers neither
+    /// - one long-lived kernel serves every conversation, so no pid ever dies, and
+    /// the Kimi app has not been observed emitting `SessionEnd` at all (a trace here
+    /// shows a conversation still tracked 31 hours after its last hook). Without a
+    /// process to ask, wall-clock is the only evidence left: after
+    /// `hookSessionIdleExpiry` with no hook of any kind, treat the session as over
+    /// and let the liveness sweep remove it. A hook the user has not answered yet
+    /// keeps its session alive - a blocked bridge is proof of a live client.
+    func expireStaleHookSessions(now: Date = Date()) {
+        for (sessionId, var session) in sessions {
+            guard session.ingress == .hookBridge else { continue }
+            guard session.phase != .ended else { continue }
+            guard session.pid == nil || session.pid == 0 else { continue }
+            guard pendingHookResponse(in: session) == nil else { continue }
+            guard now.timeIntervalSince(session.lastActivity) >= Self.hookSessionIdleExpiry else {
+                continue
+            }
+
+            IslandTrace.emit(
+                "sweep.expire",
+                "session=\(IslandTrace.tag(sessionId)) reason=idleHookSession \(IslandTrace.snapshot(session, now: now))"
+            )
+            markSessionEnded(&session, refreshActivity: false)
+            sessions[sessionId] = session
+        }
+    }
+
+    /// End a session.
+    ///
+    /// `refreshActivity` exists for the idle-expiry sweep, which ends sessions that
+    /// have been quiet for hours. Stamping `lastActivity` there would make a session
+    /// nobody has touched since this morning look like it *just* finished, and the
+    /// completion notification policy gates on exactly that recency - the island
+    /// would announce a batch of hours-old sessions as newly complete.
+    private func markSessionEnded(_ session: inout SessionState, refreshActivity: Bool = true) {
         let wasAlreadyEnded = session.phase == .ended
         session.phase = .ended
         session.intervention = nil
         session.pendingInterventions.removeAll()
         session.autoApprovePermissions = false
-        if !wasAlreadyEnded {
+        if !wasAlreadyEnded, refreshActivity {
             session.lastActivity = Date()
         }
     }
@@ -2707,10 +2870,14 @@ actor SessionStore {
             let endedReap = session.phase == .ended
             let pidIsDead: Bool = {
                 guard let pid = session.pid, pid > 0 else { return false }
-                return !SessionProcessLiveness.isAlive(pid)
+                return !SessionProcessLiveness.isAlive(pid, lastSeenAlive: session.lastActivity)
             }()
             guard endedReap || pidIsDead else { continue }
 
+            IslandTrace.emit(
+                "store.reap",
+                "session=\(IslandTrace.tag(sessionId)) endedReap=\(endedReap) deadPid=\(pidIsDead) \(IslandTrace.snapshot(session))"
+            )
             sessions.removeValue(forKey: sessionId)
             clearCodexSessionAliases(for: sessionId)
             cancelPendingSync(sessionId: sessionId)

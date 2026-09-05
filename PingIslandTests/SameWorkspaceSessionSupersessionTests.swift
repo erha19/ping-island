@@ -72,7 +72,7 @@ final class SameWorkspaceSessionSupersessionTests: XCTestCase {
 
         let visible = SameWorkspaceSessionSupersession.removingSupersededSessions(
             from: [older, newer],
-            isProcessAlive: { _ in true }
+            isProcessAlive: { _, _ in true }
         )
 
         XCTAssertEqual(
@@ -91,7 +91,7 @@ final class SameWorkspaceSessionSupersessionTests: XCTestCase {
             older.lastActivity = reference.addingTimeInterval(offset)
             let visible = SameWorkspaceSessionSupersession.removingSupersededSessions(
                 from: [older, newer],
-                isProcessAlive: { _ in true }
+                isProcessAlive: { _, _ in true }
             )
             XCTAssertEqual(Set(visible.map(\.sessionId)), ["older", "newer"])
         }
@@ -103,7 +103,7 @@ final class SameWorkspaceSessionSupersessionTests: XCTestCase {
 
         let visible = SameWorkspaceSessionSupersession.removingSupersededSessions(
             from: [older, newer],
-            isProcessAlive: { _ in false }
+            isProcessAlive: { _, _ in false }
         )
 
         XCTAssertEqual(
@@ -121,7 +121,7 @@ final class SameWorkspaceSessionSupersessionTests: XCTestCase {
 
         let visible = SameWorkspaceSessionSupersession.removingSupersededSessions(
             from: [orphan, restarted],
-            isProcessAlive: { pid in pid == 102 }
+            isProcessAlive: { pid, _ in pid == 102 }
         )
 
         XCTAssertEqual(
@@ -137,7 +137,7 @@ final class SameWorkspaceSessionSupersessionTests: XCTestCase {
 
         let visible = SameWorkspaceSessionSupersession.removingSupersededSessions(
             from: [orphan, restarted],
-            isProcessAlive: { _ in true }
+            isProcessAlive: { _, _ in true }
         )
 
         XCTAssertEqual(visible.map(\.sessionId), ["restarted"])
@@ -157,10 +157,94 @@ final class SameWorkspaceSessionSupersessionTests: XCTestCase {
 
         let visible = SameWorkspaceSessionSupersession.removingSupersededSessions(
             from: [working, newer],
-            isProcessAlive: { _ in false }
+            now: reference,
+            isProcessAlive: { _, _ in false }
         )
 
         XCTAssertEqual(Set(visible.map(\.sessionId)), ["working", "newer"])
+    }
+
+    /// A transcript records that a tool started, never that it was abandoned, so a
+    /// session killed mid-tool keeps a `.running` tail forever. Without an expiry
+    /// that tail pins the row in the list and keeps it animating as "working".
+    func testStaleRunningToolStopsProtectingAnOrphanedSession() {
+        let abandoned = session(
+            id: "abandoned",
+            pid: 101,
+            phase: .processing,
+            chatItems: [runningToolItem()],
+            activityOffset: 0
+        )
+        let newer = session(id: "newer", pid: 102, phase: .processing, activityOffset: 5)
+
+        let visible = SameWorkspaceSessionSupersession.removingSupersededSessions(
+            from: [abandoned, newer],
+            now: reference.addingTimeInterval(SessionState.liveExecutionEvidenceMaxAge + 60),
+            isProcessAlive: { _, _ in false }
+        )
+
+        XCTAssertEqual(visible.map(\.sessionId), ["newer"])
+    }
+
+    /// pids are recycled, and this app routinely stays up for days. A dead agent's
+    /// pid landing on an unrelated process must not resurrect the session.
+    func testRecycledPidDoesNotKeepAnOrphanedSessionAlive() {
+        let testProcessPid = Int(ProcessInfo.processInfo.processIdentifier)
+        let leftover = session(id: "leftover", pid: testProcessPid, phase: .processing, activityOffset: 0)
+        let newer = session(id: "newer", pid: 102, phase: .processing, activityOffset: 5)
+
+        // `reference` predates this process by years, so the pid it carries cannot
+        // be the process that produced the session. `now` clears the recency
+        // window so the pid check is what decides this case.
+        let visible = SameWorkspaceSessionSupersession.removingSupersededSessions(
+            from: [leftover, newer],
+            now: reference.addingTimeInterval(
+                SameWorkspaceSessionSupersession.recentActivityLivenessWindow + 1
+            )
+        )
+
+        XCTAssertEqual(visible.map(\.sessionId), ["newer"])
+    }
+
+    /// The Claude desktop app delivers hooks without a pid, and a session between
+    /// two tool calls has no `.running` tail either. Both liveness checks then come
+    /// up empty for a session that is demonstrably working, and each new sibling
+    /// event deleted the other session from the store — which its own next hook
+    /// rebuilt from scratch, deleting the first in turn. Observed as two live
+    /// agents in one directory collapsing to a single row that swapped identity
+    /// every few seconds.
+    func testRecentlyActivePidlessSessionIsNotSuperseded() {
+        let working = session(id: "working", phase: .processing, activityOffset: 0)
+        let sibling = session(id: "sibling", phase: .processing, activityOffset: 2)
+
+        let visible = SameWorkspaceSessionSupersession.removingSupersededSessions(
+            from: [working, sibling],
+            now: reference.addingTimeInterval(2),
+            isProcessAlive: { _, _ in false }
+        )
+
+        XCTAssertEqual(
+            Set(visible.map(\.sessionId)),
+            ["working", "sibling"],
+            "A session that reported two seconds ago is running, whether or not its ingress carries a pid"
+        )
+    }
+
+    /// The window has to close, or a replaced session would latch the list the
+    /// same way an unbounded pid check does.
+    func testQuietPidlessSessionIsSupersededOnceTheWindowCloses() {
+        let stale = session(id: "stale", phase: .processing, activityOffset: 0)
+        let sibling = session(id: "sibling", phase: .processing, activityOffset: 5)
+
+        let visible = SameWorkspaceSessionSupersession.removingSupersededSessions(
+            from: [stale, sibling],
+            now: reference.addingTimeInterval(
+                SameWorkspaceSessionSupersession.recentActivityLivenessWindow + 1
+            ),
+            isProcessAlive: { _, _ in false }
+        )
+
+        XCTAssertEqual(visible.map(\.sessionId), ["sibling"])
     }
 
     func testSessionAwaitingApprovalIsNeverSuperseded() {
@@ -179,7 +263,7 @@ final class SameWorkspaceSessionSupersessionTests: XCTestCase {
 
         let visible = SameWorkspaceSessionSupersession.removingSupersededSessions(
             from: [waiting, newer],
-            isProcessAlive: { _ in false }
+            isProcessAlive: { _, _ in false }
         )
 
         XCTAssertEqual(Set(visible.map(\.sessionId)), ["waiting", "newer"])
@@ -191,7 +275,7 @@ final class SameWorkspaceSessionSupersessionTests: XCTestCase {
 
         let visible = SameWorkspaceSessionSupersession.removingSupersededSessions(
             from: [ended, newer],
-            isProcessAlive: { _ in false }
+            isProcessAlive: { _, _ in false }
         )
 
         XCTAssertEqual(
@@ -207,7 +291,7 @@ final class SameWorkspaceSessionSupersessionTests: XCTestCase {
 
         let visible = SameWorkspaceSessionSupersession.removingSupersededSessions(
             from: [older, newest],
-            isProcessAlive: { _ in false }
+            isProcessAlive: { _, _ in false }
         )
 
         XCTAssertEqual(visible.map(\.sessionId), ["newest"])
@@ -219,7 +303,7 @@ final class SameWorkspaceSessionSupersessionTests: XCTestCase {
 
         let visible = SameWorkspaceSessionSupersession.removingSupersededSessions(
             from: [first, second],
-            isProcessAlive: { _ in false }
+            isProcessAlive: { _, _ in false }
         )
 
         XCTAssertEqual(Set(visible.map(\.sessionId)), ["first", "second"])
@@ -233,7 +317,7 @@ final class SameWorkspaceSessionSupersessionTests: XCTestCase {
 
         let visible = SameWorkspaceSessionSupersession.removingSupersededSessions(
             from: [here, elsewhere],
-            isProcessAlive: { _ in false }
+            isProcessAlive: { _, _ in false }
         )
 
         XCTAssertEqual(Set(visible.map(\.sessionId)), ["here", "elsewhere"])
@@ -245,7 +329,7 @@ final class SameWorkspaceSessionSupersessionTests: XCTestCase {
 
         let visible = SameWorkspaceSessionSupersession.removingSupersededSessions(
             from: [older, newer],
-            isProcessAlive: { _ in false }
+            isProcessAlive: { _, _ in false }
         )
 
         XCTAssertEqual(Set(visible.map(\.sessionId)), ["codex-older", "codex-newer"])
@@ -257,7 +341,7 @@ final class SameWorkspaceSessionSupersessionTests: XCTestCase {
 
         let visible = SameWorkspaceSessionSupersession.removingSupersededSessions(
             from: [older, newer],
-            isProcessAlive: { _ in false }
+            isProcessAlive: { _, _ in false }
         )
 
         XCTAssertEqual(Set(visible.map(\.sessionId)), ["older", "newer"])
@@ -269,10 +353,51 @@ final class SameWorkspaceSessionSupersessionTests: XCTestCase {
 
         let visible = SameWorkspaceSessionSupersession.removingSupersededSessions(
             from: [older, newer],
-            isProcessAlive: { _ in false }
+            isProcessAlive: { _, _ in false }
         )
 
         XCTAssertEqual(Set(visible.map(\.sessionId)), ["older", "newer"])
+    }
+
+    // MARK: - Live execution evidence
+
+    func testRunningToolCountsAsLiveEvidenceWhileTheSessionIsFresh() {
+        let working = session(id: "working", phase: .processing, chatItems: [runningToolItem()], activityOffset: 0)
+
+        XCTAssertTrue(working.hasLiveExecutionEvidence(asOf: reference))
+        XCTAssertTrue(
+            working.hasLiveExecutionEvidence(
+                asOf: reference.addingTimeInterval(SessionState.liveExecutionEvidenceMaxAge - 60)
+            )
+        )
+    }
+
+    func testRunningToolStopsCountingAsLiveEvidenceOnceTheSessionGoesStale() {
+        let working = session(id: "working", phase: .processing, chatItems: [runningToolItem()], activityOffset: 0)
+
+        XCTAssertFalse(
+            working.hasLiveExecutionEvidence(
+                asOf: reference.addingTimeInterval(SessionState.liveExecutionEvidenceMaxAge + 1)
+            )
+        )
+    }
+
+    func testFinishedToolIsNeverLiveEvidence() {
+        let completed = ChatHistoryItem(
+            id: "tool-1",
+            type: .toolCall(ToolCallItem(
+                name: "Bash",
+                input: [:],
+                status: .success,
+                result: nil,
+                structuredResult: nil,
+                subagentTools: []
+            )),
+            timestamp: reference
+        )
+        let finished = session(id: "finished", phase: .idle, chatItems: [completed], activityOffset: 0)
+
+        XCTAssertFalse(finished.hasLiveExecutionEvidence(asOf: reference))
     }
 
     // MARK: - Process liveness
@@ -284,5 +409,38 @@ final class SameWorkspaceSessionSupersessionTests: XCTestCase {
 
     func testLivenessRecognizesTheRunningTestProcess() {
         XCTAssertTrue(SessionProcessLiveness.isAlive(Int(ProcessInfo.processInfo.processIdentifier)))
+    }
+
+    func testStartTimeIsReadableForALiveProcessAndAbsentOtherwise() {
+        let testProcessPid = Int(ProcessInfo.processInfo.processIdentifier)
+        let startedAt = SessionProcessLiveness.startTime(ofPID: testProcessPid)
+
+        XCTAssertNotNil(startedAt)
+        XCTAssertLessThanOrEqual(startedAt ?? .distantFuture, Date())
+        XCTAssertNil(SessionProcessLiveness.startTime(ofPID: 0))
+    }
+
+    func testLivePidCountsAsAliveWhenTheSessionSpokeAfterTheProcessStarted() {
+        let testProcessPid = Int(ProcessInfo.processInfo.processIdentifier)
+
+        XCTAssertTrue(
+            SessionProcessLiveness.isAlive(testProcessPid, lastSeenAlive: Date())
+        )
+    }
+
+    func testLivePidCountsAsDeadWhenTheProcessStartedAfterTheSessionSpoke() {
+        let testProcessPid = Int(ProcessInfo.processInfo.processIdentifier)
+        guard let startedAt = SessionProcessLiveness.startTime(ofPID: testProcessPid) else {
+            return XCTFail("Expected a readable start time for the test process")
+        }
+
+        // Stands in for pid recycling: the process holding this pid began after the
+        // session it is supposed to belong to had already stopped reporting.
+        let lastSeenAlive = startedAt
+            .addingTimeInterval(-SessionProcessLiveness.pidIdentityTolerance - 60)
+
+        XCTAssertFalse(
+            SessionProcessLiveness.isAlive(testProcessPid, lastSeenAlive: lastSeenAlive)
+        )
     }
 }

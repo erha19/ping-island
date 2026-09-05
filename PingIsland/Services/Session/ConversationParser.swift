@@ -430,19 +430,27 @@ actor ConversationParser {
             state = IncrementalParseState()
         }
 
+        // Nothing appended, or the append could not be read: there are no new
+        // messages. Returning the accumulated conversation instead published the
+        // whole transcript as if it had just arrived, and consumers cannot tell
+        // that apart from real activity — a `Stop` hook schedules a sync, the
+        // sync finds the file unchanged, and the resulting "345 new messages"
+        // dragged a session that had just finished back into `processing` with no
+        // further event coming to correct it. Callers that want the full list read
+        // `IncrementalParseResult.allMessages`.
         if fileSize == state.lastFileOffset {
-            return state.messages
+            return []
         }
 
         do {
             try fileHandle.seek(toOffset: state.lastFileOffset)
         } catch {
-            return state.messages
+            return []
         }
 
         guard let newData = try? fileHandle.readToEnd(),
               let newContent = String(data: newData, encoding: .utf8) else {
-            return state.messages
+            return []
         }
 
         state.clearPending = false
@@ -572,7 +580,22 @@ actor ConversationParser {
                 return explicitFilePath
             }
 
-            if let fallbackOpenClawPath = latestOpenClawSessionFilePath(preferredPath: explicitFilePath) {
+            // Only OpenClaw rotates a session's transcript out from under the
+            // path its hook reported, so only OpenClaw may fall back to "newest
+            // file in the same directory". Every other client keeps one file per
+            // session id, and `preferredPath` makes that directory the client's
+            // own — for Claude, `~/.claude/projects/<workspace>/`. A session that
+            // has not written its transcript yet then adopts whichever sibling
+            // wrote last and becomes a duplicate of it: same title, same messages,
+            // same token totals. Observed as a second row carrying a live
+            // session's title, for a session that had started and ended in 350ms
+            // without ever writing a transcript of its own.
+            if transcriptFormat(for: explicitFilePath) == .openClaw,
+               let fallbackOpenClawPath = latestOpenClawSessionFilePath(preferredPath: explicitFilePath) {
+                IslandTrace.emit(
+                    "transcript.rebind",
+                    "session=\(IslandTrace.tag(sessionId)) scope=explicit missing=\(URL(fileURLWithPath: explicitFilePath).lastPathComponent) using=\(URL(fileURLWithPath: fallbackOpenClawPath).lastPathComponent)"
+                )
                 return fallbackOpenClawPath
             }
 
@@ -596,6 +619,10 @@ actor ConversationParser {
         }
 
         if let fallbackOpenClawPath = latestOpenClawSessionFilePath(preferredPath: nil) {
+            IslandTrace.emit(
+                "transcript.rebind",
+                "session=\(IslandTrace.tag(sessionId)) scope=derived missing=\(URL(fileURLWithPath: claudePath).lastPathComponent) using=\(URL(fileURLWithPath: fallbackOpenClawPath).lastPathComponent)"
+            )
             return fallbackOpenClawPath
         }
 

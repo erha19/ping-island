@@ -209,13 +209,38 @@ struct SessionState: Equatable, Identifiable, Sendable {
         needsApprovalResponse || needsQuestionResponse || suppressInAppPromptControls
     }
 
+    /// How long a thinking block or running tool call keeps counting as proof that
+    /// the session is still executing.
+    ///
+    /// The transcript records that a tool started, never that it was abandoned, so
+    /// a session killed mid-tool (crash, SIGKILL, closed terminal, dropped Stop
+    /// hook) keeps a `.running` tail forever. Without an upper bound that tail
+    /// latches the row: it can never be superseded by a newer session in the same
+    /// workspace, never has an idle hook applied to it, and never gets downgraded
+    /// out of an active phase — so it animates as "working" until the app quits.
+    ///
+    /// The bound matches the primary list's 30-minute inactivity rule: once a
+    /// session is stale enough to be auto-hidden, it must not still be claiming to
+    /// execute. Genuinely long tool calls stay covered because anything shorter
+    /// would evict live sessions running slow builds or test suites.
+    nonisolated static let liveExecutionEvidenceMaxAge: TimeInterval = 30 * 60
+
     /// Whether the session is provably still executing: the newest chat item is a
-    /// thinking block or a running tool call.
+    /// thinking block or a running tool call, and the session has been active
+    /// recently enough for that to still mean something.
     ///
     /// Used as liveness evidence when deciding whether a session may be archived or
     /// hidden in favour of a newer session in the same workspace, and when deciding
     /// whether an apparently idle hook event should end an active phase.
     nonisolated var hasLiveExecutionEvidence: Bool {
+        hasLiveExecutionEvidence(asOf: Date())
+    }
+
+    nonisolated func hasLiveExecutionEvidence(asOf referenceDate: Date) -> Bool {
+        guard referenceDate.timeIntervalSince(lastActivity) < Self.liveExecutionEvidenceMaxAge else {
+            return false
+        }
+
         for item in chatItems.reversed() {
             switch item.type {
             case .thinking:
