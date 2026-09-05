@@ -557,9 +557,17 @@ actor SessionStore {
             for: event,
             session: session
         )
-        let newPhase: SessionPhase = shouldPreserveEndedStopForAnsweredQuestion || codeBuddyCLINotificationIntervention != nil
+        let inferredPhase: SessionPhase = shouldPreserveEndedStopForAnsweredQuestion || codeBuddyCLINotificationIntervention != nil
             ? .waitingForInput
             : event.determinePhase()
+        // A fresh snapshot session is already idle. After any actor reentrancy,
+        // keep the reloaded lifecycle state under real hook-event control.
+        let isRemoteCodexThreadSnapshot = event.provider == .codex
+            && event.ingress == .remoteBridge
+            && event.event == "RemoteCodexThreadUpdated"
+        let newPhase: SessionPhase = isRemoteCodexThreadSnapshot
+            ? session.phase
+            : inferredPhase
         if wasCompletedReady, newPhase == .processing {
             session.completionSequence &+= 1
         }
