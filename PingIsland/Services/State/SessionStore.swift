@@ -1958,8 +1958,26 @@ actor SessionStore {
 
     // MARK: - File Update Processing
 
-    private func processFileUpdate(_ payload: FileUpdatePayload) async {
+    func processFileUpdate(
+        _ payload: FileUpdatePayload,
+        conversationInfoLoader: (@Sendable () async -> ConversationInfo)? = nil
+    ) async {
+        guard let sourceSession = sessions[payload.sessionId] else { return }
+        let conversationInfo: ConversationInfo
+        if let conversationInfoLoader {
+            conversationInfo = await conversationInfoLoader()
+        } else {
+            conversationInfo = await ConversationParser.shared.parse(
+                sessionId: payload.sessionId,
+                cwd: sourceSession.cwd,
+                explicitFilePath: sourceSession.clientInfo.sessionFilePath
+            )
+        }
+        // Parsing crosses an actor boundary. Reload before deriving lifecycle
+        // changes so a Stop/SessionEnd or archive during the read wins over the
+        // stale pre-read snapshot, while final transcript content can still land.
         guard var session = sessions[payload.sessionId] else { return }
+        let originalSession = session
 
         if !payload.messages.isEmpty {
             IslandTrace.emit(
@@ -1993,12 +2011,6 @@ actor SessionStore {
             )
         }
 
-        // Update conversationInfo from JSONL (summary, lastMessage, etc.)
-        let conversationInfo = await ConversationParser.shared.parse(
-            sessionId: payload.sessionId,
-            cwd: session.cwd,
-            explicitFilePath: session.clientInfo.sessionFilePath
-        )
         session.conversationInfo = conversationInfo
 
         // Handle /clear reconciliation - remove items that no longer exist in parser state
@@ -2142,7 +2154,8 @@ actor SessionStore {
             }
         }
 
-        sessions[payload.sessionId] = session
+        guard let committedSession = commitTranscriptUpdate(session, basedOn: originalSession) else { return }
+        session = committedSession
         publishState()
 
         await AgentUsageStore.shared.recordFileUpdate(session: session, payload: payload)
@@ -2155,6 +2168,21 @@ actor SessionStore {
             toolResults: payload.toolResults,
             structuredResults: payload.structuredResults
         )
+    }
+
+    /// Enrichment also crosses actor boundaries (for example a completed Task's
+    /// subagent transcript). Final content may land after SessionEnd, but its old
+    /// lifecycle must not overwrite that end or recreate an archived session.
+    func commitTranscriptUpdate(_ update: SessionState, basedOn original: SessionState) -> SessionState? {
+        guard let latest = sessions[update.sessionId] else { return nil }
+        var committed = update
+        if latest.phase == .ended,
+           original.phase != .ended || latest.lastActivity != original.lastActivity {
+            markSessionEnded(&committed, refreshActivity: false)
+            committed.lastActivity = latest.lastActivity
+        }
+        sessions[update.sessionId] = committed
+        return committed
     }
 
     /// Transcript updates are the strongest signal that a previously dormant session
@@ -2227,7 +2255,7 @@ actor SessionStore {
         return nil
     }
 
-    private func shouldPreserveActivePhaseDuringApparentIdle(
+    func shouldPreserveActivePhaseDuringApparentIdle(
         session: SessionState,
         incomingPhase: SessionPhase,
         referenceDate: Date,
@@ -2241,7 +2269,11 @@ actor SessionStore {
             // completed assistant reply is stronger evidence that the active turn has finished.
             return !hasCodexTurnCompletionEvidence
         }
-        return session.hasLiveExecutionEvidence(asOf: referenceDate)
+        // Hook ingestion has already refreshed lastActivity. An idle report must
+        // not renew an abandoned tool's execution evidence before we inspect it.
+        var evidence = session
+        evidence.lastActivity = previousLastActivity ?? session.lastActivity
+        return evidence.hasLiveExecutionEvidence(asOf: referenceDate)
     }
 
     private func mergedLastActivity(
@@ -3099,7 +3131,7 @@ actor SessionStore {
         }
     }
 
-    private func hasPendingCompletedToolResult(sessionId: String, completedToolIds: Set<String>) -> Bool {
+    func hasPendingCompletedToolResult(sessionId: String, completedToolIds: Set<String>) -> Bool {
         guard !completedToolIds.isEmpty,
               let session = sessions[sessionId] else {
             return false

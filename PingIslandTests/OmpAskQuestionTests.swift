@@ -2,6 +2,61 @@ import XCTest
 @testable import Ping_Island
 
 final class OmpAskQuestionTests: XCTestCase {
+    func testGeneratedOmpAskFallsBackWithoutSendingASecondBlockingRequest() throws {
+        let node = ProcessInfo.processInfo.environment["PING_ISLAND_TEST_NODE"] ?? "node"
+        let probe = Process()
+        probe.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        probe.arguments = [node, "--experimental-strip-types", "-e", ""]
+        probe.standardError = Pipe()
+        try probe.run()
+        probe.waitUntilExit()
+        guard probe.terminationStatus == 0 else {
+            throw XCTSkip("Node with TypeScript stripping is needed to execute the generated hook")
+        }
+        let profile = try XCTUnwrap(ClientProfileRegistry.managedHookProfile(id: "omp-hooks"))
+        var source = HookInstaller.managedPluginSource(for: profile)
+        let bridgeStart = try XCTUnwrap(source.range(of: "function runBridge("))
+        let bridgeEnd = try XCTUnwrap(source.range(of: "function deniedByIsland("))
+        source.replaceSubrange(bridgeStart.lowerBound..<bridgeEnd.lowerBound, with: """
+        const requests: unknown[] = [];
+        async function runBridge(payload: unknown, captureResponse: boolean) {
+          requests.push({ payload, captureResponse });
+          return null;
+        }
+
+        """)
+        source += """
+
+        const handlers = new Map();
+        pingIslandOmpHook({ on(name, handler) { handlers.set(name, handler); } } as any);
+        const event = { toolName: "ask", toolCallId: "call-1", input: {
+          questions: [{ id: "topic", question: "Choose", options: [{ label: "A" }] }]
+        }};
+        const ctx = { hasUI: true, cwd: "/tmp/project", sessionManager: { getSessionId: () => "test" } };
+        const result = await handlers.get("tool_call")(event, ctx);
+        if (result !== undefined || requests.length !== 1) {
+          throw new Error(`Fallback must send one question and return to OMP: ${JSON.stringify(requests)}`);
+        }
+        requests.length = 0;
+        await handlers.get("tool_call")(event, { ...ctx, hasUI: false });
+        if (requests.length !== 0) throw new Error("Headless ask must not create an unconsumed request");
+        """
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let script = directory.appendingPathComponent("omp-fallback.mts")
+        try source.write(to: script, atomically: true, encoding: .utf8)
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = [node, "--experimental-strip-types", script.path]
+        let errors = Pipe()
+        process.standardError = errors
+        try process.run()
+        let output = errors.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        XCTAssertEqual(process.terminationStatus, 0, String(decoding: output, as: UTF8.self))
+    }
+
     func testOmpAskToolCreatesQuestionIntervention() {
         let event = HookEvent(
             sessionId: "omp-session",

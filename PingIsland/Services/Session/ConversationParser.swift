@@ -574,7 +574,7 @@ actor ConversationParser {
     }
 
     /// Build session file path
-    private static func sessionFilePath(sessionId: String, cwd: String, explicitFilePath: String? = nil) -> String {
+    static func sessionFilePath(sessionId: String, cwd: String, explicitFilePath: String? = nil, homeDirectory: String = NSHomeDirectory()) -> String {
         if let explicitFilePath, !explicitFilePath.isEmpty {
             if FileManager.default.fileExists(atPath: explicitFilePath) {
                 return explicitFilePath
@@ -603,41 +603,24 @@ actor ConversationParser {
         }
 
         let projectDir = cwd.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ".", with: "-")
-        let qoderPath = NSHomeDirectory() + "/.qoder/projects/" + projectDir + "/transcript/" + sessionId + ".jsonl"
+        let qoderPath = homeDirectory + "/.qoder/projects/" + projectDir + "/transcript/" + sessionId + ".jsonl"
         if FileManager.default.fileExists(atPath: qoderPath) {
             return qoderPath
         }
 
-        let qoderWorkPath = NSHomeDirectory() + "/.qoderwork/projects/" + projectDir + "/" + sessionId + ".jsonl"
+        let qoderWorkPath = homeDirectory + "/.qoderwork/projects/" + projectDir + "/" + sessionId + ".jsonl"
         if FileManager.default.fileExists(atPath: qoderWorkPath) {
             return qoderWorkPath
         }
 
-        let claudePath = NSHomeDirectory() + "/.claude/projects/" + projectDir + "/" + sessionId + ".jsonl"
-        if FileManager.default.fileExists(atPath: claudePath) {
-            return claudePath
-        }
-
-        if let fallbackOpenClawPath = latestOpenClawSessionFilePath(preferredPath: nil) {
-            IslandTrace.emit(
-                "transcript.rebind",
-                "session=\(IslandTrace.tag(sessionId)) scope=derived missing=\(URL(fileURLWithPath: claudePath).lastPathComponent) using=\(URL(fileURLWithPath: fallbackOpenClawPath).lastPathComponent)"
-            )
-            return fallbackOpenClawPath
-        }
-
-        return claudePath
+        // Without an explicit OpenClaw path, no evidence connects this session
+        // to that client's transcripts. A missing Claude file must stay missing.
+        return homeDirectory + "/.claude/projects/" + projectDir + "/" + sessionId + ".jsonl"
     }
 
-    private static func latestOpenClawSessionFilePath(preferredPath: String?) -> String? {
+    private static func latestOpenClawSessionFilePath(preferredPath: String) -> String? {
         let fileManager = FileManager.default
-        let sessionsDirectory: URL = {
-            if let preferredPath {
-                return URL(fileURLWithPath: preferredPath).deletingLastPathComponent()
-            }
-            return fileManager.homeDirectoryForCurrentUser
-                .appendingPathComponent(".openclaw/agents/main/sessions", isDirectory: true)
-        }()
+        let sessionsDirectory = URL(fileURLWithPath: preferredPath).deletingLastPathComponent()
 
         guard let enumerator = fileManager.enumerator(
             at: sessionsDirectory,

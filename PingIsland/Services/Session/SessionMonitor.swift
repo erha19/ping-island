@@ -135,6 +135,7 @@ class SessionMonitor: ObservableObject {
 
         Task {
             await ClaudeDesktopWatcher.shared.start()
+            await KimiAppHookGuard.shared.start()
         }
 
         Task {
@@ -275,6 +276,7 @@ class SessionMonitor: ObservableObject {
         }
         Task {
             await ClaudeDesktopWatcher.shared.stop()
+            await KimiAppHookGuard.shared.stop()
         }
         Task {
             await runtimeCoordinator.stop()

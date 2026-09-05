@@ -3832,10 +3832,16 @@ struct HookInstaller {
                     return { block: true, reason };
                   }
                 }
-                // No Island answer (unreachable / window elapsed / cancelled):
-                // fall through to the normal path so OMP's native ask UI runs.
+                // Do not send this question a second time through the generic
+                // PreToolUse path: the bridge would block again but its answer
+                // would be discarded because that path ignores stdout.
+                return undefined;
               }
             }
+
+            // Headless asks must stay with OMP as well; forwarding their question
+            // payload here would create an unconsumed blocking Island request.
+            if (event.toolName === "ask") return undefined;
 
             if (isDangerousBash(event)) {
               pendingPermissionSessions.add(bridgedSessionId);

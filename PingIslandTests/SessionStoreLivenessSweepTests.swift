@@ -9,6 +9,86 @@ import XCTest
 /// sessions already in `.ended` phase.
 final class SessionStoreLivenessSweepTests: XCTestCase {
 
+    func testSessionEndDuringTranscriptEnrichmentPreservesFinalContent() async throws {
+        let id = "liveness-enrichment-end-\(UUID().uuidString)"
+        let store = SessionStore.shared
+        await store.process(.hookReceived(makeClaudeEvent(sessionId: id, pid: nil)))
+        let captured = await store.session(for: id)
+        let original = try XCTUnwrap(captured)
+        var enriched = original
+        enriched.chatItems.append(ChatHistoryItem(
+            id: "enriched-final", type: .assistant("Final subagent result"), timestamp: Date()
+        ))
+
+        // A Task-result parser await allows SessionEnd to land between capture
+        // and commit; reproduce that ordering without a timing-dependent sleep.
+        await store.process(.sessionEnded(sessionId: id))
+        let ended = await store.session(for: id)
+        let committed = await store.commitTranscriptUpdate(enriched, basedOn: original)
+        XCTAssertEqual(committed?.phase, .ended)
+        XCTAssertEqual(committed?.lastActivity, ended?.lastActivity)
+        XCTAssertTrue(committed?.chatItems.contains(where: { $0.id == "enriched-final" }) == true)
+        await store.process(.sessionArchived(sessionId: id))
+    }
+
+    func testArchiveDuringTranscriptEnrichmentDropsStaleUpdate() async throws {
+        let id = "liveness-enrichment-archive-\(UUID().uuidString)"
+        let store = SessionStore.shared
+        await store.process(.hookReceived(makeClaudeEvent(sessionId: id, pid: nil)))
+        let captured = await store.session(for: id)
+        let original = try XCTUnwrap(captured)
+        await store.process(.sessionArchived(sessionId: id))
+        let committed = await store.commitTranscriptUpdate(original, basedOn: original)
+        XCTAssertNil(committed)
+        let current = await store.session(for: id)
+        XCTAssertNil(current)
+    }
+
+    func testSessionEndDuringTranscriptReadCannotBeOverwritten() async throws {
+        let id = "liveness-read-end-\(UUID().uuidString)"
+        let store = SessionStore.shared
+        await store.process(.hookReceived(makeClaudeEvent(sessionId: id, pid: nil)))
+        let payload = FileUpdatePayload(
+            sessionId: id, cwd: "/tmp/project",
+            messages: [ChatMessage(
+                id: "final-reply", role: .assistant, timestamp: Date(), content: [.text("Finished")]
+            )],
+            isIncremental: true, completedToolIds: [], toolResults: [:], structuredResults: [:]
+        )
+        // Deterministically interleave SessionEnd at the parser await boundary.
+        await store.processFileUpdate(payload, conversationInfoLoader: {
+            await store.process(.sessionEnded(sessionId: id))
+            return ConversationInfo(
+                summary: nil, lastMessage: "Finished", lastMessageRole: "assistant",
+                lastToolName: nil, firstUserMessage: nil, lastUserMessageDate: nil
+            )
+        })
+        let session = await store.session(for: id)
+        XCTAssertEqual(session?.phase, .ended)
+        XCTAssertTrue(session?.chatItems.contains(where: { $0.id == "final-reply-text-0" }) == true)
+        await store.sweepDeadOrEndedSessions()
+        let reaped = await store.session(for: id)
+        XCTAssertNil(reaped)
+    }
+
+    func testArchiveDuringTranscriptReadCannotRecreateSession() async {
+        let id = "liveness-read-archive-\(UUID().uuidString)"
+        let store = SessionStore.shared
+        await store.process(.hookReceived(makeClaudeEvent(sessionId: id, pid: nil)))
+        await store.processFileUpdate(FileUpdatePayload(
+            sessionId: id, cwd: "/tmp/project", messages: [], isIncremental: true,
+            completedToolIds: [], toolResults: [:], structuredResults: [:]
+        ), conversationInfoLoader: {
+            await store.process(.sessionArchived(sessionId: id))
+            return ConversationInfo(
+                summary: nil, lastMessage: nil, lastMessageRole: nil,
+                lastToolName: nil, firstUserMessage: nil, lastUserMessageDate: nil
+            )
+        })
+        let archived = await store.session(for: id)
+        XCTAssertNil(archived)
+    }
+
     func testSweepRemovesSessionWithDeadPid() async throws {
         // Spawn /usr/bin/true and wait for it to exit so we have a real pid
         // that is guaranteed dead at the moment we register the session.

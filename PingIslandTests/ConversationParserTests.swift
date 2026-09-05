@@ -2,6 +2,19 @@ import XCTest
 @testable import Ping_Island
 
 final class ConversationParserTests: XCTestCase {
+    func testMissingDerivedClaudeTranscriptDoesNotAdoptOpenClawHistory() async throws {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: home) }
+        let unrelated = home.appendingPathComponent(".openclaw/agents/main/sessions/other.jsonl")
+        try writeJSONLLines([openClawLine("Unrelated history", role: "user")], to: unrelated)
+
+        let resolved = await ConversationParser.sessionFilePath(
+            sessionId: "missing", cwd: "/tmp/project", homeDirectory: home.path
+        )
+        XCTAssertEqual(resolved, home.path + "/.claude/projects/-tmp-project/missing.jsonl")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: resolved))
+    }
+
     func testCustomTitleIsPreferredOverFirstUserMessage() async throws {
         let transcriptURL = temporaryTranscriptURL(named: "custom-title")
         defer { try? FileManager.default.removeItem(at: transcriptURL.deletingLastPathComponent()) }

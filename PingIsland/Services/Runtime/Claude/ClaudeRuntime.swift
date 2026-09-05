@@ -167,7 +167,10 @@ actor ClaudeRuntime: SessionRuntime {
                     await SessionStore.shared.process(.clearDetected(sessionId: sessionID))
                 }
 
-                if !result.newMessages.isEmpty || result.clearDetected {
+                let hasPendingToolResult = await SessionStore.shared.hasPendingCompletedToolResult(
+                    sessionId: sessionID, completedToolIds: result.completedToolIds
+                )
+                if !result.newMessages.isEmpty || result.clearDetected || hasPendingToolResult {
                     let payload = FileUpdatePayload(
                         sessionId: sessionID,
                         cwd: cwd,

@@ -46,12 +46,14 @@ actor KimiAppHookGuard {
         case intact
         /// The managed block was missing and has just been rewritten.
         case repaired
+        /// The repair did not persist; retry without caching the file timestamp.
+        case repairFailed
     }
 
     private var loopTask: Task<Void, Never>?
     private var lastSeenModification: Date?
 
-    private init() {}
+    init() {}
 
     // MARK: - Lifecycle
 
@@ -89,7 +91,7 @@ actor KimiAppHookGuard {
             return dormantInterval
         case .intact:
             return idleInterval
-        case .repaired:
+        case .repaired, .repairFailed:
             return verifyInterval
         }
     }
@@ -98,13 +100,28 @@ actor KimiAppHookGuard {
 
     @discardableResult
     func checkOnce() -> CheckOutcome {
-        guard let profile = ClientProfileRegistry.managedHookProfile(id: KimiAppHookPaths.managedProfileID),
-              HookInstaller.isPreferred(profile) else {
+        guard let profile = ClientProfileRegistry.managedHookProfile(id: KimiAppHookPaths.managedProfileID) else {
+            return .dormant
+        }
+        return checkOnce(
+            configurationURL: profile.primaryConfigurationURL,
+            isPreferred: HookInstaller.isPreferred(profile),
+            isInstalled: { HookInstaller.isInstalled(profile) },
+            install: { HookInstaller.install(profile) }
+        )
+    }
+
+    func checkOnce(
+        configurationURL url: URL,
+        isPreferred: Bool,
+        isInstalled: @Sendable () -> Bool,
+        install: @Sendable () -> Void
+    ) -> CheckOutcome {
+        guard isPreferred else {
             lastSeenModification = nil
             return .dormant
         }
 
-        let url = profile.primaryConfigurationURL
         guard let modified = try? FileManager.default.attributesOfItem(atPath: url.path)[.modificationDate] as? Date else {
             // Kimi.app has not created its kernel config yet; nothing to guard.
             lastSeenModification = nil
@@ -116,14 +133,19 @@ actor KimiAppHookGuard {
         if let lastSeenModification, lastSeenModification == modified {
             return .intact
         }
-        lastSeenModification = modified
-
-        guard !HookInstaller.isInstalled(profile) else {
+        guard !isInstalled() else {
+            lastSeenModification = modified
             return .intact
         }
 
         logger.notice("Kimi app rewrote its kernel config; reinstalling managed hooks")
-        HookInstaller.install(profile)
+        install()
+        guard isInstalled() else {
+            // A failed write must remain retryable even if Kimi does not touch
+            // the file again. Do not cache an unchecked repair as intact.
+            lastSeenModification = nil
+            return .repairFailed
+        }
 
         // Re-read the timestamp so our own write does not look like a Kimi rewrite
         // on the next probe.

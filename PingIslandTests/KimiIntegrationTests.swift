@@ -162,6 +162,56 @@ final class KimiIntegrationTests: XCTestCase {
         XCTAssertEqual(KimiAppHookGuard.interval(for: .repaired), .seconds(5))
     }
 
+    func testKimiGuardRetriesFailedRepairWithoutAFileChange() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("config.toml")
+        try "model = \"test\"".write(to: url, atomically: true, encoding: .utf8)
+        let guardService = KimiAppHookGuard()
+        let first = await guardService.checkOnce(
+            configurationURL: url, isPreferred: true, isInstalled: { false }, install: {}
+        )
+        let second = await guardService.checkOnce(
+            configurationURL: url, isPreferred: true, isInstalled: { false }, install: {}
+        )
+        XCTAssertEqual(first, .repairFailed)
+        XCTAssertEqual(second, .repairFailed)
+        XCTAssertEqual(KimiAppHookGuard.interval(for: second), .seconds(5))
+    }
+
+    func testKimiGuardRepairsRewrittenConfigAndHonorsDisabledTarget() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("config.toml")
+        try "model = \"test\"".write(to: url, atomically: true, encoding: .utf8)
+        let guardService = KimiAppHookGuard()
+        let isInstalled: @Sendable () -> Bool = {
+            (try? String(contentsOf: url, encoding: .utf8))?.contains("managed-hook") == true
+        }
+        let install: @Sendable () -> Void = {
+            try? "managed-hook".write(to: url, atomically: true, encoding: .utf8)
+        }
+        let repaired = await guardService.checkOnce(
+            configurationURL: url, isPreferred: true, isInstalled: isInstalled, install: install
+        )
+        XCTAssertEqual(repaired, .repaired)
+        XCTAssertTrue(isInstalled())
+        try "model = \"rewritten\"".write(to: url, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: 10)], ofItemAtPath: url.path)
+        let disabled = await guardService.checkOnce(
+            configurationURL: url, isPreferred: false, isInstalled: isInstalled, install: install
+        )
+        XCTAssertEqual(disabled, .dormant)
+        XCTAssertFalse(isInstalled())
+        let restored = await guardService.checkOnce(
+            configurationURL: url, isPreferred: true, isInstalled: isInstalled, install: install
+        )
+        XCTAssertEqual(restored, .repaired)
+        XCTAssertTrue(isInstalled())
+    }
+
     // MARK: - Kimi desktop app auxiliary sessions and titles
 
     func testKimiTitleGenerationSessionsAreFilteredOut() {
