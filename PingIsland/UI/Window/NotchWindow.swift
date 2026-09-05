@@ -3,8 +3,7 @@
 //  PingIsland
 //
 //  Transparent window that overlays the notch area
-//  Following NotchDrop's approach: window ignores mouse events,
-//  we use global event monitors to detect clicks/hovers
+//  Mouse routing follows the visible notch and shared pointer monitoring.
 //
 
 import AppKit
@@ -52,13 +51,12 @@ class NotchPanel: NSPanel {
         // Enable tooltips even when app is inactive (needed for panel windows)
         allowsToolTipsWhenApplicationIsInactive = true
 
-        // CRITICAL: Window ignores ALL mouse events
-        // This allows clicks to pass through to the menu bar
-        // We use global event monitors to detect hover/clicks on the notch area
+        // The controller arms closed-notch input as the pointer enters its bounds.
+        // Areas outside the closed notch remain available to the menu bar.
         ignoresMouseEvents = true
 
         isReleasedWhenClosed = true
-        acceptsMouseMovedEvents = false
+        acceptsMouseMovedEvents = true
     }
 
     override var canBecomeKey: Bool { true }

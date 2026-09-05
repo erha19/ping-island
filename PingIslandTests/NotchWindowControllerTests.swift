@@ -72,6 +72,33 @@ final class NotchWindowControllerTests: XCTestCase {
         XCTAssertFalse(plan.shouldActivateApplication)
     }
 
+    func testClosedAndPoppingNotchCapturePointerBeforeClick() {
+        for status in [NotchStatus.closed, .popping] {
+            let plan = NotchWindowController.windowPresentationPlan(
+                status: status,
+                openReason: .unknown,
+                isVisible: true,
+                isOnActiveSpace: true,
+                updateSource: .environmentChange,
+                isPointerInClosedNotch: true
+            )
+            XCTAssertFalse(plan.ignoresMouseEvents, "The first click must not reach the menu bar")
+            XCTAssertFalse(plan.shouldActivateApplication)
+        }
+    }
+
+    func testClosedNotchLeavesSurroundingMenuBarInteractive() {
+        let plan = NotchWindowController.windowPresentationPlan(
+            status: .closed,
+            openReason: .unknown,
+            isVisible: true,
+            isOnActiveSpace: true,
+            updateSource: .environmentChange,
+            isPointerInClosedNotch: false
+        )
+        XCTAssertTrue(plan.ignoresMouseEvents)
+    }
+
     func testStateChangePlansNoOrderingForVisibleWindow() {
         let plan = NotchWindowController.windowPresentationPlan(
             status: .closed,

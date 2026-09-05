@@ -72,7 +72,7 @@ class NotchWindowController: NSWindowController {
         notchWindow.setFrame(windowFrame, display: true)
 
         // Dynamically toggle mouse event handling based on notch state:
-        // - Closed: ignoresMouseEvents = true (clicks pass through to menu bar/apps)
+        // - Closed: capture input while the pointer is over the notch, before mouse-down.
         // - Opened: ignoresMouseEvents = false (buttons inside panel work)
         viewModel.$status
             .receive(on: DispatchQueue.main)
@@ -184,7 +184,36 @@ class NotchWindowController: NSWindowController {
             }
             .store(in: &cancellables)
 
-        // Start with ignoring mouse events (closed state)
+        // Input routing must not wait for the throttled hover/dwell pipeline:
+        // global mouse-down monitors observe clicks only after the menu bar receives them.
+        EventMonitors.shared.mouseRoutingLocation
+            .sink { [weak self, weak notchWindow, weak viewModel] location in
+                guard let self, let notchWindow, let viewModel else { return }
+                self.updateMouseEventHandling(
+                    window: notchWindow,
+                    viewModel: viewModel,
+                    pointerLocation: location
+                )
+            }
+            .store(in: &cancellables)
+
+        Publishers.CombineLatest3(
+            viewModel.$geometry,
+            viewModel.$closedWidth,
+            viewModel.$isFullscreenPhysicalNotchCompactActive
+        )
+        .receive(on: DispatchQueue.main)
+        .sink { [weak self, weak notchWindow, weak viewModel] _ in
+            guard let self, let notchWindow, let viewModel else { return }
+            self.updateMouseEventHandling(
+                window: notchWindow,
+                viewModel: viewModel,
+                pointerLocation: NSEvent.mouseLocation
+            )
+        }
+        .store(in: &cancellables)
+
+        // Seed routing from the actual pointer even when it has not moved since launch.
         notchWindow.ignoresMouseEvents = true
         updateWindowPresentation(
             window: notchWindow,
@@ -228,7 +257,8 @@ class NotchWindowController: NSWindowController {
             openReason: viewModel.openReason,
             isVisible: window.isVisible,
             isOnActiveSpace: window.isOnActiveSpace,
-            updateSource: updateSource
+            updateSource: updateSource,
+            isPointerInClosedNotch: viewModel.closedScreenRect.insetBy(dx: -10, dy: -5).contains(NSEvent.mouseLocation)
         )
 
         switch plan.orderAction {
@@ -251,12 +281,26 @@ class NotchWindowController: NSWindowController {
         }
     }
 
+    private func updateMouseEventHandling(
+        window: NotchPanel,
+        viewModel: NotchViewModel,
+        pointerLocation: CGPoint
+    ) {
+        let shouldIgnore = viewModel.shouldHideWindowPresentation
+            || (viewModel.status != .opened
+                && !viewModel.closedScreenRect.insetBy(dx: -10, dy: -5).contains(pointerLocation))
+        if window.ignoresMouseEvents != shouldIgnore {
+            window.ignoresMouseEvents = shouldIgnore
+        }
+    }
+
     static func windowPresentationPlan(
         status: NotchStatus,
         openReason: NotchOpenReason,
         isVisible: Bool,
         isOnActiveSpace: Bool,
-        updateSource: WindowPresentationUpdateSource
+        updateSource: WindowPresentationUpdateSource,
+        isPointerInClosedNotch: Bool = false
     ) -> WindowPresentationPlan {
         let orderAction: WindowOrderAction
         if updateSource == .activeSpaceChange && !isOnActiveSpace {
@@ -279,7 +323,7 @@ class NotchWindowController: NSWindowController {
 
         return WindowPresentationPlan(
             orderAction: orderAction,
-            ignoresMouseEvents: status != .opened,
+            ignoresMouseEvents: status != .opened && !isPointerInClosedNotch,
             shouldActivateApplication: shouldActivateApplication
         )
     }

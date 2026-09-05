@@ -12,6 +12,8 @@ import Combine
 final class EventMonitors {
     static let shared = EventMonitors()
 
+    /// Minimal input routing stays active while hover previews are energy-gated.
+    let mouseRoutingLocation = CurrentValueSubject<CGPoint, Never>(.zero)
     let mouseLocation = CurrentValueSubject<CGPoint, Never>(.zero)
     let mouseDown = PassthroughSubject<NSEvent, Never>()
     let mouseDragged = PassthroughSubject<NSEvent, Never>()
@@ -98,19 +100,25 @@ final class EventMonitors {
     func restartMonitoring() {
         stopMonitoring()
         setupMonitors(level: monitoringLevel)
-        mouseLocation.send(currentMouseLocation())
+        let location = currentMouseLocation()
+        mouseRoutingLocation.send(location)
+        mouseLocation.send(location)
     }
 
     private func setupMonitors(level: EnergyEventMonitoringLevel) {
         guard level != .disabled else { return }
 
-        if level == .full {
-            mouseMoveMonitor = monitorFactory(.mouseMoved) { [weak self] _ in
-                guard let self else { return }
-                self.mouseLocation.send(self.currentMouseLocation())
+        // Even interaction-only mode must arm the closed notch before the first
+        // click reaches the menu bar. Keep expensive hover work on mouseLocation.
+        mouseMoveMonitor = monitorFactory(.mouseMoved) { [weak self] _ in
+            guard let self else { return }
+            let location = self.currentMouseLocation()
+            self.mouseRoutingLocation.send(location)
+            if self.monitoringLevel == .full {
+                self.mouseLocation.send(location)
             }
-            mouseMoveMonitor?.start()
         }
+        mouseMoveMonitor?.start()
 
         mouseDownMonitor = monitorFactory(.leftMouseDown) { [weak self] event in
             self?.mouseDown.send(event)
@@ -119,7 +127,9 @@ final class EventMonitors {
 
         mouseDraggedMonitor = monitorFactory(.leftMouseDragged) { [weak self] event in
             guard let self else { return }
-            self.mouseLocation.send(self.currentMouseLocation())
+            let location = self.currentMouseLocation()
+            self.mouseRoutingLocation.send(location)
+            self.mouseLocation.send(location)
             self.mouseDragged.send(event)
         }
         mouseDraggedMonitor?.start()

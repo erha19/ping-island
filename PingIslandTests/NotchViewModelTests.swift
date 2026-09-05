@@ -832,55 +832,31 @@ final class NotchViewModelTests: XCTestCase {
         }
     }
 
-    func testEventMonitorsDropMouseMoveInQuietEnergyPolicy() async {
+    func testInputRoutingRemainsLiveWithoutHoverWorkInQuietPolicies() async {
         await MainActor.run {
-            let notificationCenter = NotificationCenter()
-            let workspaceNotificationCenter = NotificationCenter()
-            let recorder = MonitorRecorder()
-            let policySubject = PassthroughSubject<EnergyPolicy, Never>()
-
-            let monitors = EventMonitors(
-                notificationCenter: notificationCenter,
-                workspaceNotificationCenter: workspaceNotificationCenter,
-                currentMouseLocation: { .zero },
-                monitorFactory: recorder.makeMonitor(mask:handler:),
-                energyPolicyPublisher: policySubject.eraseToAnyPublisher()
-            )
-
-            policySubject.send(EnergyPolicy.policy(for: .quietBackground))
-
-            XCTAssertEqual(recorder.stopCallCount, 4)
-            XCTAssertEqual(
-                Array(recorder.startedMasks.suffix(3)),
-                [.leftMouseDown, .leftMouseDragged, .leftMouseUp]
-            )
-            XCTAssertEqual(monitors.mouseLocation.value, .zero)
-        }
-    }
-
-    func testEventMonitorsDropMouseMoveInVisibleIdleEnergyPolicy() async {
-        await MainActor.run {
-            let notificationCenter = NotificationCenter()
-            let workspaceNotificationCenter = NotificationCenter()
-            let recorder = MonitorRecorder()
-            let policySubject = PassthroughSubject<EnergyPolicy, Never>()
-
-            let monitors = EventMonitors(
-                notificationCenter: notificationCenter,
-                workspaceNotificationCenter: workspaceNotificationCenter,
-                currentMouseLocation: { .zero },
-                monitorFactory: recorder.makeMonitor(mask:handler:),
-                energyPolicyPublisher: policySubject.eraseToAnyPublisher()
-            )
-
-            policySubject.send(EnergyPolicy.policy(for: .idleVisible))
-
-            XCTAssertEqual(recorder.stopCallCount, 4)
-            XCTAssertEqual(
-                Array(recorder.startedMasks.suffix(3)),
-                [.leftMouseDown, .leftMouseDragged, .leftMouseUp]
-            )
-            XCTAssertEqual(monitors.mouseLocation.value, .zero)
+            for mode in [EnergyMode.quietBackground, .idleVisible, .wakeGrace] {
+                let recorder = MonitorRecorder()
+                let policySubject = PassthroughSubject<EnergyPolicy, Never>()
+                var location = CGPoint.zero
+                let monitors = EventMonitors(
+                    notificationCenter: NotificationCenter(),
+                    workspaceNotificationCenter: NotificationCenter(),
+                    currentMouseLocation: { location },
+                    monitorFactory: recorder.makeMonitor(mask:handler:),
+                    energyPolicyPublisher: policySubject.eraseToAnyPublisher()
+                )
+                policySubject.send(EnergyPolicy.policy(for: mode))
+                XCTAssertEqual(recorder.stopCallCount, 4)
+                XCTAssertEqual(
+                    Array(recorder.startedMasks.suffix(4)),
+                    [.mouseMoved, .leftMouseDown, .leftMouseDragged, .leftMouseUp]
+                )
+                // Simulate moving into an external display's notch before clicking.
+                location = CGPoint(x: 2400, y: 1080)
+                recorder.mouseMoveHandler?(NSEvent())
+                XCTAssertEqual(monitors.mouseRoutingLocation.value, location)
+                XCTAssertEqual(monitors.mouseLocation.value, .zero, "Hover remains energy-gated")
+            }
         }
     }
 
@@ -932,12 +908,14 @@ private final class MonitorRecorder {
     private(set) var createdMasks: [NSEvent.EventTypeMask] = []
     private(set) var startedMasks: [NSEvent.EventTypeMask] = []
     private(set) var stopCallCount = 0
+    private(set) var mouseMoveHandler: ((NSEvent) -> Void)?
 
     func makeMonitor(
         mask: NSEvent.EventTypeMask,
         handler: @escaping (NSEvent) -> Void
     ) -> EventMonitoring {
         createdMasks.append(mask)
+        if mask == .mouseMoved { mouseMoveHandler = handler }
         return FakeEventMonitor(
             mask: mask,
             startHook: { [weak self] mask in
