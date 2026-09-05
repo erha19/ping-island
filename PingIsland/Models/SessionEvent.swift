@@ -122,6 +122,8 @@ struct FileUpdatePayload: Sendable {
 /// Info about a Claude Desktop local-agent session discovered via file monitoring
 struct ClaudeDesktopSessionInfo: Sendable {
     let sessionId: String
+    /// Desktop-side (`local_…`) id, used to deep-link straight to the session's tab.
+    let localSessionId: String
     let cwd: String
     let title: String?
     let createdAt: Date

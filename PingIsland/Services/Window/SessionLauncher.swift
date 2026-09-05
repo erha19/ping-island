@@ -38,6 +38,11 @@ actor SessionLauncher {
             return true
         }
 
+        if await activateClaudeDesktopSessionTab(session) {
+            Self.logger.debug("Activated session \(session.sessionId, privacy: .public) via Claude Desktop tab deep link")
+            return true
+        }
+
         if session.isInTmux, await activateTmuxSession(session) {
             Self.logger.debug("Activated tmux session \(session.sessionId, privacy: .public)")
             return true
@@ -312,6 +317,56 @@ actor SessionLauncher {
 
     private func allowsAppFallback(for session: SessionState) -> Bool {
         Self.allowsAppFallback(provider: session.provider, clientInfo: session.clientInfo)
+    }
+
+    /// Claude Desktop hosts each Claude Code session in its own tab, and only a deep link
+    /// carrying the desktop-side session id lands on the right one — raising the bundle
+    /// leaves whichever tab was last open in front.
+    nonisolated static func isClaudeDesktopHostedSession(
+        provider: SessionProvider,
+        clientInfo: SessionClientInfo
+    ) -> Bool {
+        guard provider == .claude else { return false }
+
+        if clientInfo.profileID?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased() == "claude-desktop" {
+            return true
+        }
+
+        return [clientInfo.terminalBundleIdentifier, clientInfo.bundleIdentifier]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+            .contains(ClaudeDesktopSessionIndex.appBundleIdentifier)
+    }
+
+    private func activateClaudeDesktopSessionTab(_ session: SessionState) async -> Bool {
+        guard Self.isClaudeDesktopHostedSession(provider: session.provider, clientInfo: session.clientInfo),
+              !session.isInTmux,
+              !session.isRemoteSession else {
+            return false
+        }
+
+        guard let deepLink = await ClaudeDesktopSessionIndex.shared.tabDeepLink(
+            forCLISessionId: session.sessionId
+        ) else {
+            await FocusDiagnosticsStore.shared.record(
+                "SessionLauncher claude-desktop tab-unresolved session=\(session.sessionId)"
+            )
+            return false
+        }
+
+        guard await activateURL(deepLink) else {
+            await FocusDiagnosticsStore.shared.record(
+                "SessionLauncher claude-desktop deep-link-failed session=\(session.sessionId) link=\(deepLink)"
+            )
+            return false
+        }
+
+        _ = await activateApplication(bundleIdentifier: ClaudeDesktopSessionIndex.appBundleIdentifier)
+        await FocusDiagnosticsStore.shared.record(
+            "SessionLauncher claude-desktop tab session=\(session.sessionId) link=\(deepLink)"
+        )
+        return true
     }
 
     private func shouldPrioritizeIDEChatSession(for session: SessionState) -> Bool {

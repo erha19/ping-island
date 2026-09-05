@@ -160,6 +160,7 @@ actor ClaudeDesktopWatcher {
 
         let info = ClaudeDesktopSessionInfo(
             sessionId: metadata.cliSessionId,
+            localSessionId: metadata.localSessionId,
             cwd: metadata.cwd,
             title: metadata.title,
             createdAt: metadata.createdAt,
