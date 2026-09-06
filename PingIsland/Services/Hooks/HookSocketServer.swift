@@ -848,6 +848,15 @@ private extension BridgeEnvelope {
             explicitMetadataOriginator,
             terminalContext.ideName
         )
+        // The bridge also mirrors the IDE host name into client_originator.
+        // Keep it for terminal routing, but do not treat it as agent identity.
+        let clientOriginatorHint = explicitMetadataOriginator.flatMap { originator -> String? in
+            if let ideName = firstNonEmpty(terminalContext.ideName),
+               originator.caseInsensitiveCompare(ideName) == .orderedSame {
+                return nil
+            }
+            return originator
+        }
         let explicitThreadSource = firstNonEmpty(
             metadata["thread_source"],
             metadata["session_start_source"],
@@ -901,11 +910,9 @@ private extension BridgeEnvelope {
             explicitKind: effectiveExplicitKind,
             explicitName: effectiveExplicitName,
             explicitBundleIdentifier: explicitBundleID,
-            terminalBundleIdentifier: explicitKind == nil && explicitName == nil && explicitBundleID == nil
-                ? nil
-                : terminalBundleID,
+            terminalBundleIdentifier: nil,
             origin: explicitOrigin,
-            originator: explicitMetadataOriginator,
+            originator: clientOriginatorHint,
             threadSource: explicitThreadSource,
             processName: processName
         )
@@ -961,6 +968,9 @@ private extension BridgeEnvelope {
         let resolvedProfile: SessionClientProfile?
         if matchedProfile?.kind == kind {
             resolvedProfile = matchedProfile
+        } else if provider == .claude, kind == .claudeCode {
+            // A concrete fallback replaces a previously misidentified cached profile.
+            resolvedProfile = ClientProfileRegistry.defaultRuntimeProfile(for: providerKind, kind: kind)
         } else if provider == .codex, kind == .codexCLI || kind == .codexApp {
             resolvedProfile = ClientProfileRegistry.defaultRuntimeProfile(for: providerKind, kind: kind)
         } else {
@@ -1394,6 +1404,10 @@ class HookSocketServer {
         "justification",
         "reason"
     ]
+
+    static func decodeHookEvent(from data: Data) throws -> HookEvent {
+        try JSONDecoder().decode(BridgeEnvelope.self, from: data).hookEvent
+    }
 
     static func inferredCodexClientKind(
         explicitKind: String?,
