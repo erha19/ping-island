@@ -118,6 +118,9 @@
 "10 分钟静音通知和声音" = "Mute notifications and sounds for 10 minutes";
 "通知与声音已静音至 %@，点击恢复" = "Notifications and sounds are muted until %@. Click to restore.";
 "已静音至 %@" = "Muted until %@";
+"会话工作时防止 Mac 休眠" = "Prevent Mac sleep while a session is working";
+"正在防止休眠（会话工作中）。点击关闭。合盖休眠无法阻止。" = "Preventing sleep while a session is working. Click to turn off. Lid-close sleep cannot be prevented.";
+"已开启：会话工作时防止休眠。点击关闭。合盖休眠无法阻止。" = "On: prevent sleep while a session is working. Click to turn off. Lid-close sleep cannot be prevented.";
 "不同阶段可分别播放不同音效，适用于 Claude、Codex 等会话。" = "Play different sounds for different phases across Claude, Codex, and other sessions.";
 "声音模式" = "Sound mode";
 "系统音适合快速配置；主题包兼容 OpenPeon / CESP 格式。" = "System sounds are quick to configure, while sound packs support OpenPeon / CESP.";

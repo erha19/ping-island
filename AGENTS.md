@@ -35,6 +35,7 @@ This file is a routing layer for coding agents working in this repo. Keep it sho
   - Claude Code 2.x stopped writing `summary` records and now persists the title shown in its own UI as a `custom-title` record, rewritten on every turn. Take the newest one, keep the legacy `summary` path as a fallback for older transcripts and other Claude-compatible clients, and only fall back to the first user message when neither exists.
 - Notch state and layout: `PingIsland/Core/NotchViewModel.swift`, `PingIsland/UI/Views/NotchView.swift`
 - App-wide low-power policy for background polling, event monitoring, UI animation tiers, and silent update gating: `PingIsland/Core/EnergyGovernor.swift`
+- Session-aware keep-awake (IOPM system assertion while working; notch shortcut next to mute): `PingIsland/Core/SessionKeepAwake.swift`
 - User idle protection for temporarily routing blocking approvals/questions back to terminals: `PingIsland/Core/UserIdleAutoProtection.swift`, `PingIsland/Core/Settings.swift`, `PingIsland/Services/Hooks/BridgeRuntimeConfigWriter.swift`
 - Detached floating capsule: `PingIsland/UI/Window/DetachedIslandWindowController.swift`, `PingIsland/UI/Views/DetachedIslandPanelView.swift`, `PingIsland/UI/Views/IslandOpenedContentView.swift`
   - Detached pet interactions now keep the pet anchored in place while hover/click previews expand sideways as message-bubble lists; trace both the panel layout and window-anchor math together when changing this flow

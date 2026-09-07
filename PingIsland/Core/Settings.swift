@@ -396,6 +396,7 @@ final class AppSettingsStore: ObservableObject {
         static let soundEnabled = "soundEnabled"
         static let soundVolume = "soundVolume"
         static let temporarilyMuteNotificationsUntil = "temporarilyMuteNotificationsUntil"
+        static let preventSleepWhileWorkingEnabled = "preventSleepWhileWorkingEnabled"
         static let processingStartSound = "processingStartSound"
         static let attentionRequiredSound = "attentionRequiredSound"
         static let taskCompletedSound = "taskCompletedSound"
@@ -508,6 +509,23 @@ final class AppSettingsStore: ObservableObject {
             } else {
                 defaults.removeObject(forKey: Keys.temporarilyMuteNotificationsUntil)
             }
+        }
+    }
+
+    /// When enabled, Ping Island holds a system idle-sleep assertion while any
+    /// tracked session is working (with hysteresis / battery floor). Controlled
+    /// from the opened-island shortcut next to temporary mute.
+    @Published var preventSleepWhileWorkingEnabled: Bool {
+        didSet {
+            guard !isBootstrapping else { return }
+            defaults.set(
+                preventSleepWhileWorkingEnabled,
+                forKey: Keys.preventSleepWhileWorkingEnabled
+            )
+            recordTelemetrySettingChange(
+                key: Keys.preventSleepWhileWorkingEnabled,
+                value: preventSleepWhileWorkingEnabled.description
+            )
         }
     }
 
@@ -1425,6 +1443,12 @@ final class AppSettingsStore: ObservableObject {
             default: 0.9
         ))
         _temporarilyMuteNotificationsUntil = Published(initialValue: activeTemporaryMute)
+        _preventSleepWhileWorkingEnabled = Published(initialValue: Self.boolValue(
+            from: defaults,
+            key: Keys.preventSleepWhileWorkingEnabled,
+            exists: persistedKeys.contains(Keys.preventSleepWhileWorkingEnabled),
+            default: false
+        ))
         _processingStartSound = Published(initialValue: NotificationSound(
             rawValue: defaults.string(forKey: Keys.processingStartSound) ?? ""
         ) ?? .tink)
@@ -1745,6 +1769,11 @@ enum AppSettings {
 
     static var areReminderNotificationsSuppressed: Bool {
         shared.areNotificationsMutedTemporarily
+    }
+
+    static var preventSleepWhileWorkingEnabled: Bool {
+        get { shared.preventSleepWhileWorkingEnabled }
+        set { shared.preventSleepWhileWorkingEnabled = newValue }
     }
 
     static var soundThemeMode: SoundThemeMode {
