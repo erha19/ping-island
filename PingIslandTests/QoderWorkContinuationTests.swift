@@ -29,7 +29,7 @@ final class QoderWorkContinuationTests: XCTestCase {
         XCTAssertTrue(session?.intervention?.awaitsExternalContinuation ?? false)
         XCTAssertFalse(session?.intervention?.supportsInlineResponse ?? true)
         XCTAssertEqual(session?.intervention?.submittedAnswers["topic"], ["A 方案"])
-        XCTAssertEqual(session?.intervention?.externalContinuationStatusMessage, "Qoder 有问题需要介入处理，可通过上方按钮快速打开并继续操作")
+        XCTAssertEqual(session?.intervention?.externalContinuationStatusMessage, "Qoder IDE 有问题需要介入处理，可通过上方按钮快速打开并继续操作")
 
         await store.process(.sessionArchived(sessionId: sessionId))
     }
