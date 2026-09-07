@@ -29,6 +29,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if !launchConfiguration.isRunningTests {
             UpdateManager.shared.start()
             UserIdleAutoProtection.shared.start()
+            // Holds a system power assertion while agent sessions are working.
+            // Off by default; see KeepAwakeMode.
+            _ = KeepAwakeController.shared
             Task {
                 await SoundPackCatalog.shared.refreshInBackground()
             }
