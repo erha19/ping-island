@@ -3679,7 +3679,7 @@ actor SessionStore {
         let initialProject = restoredAssociation?.projectName
             ?? Self.projectName(for: initialCwd, fallback: name ?? "Codex")
         let existingLastActivity = sessions[resolvedSessionId]?.lastActivity
-        let resolvedClientInfo = normalizedCodexClientInfo(
+        let resolvedClientInfo = Self.normalizedCodexClientInfo(
             restored: restoredAssociation?.clientInfo,
             incoming: clientInfo,
             sessionId: sessionId
@@ -3867,7 +3867,7 @@ actor SessionStore {
         let projectName = restoredAssociation?.projectName
             ?? Self.projectName(for: fallbackCwd, fallback: fallbackName)
         let existingLastActivity = sessions[resolvedSessionId]?.lastActivity
-        let resolvedClientInfo = normalizedCodexClientInfo(
+        let resolvedClientInfo = Self.normalizedCodexClientInfo(
             restored: restoredAssociation?.clientInfo,
             incoming: snapshot.clientInfo,
             sessionId: snapshot.threadId
@@ -4616,7 +4616,7 @@ actor SessionStore {
             cwd: candidateCwd,
             projectName: Self.projectName(for: candidateCwd, fallback: "Codex"),
             provider: .codex,
-            clientInfo: normalizedCodexClientInfo(
+            clientInfo: Self.normalizedCodexClientInfo(
                 restored: nil,
                 incoming: event.clientInfo,
                 sessionId: event.sessionId
@@ -4677,7 +4677,7 @@ actor SessionStore {
             let trimmed = cwd?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             return trimmed.isEmpty ? "/" : trimmed
         }()
-        let candidateClientInfo = normalizedCodexClientInfo(
+        let candidateClientInfo = Self.normalizedCodexClientInfo(
             restored: nil,
             incoming: clientInfo,
             sessionId: incomingSessionId
@@ -4872,12 +4872,12 @@ actor SessionStore {
         }
     }
 
-    private func normalizedCodexClientInfo(
+    nonisolated static func normalizedCodexClientInfo(
         restored: SessionClientInfo?,
         incoming: SessionClientInfo?,
         sessionId: String
     ) -> SessionClientInfo {
-        let normalizedRestored = restored?.normalizedForCodexRouting(sessionId: sessionId)
+        var normalizedRestored = restored?.normalizedForCodexRouting(sessionId: sessionId)
         let normalizedIncoming = incoming?.normalizedForCodexRouting(sessionId: sessionId)
         let base: SessionClientInfo
 
@@ -4885,6 +4885,43 @@ actor SessionStore {
             base = SessionClientInfo.codexCLI()
         } else {
             base = SessionClientInfo.codexApp(threadId: sessionId)
+        }
+
+        let restoredHostBundleIdentifier = (
+            normalizedRestored?.terminalBundleIdentifier
+                ?? normalizedRestored?.bundleIdentifier
+        )?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let restoredHasQoderIDEContamination = normalizedRestored?.kind == .codexApp
+            && (
+                restoredHostBundleIdentifier == "com.qoder.ide"
+                    || restoredHostBundleIdentifier == "com.aliyun.lingma.ide"
+            )
+        let incomingReplacesTerminalRouting = restoredHasQoderIDEContamination
+            && normalizedIncoming?.kind == .codexApp
+            && normalizedIncoming?.terminalBundleIdentifier == nil
+            && normalizedIncoming?.terminalProgram == nil
+            && normalizedIncoming?.terminalSessionIdentifier == nil
+            && normalizedIncoming?.iTermSessionIdentifier == nil
+            && normalizedIncoming?.tmuxSessionIdentifier == nil
+            && normalizedIncoming?.tmuxPaneIdentifier == nil
+        if incomingReplacesTerminalRouting, var repaired = normalizedRestored {
+            repaired.kind = .codexApp
+            repaired.profileID = "codex-app"
+            repaired.name = "Codex App"
+            repaired.bundleIdentifier = "com.openai.codex"
+            repaired.launchURL = SessionClientInfo.appLaunchURL(
+                bundleIdentifier: "com.openai.codex",
+                sessionId: sessionId
+            )
+            repaired.origin = "desktop"
+            repaired.originator = nil
+            repaired.terminalBundleIdentifier = nil
+            repaired.terminalProgram = nil
+            repaired.terminalSessionIdentifier = nil
+            repaired.iTermSessionIdentifier = nil
+            repaired.tmuxSessionIdentifier = nil
+            repaired.tmuxPaneIdentifier = nil
+            normalizedRestored = repaired
         }
 
         return base

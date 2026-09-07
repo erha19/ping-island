@@ -619,15 +619,11 @@ actor CodexRolloutParser {
 
         let resolvedClientInfo = baseClientInfo.merged(with: SessionClientInfo(
             kind: prefersCLIContext ? .codexCLI : .codexApp,
-            name: originator ?? normalizedClientInfo?.name,
-            bundleIdentifier: prefersCLIContext ? normalizedClientInfo?.bundleIdentifier : (normalizedClientInfo?.bundleIdentifier ?? "com.openai.codex"),
+            name: baseClientInfo.name,
+            bundleIdentifier: prefersCLIContext ? normalizedClientInfo?.bundleIdentifier : baseClientInfo.bundleIdentifier,
             launchURL: prefersCLIContext
                 ? normalizedClientInfo?.launchURL
-                : (normalizedClientInfo?.launchURL ?? SessionClientInfo.appLaunchURL(
-                    bundleIdentifier: normalizedClientInfo?.bundleIdentifier ?? "com.openai.codex",
-                    sessionId: resolvedThreadId,
-                    workspacePath: resolvedCwd
-                )),
+                : baseClientInfo.launchURL,
             origin: origin ?? normalizedClientInfo?.origin ?? (prefersCLIContext ? "cli" : "desktop"),
             originator: originator ?? normalizedClientInfo?.originator,
             threadSource: threadSource ?? normalizedClientInfo?.threadSource,

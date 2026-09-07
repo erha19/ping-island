@@ -284,8 +284,6 @@ actor CodexAppServerMonitor {
     private var threadApprovalModes: [String: String] = [:]  // threadId → approvalMode
     private var rolloutRecoveryCache = CodexRolloutRecoveryCache()
     private var recoveredNotLoadedThreadVersions: [String: String] = [:]
-    private var resolvedClientBundleIdentifier: String?
-    private var resolvedClientName: String?
     private var lastThreadDiagnostics: [ThreadDiagnosticsSnapshot] = []
 
     private nonisolated static let rolloutRecoveryWindow: TimeInterval = 30 * 60
@@ -309,9 +307,6 @@ actor CodexAppServerMonitor {
             logger.notice("Codex CLI not found; app-server monitor disabled")
             return
         }
-
-        resolvedClientBundleIdentifier = Self.bundleIdentifier(forCodexExecutable: executable)
-        resolvedClientName = Self.clientName(forCodexExecutable: executable)
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
@@ -1865,23 +1860,13 @@ actor CodexAppServerMonitor {
         }
 
         let defaultInfo = inferredKind == .codexApp
-            ? SessionClientInfo(
-                kind: .codexApp,
-                profileID: "codex-app",
-                name: resolvedClientName ?? "Codex App",
-                bundleIdentifier: resolvedClientBundleIdentifier ?? "com.openai.codex",
-                launchURL: SessionClientInfo.appLaunchURL(
-                    bundleIdentifier: resolvedClientBundleIdentifier ?? "com.openai.codex",
-                    sessionId: threadId
-                ),
-                origin: "desktop"
-            )
-            : SessionClientInfo(kind: .codexCLI, profileID: "codex-cli", name: "Codex CLI")
+            ? SessionClientInfo.codexApp(threadId: threadId)
+            : SessionClientInfo.codexCLI()
 
         return defaultInfo.merged(with: SessionClientInfo(
             kind: inferredKind,
             profileID: inferredKind == .codexApp ? "codex-app" : "codex-cli",
-            name: originator ?? defaultInfo.name,
+            name: defaultInfo.name,
             bundleIdentifier: inferredKind == .codexApp ? defaultInfo.bundleIdentifier : nil,
             launchURL: inferredKind == .codexApp ? defaultInfo.launchURL : nil,
             origin: resolvedOrigin,
@@ -2027,8 +2012,9 @@ actor CodexAppServerMonitor {
     }
 
     private func resolveCodexExecutable() -> String? {
-        let bundled = "/Applications/Codex.app/Contents/Resources/codex"
-        if FileManager.default.isExecutableFile(atPath: bundled) {
+        if let bundled = Self.codexExecutable(
+            inApplicationAt: URL(fileURLWithPath: "/Applications/Codex.app", isDirectory: true)
+        ) {
             return bundled
         }
 
@@ -2047,12 +2033,8 @@ actor CodexAppServerMonitor {
             for case let fileURL as URL in enumerator {
                 if fileURL.pathExtension == "app" {
                     enumerator.skipDescendants()
-                    let candidate = fileURL
-                        .appendingPathComponent("Contents", isDirectory: true)
-                        .appendingPathComponent("Resources", isDirectory: true)
-                        .appendingPathComponent("codex")
-                    if FileManager.default.isExecutableFile(atPath: candidate.path) {
-                        return candidate.path
+                    if let candidate = Self.codexExecutable(inApplicationAt: fileURL) {
+                        return candidate
                     }
                 }
             }
@@ -2065,25 +2047,28 @@ actor CodexAppServerMonitor {
             .first(where: FileManager.default.isExecutableFile(atPath:))
     }
 
-    private static func bundleIdentifier(forCodexExecutable executable: String) -> String? {
-        let executableURL = URL(fileURLWithPath: executable)
-        guard executableURL.path.contains(".app/") else { return nil }
-        let appPath = executableURL.path.components(separatedBy: "/Contents/").first ?? ""
-        guard !appPath.isEmpty else { return nil }
-        return Bundle(url: URL(fileURLWithPath: appPath))?.bundleIdentifier
-    }
-
-    private static func clientName(forCodexExecutable executable: String) -> String? {
-        let executableURL = URL(fileURLWithPath: executable)
-        guard executableURL.path.contains(".app/") else { return nil }
-        let appPath = executableURL.path.components(separatedBy: "/Contents/").first ?? ""
-        guard !appPath.isEmpty,
-              let bundle = Bundle(url: URL(fileURLWithPath: appPath)) else {
+    nonisolated static func codexExecutable(inApplicationAt applicationURL: URL) -> String? {
+        let infoURL = applicationURL
+            .appendingPathComponent("Contents", isDirectory: true)
+            .appendingPathComponent("Info.plist")
+        guard let infoData = try? Data(contentsOf: infoURL),
+              let info = try? PropertyListSerialization.propertyList(
+                from: infoData,
+                options: [],
+                format: nil
+              ) as? [String: Any],
+              let bundleIdentifier = info["CFBundleIdentifier"] as? String,
+              bundleIdentifier.caseInsensitiveCompare("com.openai.codex") == .orderedSame else {
             return nil
         }
 
-        return bundle.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String
-            ?? bundle.object(forInfoDictionaryKey: "CFBundleName") as? String
+        let executableURL = applicationURL
+            .appendingPathComponent("Contents", isDirectory: true)
+            .appendingPathComponent("Resources", isDirectory: true)
+            .appendingPathComponent("codex")
+        return FileManager.default.isExecutableFile(atPath: executableURL.path)
+            ? executableURL.path
+            : nil
     }
 
 }

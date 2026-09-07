@@ -76,6 +76,41 @@ final class CodexRolloutParserTests: XCTestCase {
         XCTAssertNil(clientInfo.launchURL)
     }
 
+    func testRolloutOriginatorDoesNotReplaceCodexClientIdentity() async throws {
+        let tempDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDirectory) }
+
+        let threadId = "codex-thread-with-ide-originator"
+        let rolloutURL = tempDirectory.appendingPathComponent("rollout-\(threadId).jsonl")
+        let rollout = """
+        {"timestamp":"2026-09-07T10:00:00Z","type":"session_meta","payload":{"id":"\(threadId)","cwd":"/tmp/project","originator":"Qoder CN IDE","source":"desktop"}}
+        {"timestamp":"2026-09-07T10:00:01Z","type":"event_msg","payload":{"type":"user_message","message":"inspect the project"}}
+        """
+        try rollout.write(to: rolloutURL, atomically: true, encoding: .utf8)
+
+        let snapshot = await CodexRolloutParser.shared.parseThread(
+            threadId: threadId,
+            fallbackCwd: "/tmp/project",
+            clientInfo: SessionClientInfo(
+                kind: .codexApp,
+                profileID: "codex-app",
+                name: "Qoder CN IDE",
+                bundleIdentifier: "com.aliyun.lingma.ide",
+                sessionFilePath: rolloutURL.path
+            )
+        )
+
+        let clientInfo = try XCTUnwrap(snapshot?.clientInfo)
+        XCTAssertEqual(clientInfo.profileID, "codex-app")
+        XCTAssertEqual(clientInfo.name, "Codex App")
+        XCTAssertEqual(clientInfo.bundleIdentifier, "com.openai.codex")
+        XCTAssertEqual(clientInfo.originator, "Qoder CN IDE")
+        XCTAssertNil(clientInfo.ideHostProfile)
+        XCTAssertNil(clientInfo.ideHostBadgeLabel(for: .codex))
+    }
+
     func testRolloutParserInfersPendingMCPApprovalFromUnresolvedToolCall() async throws {
         let tempDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)

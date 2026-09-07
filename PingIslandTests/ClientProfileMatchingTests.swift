@@ -92,4 +92,53 @@ final class ClientProfileMatchingTests: XCTestCase {
             XCTAssertNil(normalized.ideHostBadgeLabel(for: provider), expectedLabel)
         }
     }
+
+    func testCanonicalCodexSnapshotClearsRestoredQoderTerminalRouting() {
+        let sessionId = "codex-thread-with-stale-host"
+        let repaired = SessionStore.normalizedCodexClientInfo(
+            restored: SessionClientInfo(
+                kind: .codexApp,
+                profileID: "codex-app",
+                name: "Codex App",
+                bundleIdentifier: "com.openai.codex",
+                originator: "Qoder CN IDE",
+                terminalBundleIdentifier: "com.aliyun.lingma.ide",
+                terminalProgram: "vscode"
+            ),
+            incoming: .codexApp(threadId: sessionId),
+            sessionId: sessionId
+        )
+
+        XCTAssertEqual(repaired.profileID, "codex-app")
+        XCTAssertEqual(repaired.name, "Codex App")
+        XCTAssertEqual(repaired.bundleIdentifier, "com.openai.codex")
+        XCTAssertNil(repaired.originator)
+        XCTAssertNil(repaired.terminalBundleIdentifier)
+        XCTAssertNil(repaired.ideHostProfile)
+        XCTAssertNil(repaired.ideHostBadgeLabel(for: .codex))
+    }
+
+    func testCodexAppServerSnapshotPreservesUnrelatedRestoredTerminalRouting() {
+        let sessionId = "codex-cli-thread"
+        let restored = SessionClientInfo(
+            kind: .codexCLI,
+            profileID: "codex-cli",
+            name: "Codex CLI",
+            origin: "cli",
+            originator: "Ghostty",
+            terminalBundleIdentifier: "com.mitchellh.ghostty",
+            terminalProgram: "ghostty",
+            terminalSessionIdentifier: "terminal-session"
+        )
+        let merged = SessionStore.normalizedCodexClientInfo(
+            restored: restored,
+            incoming: .codexApp(threadId: sessionId),
+            sessionId: sessionId
+        )
+
+        XCTAssertEqual(merged.kind, .codexApp)
+        XCTAssertEqual(merged.profileID, "codex-app")
+        XCTAssertEqual(merged.terminalBundleIdentifier, "com.mitchellh.ghostty")
+        XCTAssertEqual(merged.terminalSessionIdentifier, "terminal-session")
+    }
 }

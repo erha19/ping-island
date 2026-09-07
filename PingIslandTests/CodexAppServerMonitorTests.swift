@@ -3,6 +3,30 @@ import XCTest
 @testable import Ping_Island
 
 final class CodexAppServerMonitorTests: XCTestCase {
+    private func makeTemporaryApplication(bundleIdentifier: String) throws -> URL {
+        let applicationURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+            .appendingPathComponent("TestHost.app", isDirectory: true)
+        let contentsURL = applicationURL.appendingPathComponent("Contents", isDirectory: true)
+        let resourcesURL = contentsURL.appendingPathComponent("Resources", isDirectory: true)
+        try FileManager.default.createDirectory(at: resourcesURL, withIntermediateDirectories: true)
+
+        let infoData = try PropertyListSerialization.data(
+            fromPropertyList: ["CFBundleIdentifier": bundleIdentifier],
+            format: .xml,
+            options: 0
+        )
+        try infoData.write(to: contentsURL.appendingPathComponent("Info.plist"))
+
+        let executableURL = resourcesURL.appendingPathComponent("codex")
+        try Data("#!/bin/sh\n".utf8).write(to: executableURL)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755],
+            ofItemAtPath: executableURL.path
+        )
+        return applicationURL
+    }
+
     private func makeTemporaryRollout(
         named name: String,
         modificationDate: Date
@@ -29,6 +53,25 @@ final class CodexAppServerMonitorTests: XCTestCase {
 
         XCTAssertEqual(task.maximumMessageSize, CodexAppServerMonitor.maximumWebSocketMessageSize)
         XCTAssertGreaterThan(task.maximumMessageSize, 1_214_839)
+    }
+
+    func testBundledCodexDiscoveryRejectsExecutableFromUnrelatedIDE() throws {
+        let qoderApplication = try makeTemporaryApplication(bundleIdentifier: "com.aliyun.lingma.ide")
+        let codexApplication = try makeTemporaryApplication(bundleIdentifier: "com.openai.codex")
+        defer {
+            try? FileManager.default.removeItem(at: qoderApplication.deletingLastPathComponent())
+            try? FileManager.default.removeItem(at: codexApplication.deletingLastPathComponent())
+        }
+
+        XCTAssertNil(CodexAppServerMonitor.codexExecutable(inApplicationAt: qoderApplication))
+        XCTAssertEqual(
+            CodexAppServerMonitor.codexExecutable(inApplicationAt: codexApplication),
+            codexApplication
+                .appendingPathComponent("Contents", isDirectory: true)
+                .appendingPathComponent("Resources", isDirectory: true)
+                .appendingPathComponent("codex")
+                .path
+        )
     }
 
     func testWebSocketPayloadsEncodeAsTextJSON() throws {
