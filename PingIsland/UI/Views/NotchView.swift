@@ -267,13 +267,26 @@ struct NotchView: View {
     }
 
     private var keepAwakeButtonHelpText: String {
-        if !settings.preventSleepWhileWorkingEnabled {
+        switch keepAwakeController.decision {
+        case .release(.disabled):
             return AppLocalization.string("会话工作时防止 Mac 休眠")
+        case .release(.batteryFloor(let percent)):
+            return AppLocalization.format("防休眠已暂停：电量 %d%%。点击关闭。", percent)
+        case .release(.nothingWorking):
+            return AppLocalization.string("自动防休眠已开启，等待会话工作。点击关闭。")
+        case .hold(let reason):
+            guard keepAwakeController.isHoldingAssertion else {
+                return AppLocalization.string("防休眠尚未生效。点击关闭。")
+            }
+            switch reason {
+            case .sessionWorking:
+                return AppLocalization.string("正在防止休眠（会话工作中）。点击关闭。合盖休眠无法阻止。")
+            case .graceWindow:
+                return AppLocalization.string("正在防止休眠（任务结束后的 120 秒宽限期）。点击关闭。")
+            case .alwaysOn:
+                return AppLocalization.string("始终防止休眠，低电量时仍保持开启。点击关闭。")
+            }
         }
-        if keepAwakeController.isHoldingAssertion {
-            return AppLocalization.string("正在防止休眠（会话工作中）。点击关闭。合盖休眠无法阻止。")
-        }
-        return AppLocalization.string("已开启：会话工作时防止休眠。点击关闭。合盖休眠无法阻止。")
     }
 
     private var closedMascotStatus: MascotStatus {
@@ -834,7 +847,7 @@ struct NotchView: View {
             Spacer(minLength: 0)
 
             NotchKeepAwakeButton(
-                isActive: settings.preventSleepWhileWorkingEnabled,
+                isActive: settings.keepAwakeMode != .off,
                 isHoldingAssertion: keepAwakeController.isHoldingAssertion,
                 action: togglePreventSleepWhileWorking,
                 helpText: keepAwakeButtonHelpText
@@ -848,7 +861,9 @@ struct NotchView: View {
 
             NotchSettingsButton(
                 hasUnseenUpdate: updateManager.hasUnseenUpdate,
-                action: openSettingsWindow
+                action: openSettingsWindow,
+                helpText: AppLocalization.string(updateManager.hasUnseenUpdate
+                    ? "打开设置（有可用更新）" : "打开设置")
             )
         }
         .padding(.trailing, 12)
@@ -1521,7 +1536,7 @@ struct NotchView: View {
     }
 
     private func togglePreventSleepWhileWorking() {
-        settings.preventSleepWhileWorkingEnabled.toggle()
+        settings.keepAwakeMode = settings.keepAwakeMode == .off ? .auto : .off
     }
 
 }
@@ -1598,6 +1613,7 @@ private struct StraightDetachHintArrow: Shape {
 private struct NotchSettingsButton: View {
     let hasUnseenUpdate: Bool
     let action: () -> Void
+    let helpText: String
 
     @State private var isHovering = false
 
@@ -1627,7 +1643,8 @@ private struct NotchSettingsButton: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help("设置")
+        .help(Text(helpText))
+        .accessibilityLabel(Text(helpText))
         .onHover { hovering in
             withAnimation(.easeOut(duration: 0.12)) {
                 isHovering = hovering
@@ -1661,8 +1678,8 @@ private struct NotchKeepAwakeButton: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help(helpText)
-        .accessibilityLabel(helpText)
+        .help(Text(helpText))
+        .accessibilityLabel(Text(helpText))
         .onHover { hovering in
             withAnimation(.easeOut(duration: 0.12)) {
                 isHovering = hovering
@@ -1723,8 +1740,8 @@ private struct NotchTemporaryMuteButton: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help(helpText)
-        .accessibilityLabel(helpText)
+        .help(Text(helpText))
+        .accessibilityLabel(Text(helpText))
         .onHover { hovering in
             withAnimation(.easeOut(duration: 0.12)) {
                 isHovering = hovering

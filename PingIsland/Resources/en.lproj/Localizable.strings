@@ -801,3 +801,19 @@
 "街机厅深色底与高对比霓虹色。" = "Deep arcade tones with high-contrast neon accents.";
 "Game Boy Olive" = "Game Boy Olive";
 "经典掌机的四阶橄榄绿色调。" = "The classic four-step olive handheld palette.";
+
+// Unified keep-awake modes
+"防止休眠" = "Prevent sleep";
+"防休眠模式" = "Keep-awake mode";
+"自动（会话工作时）" = "Auto (while working)";
+"始终开启" = "Always on";
+"自动模式在会话工作时防止休眠，结束后保留 120 秒；电池电量不高于 35% 时暂停。始终开启会忽略低电量保护。显示器仍可正常休眠，无法阻止合盖休眠。" = "Auto prevents sleep while sessions work and for 120 seconds afterward; it pauses on battery at 35% or below. Always on ignores the battery limit. The display can sleep normally; closing the lid still puts the Mac to sleep.";
+"防休眠已暂停：电量 %d%%。点击关闭。" = "Keep-awake paused: battery at %d%%. Click to turn off.";
+"自动防休眠已开启，等待会话工作。点击关闭。" = "Auto keep-awake enabled, waiting for a working session. Click to turn off.";
+"防休眠尚未生效。点击关闭。" = "Keep-awake is not active yet. Click to turn off.";
+"正在防止休眠（任务结束后的 120 秒宽限期）。点击关闭。" = "Preventing sleep during the 120-second grace period after work ends. Click to turn off.";
+"始终防止休眠，低电量时仍保持开启。点击关闭。" = "Always preventing sleep, even on low battery. Click to turn off.";
+
+// Notch header tooltips
+"打开设置" = "Open settings";
+"打开设置（有可用更新）" = "Open settings (an update is available)";

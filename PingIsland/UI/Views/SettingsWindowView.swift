@@ -3299,6 +3299,20 @@ private struct SettingsPanelContentView: View {
                 }
             }
 
+            SettingsSectionCard(title: "防止休眠") {
+                SettingsInfoLine(
+                    title: "防休眠模式",
+                    subtitle: "自动模式在会话工作时防止休眠，结束后保留 120 秒；电池电量不高于 35% 时暂停。始终开启会忽略低电量保护。显示器仍可正常休眠，无法阻止合盖休眠。"
+                ) {
+                    Picker("防休眠模式", selection: $settings.keepAwakeMode) {
+                        Text("关闭").tag(KeepAwakeMode.off)
+                        Text("自动（会话工作时）").tag(KeepAwakeMode.auto)
+                        Text("始终开启").tag(KeepAwakeMode.always)
+                    }
+                    .settingsMenuPicker(width: 168)
+                }
+            }
+
             SettingsSectionCard(title: "行为") {
                 SettingsToggleLine(
                     title: "全屏时隐藏",

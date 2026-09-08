@@ -392,12 +392,11 @@ final class AppSettingsStore: ObservableObject {
 
     private enum Keys {
         static let appLanguage = "appLanguage"
-        static let keepAwakeMode = "keepAwakeMode"
         static let notificationSound = "notificationSound"
         static let soundEnabled = "soundEnabled"
         static let soundVolume = "soundVolume"
         static let temporarilyMuteNotificationsUntil = "temporarilyMuteNotificationsUntil"
-        static let preventSleepWhileWorkingEnabled = "preventSleepWhileWorkingEnabled"
+        static let keepAwakeMode = "keepAwakeMode"
         static let processingStartSound = "processingStartSound"
         static let attentionRequiredSound = "attentionRequiredSound"
         static let taskCompletedSound = "taskCompletedSound"
@@ -470,14 +469,6 @@ final class AppSettingsStore: ObservableObject {
         }
     }
 
-    /// Whether the machine should be kept awake while agent sessions are working.
-    @Published var keepAwakeMode: KeepAwakeMode {
-        didSet {
-            guard !isBootstrapping else { return }
-            defaults.set(keepAwakeMode.rawValue, forKey: Keys.keepAwakeMode)
-        }
-    }
-
     @Published var notificationSound: NotificationSound {
         didSet {
             guard !isBootstrapping else { return }
@@ -521,20 +512,12 @@ final class AppSettingsStore: ObservableObject {
         }
     }
 
-    /// When enabled, Ping Island holds a system idle-sleep assertion while any
-    /// tracked session is working (with hysteresis / battery floor). Controlled
-    /// from the opened-island shortcut next to temporary mute.
-    @Published var preventSleepWhileWorkingEnabled: Bool {
+    /// One policy shared by the notch shortcut and settings, with a single assertion owner.
+    @Published var keepAwakeMode: KeepAwakeMode {
         didSet {
             guard !isBootstrapping else { return }
-            defaults.set(
-                preventSleepWhileWorkingEnabled,
-                forKey: Keys.preventSleepWhileWorkingEnabled
-            )
-            recordTelemetrySettingChange(
-                key: Keys.preventSleepWhileWorkingEnabled,
-                value: preventSleepWhileWorkingEnabled.description
-            )
+            defaults.set(keepAwakeMode.rawValue, forKey: Keys.keepAwakeMode)
+            recordTelemetrySettingChange(key: Keys.keepAwakeMode, value: keepAwakeMode.rawValue)
         }
     }
 
@@ -1380,7 +1363,6 @@ final class AppSettingsStore: ObservableObject {
         self.subagentVisibilityModeStorage = .visible
         let persistedKeys = Set(defaults.dictionaryRepresentation().keys)
         let appLanguageRaw = defaults.string(forKey: Keys.appLanguage)
-        let keepAwakeModeRaw = defaults.string(forKey: Keys.keepAwakeMode)
         let legacyNotificationSound = NotificationSound(
             rawValue: defaults.string(forKey: Keys.notificationSound) ?? ""
         ) ?? .blow
@@ -1439,7 +1421,6 @@ final class AppSettingsStore: ObservableObject {
             : nil
 
         _appLanguage = Published(initialValue: AppLanguage(rawValue: appLanguageRaw ?? "") ?? .system)
-        _keepAwakeMode = Published(initialValue: KeepAwakeMode(rawValue: keepAwakeModeRaw ?? "") ?? .off)
         _notificationSound = Published(initialValue: legacyNotificationSound)
         _soundEnabled = Published(initialValue: Self.boolValue(
             from: defaults,
@@ -1454,12 +1435,14 @@ final class AppSettingsStore: ObservableObject {
             default: 0.9
         ))
         _temporarilyMuteNotificationsUntil = Published(initialValue: activeTemporaryMute)
-        _preventSleepWhileWorkingEnabled = Published(initialValue: Self.boolValue(
-            from: defaults,
-            key: Keys.preventSleepWhileWorkingEnabled,
-            exists: persistedKeys.contains(Keys.preventSleepWhileWorkingEnabled),
-            default: false
-        ))
+        let savedKeepAwakeMode = defaults.string(forKey: Keys.keepAwakeMode)
+        let initialKeepAwakeMode = savedKeepAwakeMode.map { KeepAwakeMode(rawValue: $0) ?? .off }
+            ?? (defaults.bool(forKey: "preventSleepWhileWorkingEnabled") ? .auto : .off)
+        _keepAwakeMode = Published(initialValue: initialKeepAwakeMode)
+        if savedKeepAwakeMode == nil {
+            defaults.set(initialKeepAwakeMode.rawValue, forKey: Keys.keepAwakeMode)
+        }
+        defaults.removeObject(forKey: "preventSleepWhileWorkingEnabled")
         _processingStartSound = Published(initialValue: NotificationSound(
             rawValue: defaults.string(forKey: Keys.processingStartSound) ?? ""
         ) ?? .tink)
@@ -1782,9 +1765,9 @@ enum AppSettings {
         shared.areNotificationsMutedTemporarily
     }
 
-    static var preventSleepWhileWorkingEnabled: Bool {
-        get { shared.preventSleepWhileWorkingEnabled }
-        set { shared.preventSleepWhileWorkingEnabled = newValue }
+    static var keepAwakeMode: KeepAwakeMode {
+        get { shared.keepAwakeMode }
+        set { shared.keepAwakeMode = newValue }
     }
 
     static var soundThemeMode: SoundThemeMode {

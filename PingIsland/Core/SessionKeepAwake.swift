@@ -21,45 +21,6 @@ struct SessionKeepAwakeBatteryStatus: Equatable, Sendable {
     var percentage: Double?
 }
 
-enum SessionKeepAwakeEvaluator {
-    /// Grace window that covers model-generation gaps between tool calls so
-    /// the assertion does not flap acquire/release mid-turn.
-    nonisolated static let releaseGraceDuration: TimeInterval = 120
-
-    /// Release below this charge while on battery so keep-awake cannot flatten
-    /// an unattended machine. AC power ignores the floor.
-    nonisolated static let batteryFloorPercentage: Double = 35
-
-    struct Inputs: Equatable, Sendable {
-        var featureEnabled: Bool
-        var hasWorkingSession: Bool
-        var lastWorkingAt: Date?
-        var now: Date
-        var battery: SessionKeepAwakeBatteryStatus
-    }
-
-    /// Pure decision for whether the system idle-sleep assertion should be held.
-    nonisolated static func shouldHoldAssertion(_ inputs: Inputs) -> Bool {
-        guard inputs.featureEnabled else { return false }
-
-        if inputs.battery.isOnBattery,
-           let percentage = inputs.battery.percentage,
-           percentage < batteryFloorPercentage {
-            return false
-        }
-
-        if inputs.hasWorkingSession {
-            return true
-        }
-
-        guard let lastWorkingAt = inputs.lastWorkingAt else {
-            return false
-        }
-
-        return inputs.now.timeIntervalSince(lastWorkingAt) < releaseGraceDuration
-    }
-}
-
 enum SystemBatteryStatusReader {
     nonisolated static func current() -> SessionKeepAwakeBatteryStatus {
         guard let snapshotInfo = IOPSCopyPowerSourcesInfo()?.takeRetainedValue() else {
@@ -162,19 +123,20 @@ final class IOPMSystemSleepAssertionClient: SessionKeepAwakeAssertionClient {
 final class SessionKeepAwakeController: ObservableObject {
     static let shared = SessionKeepAwakeController()
 
-    nonisolated static let assertionReason = "Ping Island: agent session working"
+    nonisolated static let assertionReason = "Ping Island: keep awake"
 
     @Published private(set) var isHoldingAssertion = false
-    @Published private(set) var isFeatureEnabled = false
+    @Published private(set) var decision: KeepAwakeDecision = .release(.disabled)
 
     private let settings: AppSettingsStore
     private let assertionClient: SessionKeepAwakeAssertionClient
     private let batteryStatusProvider: () -> SessionKeepAwakeBatteryStatus
     private let nowProvider: () -> Date
+    private let powerPollInterval: TimeInterval
     private var cancellables = Set<AnyCancellable>()
     private var graceTimer: Timer?
     private var batteryTimer: Timer?
-    private var lastWorkingAt: Date?
+    private var stoppedWorkingAt: Date?
     private var cachedHasWorkingSession = false
     private var started = false
 
@@ -183,29 +145,30 @@ final class SessionKeepAwakeController: ObservableObject {
         assertionClient: SessionKeepAwakeAssertionClient = IOPMSystemSleepAssertionClient(),
         batteryStatusProvider: @escaping () -> SessionKeepAwakeBatteryStatus = SystemBatteryStatusReader.current,
         nowProvider: @escaping () -> Date = Date.init,
-        observeSessions: Bool = true
+        observeSessions: Bool = true,
+        powerPollInterval: TimeInterval = 30
     ) {
         self.settings = settings
         self.assertionClient = assertionClient
         self.batteryStatusProvider = batteryStatusProvider
         self.nowProvider = nowProvider
-        self.isFeatureEnabled = settings.preventSleepWhileWorkingEnabled
+        self.powerPollInterval = powerPollInterval
 
         if observeSessions {
             SessionStore.shared.sessionsPublisher
+                .map { sessions in sessions.contains { $0.phase.isActive } }
+                .removeDuplicates()
                 .receive(on: DispatchQueue.main)
-                .sink { [weak self] sessions in
-                    self?.handleSessions(sessions)
+                .sink { [weak self] hasWorkingSession in
+                    self?.handleWorkingSessionChange(hasWorkingSession)
                 }
                 .store(in: &cancellables)
         }
 
-        settings.$preventSleepWhileWorkingEnabled
+        settings.$keepAwakeMode
+            .removeDuplicates()
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] enabled in
-                self?.isFeatureEnabled = enabled
-                self?.reevaluate(hasWorkingSession: self?.cachedHasWorkingSession ?? false)
-            }
+            .sink { [weak self] _ in self?.refreshPowerState() }
             .store(in: &cancellables)
     }
 
@@ -216,113 +179,94 @@ final class SessionKeepAwakeController: ObservableObject {
 
     func start() {
         started = true
-        isFeatureEnabled = settings.preventSleepWhileWorkingEnabled
-        reevaluate(hasWorkingSession: cachedHasWorkingSession)
-        refreshBatteryPolling()
+        refreshPowerState()
     }
 
     func stop() {
         started = false
-        graceTimer?.invalidate()
-        graceTimer = nil
-        batteryTimer?.invalidate()
-        batteryTimer = nil
-        applyAssertion(shouldHold: false)
+        stoppedWorkingAt = nil
+        refreshPowerState()
     }
 
-    private func handleSessions(_ sessions: [SessionState]) {
-        let hasWorkingSession = sessions.contains { $0.phase.isActive }
-        cachedHasWorkingSession = hasWorkingSession
-        reevaluate(hasWorkingSession: hasWorkingSession)
-    }
-
-    private func reevaluate(hasWorkingSession: Bool) {
-        let now = nowProvider()
-        if hasWorkingSession {
-            lastWorkingAt = now
+    /// Aggregate all sessions before applying the transition: one idle session
+    /// must not release the assertion while another is still working.
+    func handleWorkingSessionChange(_ hasWorkingSession: Bool) {
+        if cachedHasWorkingSession && !hasWorkingSession {
+            stoppedWorkingAt = nowProvider()
+        } else if hasWorkingSession {
+            stoppedWorkingAt = nil
         }
+        cachedHasWorkingSession = hasWorkingSession
+        refreshPowerState()
+    }
 
-        let shouldHold = SessionKeepAwakeEvaluator.shouldHoldAssertion(
-            .init(
-                featureEnabled: settings.preventSleepWhileWorkingEnabled && started,
-                hasWorkingSession: hasWorkingSession,
-                lastWorkingAt: lastWorkingAt,
-                now: now,
-                battery: batteryStatusProvider()
-            )
-        )
+    /// Used by both settings updates and the power timer. Power changes must not
+    /// depend on SessionStore publishing another snapshot during a long tool call.
+    func refreshPowerState() {
+        let now = nowProvider()
+        let mode: KeepAwakeMode = started ? settings.keepAwakeMode : .off
+        let battery = mode == .auto
+            ? batteryStatusProvider()
+            : SessionKeepAwakeBatteryStatus(isOnBattery: false, percentage: nil)
+        let elapsed = stoppedWorkingAt.map { now.timeIntervalSince($0) }
+        let next = KeepAwakePolicy.decide(for: KeepAwakeInputs(
+            mode: mode,
+            hasWorkingSession: cachedHasWorkingSession,
+            secondsSinceWorking: elapsed,
+            isOnBattery: battery.isOnBattery,
+            batteryPercent: battery.percentage.map { Int($0) }
+        ))
 
-        applyAssertion(shouldHold: shouldHold)
-        scheduleGraceTimerIfNeeded(hasWorkingSession: hasWorkingSession, now: now)
-        refreshBatteryPolling()
+        if next != decision { decision = next }
+        applyAssertion(shouldHold: next.isHolding)
+
+        let remaining = elapsed.map { KeepAwakePolicy.defaultGraceSeconds - $0 } ?? 0
+        let isInGrace = !cachedHasWorkingSession && remaining > 0
+        updateGraceTimer(remaining: mode == .auto && isInGrace ? remaining : nil)
+        // Keep checking even after low battery releases the assertion, so AC power
+        // or a recovered charge can restore protection without a new session event.
+        let needsPowerPolling = mode == .auto && (cachedHasWorkingSession || isInGrace)
+        let needsAcquireRetry = next.isHolding && !isHoldingAssertion
+        updateBatteryTimer(needed: needsPowerPolling || needsAcquireRetry)
     }
 
     private func applyAssertion(shouldHold: Bool) {
+        let wasHolding = assertionClient.isHolding
         if shouldHold {
-            let wasHolding = assertionClient.isHolding
-            let acquired = assertionClient.acquire(reason: Self.assertionReason)
-            isHoldingAssertion = acquired && assertionClient.isHolding
-            if acquired && !wasHolding {
-                IslandTrace.emit(
-                    "keep_awake",
-                    "state=hold feature=\(settings.preventSleepWhileWorkingEnabled)"
-                )
-            }
-            return
+            _ = assertionClient.acquire(reason: Self.assertionReason)
+        } else {
+            assertionClient.release()
         }
-
-        guard assertionClient.isHolding || isHoldingAssertion else {
-            isHoldingAssertion = false
-            return
+        let held = assertionClient.isHolding
+        if isHoldingAssertion != held { isHoldingAssertion = held }
+        if wasHolding != held {
+            IslandTrace.emit("keep_awake", "state=\(held ? "hold" : "release") mode=\(settings.keepAwakeMode.rawValue)")
         }
-
-        assertionClient.release()
-        isHoldingAssertion = false
-        IslandTrace.emit(
-            "keep_awake",
-            "state=release feature=\(settings.preventSleepWhileWorkingEnabled)"
-        )
     }
 
-    private func scheduleGraceTimerIfNeeded(hasWorkingSession: Bool, now: Date) {
+    private func updateGraceTimer(remaining: TimeInterval?) {
         graceTimer?.invalidate()
         graceTimer = nil
-
-        guard settings.preventSleepWhileWorkingEnabled,
-              started,
-              !hasWorkingSession,
-              let lastWorkingAt else {
-            return
-        }
-
-        let remaining = SessionKeepAwakeEvaluator.releaseGraceDuration - now.timeIntervalSince(lastWorkingAt)
-        guard remaining > 0 else { return }
+        guard let remaining else { return }
 
         let timer = Timer(timeInterval: remaining, repeats: false) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                self.reevaluate(hasWorkingSession: self.cachedHasWorkingSession)
-            }
+            Task { @MainActor [weak self] in self?.refreshPowerState() }
         }
         graceTimer = timer
         RunLoop.main.add(timer, forMode: .common)
     }
 
-    private func refreshBatteryPolling() {
-        let shouldPoll = started && settings.preventSleepWhileWorkingEnabled && isHoldingAssertion
-        if shouldPoll {
-            guard batteryTimer == nil else { return }
-            let timer = Timer(timeInterval: 30, repeats: true) { [weak self] _ in
-                Task { @MainActor [weak self] in
-                    guard let self else { return }
-                    self.reevaluate(hasWorkingSession: self.cachedHasWorkingSession)
-                }
-            }
-            batteryTimer = timer
-            RunLoop.main.add(timer, forMode: .common)
-        } else {
+    private func updateBatteryTimer(needed: Bool) {
+        guard needed else {
             batteryTimer?.invalidate()
             batteryTimer = nil
+            return
         }
+        guard batteryTimer == nil else { return }
+        let timer = Timer(timeInterval: powerPollInterval, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.refreshPowerState() }
+        }
+        batteryTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
     }
 }

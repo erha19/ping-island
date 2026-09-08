@@ -30,9 +30,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             UpdateManager.shared.start()
             UserIdleAutoProtection.shared.start()
             SessionKeepAwakeController.shared.start()
-            // Holds a system power assertion while agent sessions are working.
-            // Off by default; see KeepAwakeMode.
-            _ = KeepAwakeController.shared
             Task {
                 await SoundPackCatalog.shared.refreshInBackground()
             }

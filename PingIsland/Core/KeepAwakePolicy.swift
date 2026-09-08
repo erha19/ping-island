@@ -35,7 +35,7 @@ struct KeepAwakeInputs: Equatable, Sendable {
     /// for it burns battery until the user returns and wakes the machine anyway.
     var hasWorkingSession: Bool = false
 
-    /// Seconds since a session was last observed working; nil when never observed.
+    /// Seconds since the last working session stopped; nil before that transition.
     var secondsSinceWorking: TimeInterval?
 
     var isOnBattery: Bool = false
@@ -69,17 +69,17 @@ enum KeepAwakeDecision: Equatable, Sendable {
 }
 
 enum KeepAwakePolicy {
-    /// Keep holding for this long after the last working observation.
+    /// Keep holding for this long after the last working session stops.
     ///
     /// Without a grace window the assertion flaps once per model-generation gap: the
     /// pause between one tool finishing and the next starting is indistinguishable
     /// from idle. Measured on an equivalent Windows implementation, no grace window
     /// produced 4 acquire/release cycles in 3 minutes.
-    static let defaultGraceSeconds: TimeInterval = 120
+    nonisolated static let defaultGraceSeconds: TimeInterval = 120
 
-    /// Below this charge, `.auto` stops holding. An unattended overnight run can
+    /// At or below this charge, `.auto` stops holding. An unattended overnight run can
     /// otherwise flatten the machine, losing the work the assertion was protecting.
-    static let defaultBatteryFloorPercent = 35
+    nonisolated static let defaultBatteryFloorPercent = 35
 
     nonisolated static func decide(
         for inputs: KeepAwakeInputs,

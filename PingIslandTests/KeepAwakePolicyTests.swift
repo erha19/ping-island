@@ -2,158 +2,46 @@ import XCTest
 @testable import Ping_Island
 
 final class KeepAwakePolicyTests: XCTestCase {
-
-    // MARK: - Modes
-
-    func testOffNeverHolds() {
-        var inputs = KeepAwakeInputs.empty
-        inputs.mode = .off
-        inputs.hasWorkingSession = true
-        XCTAssertEqual(KeepAwakePolicy.decide(for: inputs), .release(.disabled))
+    func testOffOverridesWorkingSessions() {
+        XCTAssertEqual(KeepAwakePolicy.decide(for: .init(mode: .off, hasWorkingSession: true)), .release(.disabled))
     }
 
-    func testAlwaysHoldsEvenWithNoSessions() {
-        var inputs = KeepAwakeInputs.empty
-        inputs.mode = .always
-        XCTAssertEqual(KeepAwakePolicy.decide(for: inputs), .hold(.alwaysOn))
+    func testAlwaysOverridesIdleAndBatteryFloor() {
+        XCTAssertEqual(KeepAwakePolicy.decide(for: .init(mode: .always, isOnBattery: true, batteryPercent: 1)), .hold(.alwaysOn))
     }
 
-    func testAlwaysIgnoresBatteryFloorBecauseItIsAnExplicitChoice() {
-        var inputs = KeepAwakeInputs.empty
-        inputs.mode = .always
-        inputs.isOnBattery = true
-        inputs.batteryPercent = 5
-        XCTAssertEqual(KeepAwakePolicy.decide(for: inputs), .hold(.alwaysOn))
+    func testAutoHoldsForWorkingSession() {
+        XCTAssertEqual(KeepAwakePolicy.decide(for: .init(mode: .auto, hasWorkingSession: true)), .hold(.sessionWorking))
     }
 
-    // MARK: - Auto
-
-    func testAutoHoldsWhileASessionIsWorking() {
-        var inputs = KeepAwakeInputs.empty
-        inputs.mode = .auto
-        inputs.hasWorkingSession = true
-        XCTAssertEqual(KeepAwakePolicy.decide(for: inputs), .hold(.sessionWorking))
+    func testIdleWithoutPriorWorkDoesNotHold() {
+        XCTAssertEqual(KeepAwakePolicy.decide(for: .init(mode: .auto)), .release(.nothingWorking))
     }
 
-    func testAutoReleasesWhenNothingIsWorking() {
-        var inputs = KeepAwakeInputs.empty
-        inputs.mode = .auto
-        inputs.hasWorkingSession = false
-        XCTAssertEqual(KeepAwakePolicy.decide(for: inputs), .release(.nothingWorking))
+    func testGraceExpiresAtExactBoundary() {
+        XCTAssertEqual(KeepAwakePolicy.decide(for: .init(mode: .auto, secondsSinceWorking: 119)), .hold(.graceWindow))
+        XCTAssertEqual(KeepAwakePolicy.decide(for: .init(mode: .auto, secondsSinceWorking: 120)), .release(.nothingWorking))
     }
 
-    /// A session waiting on the user is not working. It will not resume by itself, so
-    /// holding the machine awake for it only costs battery. `hasWorkingSession` is
-    /// driven by `phase.isActive` (.processing/.compacting) rather than by
-    /// `EnergyMode.active`, which also covers `hasAttentionSession`.
-    func testAutoReleasesForSessionsWaitingOnTheUser() {
-        var inputs = KeepAwakeInputs.empty
-        inputs.mode = .auto
-        inputs.hasWorkingSession = false
-        inputs.secondsSinceWorking = KeepAwakePolicy.defaultGraceSeconds + 1
-        XCTAssertEqual(KeepAwakePolicy.decide(for: inputs), .release(.nothingWorking))
+    func testBatteryFloorIncludesExactBoundary() {
+        for percent in [0, 34, 35] {
+            XCTAssertEqual(KeepAwakePolicy.decide(for: .init(mode: .auto, hasWorkingSession: true, isOnBattery: true, batteryPercent: percent)), .release(.batteryFloor(percent: percent)))
+        }
+        XCTAssertEqual(KeepAwakePolicy.decide(for: .init(mode: .auto, hasWorkingSession: true, isOnBattery: true, batteryPercent: 36)), .hold(.sessionWorking))
     }
 
-    // MARK: - Grace window
-
-    func testGraceWindowHoldsThroughShortGenerationGaps() {
-        var inputs = KeepAwakeInputs.empty
-        inputs.mode = .auto
-        inputs.hasWorkingSession = false
-        inputs.secondsSinceWorking = 30
-        XCTAssertEqual(KeepAwakePolicy.decide(for: inputs), .hold(.graceWindow))
+    func testBatteryFloorAlsoOverridesGrace() {
+        XCTAssertEqual(KeepAwakePolicy.decide(for: .init(mode: .auto, secondsSinceWorking: 1, isOnBattery: true, batteryPercent: 20)), .release(.batteryFloor(percent: 20)))
     }
 
-    func testGraceWindowExpires() {
-        var inputs = KeepAwakeInputs.empty
-        inputs.mode = .auto
-        inputs.hasWorkingSession = false
-        inputs.secondsSinceWorking = KeepAwakePolicy.defaultGraceSeconds
-        XCTAssertEqual(KeepAwakePolicy.decide(for: inputs), .release(.nothingWorking))
+    func testACAndUnknownChargeDoNotSuppressWorkingSession() {
+        XCTAssertEqual(KeepAwakePolicy.decide(for: .init(mode: .auto, hasWorkingSession: true, isOnBattery: false, batteryPercent: 10)), .hold(.sessionWorking))
+        XCTAssertEqual(KeepAwakePolicy.decide(for: .init(mode: .auto, hasWorkingSession: true, isOnBattery: true, batteryPercent: nil)), .hold(.sessionWorking))
     }
 
-    func testGraceWindowIsConfigurable() {
-        var inputs = KeepAwakeInputs.empty
-        inputs.mode = .auto
-        inputs.secondsSinceWorking = 30
-        XCTAssertEqual(
-            KeepAwakePolicy.decide(for: inputs, graceSeconds: 10),
-            .release(.nothingWorking)
-        )
-    }
-
-    func testNeverHavingWorkedDoesNotHold() {
-        var inputs = KeepAwakeInputs.empty
-        inputs.mode = .auto
-        inputs.secondsSinceWorking = nil
-        XCTAssertEqual(KeepAwakePolicy.decide(for: inputs), .release(.nothingWorking))
-    }
-
-    // MARK: - Battery floor
-
-    func testAutoReleasesAtOrBelowTheBatteryFloorEvenWhileWorking() {
-        var inputs = KeepAwakeInputs.empty
-        inputs.mode = .auto
-        inputs.hasWorkingSession = true
-        inputs.isOnBattery = true
-        inputs.batteryPercent = KeepAwakePolicy.defaultBatteryFloorPercent
-        XCTAssertEqual(
-            KeepAwakePolicy.decide(for: inputs),
-            .release(.batteryFloor(percent: KeepAwakePolicy.defaultBatteryFloorPercent))
-        )
-    }
-
-    func testAutoHoldsAboveTheBatteryFloor() {
-        var inputs = KeepAwakeInputs.empty
-        inputs.mode = .auto
-        inputs.hasWorkingSession = true
-        inputs.isOnBattery = true
-        inputs.batteryPercent = KeepAwakePolicy.defaultBatteryFloorPercent + 1
-        XCTAssertEqual(KeepAwakePolicy.decide(for: inputs), .hold(.sessionWorking))
-    }
-
-    func testBatteryFloorDoesNotApplyOnACPower() {
-        var inputs = KeepAwakeInputs.empty
-        inputs.mode = .auto
-        inputs.hasWorkingSession = true
-        inputs.isOnBattery = false
-        inputs.batteryPercent = 5
-        XCTAssertEqual(KeepAwakePolicy.decide(for: inputs), .hold(.sessionWorking))
-    }
-
-    func testUnknownBatteryPercentDoesNotBlockHolding() {
-        var inputs = KeepAwakeInputs.empty
-        inputs.mode = .auto
-        inputs.hasWorkingSession = true
-        inputs.isOnBattery = true
-        inputs.batteryPercent = nil
-        XCTAssertEqual(KeepAwakePolicy.decide(for: inputs), .hold(.sessionWorking))
-    }
-
-    // MARK: - Assertion wrapper
-
-    func testSleepAssertionHoldAndReleaseAreIdempotent() {
-        let assertion = SleepAssertion(name: "PingIsland unit test")
-        XCTAssertFalse(assertion.isHeld)
-
-        XCTAssertTrue(assertion.hold())
-        XCTAssertTrue(assertion.isHeld)
-        XCTAssertTrue(assertion.hold(), "holding twice should be a no-op")
-        XCTAssertTrue(assertion.isHeld)
-
-        XCTAssertTrue(assertion.release())
-        XCTAssertFalse(assertion.isHeld)
-        XCTAssertTrue(assertion.release(), "releasing twice should be a no-op")
-        XCTAssertFalse(assertion.isHeld)
-    }
-
-    func testSleepAssertionFollowsDecision() {
-        let assertion = SleepAssertion(name: "PingIsland unit test")
-
-        assertion.apply(.hold(.sessionWorking))
-        XCTAssertTrue(assertion.isHeld)
-
-        assertion.apply(.release(.nothingWorking))
-        XCTAssertFalse(assertion.isHeld)
+    func testDefaultThresholds() {
+        XCTAssertEqual(KeepAwakePolicy.defaultGraceSeconds, 120)
+        XCTAssertEqual(KeepAwakePolicy.defaultBatteryFloorPercent, 35)
+        XCTAssertEqual(KeepAwakeInputs.empty.mode, .off)
     }
 }
