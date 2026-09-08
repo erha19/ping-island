@@ -29,6 +29,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if !launchConfiguration.isRunningTests {
             UpdateManager.shared.start()
             UserIdleAutoProtection.shared.start()
+            SessionKeepAwakeController.shared.start()
             Task {
                 await SoundPackCatalog.shared.refreshInBackground()
             }
@@ -202,6 +203,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         screenObserver = nil
         UserIdleAutoProtection.shared.stop()
+        SessionKeepAwakeController.shared.stop()
         if !launchConfiguration.isRunningTests {
             startupSessionMonitor.stopMonitoring()
         }

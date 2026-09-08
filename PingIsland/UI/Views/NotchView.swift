@@ -54,6 +54,7 @@ struct NotchView: View {
     @StateObject private var activityCoordinator = NotchActivityCoordinator.shared
     @ObservedObject private var updateManager = UpdateManager.shared
     @ObservedObject private var settings = AppSettings.shared
+    @ObservedObject private var keepAwakeController = SessionKeepAwakeController.shared
     @ObservedObject private var screenSelector = ScreenSelector.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var previousPendingIds: Set<String> = []
@@ -263,6 +264,16 @@ struct NotchView: View {
             "通知与声音已静音至 %@，点击恢复",
             formattedTemporaryMuteTime(mutedUntil)
         )
+    }
+
+    private var keepAwakeButtonHelpText: String {
+        if !settings.preventSleepWhileWorkingEnabled {
+            return AppLocalization.string("会话工作时防止 Mac 休眠")
+        }
+        if keepAwakeController.isHoldingAssertion {
+            return AppLocalization.string("正在防止休眠（会话工作中）。点击关闭。合盖休眠无法阻止。")
+        }
+        return AppLocalization.string("已开启：会话工作时防止休眠。点击关闭。合盖休眠无法阻止。")
     }
 
     private var closedMascotStatus: MascotStatus {
@@ -821,6 +832,13 @@ struct NotchView: View {
             }
 
             Spacer(minLength: 0)
+
+            NotchKeepAwakeButton(
+                isActive: settings.preventSleepWhileWorkingEnabled,
+                isHoldingAssertion: keepAwakeController.isHoldingAssertion,
+                action: togglePreventSleepWhileWorking,
+                helpText: keepAwakeButtonHelpText
+            )
 
             NotchTemporaryMuteButton(
                 isActive: areReminderNotificationsSuppressed,
@@ -1502,6 +1520,10 @@ struct NotchView: View {
         }
     }
 
+    private func togglePreventSleepWhileWorking() {
+        settings.preventSleepWhileWorkingEnabled.toggle()
+    }
+
 }
 
 private struct NotchDetachmentHintView: View {
@@ -1611,6 +1633,69 @@ private struct NotchSettingsButton: View {
                 isHovering = hovering
             }
         }
+    }
+}
+
+private struct NotchKeepAwakeButton: View {
+    let isActive: Bool
+    let isHoldingAssertion: Bool
+    let action: () -> Void
+    let helpText: String
+
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: iconName)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(iconForegroundStyle)
+                .frame(width: 28, height: 28)
+                .background(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(backgroundFillColor)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(borderColor, lineWidth: isActive ? 1 : 0)
+                )
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(helpText)
+        .accessibilityLabel(helpText)
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: 0.12)) {
+                isHovering = hovering
+            }
+        }
+    }
+
+    private var iconName: String {
+        if isActive {
+            return isHoldingAssertion ? "cup.and.saucer.fill" : "cup.and.saucer"
+        }
+        return "cup.and.saucer"
+    }
+
+    private var iconForegroundStyle: AnyShapeStyle {
+        if isActive {
+            return AnyShapeStyle(Color.white.opacity(isHovering ? 0.92 : 0.78))
+        }
+        return AnyShapeStyle(isHovering ? Color.black : Color.white.opacity(0.92))
+    }
+
+    private var backgroundFillColor: Color {
+        if isActive {
+            return Color.white.opacity(isHovering ? 0.18 : 0.12)
+        }
+        return isHovering ? Color.white.opacity(0.95) : Color.white.opacity(0.1)
+    }
+
+    private var borderColor: Color {
+        if isActive {
+            return Color.white.opacity(isHovering ? 0.28 : 0.16)
+        }
+        return .clear
     }
 }
 
