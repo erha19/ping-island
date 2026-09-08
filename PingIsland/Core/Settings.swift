@@ -392,6 +392,7 @@ final class AppSettingsStore: ObservableObject {
 
     private enum Keys {
         static let appLanguage = "appLanguage"
+        static let keepAwakeMode = "keepAwakeMode"
         static let notificationSound = "notificationSound"
         static let soundEnabled = "soundEnabled"
         static let soundVolume = "soundVolume"
@@ -466,6 +467,14 @@ final class AppSettingsStore: ObservableObject {
         didSet {
             guard !isBootstrapping else { return }
             defaults.set(appLanguage.rawValue, forKey: Keys.appLanguage)
+        }
+    }
+
+    /// Whether the machine should be kept awake while agent sessions are working.
+    @Published var keepAwakeMode: KeepAwakeMode {
+        didSet {
+            guard !isBootstrapping else { return }
+            defaults.set(keepAwakeMode.rawValue, forKey: Keys.keepAwakeMode)
         }
     }
 
@@ -1371,6 +1380,7 @@ final class AppSettingsStore: ObservableObject {
         self.subagentVisibilityModeStorage = .visible
         let persistedKeys = Set(defaults.dictionaryRepresentation().keys)
         let appLanguageRaw = defaults.string(forKey: Keys.appLanguage)
+        let keepAwakeModeRaw = defaults.string(forKey: Keys.keepAwakeMode)
         let legacyNotificationSound = NotificationSound(
             rawValue: defaults.string(forKey: Keys.notificationSound) ?? ""
         ) ?? .blow
@@ -1429,6 +1439,7 @@ final class AppSettingsStore: ObservableObject {
             : nil
 
         _appLanguage = Published(initialValue: AppLanguage(rawValue: appLanguageRaw ?? "") ?? .system)
+        _keepAwakeMode = Published(initialValue: KeepAwakeMode(rawValue: keepAwakeModeRaw ?? "") ?? .off)
         _notificationSound = Published(initialValue: legacyNotificationSound)
         _soundEnabled = Published(initialValue: Self.boolValue(
             from: defaults,
