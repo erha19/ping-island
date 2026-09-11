@@ -3,6 +3,88 @@ import XCTest
 @testable import Ping_Island
 
 final class CodexRolloutParserTests: XCTestCase {
+    func testAuxiliaryRolloutsUseSourceOrOpeningPromptAcrossIncrementalReads() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let titlePrompt = "You are a helpful assistant. You will be presented with a user prompt, and your job is to provide a short title for a task that will be created from that prompt. The title you generate will be shown in the UI to represent the prompt."
+        let cases: [(source: String?, prompt: String, hidden: Bool)] = [
+            ("thread_title", "An inherited user request", true),
+            ("thread_title_reconsideration", "An inherited user request", true),
+            ("ambient_suggestions", "An inherited user request", true),
+            (nil, titlePrompt, true),
+            ("user", "Review this template: " + titlePrompt, false),
+            ("ambient_suggestion_task", "Return project suggestions as JSON", false),
+            ("user", #"{"title":"Project title","suggestions":[],"exclude":[]}"#, false)
+        ]
+
+        for (index, testCase) in cases.enumerated() {
+            let threadID = "auxiliary-rollout-\(index)"
+            let url = directory.appendingPathComponent("rollout-\(threadID).jsonl")
+            var metadata: [String: Any] = [
+                "id": threadID, "cwd": "/tmp/project", "source": "vscode", "originator": "Codex Desktop"
+            ]
+            metadata["thread_source"] = testCase.source
+            let records: [[String: Any]] = [
+                ["type": "session_meta", "payload": metadata],
+                ["type": "event_msg", "payload": ["type": "user_message", "message": testCase.prompt]],
+                ["type": "event_msg", "payload": ["type": "agent_message", "phase": "final", "message": #"{"title":"Project title","suggestions":[],"exclude":[]}"#]]
+            ]
+            let lines = try records.map { String(decoding: try JSONSerialization.data(withJSONObject: $0), as: UTF8.self) }
+            try (lines.joined(separator: "\n") + "\n").write(to: url, atomically: true, encoding: .utf8)
+            let client = SessionClientInfo(kind: .codexApp, sessionFilePath: url.path)
+            let initial = await CodexRolloutParser.shared.parseThread(threadId: threadID, fallbackCwd: "/tmp/project", clientInfo: client)
+            XCTAssertEqual(initial == nil, testCase.hidden, "case \(index)")
+
+            let handle = try FileHandle(forWritingTo: url)
+            try handle.seekToEnd()
+            try handle.write(contentsOf: Data("{\"type\":\"event_msg\",\"payload\":{\"type\":\"agent_message\",\"message\":\"Done\"}}\n".utf8))
+            try handle.close()
+            let appended = await CodexRolloutParser.shared.parseThread(threadId: threadID, fallbackCwd: "/tmp/project", clientInfo: client)
+            XCTAssertEqual(appended == nil, testCase.hidden, "appended case \(index)")
+            let metrics = await CodexRolloutParser.shared.debugReadMetrics(forFilePath: url.path)
+            XCTAssertEqual(metrics?.fullRebuildCount, 1)
+            XCTAssertEqual(metrics?.incrementalReadCount, 1)
+        }
+    }
+
+    func testDesktopRolloutRepairsCachedQoderIdentityUnlessActualTerminalEvidenceExists() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        for terminalTTY in [nil, "/dev/ttys321"] as [String?] {
+            let threadID = UUID().uuidString
+            let url = directory.appendingPathComponent("rollout-\(threadID).jsonl")
+            let rollout = """
+            {"type":"session_meta","payload":{"id":"\(threadID)","cwd":"/tmp/project","originator":"Codex Desktop","source":"vscode","thread_source":"user"}}
+            {"type":"event_msg","payload":{"type":"user_message","message":"Fix session routing"}}
+            """
+            try rollout.write(to: url, atomically: true, encoding: .utf8)
+            let snapshot = await CodexRolloutParser.shared.parseThread(
+                threadId: threadID, fallbackCwd: "/tmp/project",
+                clientInfo: SessionClientInfo(
+                    kind: .codexCLI, profileID: "codex-cli", name: "Codex CLI",
+                    bundleIdentifier: "com.aliyun.lingma.ide", launchURL: "qoder-cn://open?session=\(threadID)",
+                    origin: "cli", originator: "Qoder CN", threadSource: "cli", sessionFilePath: url.path,
+                    terminalBundleIdentifier: "com.aliyun.lingma.ide", terminalTTY: terminalTTY
+                )
+            )
+            let client = try XCTUnwrap(snapshot?.clientInfo)
+            XCTAssertEqual(client.threadSource, "user")
+            if terminalTTY == nil {
+                XCTAssertEqual(client.kind, .codexApp)
+                XCTAssertEqual(client.bundleIdentifier, "com.openai.codex")
+                XCTAssertNil(client.terminalBundleIdentifier)
+                XCTAssertFalse(client.launchURL?.hasPrefix("qoder-cn:") == true)
+            } else {
+                XCTAssertEqual(client.kind, .codexCLI)
+                XCTAssertEqual(client.terminalBundleIdentifier, "com.aliyun.lingma.ide")
+                XCTAssertEqual(client.terminalTTY, terminalTTY)
+            }
+        }
+    }
+
     func testRolloutParserIgnoresCodexMemoryMaintenanceThread() async throws {
         let tempDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -31,6 +113,44 @@ final class CodexRolloutParserTests: XCTestCase {
         )
 
         XCTAssertNil(snapshot)
+    }
+
+    func testRolloutParserIgnoresAmbientSuggestionsAcrossIncrementalAppends() async throws {
+        let tempDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDirectory) }
+
+        let threadId = "019f098a-04fe-7402-9a6d-21108754533d"
+        let rolloutURL = tempDirectory.appendingPathComponent("rollout-\(threadId).jsonl")
+        let rollout = """
+        {"timestamp":"2026-06-27T14:44:29Z","type":"session_meta","payload":{"id":"\(threadId)","cwd":"/tmp/project","title":"project","originator":"Codex Desktop","source":"desktop"}}
+        {"timestamp":"2026-06-27T14:44:30Z","type":"event_msg","payload":{"type":"user_message","message":"# Overview\\n\\nGenerate 0 to 3 hyperpersonalized suggestions for what this user can do with Codex in this local project: /tmp/project"}}
+        {"timestamp":"2026-06-27T14:46:25Z","type":"event_msg","payload":{"type":"agent_message","phase":"final","message":"No suggestions available."}}
+        """
+        try rollout.write(to: rolloutURL, atomically: true, encoding: .utf8)
+
+        let snapshot = await CodexRolloutParser.shared.parseThread(
+            threadId: threadId,
+            fallbackCwd: "/tmp/project",
+            clientInfo: SessionClientInfo(
+                kind: .codexApp,
+                profileID: "codex-app",
+                name: "Codex App",
+                bundleIdentifier: "com.openai.codex",
+                sessionFilePath: rolloutURL.path
+            )
+        )
+
+        XCTAssertNil(snapshot)
+        let handle = try FileHandle(forWritingTo: rolloutURL)
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data("\n{\"type\":\"event_msg\",\"payload\":{\"type\":\"agent_message\",\"message\":\"Done\"}}\n".utf8))
+        try handle.close()
+        let appended = await CodexRolloutParser.shared.parseThread(
+            threadId: threadId, fallbackCwd: "/tmp/project",
+            clientInfo: SessionClientInfo(kind: .codexApp, sessionFilePath: rolloutURL.path))
+        XCTAssertNil(appended)
     }
 
     func testRolloutParserPreservesTerminalHostedCodexCLIContext() async throws {

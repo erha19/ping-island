@@ -118,6 +118,132 @@ final class ClientProfileMatchingTests: XCTestCase {
         XCTAssertNil(repaired.ideHostBadgeLabel(for: .codex))
     }
 
+    func testCanonicalDesktopRepairsContaminatedCLIAndKeepsUnrelatedMetadata() throws {
+        let sessionId = "polluted-codex-desktop"
+        for host in ["com.qoder.ide", "com.aliyun.lingma.ide"] {
+            let cached = SessionClientInfo(
+                kind: .codexCLI, profileID: "codex-cli", name: "Codex CLI",
+                launchURL: "qoder-cn://file/tmp/project", origin: "cli", originator: "Qoder CN IDE",
+                threadSource: "vscode", transport: "ssh-remote", remoteHost: "devbox",
+                sessionFilePath: "/tmp/codex/rollout.jsonl", terminalBundleIdentifier: host
+            )
+            let repaired = SessionStore.normalizedCodexClientInfo(
+                restored: cached, incoming: .codexApp(threadId: sessionId), sessionId: sessionId
+            )
+            XCTAssertEqual(repaired.kind, .codexApp)
+            XCTAssertEqual(repaired.profileID, "codex-app")
+            XCTAssertEqual(repaired.name, "Codex App")
+            XCTAssertEqual(repaired.launchURL, "codex://threads/\(sessionId)")
+            XCTAssertNil(repaired.terminalBundleIdentifier)
+            XCTAssertNil(repaired.originator)
+            XCTAssertNil(repaired.ideHostProfile)
+            XCTAssertEqual(repaired.remoteHost, "devbox")
+            XCTAssertEqual(repaired.sessionFilePath, "/tmp/codex/rollout.jsonl")
+            let reloaded = try JSONDecoder().decode(SessionClientInfo.self, from: JSONEncoder().encode(repaired))
+            XCTAssertEqual(reloaded.normalizedForCodexRouting(sessionId: sessionId), repaired)
+        }
+    }
+
+    func testConfirmedDesktopCacheRepairsBareQoderHostWithoutNewSnapshot() {
+        let cached = SessionClientInfo(
+            kind: .codexCLI, profileID: "codex-cli", name: "Codex CLI",
+            launchURL: "qoder-cn://file/tmp/project", origin: "desktop", originator: "Codex Desktop",
+            threadSource: "vscode", terminalBundleIdentifier: "com.aliyun.lingma.ide"
+        )
+        let repaired = cached.normalizedForCodexRouting(sessionId: "desktop-cache")
+        XCTAssertEqual(repaired.kind, .codexApp)
+        XCTAssertEqual(repaired.profileID, "codex-app")
+        XCTAssertEqual(repaired.bundleIdentifier, "com.openai.codex")
+        XCTAssertEqual(repaired.launchURL, "codex://threads/desktop-cache")
+        XCTAssertNil(repaired.terminalBundleIdentifier)
+        XCTAssertNil(repaired.ideHostProfile)
+
+        let association = PersistedSessionAssociation(session: SessionState(
+            sessionId: "desktop-cache", cwd: "/tmp/project", projectName: "project", provider: .codex,
+            clientInfo: cached, sessionName: "User work"
+        ))
+        let migrated = SessionAssociationStore.normalizedAssociations(["codex:desktop-cache": association])
+        XCTAssertEqual(migrated["codex:desktop-cache"]?.clientInfo, repaired)
+        XCTAssertEqual(migrated["codex:desktop-cache"]?.sessionName, "User work")
+        XCTAssertEqual(SessionAssociationStore.normalizedAssociations(migrated), migrated)
+    }
+
+    func testExplicitRoutingReplacementClearsFieldsWhilePartialUpdatesKeepThem() throws {
+        let cached = SessionClientInfo(
+            kind: .codexCLI, launchURL: "qoder-cn://file/tmp/project", originator: "Qoder CN IDE",
+            sessionFilePath: "/tmp/rollout.jsonl", terminalBundleIdentifier: "com.aliyun.lingma.ide",
+            terminalProgram: "vscode", terminalTTY: "/dev/ttys004", terminalSessionIdentifier: "terminal-1"
+        )
+        let desktop = SessionClientInfo.codexApp(threadId: "repair")
+        XCTAssertEqual(cached.merged(with: desktop).terminalSessionIdentifier, "terminal-1")
+        let replaced = cached.merged(with: desktop, replacingRouting: true)
+        XCTAssertNil(replaced.originator)
+        XCTAssertNil(replaced.terminalBundleIdentifier)
+        XCTAssertNil(replaced.terminalProgram)
+        XCTAssertNil(replaced.terminalTTY)
+        XCTAssertNil(replaced.terminalSessionIdentifier)
+        XCTAssertEqual(replaced.sessionFilePath, "/tmp/rollout.jsonl")
+        let legacy = try JSONDecoder().decode(SessionClientInfo.self, from: Data(#"{"kind":"codexCLI","origin":"cli"}"#.utf8))
+        XCTAssertNil(legacy.terminalTTY)
+    }
+
+    func testDesktopSnapshotPreservesRealQoderCLIRouting() {
+        let cached = SessionClientInfo(
+            kind: .codexCLI, profileID: "codex-cli", name: "Codex CLI",
+            launchURL: "qoder-cn://file/tmp/project", origin: "cli",
+            terminalBundleIdentifier: "com.aliyun.lingma.ide", terminalProgram: "vscode",
+            terminalSessionIdentifier: "terminal-123"
+        )
+        let merged = SessionStore.normalizedCodexClientInfo(
+            restored: cached, incoming: .codexApp(threadId: "real-cli"), sessionId: "real-cli"
+        )
+        XCTAssertEqual(merged.kind, .codexCLI)
+        XCTAssertEqual(merged.profileID, "codex-cli")
+        XCTAssertEqual(merged.terminalSessionIdentifier, "terminal-123")
+        XCTAssertEqual(merged.ideHostBadgeLabel(for: .codex), "Qoder CN IDE 终端")
+        XCTAssertFalse(merged.prefersAppNavigation)
+    }
+
+    func testLegacyAppClassificationWithRealTerminalEvidenceMigratesToCLI() {
+        for host in ["com.aliyun.lingma.ide", "com.mitchellh.ghostty"] {
+            let cached = SessionClientInfo(
+                kind: .codexApp, profileID: "codex-app", name: "Codex App",
+                bundleIdentifier: "com.openai.codex", launchURL: "codex://threads/legacy-cli", origin: "desktop",
+                terminalBundleIdentifier: host, terminalTTY: "/dev/ttys007", terminalSessionIdentifier: "terminal-7"
+            )
+            let migrated = cached.normalizedForCodexRouting(sessionId: "legacy-cli")
+            XCTAssertEqual(migrated.kind, .codexCLI)
+            XCTAssertEqual(migrated.profileID, "codex-cli")
+            XCTAssertNil(migrated.bundleIdentifier)
+            XCTAssertNil(migrated.launchURL)
+            let updated = SessionStore.normalizedCodexClientInfo(
+                restored: migrated, incoming: .codexApp(threadId: "legacy-cli"), sessionId: "legacy-cli"
+            )
+            XCTAssertEqual(updated.kind, .codexCLI)
+            XCTAssertEqual(updated.terminalTTY, "/dev/ttys007")
+            XCTAssertEqual(updated.terminalBundleIdentifier, host)
+        }
+    }
+
+    func testDesktopOriginatorRepairsInferredCLIOriginButPreservesExplicitCLISource() {
+        var cached = SessionClientInfo(
+            kind: .codexCLI, profileID: "codex-cli", name: "Codex CLI",
+            launchURL: "qoder-cn://file/tmp/project", origin: "cli", originator: "Codex Desktop",
+            threadSource: "vscode", terminalBundleIdentifier: "com.aliyun.lingma.ide"
+        )
+        let repaired = cached.normalizedForCodexRouting(sessionId: "desktop-originator")
+        XCTAssertEqual(repaired.kind, .codexApp)
+        XCTAssertEqual(repaired.origin, "desktop")
+        XCTAssertNil(repaired.terminalBundleIdentifier)
+        XCTAssertEqual(repaired.launchURL, "codex://threads/desktop-originator")
+
+        cached.threadSource = "cli"
+        XCTAssertEqual(cached.normalizedForCodexRouting().kind, .codexCLI)
+        cached.threadSource = "vscode"
+        cached.terminalTTY = "/dev/ttys003"
+        XCTAssertEqual(cached.normalizedForCodexRouting().kind, .codexCLI)
+    }
+
     func testCodexAppServerSnapshotPreservesUnrelatedRestoredTerminalRouting() {
         let sessionId = "codex-cli-thread"
         let restored = SessionClientInfo(
@@ -136,8 +262,8 @@ final class ClientProfileMatchingTests: XCTestCase {
             sessionId: sessionId
         )
 
-        XCTAssertEqual(merged.kind, .codexApp)
-        XCTAssertEqual(merged.profileID, "codex-app")
+        XCTAssertEqual(merged.kind, .codexCLI)
+        XCTAssertEqual(merged.profileID, "codex-cli")
         XCTAssertEqual(merged.terminalBundleIdentifier, "com.mitchellh.ghostty")
         XCTAssertEqual(merged.terminalSessionIdentifier, "terminal-session")
     }

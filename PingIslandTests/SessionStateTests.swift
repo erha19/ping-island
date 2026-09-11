@@ -651,7 +651,48 @@ final class SessionStateTests: XCTestCase {
         XCTAssertFalse(session.shouldHideFromPrimaryUI)
     }
 
-    func testCodexAuxiliaryExcludeThreadHidesFromPrimaryUI() {
+    func testAmbientSuggestionsWithToolsAndNamedSessionHideFromPrimaryUI() {
+        let prompt = "# Overview\n\nGenerate 0 to 3 hyperpersonalized suggestions for what this user can do with Codex in this local project: /tmp/project"
+        var session = SessionState(
+            sessionId: "ambient-helper", cwd: "/tmp/project", provider: .codex,
+            clientInfo: .codexApp(threadId: "ambient-helper"),
+            sessionName: "Project suggestions", previewText: #"{"suggestions":[]}"#,
+            chatItems: [
+                ChatHistoryItem(id: "user", type: .user(prompt), timestamp: Date()),
+                ChatHistoryItem(id: "tool", type: .toolCall(ToolCallItem(
+                    name: "exec_command", input: [:], status: .success, result: "files",
+                    structuredResult: nil, subagentTools: [])), timestamp: Date()),
+                ChatHistoryItem(id: "assistant", type: .assistant("Checking recent activity"), timestamp: Date())
+            ]
+        )
+        XCTAssertTrue(session.shouldHideFromPrimaryUI)
+        session.chatItems[0] = ChatHistoryItem(id: "user", type: .user("Suggest improvements to this project"), timestamp: Date())
+        XCTAssertFalse(session.shouldHideFromPrimaryUI)
+    }
+
+    func testRestoredCodexTitleHelpersHideBySourceOrOpeningPrompt() {
+        let prompt = "You are a helpful assistant. You will be presented with a user prompt, and your job is to provide a short title for a task that will be created from that prompt. The title you generate will be shown in the UI to represent the prompt."
+        var session = SessionState(
+            sessionId: "restored-title-helper", cwd: "/tmp/project", provider: .codex,
+            clientInfo: .codexApp(threadId: "restored-title-helper"),
+            sessionName: "A useful project title", previewText: #"{"title":"A useful project title"}"#,
+            chatItems: [ChatHistoryItem(id: "user", type: .user(prompt), timestamp: Date())]
+        )
+        XCTAssertTrue(session.shouldHideFromPrimaryUI)
+
+        session.chatItems = [ChatHistoryItem(id: "user", type: .user("An inherited user task"), timestamp: Date())]
+        session.clientInfo.threadSource = "thread_title_reconsideration"
+        XCTAssertTrue(session.shouldHideFromPrimaryUI)
+        session.clientInfo.threadSource = "ambient_suggestion_task"
+        XCTAssertFalse(session.shouldHideFromPrimaryUI)
+
+        session.clientInfo.threadSource = "user"
+        session.chatItems.append(ChatHistoryItem(id: "assistant", type: .assistant(prompt), timestamp: Date()))
+        session.previewText = prompt
+        XCTAssertFalse(session.shouldHideFromPrimaryUI)
+    }
+
+    func testCodexExcludeJSONWithoutAuxiliaryEvidenceStaysVisible() {
         let message = #"{"exclude":[]}"#
         let session = SessionState(
             sessionId: "codex-exclude-helper",
@@ -672,10 +713,10 @@ final class SessionStateTests: XCTestCase {
             )
         )
 
-        XCTAssertTrue(session.shouldHideFromPrimaryUI)
+        XCTAssertFalse(session.shouldHideFromPrimaryUI)
     }
 
-    func testCodexAuxiliarySuggestionsThreadHidesFromPrimaryUI() {
+    func testCodexSuggestionsJSONWithoutAuxiliaryEvidenceStaysVisible() {
         let message = #"{"suggestions":[{"title":"Add investor appendix slides","prompt":"Add the three investor appendix slides."}]}"#
         let session = SessionState(
             sessionId: "codex-suggestions-helper",
@@ -696,10 +737,10 @@ final class SessionStateTests: XCTestCase {
             )
         )
 
-        XCTAssertTrue(session.shouldHideFromPrimaryUI)
+        XCTAssertFalse(session.shouldHideFromPrimaryUI)
     }
 
-    func testCodexAuxiliarySuggestionsThreadWithGenericSessionNameHidesFromPrimaryUI() {
+    func testCodexSuggestionsJSONWithGenericSessionNameStaysVisible() {
         let message = #"{"suggestions":[{"title":"Add investor appendix slides","prompt":"Add the three investor appendix slides."}]}"#
         let session = SessionState(
             sessionId: "codex-named-suggestions-helper",
@@ -722,7 +763,7 @@ final class SessionStateTests: XCTestCase {
             )
         )
 
-        XCTAssertTrue(session.shouldHideFromPrimaryUI)
+        XCTAssertFalse(session.shouldHideFromPrimaryUI)
     }
 
     func testCodexNormalJSONPromptStaysVisibleInPrimaryUI() {

@@ -548,87 +548,26 @@ struct SessionState: Equatable, Identifiable, Sendable {
         return !FileManager.default.fileExists(atPath: transcriptPath)
     }
 
-    /// Codex may write helper threads for app-side suggestions or selection filters into the
-    /// same rollout/app-server surfaces as user sessions. Hide those JSON-only helper threads
-    /// from the primary list while keeping real JSON user prompts visible.
+    /// Restored helpers use the same source/opening-prompt evidence as live ingress.
+    /// JSON output and generic session names do not identify an auxiliary task.
     private nonisolated var isLikelyCodexAuxiliaryThreadForUI: Bool {
-        guard provider == .codex else { return false }
-        guard intervention == nil else { return false }
-        guard !hasSpecificCodexSessionName else { return false }
-        // Real subagent threads have parent ID AND subagent metadata.
-        // Suggestions threads have parent ID but no subagent metadata.
-        let isRealSubagent = codexParentThreadId?.isEmpty == false
-            && (codexSubagentDepth != nil
-                || codexSubagentNickname?.isEmpty == false
-                || codexSubagentRole?.isEmpty == false)
-        if isRealSubagent { return false }
-        guard !chatItems.contains(where: Self.isToolCallItem(_:)) else { return false }
-
-        let visibleTexts = codexAuxiliaryCandidateTexts
-        guard !visibleTexts.isEmpty else { return false }
-        guard visibleTexts.contains(where: Self.isCodexAuxiliaryJSONText(_:)) else { return false }
-
-        return visibleTexts.allSatisfy { text in
-            Self.isCodexAuxiliaryJSONText(text) || Self.isLikelyGenericCodexProgressText(text)
-        }
-    }
-
-    private nonisolated var hasSpecificCodexSessionName: Bool {
-        guard let sessionName = SessionTextSanitizer.sanitizedDisplayText(sessionName) else {
-            return false
-        }
-
-        let normalizedName = Self.normalizedCodexAuxiliaryComparisonText(sessionName)
-        let normalizedProject = Self.normalizedCodexAuxiliaryComparisonText(projectName)
-        let genericNames: Set<String> = [
-            "codex",
-            "codex session",
-            "new session",
-            "untitled"
-        ]
-
-        if normalizedName == normalizedProject || genericNames.contains(normalizedName) {
-            return false
-        }
-
-        return true
-    }
-
-    private nonisolated var codexAuxiliaryCandidateTexts: [String] {
-        var texts: [String] = [
-            SessionTextSanitizer.sanitizedDisplayText(previewText),
-            compactHookMessage,
-            SessionTextSanitizer.sanitizedDisplayText(conversationInfo.summary),
-            SessionTextSanitizer.sanitizedDisplayText(conversationInfo.firstUserMessage),
-            SessionTextSanitizer.sanitizedDisplayText(conversationInfo.lastMessage)
-        ].compactMap { $0 }
-
-        for item in chatItems {
-            switch item.type {
-            case .user(let text), .assistant(let text), .thinking(let text):
-                if let sanitized = SessionTextSanitizer.sanitizedDisplayText(text) {
-                    texts.append(sanitized)
-                }
-            case .toolCall, .interrupted:
-                continue
+        guard provider == .codex, intervention == nil else { return false }
+        let firstUserText = conversationInfo.firstUserMessage ?? chatItems.lazy.compactMap { item -> String? in
+            if case .user(let text) = item.type {
+                return text
             }
-        }
-
-        var seen: Set<String> = []
-        return texts.filter { seen.insert($0).inserted }
-    }
-
-    private nonisolated static func isToolCallItem(_ item: ChatHistoryItem) -> Bool {
-        if case .toolCall = item.type {
-            return true
-        }
-        return false
-    }
-
-    private nonisolated static func normalizedCodexAuxiliaryComparisonText(_ text: String) -> String {
-        text.trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
-            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            return nil
+        }.first
+        return CodexAuxiliaryHookFilter.isCodexAuxiliaryThread(
+            cwd: cwd,
+            title: sessionName,
+            preview: previewText ?? compactHookMessage,
+            metadata: [
+                "prompt": firstUserText ?? "",
+                "thread_source": clientInfo.threadSource ?? "",
+                "session_file_path": clientInfo.sessionFilePath ?? ""
+            ]
+        )
     }
 
     /// Codex placeholder sessions can be created before a richer thread record is available.
@@ -843,27 +782,6 @@ struct SessionState: Equatable, Identifiable, Sendable {
             "压缩上下文"
         ]
         return containsMatches.contains { normalized.contains($0) }
-    }
-
-    private nonisolated static func isCodexAuxiliaryJSONText(_ text: String) -> Bool {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmed.hasPrefix("{"), trimmed.hasSuffix("}") else { return false }
-        guard let data = trimmed.data(using: .utf8),
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            return false
-        }
-
-        let keys = Set(object.keys)
-        if keys == ["suggestions"], object["suggestions"] is [Any] {
-            return true
-        }
-
-        let includeExcludeKeys: Set<String> = ["include", "exclude"]
-        if !keys.isEmpty, keys.isSubset(of: includeExcludeKeys) {
-            return keys.allSatisfy { key in object[key] is [Any] }
-        }
-
-        return false
     }
 
     private nonisolated static func isLikelyGenericHookProgressText(_ text: String) -> Bool {

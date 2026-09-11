@@ -462,8 +462,7 @@ actor SessionStore {
             && session.clientInfo.isPlainClaudeCodeRouting
 
         session.provider = event.provider
-        session.clientInfo = session.clientInfo.merged(with: event.clientInfo)
-        session.clientInfo = normalizedClientInfo(session.clientInfo, provider: event.provider, sessionId: sessionId)
+        session.clientInfo = normalizedClientInfo(session.clientInfo, merging: event.clientInfo, provider: event.provider, sessionId: sessionId)
         session.ingress = event.ingress
         applyHookWorkspace(event.cwd, to: &session)
         session.pid = event.pid
@@ -474,8 +473,7 @@ actor SessionStore {
             session.tty = tty.replacingOccurrences(of: "/dev/", with: "")
         }
         if let runtimeClientInfo = await runtimeClientInfo(for: session, tree: tree) {
-            session.clientInfo = session.clientInfo.merged(with: runtimeClientInfo)
-            session.clientInfo = normalizedClientInfo(session.clientInfo, provider: event.provider, sessionId: sessionId)
+            session.clientInfo = normalizedClientInfo(session.clientInfo, merging: runtimeClientInfo, provider: event.provider, sessionId: sessionId)
         }
         await TerminalAutomationPermissionCoordinator.shared.prepareIfNeeded(
             provider: event.provider,
@@ -501,8 +499,7 @@ actor SessionStore {
         if let latest = sessions[sessionId], latest.lastActivity > session.lastActivity {
             session = latest
             // Re-apply enrichment
-            session.clientInfo = session.clientInfo.merged(with: event.clientInfo)
-            session.clientInfo = normalizedClientInfo(session.clientInfo, provider: event.provider, sessionId: sessionId)
+            session.clientInfo = normalizedClientInfo(session.clientInfo, merging: event.clientInfo, provider: event.provider, sessionId: sessionId)
             applyHookWorkspace(event.cwd, to: &session)
         }
 
@@ -880,7 +877,7 @@ actor SessionStore {
             ?? Self.projectName(for: resolvedCwd, fallback: event.provider.displayName)
         let restoredClientInfo = restoredAssociation?.clientInfo ?? SessionClientInfo.default(for: event.provider)
         let resolvedClientInfo = normalizedClientInfo(
-            restoredClientInfo.merged(with: event.clientInfo),
+            restoredClientInfo, merging: event.clientInfo,
             provider: event.provider,
             sessionId: event.sessionId
         )
@@ -3633,7 +3630,7 @@ actor SessionStore {
     ) {
         let preliminarySessionId = resolveCodexSessionAlias(sessionId)
         if case .none = intervention,
-           CodexAuxiliaryHookFilter.isCodexMemoryMaintenanceThread(
+           CodexAuxiliaryHookFilter.isCodexAuxiliaryThread(
                 cwd: cwd,
                 title: name,
                 preview: preview,
@@ -3680,7 +3677,7 @@ actor SessionStore {
             ?? Self.projectName(for: initialCwd, fallback: name ?? "Codex")
         let existingLastActivity = sessions[resolvedSessionId]?.lastActivity
         let resolvedClientInfo = Self.normalizedCodexClientInfo(
-            restored: restoredAssociation?.clientInfo,
+            restored: sessions[resolvedSessionId]?.clientInfo ?? restoredAssociation?.clientInfo,
             incoming: clientInfo,
             sessionId: sessionId
         )
@@ -3704,11 +3701,7 @@ actor SessionStore {
         }
 
         session.provider = .codex
-        session.clientInfo = normalizedClientInfo(
-            session.clientInfo.merged(with: resolvedClientInfo),
-            provider: .codex,
-            sessionId: sessionId
-        )
+        session.clientInfo = resolvedClientInfo
         if let cwd, !cwd.isEmpty {
             session.cwd = cwd
             session.projectName = Self.projectName(for: cwd, fallback: session.projectName)
@@ -3832,11 +3825,12 @@ actor SessionStore {
         ingress: SessionIngress = .codexAppServer
     ) {
         if case .none = snapshot.intervention,
-           CodexAuxiliaryHookFilter.isCodexMemoryMaintenanceThread(
+           CodexAuxiliaryHookFilter.isCodexAuxiliaryThread(
                 cwd: snapshot.cwd,
                 title: snapshot.name,
                 preview: snapshot.displayResultText ?? snapshot.preview,
                 metadata: [
+                    "prompt": snapshot.conversationInfo.firstUserMessage ?? "",
                     "session_file_path": snapshot.clientInfo?.sessionFilePath ?? "",
                     "thread_source": snapshot.clientInfo?.threadSource ?? ""
                 ]
@@ -3868,7 +3862,7 @@ actor SessionStore {
             ?? Self.projectName(for: fallbackCwd, fallback: fallbackName)
         let existingLastActivity = sessions[resolvedSessionId]?.lastActivity
         let resolvedClientInfo = Self.normalizedCodexClientInfo(
-            restored: restoredAssociation?.clientInfo,
+            restored: sessions[resolvedSessionId]?.clientInfo ?? restoredAssociation?.clientInfo,
             incoming: snapshot.clientInfo,
             sessionId: snapshot.threadId
         )
@@ -3894,11 +3888,7 @@ actor SessionStore {
             && snapshot.hasCompletedAssistantReply
 
         session.provider = .codex
-        session.clientInfo = normalizedClientInfo(
-            session.clientInfo.merged(with: resolvedClientInfo),
-            provider: .codex,
-            sessionId: snapshot.threadId
-        )
+        session.clientInfo = resolvedClientInfo
         session.cwd = fallbackCwd
         session.projectName = Self.projectName(for: fallbackCwd, fallback: session.projectName)
         let shouldPreserveActivePhase = shouldPreserveActivePhaseDuringApparentIdle(
@@ -4781,19 +4771,26 @@ actor SessionStore {
 
         let normalizedBundleIdentifier = TerminalAppRegistry.normalizedHostBundleIdentifier(for: appIdentity.bundleIdentifier)
         let appName = appIdentity.name
+        let isTerminalHost = !isStandaloneCodexHost(bundleIdentifier: normalizedBundleIdentifier, name: appName)
+            && (TerminalAppRegistry.isTerminalBundle(normalizedBundleIdentifier)
+                || TerminalAppRegistry.isIDEBundle(normalizedBundleIdentifier))
         let workspaceLaunchURL = SessionClientInfo.appLaunchURL(
             bundleIdentifier: normalizedBundleIdentifier,
             workspacePath: session.cwd
         )
 
         var runtimeInfo = SessionClientInfo(
-            kind: session.clientInfo.kind,
+            kind: session.provider == .codex && isTerminalHost ? .codexCLI : session.clientInfo.kind,
             launchURL: workspaceLaunchURL,
             originator: appName,
             threadSource: TerminalAppRegistry.isIDEBundle(normalizedBundleIdentifier)
                 ? (session.clientInfo.threadSource ?? "ide-terminal")
                 : session.clientInfo.threadSource,
-            terminalBundleIdentifier: normalizedBundleIdentifier
+            terminalBundleIdentifier: normalizedBundleIdentifier,
+            // This host came from the live process tree, not inherited environment
+            // hints. Retain that evidence through later snapshots and cache reloads.
+            terminalProgram: session.provider == .codex && isTerminalHost ? appName : nil,
+            terminalTTY: session.provider == .codex && isTerminalHost ? resolvedTTY : nil
         )
 
         if session.provider == .codex,
@@ -4853,9 +4850,14 @@ actor SessionStore {
 
     private func normalizedClientInfo(
         _ clientInfo: SessionClientInfo,
+        merging incoming: SessionClientInfo? = nil,
         provider: SessionProvider,
         sessionId: String
     ) -> SessionClientInfo {
+        if provider == .codex {
+            return Self.normalizedCodexClientInfo(restored: clientInfo, incoming: incoming, sessionId: sessionId)
+        }
+        let clientInfo = incoming.map { clientInfo.merged(with: $0) } ?? clientInfo
         switch provider {
         case .claude:
             return clientInfo.normalizedForClaudeRouting()
@@ -4877,56 +4879,32 @@ actor SessionStore {
         incoming: SessionClientInfo?,
         sessionId: String
     ) -> SessionClientInfo {
-        var normalizedRestored = restored?.normalizedForCodexRouting(sessionId: sessionId)
-        let normalizedIncoming = incoming?.normalizedForCodexRouting(sessionId: sessionId)
-        let base: SessionClientInfo
+        let restored = restored?.normalizedForCodexRouting(sessionId: sessionId)
+        guard var incoming = incoming?.normalizedForCodexRouting(sessionId: sessionId) else {
+            return restored ?? .codexApp(threadId: sessionId)
+        }
+        guard let restored else { return incoming }
 
-        if normalizedIncoming?.kind == .codexCLI || normalizedRestored?.kind == .codexCLI {
-            base = SessionClientInfo.codexCLI()
-        } else {
-            base = SessionClientInfo.codexApp(threadId: sessionId)
+        let incomingIsDesktop = incoming.kind == .codexApp
+            && incoming.hasCodexDesktopSource && !incoming.hasInteractiveCodexTerminalRouting
+        // Older App rows could also contain a synthetic "vscode" program. Keep
+        // real CLI programs, TTYs and terminal identifiers when reconciling them.
+        let replacesPollutedRouting = incomingIsDesktop && restored.hasQoderHostRouting
+            && !restored.hasCodexTerminalSessionIdentifier
+            && (restored.kind == .codexApp || !restored.hasInteractiveCodexTerminalRouting)
+
+        if incomingIsDesktop, restored.kind == .codexCLI,
+           restored.hasInteractiveCodexTerminalRouting {
+            incoming.kind = .codexCLI
+            incoming.profileID = "codex-cli"
+            incoming.name = "Codex CLI"
+            incoming.bundleIdentifier = restored.bundleIdentifier
+            incoming.launchURL = restored.launchURL
+            incoming.origin = restored.origin
+            incoming.originator = restored.originator
         }
 
-        let restoredHostBundleIdentifier = (
-            normalizedRestored?.terminalBundleIdentifier
-                ?? normalizedRestored?.bundleIdentifier
-        )?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        let restoredHasQoderIDEContamination = normalizedRestored?.kind == .codexApp
-            && (
-                restoredHostBundleIdentifier == "com.qoder.ide"
-                    || restoredHostBundleIdentifier == "com.aliyun.lingma.ide"
-            )
-        let incomingReplacesTerminalRouting = restoredHasQoderIDEContamination
-            && normalizedIncoming?.kind == .codexApp
-            && normalizedIncoming?.terminalBundleIdentifier == nil
-            && normalizedIncoming?.terminalProgram == nil
-            && normalizedIncoming?.terminalSessionIdentifier == nil
-            && normalizedIncoming?.iTermSessionIdentifier == nil
-            && normalizedIncoming?.tmuxSessionIdentifier == nil
-            && normalizedIncoming?.tmuxPaneIdentifier == nil
-        if incomingReplacesTerminalRouting, var repaired = normalizedRestored {
-            repaired.kind = .codexApp
-            repaired.profileID = "codex-app"
-            repaired.name = "Codex App"
-            repaired.bundleIdentifier = "com.openai.codex"
-            repaired.launchURL = SessionClientInfo.appLaunchURL(
-                bundleIdentifier: "com.openai.codex",
-                sessionId: sessionId
-            )
-            repaired.origin = "desktop"
-            repaired.originator = nil
-            repaired.terminalBundleIdentifier = nil
-            repaired.terminalProgram = nil
-            repaired.terminalSessionIdentifier = nil
-            repaired.iTermSessionIdentifier = nil
-            repaired.tmuxSessionIdentifier = nil
-            repaired.tmuxPaneIdentifier = nil
-            normalizedRestored = repaired
-        }
-
-        return base
-            .merged(with: normalizedRestored ?? base)
-            .merged(with: normalizedIncoming ?? base)
+        return restored.merged(with: incoming, replacingRouting: replacesPollutedRouting)
             .normalizedForCodexRouting(sessionId: sessionId)
     }
 
@@ -4997,21 +4975,23 @@ actor SessionStore {
     }
 
     private func removeIgnoredCodexAuxiliarySessionIfNeeded(sessionId: String) {
-        guard let session = sessions[sessionId],
-              isLikelyEmptyCodexPlaceholder(session) || isCodexMemoryMaintenanceSession(session) else {
+        guard let session = sessions[sessionId], session.provider == .codex,
+              ignoredCodexAuxiliaryHookSessionIds.contains(sessionId)
+                || isLikelyEmptyCodexPlaceholder(session) || isCodexAuxiliarySession(session) else {
             return
         }
 
         removeCodexAuxiliarySession(sessionId: sessionId)
     }
 
-    private func isCodexMemoryMaintenanceSession(_ session: SessionState) -> Bool {
+    private func isCodexAuxiliarySession(_ session: SessionState) -> Bool {
         guard session.provider == .codex else { return false }
-        return CodexAuxiliaryHookFilter.isCodexMemoryMaintenanceThread(
+        return CodexAuxiliaryHookFilter.isCodexAuxiliaryThread(
             cwd: session.cwd,
             title: session.sessionName,
             preview: session.previewText ?? session.conversationInfo.lastMessage ?? session.latestHookMessage,
             metadata: [
+                "prompt": session.conversationInfo.firstUserMessage ?? "",
                 "session_file_path": session.clientInfo.sessionFilePath ?? "",
                 "thread_source": session.clientInfo.threadSource ?? ""
             ]
@@ -5021,15 +5001,9 @@ actor SessionStore {
     private func shouldIgnoreCodexHookEvent(_ event: HookEvent, existingSession: SessionState?) -> Bool {
         guard event.provider == .codex else { return false }
 
-        // Background Codex agents (ambient suggestions, state queries, safety filters)
-        // run with cwd="/". They are internal system processes, not user coding sessions.
-        if event.cwd == "/" {
-            return true
-        }
-
         guard !event.expectsResponse else { return false }
         guard case .none = event.intervention else { return false }
-        if CodexAuxiliaryHookFilter.isCodexMemoryMaintenanceThread(
+        return CodexAuxiliaryHookFilter.isCodexAuxiliaryThread(
             cwd: event.cwd,
             title: existingSession?.sessionName,
             preview: event.message,
@@ -5037,21 +5011,7 @@ actor SessionStore {
                 "session_file_path": event.clientInfo.sessionFilePath ?? "",
                 "thread_source": event.clientInfo.threadSource ?? ""
             ]
-        ) {
-            return true
-        }
-
-        guard event.clientInfo.sessionFilePath?.isEmpty != false else { return false }
-        if let existingSession {
-            guard isLikelyEmptyCodexPlaceholder(existingSession) else {
-                return false
-            }
-        }
-        guard let message = Self.normalizedHookMessage(event.message) else {
-            return false
-        }
-
-        return CodexAuxiliaryHookFilter.isCodexTitleGenerationPrompt(message)
+        )
     }
 
     private func shouldIgnoreClaudeAskUserQuestionPermissionRequest(_ event: HookEvent) -> Bool {

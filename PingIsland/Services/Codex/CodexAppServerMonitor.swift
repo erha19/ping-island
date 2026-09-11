@@ -1412,16 +1412,20 @@ actor CodexAppServerMonitor {
     }
 
     private static func shouldIgnoreAuxiliaryThread(_ thread: [String: Any]) -> Bool {
-        CodexAuxiliaryHookFilter.isCodexMemoryMaintenanceThread(
+        CodexAuxiliaryHookFilter.isCodexAuxiliaryThread(
             cwd: thread["cwd"] as? String,
             title: thread["name"] as? String,
             preview: thread["preview"] as? String,
             metadata: [
+                "prompt": sanitizedThreadText(thread["firstUserMessage"] as? String)
+                    ?? sanitizedThreadText(thread["first_user_message"] as? String)
+                    ?? "",
                 "session_file_path": sanitizedThreadText(thread["sessionFilePath"] as? String)
                     ?? sanitizedThreadText(thread["rolloutPath"] as? String)
                     ?? sanitizedThreadText(thread["path"] as? String)
                     ?? "",
                 "thread_source": sanitizedThreadText(thread["threadSource"] as? String)
+                    ?? sanitizedThreadText(thread["thread_source"] as? String)
                     ?? sanitizedThreadText(thread["source"] as? String)
                     ?? ""
             ]
@@ -1840,20 +1844,21 @@ actor CodexAppServerMonitor {
         }
     }
 
-    private func makeClientInfo(from thread: [String: Any], threadId: String) -> SessionClientInfo {
+    nonisolated func makeClientInfo(from thread: [String: Any], threadId: String) -> SessionClientInfo {
         let origin = sanitizedText(thread["origin"] as? String)
             ?? sanitizedText(thread["clientOrigin"] as? String)
         let originator = sanitizedText(thread["originator"] as? String)
             ?? sanitizedText(thread["clientOriginator"] as? String)
         let threadSource = sanitizedText(thread["threadSource"] as? String)
+            ?? sanitizedText(thread["thread_source"] as? String)
             ?? sanitizedText(thread["source"] as? String)
             ?? sanitizedText(thread["sessionStartSource"] as? String)
         let sessionFilePath = Self.rolloutPath(from: thread)
 
-        let resolvedOrigin = origin ?? "desktop"
+        let resolvedOrigin = origin ?? ((thread["source"] as? String) == "cli" ? "cli" : "desktop")
 
         let inferredKind: SessionClientKind
-        if resolvedOrigin.localizedCaseInsensitiveContains("cli") {
+        if resolvedOrigin.localizedCaseInsensitiveContains("cli") || threadSource == "cli" {
             inferredKind = .codexCLI
         } else {
             inferredKind = .codexApp
@@ -1948,7 +1953,7 @@ actor CodexAppServerMonitor {
         return sanitizedText(fragments.joined(separator: "\n"))
     }
 
-    private func sanitizedText(_ text: String?) -> String? {
+    private nonisolated func sanitizedText(_ text: String?) -> String? {
         guard let text else { return nil }
         let collapsed = text
             .replacingOccurrences(of: "\r\n", with: "\n")

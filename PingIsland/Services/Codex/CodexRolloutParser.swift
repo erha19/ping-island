@@ -327,7 +327,7 @@ actor CodexRolloutParser {
         var sessionName: String? = seedSnapshot?.name
         var origin: String? = seedSnapshot?.clientInfo?.origin
         var originator: String? = seedSnapshot?.clientInfo?.originator
-        var threadSource: String? = seedSnapshot?.clientInfo?.threadSource
+        var threadSource: String? = seedSnapshot?.clientInfo?.threadSource ?? clientInfo?.threadSource
         var subagentMetadata = ParsedSubagentMetadata(
             parentThreadId: seedSnapshot?.parentThreadId,
             depth: seedSnapshot?.subagentDepth,
@@ -354,9 +354,18 @@ actor CodexRolloutParser {
                 sessionName = stringValue(payload["title"]) ?? sessionName
                 let sourceValue = payload["source"]
                 let source = stringValue(sourceValue)
-                origin = stringValue(payload["origin"]) ?? (source == "cli" ? "cli" : origin)
-                originator = stringValue(payload["originator"]) ?? originator
-                threadSource = source ?? threadSource
+                let sourceOrigin = stringValue(payload["origin"])
+                    ?? (["cli", "desktop", "app"].contains(source ?? "") ? source : nil)
+                let sourceOriginator = stringValue(payload["originator"])
+                let sourceIdentity = SessionClientInfo(
+                    kind: .unknown, origin: sourceOrigin, originator: sourceOriginator
+                )
+                origin = sourceOrigin ?? (sourceIdentity.hasCodexDesktopSource ? "desktop" : origin)
+                originator = sourceOriginator ?? originator
+                threadSource = stringValue(payload["thread_source"])
+                    ?? stringValue(payload["threadSource"])
+                    ?? source
+                    ?? threadSource
                 if let parsedSubagentMetadata = parseSubagentMetadata(
                     payload: payload,
                     sourceValue: sourceValue
@@ -580,10 +589,14 @@ actor CodexRolloutParser {
 
         let preview = latestFinalText ?? latestAgentText ?? latestUserText ?? firstUserMessage
         if applyAuxiliaryFilter {
-            guard !CodexAuxiliaryHookFilter.isCodexMemoryMaintenanceThread(
+            guard !CodexAuxiliaryHookFilter.isCodexAuxiliaryThread(
                 cwd: resolvedCwd,
                 title: sessionName,
-                preview: preview
+                preview: preview,
+                metadata: [
+                    "prompt": firstUserMessage ?? "",
+                    "thread_source": threadSource ?? ""
+                ]
             ) else {
                 return nil
             }
@@ -598,14 +611,20 @@ actor CodexRolloutParser {
             lastUserMessageDate: lastUserMessageDate
         )
 
-        let normalizedClientInfo = clientInfo?.normalizedForCodexRouting(sessionId: resolvedThreadId)
-        let prefersCLIContext = normalizedClientInfo?.kind == .codexCLI
-            || origin == "cli"
-            || threadSource == "cli"
-            || (normalizedClientInfo?.terminalBundleIdentifier?.isEmpty == false
-                && normalizedClientInfo?.terminalBundleIdentifier != "com.openai.codex")
-            || normalizedClientInfo?.terminalSessionIdentifier?.isEmpty == false
-            || normalizedClientInfo?.iTermSessionIdentifier?.isEmpty == false
+        // Fresh rollout identity must participate in normalization before cached CLI
+        // or IDE routing is trusted; a desktop source can repair stale associations.
+        let normalizedClientInfo = (clientInfo ?? SessionClientInfo.codexApp(threadId: resolvedThreadId))
+            .merged(with: SessionClientInfo(
+                kind: clientInfo?.kind ?? .codexApp,
+                origin: origin,
+                originator: originator,
+                threadSource: threadSource
+            ))
+            .normalizedForCodexRouting(sessionId: resolvedThreadId)
+        let prefersCLIContext = normalizedClientInfo.kind == .codexCLI
+            || normalizedClientInfo.origin == "cli"
+            || normalizedClientInfo.threadSource == "cli"
+            || normalizedClientInfo.hasInteractiveCodexTerminalRouting
 
         if prefersCLIContext,
            let inferredIntervention = Self.pendingMCPApprovalIntervention(from: historyItems) {
@@ -620,23 +639,24 @@ actor CodexRolloutParser {
         let resolvedClientInfo = baseClientInfo.merged(with: SessionClientInfo(
             kind: prefersCLIContext ? .codexCLI : .codexApp,
             name: baseClientInfo.name,
-            bundleIdentifier: prefersCLIContext ? normalizedClientInfo?.bundleIdentifier : baseClientInfo.bundleIdentifier,
+            bundleIdentifier: prefersCLIContext ? normalizedClientInfo.bundleIdentifier : baseClientInfo.bundleIdentifier,
             launchURL: prefersCLIContext
-                ? normalizedClientInfo?.launchURL
+                ? normalizedClientInfo.launchURL
                 : baseClientInfo.launchURL,
-            origin: origin ?? normalizedClientInfo?.origin ?? (prefersCLIContext ? "cli" : "desktop"),
-            originator: originator ?? normalizedClientInfo?.originator,
-            threadSource: threadSource ?? normalizedClientInfo?.threadSource,
-            transport: normalizedClientInfo?.transport,
-            remoteHost: normalizedClientInfo?.remoteHost,
+            origin: origin ?? normalizedClientInfo.origin ?? (prefersCLIContext ? "cli" : "desktop"),
+            originator: originator ?? normalizedClientInfo.originator,
+            threadSource: threadSource ?? normalizedClientInfo.threadSource,
+            transport: normalizedClientInfo.transport,
+            remoteHost: normalizedClientInfo.remoteHost,
             sessionFilePath: fileURL.path,
-            terminalBundleIdentifier: normalizedClientInfo?.terminalBundleIdentifier,
-            terminalProgram: normalizedClientInfo?.terminalProgram,
-            terminalSessionIdentifier: normalizedClientInfo?.terminalSessionIdentifier,
-            iTermSessionIdentifier: normalizedClientInfo?.iTermSessionIdentifier,
-            tmuxSessionIdentifier: normalizedClientInfo?.tmuxSessionIdentifier,
-            tmuxPaneIdentifier: normalizedClientInfo?.tmuxPaneIdentifier,
-            processName: normalizedClientInfo?.processName
+            terminalBundleIdentifier: normalizedClientInfo.terminalBundleIdentifier,
+            terminalProgram: normalizedClientInfo.terminalProgram,
+            terminalTTY: normalizedClientInfo.terminalTTY,
+            terminalSessionIdentifier: normalizedClientInfo.terminalSessionIdentifier,
+            iTermSessionIdentifier: normalizedClientInfo.iTermSessionIdentifier,
+            tmuxSessionIdentifier: normalizedClientInfo.tmuxSessionIdentifier,
+            tmuxPaneIdentifier: normalizedClientInfo.tmuxPaneIdentifier,
+            processName: normalizedClientInfo.processName
         ))
 
         return CodexThreadSnapshot(

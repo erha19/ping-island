@@ -58,6 +58,7 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
     var sessionFilePath: String?
     var terminalBundleIdentifier: String?
     var terminalProgram: String?
+    var terminalTTY: String?
     var terminalSessionIdentifier: String?
     var iTermSessionIdentifier: String?
     var tmuxSessionIdentifier: String?
@@ -78,6 +79,7 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
         sessionFilePath: String? = nil,
         terminalBundleIdentifier: String? = nil,
         terminalProgram: String? = nil,
+        terminalTTY: String? = nil,
         terminalSessionIdentifier: String? = nil,
         iTermSessionIdentifier: String? = nil,
         tmuxSessionIdentifier: String? = nil,
@@ -97,6 +99,7 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
         self.sessionFilePath = sessionFilePath?.nonEmpty
         self.terminalBundleIdentifier = terminalBundleIdentifier?.nonEmpty
         self.terminalProgram = terminalProgram?.nonEmpty
+        self.terminalTTY = terminalTTY?.nonEmpty
         self.terminalSessionIdentifier = terminalSessionIdentifier?.nonEmpty
         self.iTermSessionIdentifier = iTermSessionIdentifier?.nonEmpty
         self.tmuxSessionIdentifier = tmuxSessionIdentifier?.nonEmpty
@@ -594,41 +597,81 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
         return kind == .codexApp || launchURL != nil || bundleIdentifier == "com.openai.codex"
     }
 
+    /// An IDE bundle can be an inherited host hint. A terminal program, TTY or
+    /// session identifier is evidence that the agent actually runs in a terminal.
+    nonisolated var hasCodexTerminalSessionIdentifier: Bool {
+        [terminalTTY, terminalSessionIdentifier, iTermSessionIdentifier,
+            tmuxSessionIdentifier, tmuxPaneIdentifier].contains { $0?.nonEmpty != nil }
+    }
+
+    nonisolated var hasInteractiveCodexTerminalRouting: Bool {
+        if hasCodexTerminalSessionIdentifier {
+            return true
+        }
+        if let program = terminalProgram?.nonEmpty,
+           program.lowercased() != "codex",
+           TerminalAppRegistry.inferredBundleIdentifier(forTerminalProgram: program) != "com.openai.codex" {
+            return true
+        }
+        guard let bundle = terminalBundleIdentifier?.nonEmpty else { return false }
+        return bundle.lowercased() != "com.openai.codex"
+            && TerminalAppRegistry.isTerminalBundle(bundle)
+            && !TerminalAppRegistry.isIDEBundle(bundle)
+    }
+
+    nonisolated var hasCodexDesktopOriginator: Bool {
+        let sourceName = originator?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return sourceName == "codex desktop" || sourceName == "codex_desktop"
+    }
+
+    nonisolated var hasCodexDesktopSource: Bool {
+        let source = origin?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return source == "desktop" || source == "app"
+            || hasCodexDesktopOriginator
+            || profileID == "codex-app" || bundleIdentifier?.lowercased() == "com.openai.codex"
+            || launchURL?.lowercased().hasPrefix("codex://") == true
+    }
+
+    nonisolated var hasQoderHostRouting: Bool {
+        [terminalBundleIdentifier, bundleIdentifier].contains {
+            ["com.qoder.ide", "com.aliyun.lingma.ide"].contains($0?.lowercased() ?? "")
+        } || launchURL?.lowercased().hasPrefix("qoder://") == true
+            || launchURL?.lowercased().hasPrefix("qoder-cn://") == true
+    }
+
     nonisolated func normalizedForCodexRouting(sessionId: String? = nil) -> SessionClientInfo {
         var normalized = self
 
-        let normalizedProfileID = normalized.profileID?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
         let normalizedOrigin = normalized.origin?
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
         let normalizedThreadSource = normalized.threadSource?
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
-        let hasCodexAppIdentity = normalizedProfileID == "codex-app"
-            || normalized.bundleIdentifier == "com.openai.codex"
-            || normalized.launchURL?.lowercased().hasPrefix("codex://") == true
-        let hasInteractiveTerminalRouting = normalized.terminalBundleIdentifier?.nonEmpty != nil
-            || normalized.terminalProgram?.nonEmpty != nil
-            || normalized.terminalSessionIdentifier?.nonEmpty != nil
-            || normalized.iTermSessionIdentifier?.nonEmpty != nil
-            || normalized.tmuxSessionIdentifier?.nonEmpty != nil
-            || normalized.tmuxPaneIdentifier?.nonEmpty != nil
-        let isExplicitCLIOrigin = normalizedOrigin == "cli" || normalizedThreadSource == "cli"
+        // Old hook classification also synthesized origin=cli from a bare IDE
+        // hint. An explicit Desktop originator can correct that inferred value;
+        // a real CLI runtime source still wins.
+        let isExplicitCLIOrigin = normalizedThreadSource == "cli"
+            || (normalizedOrigin == "cli" && !normalized.hasCodexDesktopOriginator)
+
+        // Older snapshots could label a live terminal session as App. Preserve
+        // its actual terminal evidence when migrating those cached identities.
+        if normalized.kind == .codexApp, normalized.hasInteractiveCodexTerminalRouting,
+           !normalized.hasQoderHostRouting || normalized.hasCodexTerminalSessionIdentifier || isExplicitCLIOrigin {
+            normalized.kind = .codexCLI
+        }
 
         if normalized.kind == .codexCLI,
-           hasCodexAppIdentity,
-           !hasInteractiveTerminalRouting,
+           normalized.hasCodexDesktopSource,
+           !normalized.hasInteractiveCodexTerminalRouting,
            !isExplicitCLIOrigin {
             normalized.kind = .codexApp
+            normalized.origin = "desktop"
         }
 
         switch normalized.kind {
         case .codexCLI:
-            if normalized.profileID == nil {
-                normalized.profileID = "codex-cli"
-            }
+            normalized.profileID = "codex-cli"
             if normalized.name == nil || normalized.name == "Codex App" {
                 normalized.name = "Codex CLI"
             }
@@ -643,10 +686,19 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
             }
 
         case .codexApp:
-            if normalized.profileID == nil {
-                normalized.profileID = "codex-app"
+            if normalized.hasCodexDesktopSource, !normalized.hasInteractiveCodexTerminalRouting {
+                let hadQoderHostRouting = normalized.hasQoderHostRouting
+                normalized.bundleIdentifier = "com.openai.codex"
+                if hadQoderHostRouting {
+                    normalized.launchURL = nil
+                    normalized.terminalBundleIdentifier = nil
+                    if normalized.originator?.localizedCaseInsensitiveContains("qoder") == true {
+                        normalized.originator = nil
+                    }
+                }
             }
-            if normalized.name == nil {
+            normalized.profileID = "codex-app"
+            if normalized.name == nil || normalized.name == "Codex CLI" {
                 normalized.name = "Codex App"
             }
 
@@ -861,8 +913,23 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
         return parts.joined(separator: " · ")
     }
 
-    nonisolated func merged(with newer: SessionClientInfo) -> SessionClientInfo {
+    nonisolated func merged(with newer: SessionClientInfo, replacingRouting: Bool = false) -> SessionClientInfo {
         var merged = self
+
+        // Authoritative routing repairs must be able to remove cached values.
+        // Ordinary partial updates still treat nil as "no new information".
+        if replacingRouting {
+            merged.bundleIdentifier = newer.bundleIdentifier
+            merged.launchURL = newer.launchURL
+            merged.originator = newer.originator
+            merged.terminalBundleIdentifier = newer.terminalBundleIdentifier
+            merged.terminalProgram = newer.terminalProgram
+            merged.terminalTTY = newer.terminalTTY
+            merged.terminalSessionIdentifier = newer.terminalSessionIdentifier
+            merged.iTermSessionIdentifier = newer.iTermSessionIdentifier
+            merged.tmuxSessionIdentifier = newer.tmuxSessionIdentifier
+            merged.tmuxPaneIdentifier = newer.tmuxPaneIdentifier
+        }
 
         if merged.kind == .unknown || newer.kind != .unknown {
             merged.kind = newer.kind
@@ -903,6 +970,9 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
         }
         if let terminalProgram = newer.terminalProgram?.nonEmpty {
             merged.terminalProgram = terminalProgram
+        }
+        if let terminalTTY = newer.terminalTTY?.nonEmpty {
+            merged.terminalTTY = terminalTTY
         }
         if let terminalSessionIdentifier = newer.terminalSessionIdentifier?.nonEmpty {
             merged.terminalSessionIdentifier = terminalSessionIdentifier

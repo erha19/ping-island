@@ -937,7 +937,13 @@ private extension BridgeEnvelope {
                 terminalProgram: terminalContext.terminalProgram,
                 terminalBundleID: terminalContext.terminalBundleID,
                 ideBundleID: terminalContext.ideBundleID,
-                matchedProfileKind: matchedProfile?.kind
+                matchedProfileKind: matchedProfile?.kind,
+                origin: explicitOrigin,
+                originator: explicitMetadataOriginator,
+                hasTerminalSession: [terminalContext.terminalSessionID, terminalContext.iTermSessionID,
+                    terminalContext.tmuxSession, terminalContext.tmuxPane].contains {
+                        $0?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+                    }
             )
         case .copilot:
             if let matchedProfile {
@@ -980,7 +986,6 @@ private extension BridgeEnvelope {
         let resolvedBundleID: String?
         if kind == .codexApp {
             resolvedBundleID = explicitBundleID
-                ?? terminalBundleID
                 ?? resolvedProfile?.defaultBundleIdentifier
                 ?? "com.openai.codex"
         } else {
@@ -1026,7 +1031,7 @@ private extension BridgeEnvelope {
             resolvedOrigin = nil
         }
 
-        return SessionClientInfo(
+        let clientInfo = SessionClientInfo(
             kind: kind,
             profileID: resolvedProfile?.id,
             name: resolvedName,
@@ -1040,12 +1045,14 @@ private extension BridgeEnvelope {
             sessionFilePath: sessionFilePath,
             terminalBundleIdentifier: terminalBundleID,
             terminalProgram: terminalContext.terminalProgram,
+            terminalTTY: terminalContext.tty,
             terminalSessionIdentifier: terminalContext.terminalSessionID,
             iTermSessionIdentifier: terminalContext.iTermSessionID,
             tmuxSessionIdentifier: terminalContext.tmuxSession,
             tmuxPaneIdentifier: terminalContext.tmuxPane,
             processName: processName
         )
+        return provider == .codex ? clientInfo.normalizedForCodexRouting(sessionId: sessionId) : clientInfo
     }
 
     private static func resolvedCWD(
@@ -1225,6 +1232,16 @@ enum KimiAuxiliaryHookFilter {
 }
 
 struct CodexAuxiliaryHookFilter {
+    // These are Codex Desktop's task sources, not the text or JSON returned by a task.
+    // In particular, ambient_suggestion_task is a user-created task and stays visible.
+    private nonisolated static let auxiliaryThreadSources: Set<String> = [
+        "thread_title",
+        "thread_description",
+        "thread_summary",
+        "thread_title_reconsideration",
+        "ambient_suggestions",
+        "ambient_suggestion_safety"
+    ]
     private nonisolated static let titleGenerationPromptPrefix =
         "you are a helpful assistant. you will be presented with a user prompt"
     private nonisolated static let titleGenerationPromptRoleMarker =
@@ -1266,23 +1283,12 @@ struct CodexAuxiliaryHookFilter {
             return true
         }
 
-        if Self.isCodexMemoryMaintenanceThread(
+        guard Self.isCodexAuxiliaryThread(
             cwd: cwd ?? metadata["cwd"],
             title: title,
             preview: preview,
             metadata: metadata
-        ) {
-            ignoredSessionIDs[sessionId] = now
-            return true
-        }
-
-        let prompt = Self.firstNonEmpty(
-            metadata["prompt"],
-            metadata["message"],
-            preview,
-            title
-        )
-        guard Self.isCodexTitleGenerationPrompt(prompt) else { return false }
+        ) else { return false }
 
         ignoredSessionIDs[sessionId] = now
         return true
@@ -1293,6 +1299,15 @@ struct CodexAuxiliaryHookFilter {
             return false
         }
 
+        if prompt.hasPrefix("you are in a fork of an existing codex thread at a possible durable title checkpoint.") {
+            return prompt.contains("the current ui title is:")
+                && prompt.contains("only fill the structured fields")
+        }
+        if prompt.hasPrefix("you are in a fork of a voice chat.") {
+            return prompt.contains(titleGenerationPromptAlternateRoleMarker)
+                && prompt.contains("only fill the title and description fields")
+        }
+
         let hasTitleGenerationRole = prompt.contains(titleGenerationPromptRoleMarker)
             || prompt.contains(titleGenerationPromptAlternateRoleMarker)
         let hasDisplayOrReturnInstruction = prompt.contains(titleGenerationPromptDisplayMarker)
@@ -1300,9 +1315,38 @@ struct CodexAuxiliaryHookFilter {
             || prompt.contains("represent the prompt")
             || prompt.contains("no quotes or trailing punctuation")
 
-        return prompt.contains(titleGenerationPromptPrefix)
+        return prompt.hasPrefix(titleGenerationPromptPrefix)
             && hasTitleGenerationRole
             && hasDisplayOrReturnInstruction
+    }
+
+    /// Desktop ambient suggestion runs use the project cwd and can execute tools.
+    /// Match their dedicated opening prompt, never arbitrary mentions or result JSON.
+    nonisolated static func isCodexSuggestionGenerationPrompt(_ text: String?) -> Bool {
+        guard let prompt = normalizedPrompt(text) else { return false }
+        let prefix = "# overview generate 0 to 3 hyperpersonalized suggestions for what this user can do with codex in "
+        return prompt.hasPrefix(prefix + "this local project:")
+            || prompt.hasPrefix(prefix + "this projectless task")
+    }
+
+    nonisolated static func isCodexAuxiliaryThread(
+        cwd: String?,
+        title: String?,
+        preview: String?,
+        metadata: [String: String] = [:]
+    ) -> Bool {
+        if let source = normalizedPrompt(firstNonEmpty(metadata["thread_source"], metadata["threadSource"])),
+           auxiliaryThreadSources.contains(source) {
+            return true
+        }
+        if isCodexMemoryMaintenanceThread(cwd: cwd, title: title, preview: preview, metadata: metadata) {
+            return true
+        }
+
+        // A known opening prompt is stronger than a changing result preview. Matching
+        // only the opening also preserves user tasks that quote a helper prompt later.
+        let prompt = firstNonEmpty(metadata["prompt"], metadata["message"], preview)
+        return isCodexTitleGenerationPrompt(prompt) || isCodexSuggestionGenerationPrompt(prompt)
     }
 
     nonisolated static func isCodexMemoryMaintenanceThread(
@@ -1418,7 +1462,10 @@ class HookSocketServer {
         terminalProgram: String?,
         terminalBundleID: String?,
         ideBundleID: String?,
-        matchedProfileKind: SessionClientKind?
+        matchedProfileKind: SessionClientKind?,
+        origin: String? = nil,
+        originator: String? = nil,
+        hasTerminalSession: Bool = false
     ) -> SessionClientKind {
         func hasContent(_ value: String?) -> Bool {
             guard let value else { return false }
@@ -1450,6 +1497,7 @@ class HookSocketServer {
         let isExplicitDesktop = normalizedKind?.contains("app") == true
             || normalizedKind?.contains("desktop") == true
             || normalizedBundleID == "com.openai.codex"
+            || SessionClientInfo(kind: .unknown, origin: origin, originator: originator).hasCodexDesktopSource
         let hasHostedTerminalBundle = normalizedTerminalBundleID != nil
             && normalizedTerminalBundleID != "com.openai.codex"
         let hasHostedIDEBundle = normalizedIDEBundleID != nil
@@ -1458,9 +1506,9 @@ class HookSocketServer {
             && normalizedTerminalProgram != "codex"
             && inferredTerminalProgramBundleID != "com.openai.codex"
         let hasTerminalContext = hasContent(terminalTTY)
+            || hasTerminalSession
             || hasHostedTerminalProgram
-            || hasHostedTerminalBundle
-            || hasHostedIDEBundle
+            || (hasHostedTerminalBundle && !TerminalAppRegistry.isIDEBundle(normalizedTerminalBundleID ?? ""))
 
         if isExplicitCLI || hasTerminalContext {
             return .codexCLI
@@ -1468,6 +1516,10 @@ class HookSocketServer {
 
         if isExplicitDesktop || hasExplicitNonTerminalBundle {
             return .codexApp
+        }
+
+        if hasHostedTerminalBundle || hasHostedIDEBundle {
+            return .codexCLI
         }
 
         if let matchedProfileKind {

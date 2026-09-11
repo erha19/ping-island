@@ -35,7 +35,24 @@ enum SessionAssociationStore {
             return [:]
         }
 
-        return associations
+        let repaired = normalizedAssociations(associations)
+        if repaired != associations {
+            save(repaired)
+        }
+        return repaired
+    }
+
+    /// Repair identities supported by stored desktop evidence on first load,
+    /// even when the corresponding thread has not produced a new snapshot yet.
+    nonisolated static func normalizedAssociations(
+        _ associations: [String: PersistedSessionAssociation]
+    ) -> [String: PersistedSessionAssociation] {
+        associations.mapValues { association in
+            guard association.provider == .codex else { return association }
+            var repaired = association
+            repaired.clientInfo = association.clientInfo.normalizedForCodexRouting(sessionId: association.sessionId)
+            return repaired
+        }
     }
 
     nonisolated static func save(_ associations: [String: PersistedSessionAssociation]) {

@@ -3,6 +3,29 @@ import XCTest
 @testable import Ping_Island
 
 final class CodexAppServerMonitorTests: XCTestCase {
+    func testClientIdentityUsesRuntimeSourceSeparatelyFromTaskSource() {
+        let monitor = CodexAppServerMonitor.shared
+        for thread: [String: Any] in [
+            ["source": "cli", "thread_source": "user"],
+            ["threadSource": "cli"],
+            ["origin": "cli", "originator": "codex-tui"]
+        ] {
+            let client = monitor.makeClientInfo(from: thread, threadId: "cli-thread")
+            XCTAssertEqual(client.kind, .codexCLI)
+            XCTAssertEqual(client.profileID, "codex-cli")
+            XCTAssertNil(client.bundleIdentifier)
+            XCTAssertNil(client.launchURL)
+        }
+        let desktop = monitor.makeClientInfo(from: [
+            "source": "vscode", "originator": "Codex Desktop", "thread_source": "user"
+        ], threadId: "desktop-thread")
+        XCTAssertEqual(desktop.kind, .codexApp)
+        XCTAssertEqual(desktop.threadSource, "user")
+        XCTAssertEqual(desktop.launchURL, "codex://threads/desktop-thread")
+        let helper = monitor.makeClientInfo(from: ["thread_source": "thread_title"], threadId: "helper")
+        XCTAssertEqual(helper.threadSource, "thread_title")
+    }
+
     private func makeTemporaryApplication(bundleIdentifier: String) throws -> URL {
         let applicationURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)

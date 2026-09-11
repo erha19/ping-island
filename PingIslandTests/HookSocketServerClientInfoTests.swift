@@ -2,6 +2,49 @@ import XCTest
 @testable import Ping_Island
 
 final class HookSocketServerClientInfoTests: XCTestCase {
+    func testCodexDesktopSourceIgnoresBareQoderHostHints() throws {
+        for host in ["com.qoder.ide", "com.aliyun.lingma.ide"] {
+            let event = try decodeCodexEvent(
+                terminalContext: ["terminalBundleID": host, "ideBundleID": host, "ideName": "Qoder CN IDE"],
+                metadata: ["client_origin": "desktop", "client_originator": "Codex Desktop", "thread_source": "vscode"]
+            )
+            XCTAssertEqual(event.clientInfo.kind, .codexApp)
+            XCTAssertEqual(event.clientInfo.profileID, "codex-app")
+            XCTAssertEqual(event.clientInfo.bundleIdentifier, "com.openai.codex")
+            XCTAssertEqual(event.clientInfo.launchURL, "codex://threads/test-codex-identity")
+            XCTAssertNil(event.clientInfo.ideHostBadgeLabel(for: .codex))
+        }
+    }
+
+    func testCodexDesktopHintsPreserveActualQoderTerminal() throws {
+        for context in [
+            ["terminalProgram": "vscode", "tty": "/dev/ttys004"],
+            ["terminalSessionID": "terminal-123"],
+            ["tmuxSession": "work", "tmuxPane": "%1"]
+        ] {
+            let event = try decodeCodexEvent(
+                terminalContext: context.merging([
+                    "terminalBundleID": "com.aliyun.lingma.ide",
+                    "ideBundleID": "com.aliyun.lingma.ide", "ideName": "Qoder CN IDE"
+                ]) { first, _ in first },
+                metadata: ["client_kind": "codex-app", "client_origin": "desktop", "client_originator": "Codex Desktop"]
+            )
+            XCTAssertEqual(event.clientInfo.kind, .codexCLI)
+            XCTAssertEqual(event.clientInfo.profileID, "codex-cli")
+            XCTAssertEqual(event.clientInfo.terminalBundleIdentifier, "com.aliyun.lingma.ide")
+            XCTAssertEqual(event.clientInfo.ideHostBadgeLabel(for: .codex), "Qoder CN IDE 终端")
+        }
+    }
+
+    private func decodeCodexEvent(terminalContext: [String: String], metadata: [String: String]) throws -> HookEvent {
+        let envelope: [String: Any] = [
+            "id": UUID().uuidString, "provider": "codex", "eventType": "UserPromptSubmit",
+            "sessionKey": "codex:test-codex-identity", "cwd": "/tmp/project",
+            "terminalContext": terminalContext, "metadata": metadata, "expectsResponse": false
+        ]
+        return try HookSocketServer.decodeHookEvent(from: JSONSerialization.data(withJSONObject: envelope))
+    }
+
     func testClaudeHookKeepsClientIdentityInsideQoderIDETerminals() throws {
         for (hostName, hostBundle) in [
             ("Qoder IDE", "com.qoder.ide"),

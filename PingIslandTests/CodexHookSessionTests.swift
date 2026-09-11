@@ -3,6 +3,54 @@ import XCTest
 @testable import Ping_Island
 
 final class CodexHookSessionTests: XCTestCase {
+    func testDesktopRepairReplacesCurrentMemoryAcrossEveryIngress() async {
+        for ingress in ["hook", "summary", "snapshot"] {
+            let sessionId = "codex-routing-repair-\(UUID().uuidString)"
+            let store = SessionStore.shared
+            await store.upsertCodexSession(
+                sessionId: sessionId, name: "Real user task", preview: "Working on the project",
+                cwd: "/tmp/project", phase: .processing, intervention: nil,
+                clientInfo: SessionClientInfo(
+                    kind: .codexCLI, profileID: "codex-cli", name: "Codex CLI",
+                    launchURL: "qoder-cn://file/tmp/project", origin: "cli", originator: "Qoder CN IDE",
+                    terminalBundleIdentifier: "com.aliyun.lingma.ide"
+                )
+            )
+            let polluted = await store.session(for: sessionId)
+            XCTAssertEqual(polluted?.clientInfo.kind, .codexCLI)
+            XCTAssertNotNil(polluted?.clientInfo.terminalBundleIdentifier)
+
+            if ingress == "hook" {
+                await store.process(.hookReceived(makeCodexUserPromptSubmitEvent(sessionId: sessionId)))
+            } else if ingress == "summary" {
+                await store.upsertCodexSession(
+                    sessionId: sessionId, name: "Real user task", preview: "Working on the project",
+                    cwd: "/tmp/project", phase: .processing, intervention: nil,
+                    clientInfo: .codexApp(threadId: sessionId)
+                )
+            } else {
+                await store.syncCodexThreadSnapshot(CodexThreadSnapshot(
+                    threadId: sessionId, name: "Real user task", preview: "Working on the project",
+                    cwd: "/tmp/project", clientInfo: .codexApp(threadId: sessionId), intervention: nil,
+                    createdAt: Date(), updatedAt: Date(), phase: .processing, historyItems: [],
+                    conversationInfo: ConversationInfo(
+                        summary: nil, lastMessage: nil, lastMessageRole: nil, lastToolName: nil,
+                        firstUserMessage: nil, lastUserMessageDate: nil
+                    ), latestTurnId: nil, latestResponseText: nil,
+                    latestResponsePhase: nil, latestUserText: nil
+                ))
+            }
+            let repaired = await store.session(for: sessionId)
+            XCTAssertEqual(repaired?.clientInfo.kind, .codexApp, ingress)
+            XCTAssertEqual(repaired?.clientInfo.profileID, "codex-app", ingress)
+            XCTAssertEqual(repaired?.clientInfo.launchURL, "codex://threads/\(sessionId)", ingress)
+            XCTAssertNil(repaired?.clientInfo.terminalBundleIdentifier, ingress)
+            XCTAssertNil(repaired?.clientInfo.originator, ingress)
+            XCTAssertNil(repaired?.clientInfo.ideHostBadgeLabel(for: .codex), ingress)
+            await store.process(.sessionArchived(sessionId: sessionId))
+        }
+    }
+
     func testCodexAppSessionStartWithoutMessageStaysIdleUntilPrompt() async {
         let sessionId = "codex-session-start-\(UUID().uuidString)"
         let store = SessionStore.shared

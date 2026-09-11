@@ -763,6 +763,16 @@ public enum HookPayloadMapper {
         let hints = hintKeys
             .compactMap { environment[$0]?.lowercased() }
             .joined(separator: " ")
+        // Qoder's CLI settings (including disabled statistics) can be inherited
+        // by unrelated apps. Only bundle identity or IDE IPC/executable paths
+        // establish a Qoder host; arbitrary prefixed variables do not.
+        let ideIPCHints = [
+            "VSCODE_GIT_IPC_HANDLE",
+            "VSCODE_IPC_HOOK_CLI",
+            "VSCODE_GIT_ASKPASS_MAIN",
+        ]
+            .compactMap { environment[$0]?.lowercased() }
+            .joined(separator: " ")
 
         if bundleIdentifier == "com.qoder.work"
             || hints.contains("qoderwork.app")
@@ -771,16 +781,14 @@ public enum HookPayloadMapper {
             return ("QoderWork", "com.qoder.work")
         }
         if bundleIdentifier == "com.aliyun.lingma.ide"
-            || hints.contains("qoder cn.app")
-            || hints.contains("qoder cn ide.app")
-            || hints.contains("com.aliyun.lingma.ide")
-            || environment.keys.contains(where: { $0.hasPrefix("QODERCN_") || $0.hasPrefix("QODER_CN_") }) {
+            || ideIPCHints.contains("qoder cn.app")
+            || ideIPCHints.contains("qoder cn ide.app")
+            || ideIPCHints.contains("com.aliyun.lingma.ide") {
             return ("Qoder CN IDE", "com.aliyun.lingma.ide")
         }
         if bundleIdentifier == "com.qoder.ide"
-            || hints.contains("qoder ide.app")
-            || hints.contains("com.qoder.ide")
-            || environment.keys.contains(where: { $0.hasPrefix("QODER_") }) {
+            || ideIPCHints.contains("qoder ide.app")
+            || ideIPCHints.contains("com.qoder.ide") {
             return ("Qoder IDE", "com.qoder.ide")
         }
         if hints.contains("cursor") || environment.keys.contains(where: { $0.hasPrefix("CURSOR_") }) {
