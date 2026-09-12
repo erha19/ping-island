@@ -16,6 +16,7 @@ xcrun swiftc \
   -o "${EXECUTABLE_PATH}" \
   "${ROOT_DIR}/scripts/mascot-export/SessionStubs.swift" \
   "${ROOT_DIR}/PingIsland/Models/MascotStatus.swift" \
+  "${ROOT_DIR}/PingIsland/UI/Components/TerminalColors.swift" \
   "${ROOT_DIR}/PingIsland/UI/Components/MascotView.swift" \
   "${ROOT_DIR}/scripts/mascot-export/MascotGIFExporterMain.swift"
 

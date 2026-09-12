@@ -6,6 +6,7 @@ enum SessionProvider {
     case claude
     case copilot
     case kimi
+    case omp
     case gemini
 }
 
@@ -42,6 +43,7 @@ enum SessionClientBrand {
     case qoder
     case copilot
     case kimi
+    case omp
     case claude
     case neutral
 }
@@ -84,6 +86,10 @@ struct SessionState {
 }
 
 enum AppLocalization {
+    static func string(_ key: String) -> String {
+        key
+    }
+
     static func format(_ format: String, _ arguments: CVarArg...) -> String {
         String(format: format, arguments: arguments)
     }

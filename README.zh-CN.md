@@ -44,6 +44,7 @@
   <img src="docs/images/mascots/gemini.gif" width="36" alt="Gemini CLI gif" title="Gemini CLI">&nbsp;
   <img src="docs/images/mascots/hermes.gif" width="36" alt="Hermes Agent gif" title="Hermes Agent">&nbsp;
   <img src="docs/images/mascots/pi.gif" width="36" alt="Pi Agent gif" title="Pi Agent">&nbsp;
+  <img src="docs/images/mascots/omp.gif" width="36" alt="Oh My Pi 宠物" title="Oh My Pi (OMP)">&nbsp;
   <img src="docs/images/mascots/qwen.gif" width="36" alt="Qwen Code gif" title="Qwen Code">&nbsp;
   <img src="docs/images/mascots/kimi.gif" width="36" alt="Kimi CLI gif" title="Kimi CLI">&nbsp;
   <img src="docs/images/mascots/openclaw.gif" width="36" alt="OpenClaw gif" title="OpenClaw">&nbsp;
@@ -54,7 +55,7 @@
   <img src="docs/images/mascots/copilot.gif" width="36" alt="GitHub Copilot gif" title="GitHub Copilot">
 </p>
 <p align="center">
-  <sub>Claude Code · Codex · Gemini CLI · Hermes Agent · Pi Agent · Qwen Code · Kimi CLI · OpenClaw · OpenCode · Cursor · Qoder · CodeBuddy · GitHub Copilot</sub>
+  <sub>Claude Code · Codex · Gemini CLI · Hermes Agent · Pi Agent · Oh My Pi · Qwen Code · Kimi CLI · OpenClaw · OpenCode · Cursor · Qoder · CodeBuddy · GitHub Copilot</sub>
 </p>
 
 <a id="lets-try-it"></a>
@@ -120,7 +121,7 @@ xcodebuild -project PingIsland.xcodeproj -scheme PingIsland -configuration Relea
 
 ## Ping Island 是什么？
 
-Ping Island 是一个 macOS 菜单栏应用。当你的编码 Agent 需要你处理审批、输入或查看结果时，它会展开成一个紧凑的会话界面。它能接 Claude 风格 hooks、Codex hooks、Gemini CLI hooks、Hermes Agent plugin hooks、Pi Agent extension hooks、Qwen Code hooks、Kimi CLI hooks、OpenClaw internal hooks + session transcripts、Codex app-server、OpenCode 插件，以及兼容 IDE 的集成层，所以你不用一直盯着终端标签页，也能看到会话状态。
+Ping Island 是一个 macOS 菜单栏应用。当你的编码 Agent 需要你处理审批、输入或查看结果时，它会展开成一个紧凑的会话界面。它能接 Claude 风格 hooks、Codex hooks、Gemini CLI hooks、Hermes Agent plugin hooks、Pi Agent extension hooks、Oh My Pi hooks、Qwen Code hooks、Kimi CLI hooks、OpenClaw internal hooks + session transcripts、Codex app-server、OpenCode 插件，以及兼容 IDE 的集成层，所以你不用一直盯着终端标签页，也能看到会话状态。
 
 如果你了解过 [Vibe Island](https://vibeisland.app/)，可以把 Ping Island 理解成同一产品方向下的独立开源替代方案：它同样是一个原生 macOS 刘海区 / 菜单栏界面，用来监控和控制 AI 编码会话。
 
@@ -143,7 +144,7 @@ Ping Island 关注的，是那些真正会打断编码节奏的时刻，并把�
 - **原地处理** - 直接在刘海界面里批准工具调用、拒绝请求、回答追问。
 - **一键跳回现场** - 快速回到对应的 iTerm2、Ghostty、Terminal.app、tmux pane 或 IDE 窗口。
 - **SSH 终端支持** - 可以通过 SSH 自动引导远程 PingIslandBridge，把远程 Claude 兼容 hooks 重写到桥接入口，并把远程终端里的事件统一回流到你本机的 Island 界面。
-- **多 Agent 统一收口** - 在一个菜单栏入口里持续跟踪 Claude Code、Codex、Gemini CLI、Hermes Agent、Pi Agent、Qwen Code、Kimi CLI、OpenClaw、OpenCode、Cursor、Qoder、CodeBuddy、WorkBuddy、GitHub Copilot 等兼容会话。
+- **多 Agent 统一收口** - 在一个菜单栏入口里持续跟踪 Claude Code、Codex、Gemini CLI、Hermes Agent、Pi Agent、Oh My Pi（OMP）、Qwen Code、Kimi CLI、OpenClaw、OpenCode、Cursor、Qoder、CodeBuddy、WorkBuddy、GitHub Copilot 等兼容会话。
 - **OpenClaw Gateway 支持** - 先通过 OpenClaw internal hooks 快速拿到会话事件，再从本地 session transcript 回填完整对话，让 Island 不只显示单条入站消息。
 - **Codex hooks + app-server** - 同时支持 Codex CLI hooks、实时 app-server 线程同步，以及 rollout 解析兜底。
 - **自定义音效** - 可按事件选择 macOS 系统音，也支持导入本地 sound pack。
@@ -151,6 +152,7 @@ Ping Island 关注的，是那些真正会打断编码节奏的时刻，并把�
 - **Buddy 离岛（v0.5.0+）** - 可把当前宠物从刘海里拖出来，作为独立悬浮小伙伴持续陪伴。
 - **Hermes 专属宠物** - Hermes Agent 默认使用一只带翼盔和信使挎包的金色“翼盔信使狐”，和 Claude / Qwen 体系做明显区分。
 - **Pi 专属宠物** - Pi Agent 默认使用“终端云团”形象，让 extension hook 会话在 Island UI 里更容易辨认。
+- **Oh My Pi 专属宠物** - Oh My Pi（OMP）使用独立的橙色像素宠物，可在 Island 中处理工具审批与 `ask` 问答。
 - **Qwen 专属宠物** - Qwen Code 默认使用一只带薄荷围巾的卡皮巴拉，强调稳定、耐心、适合连续追问的气质。
 - **Kimi 专属宠物** - Kimi CLI 保留原先实现的“蓝色键盘球”形象，让 Kimi hook 会话在 README 和应用 UI 里都能保持独立识别。
 
@@ -164,6 +166,7 @@ Ping Island 关注的，是那些真正会打断编码节奏的时刻，并把�
 | Gemini CLI | `~/.gemini/settings.json` 中的 Gemini CLI hooks | 兼容终端宿主 | 会话生命周期、工具活动、通知、压缩前事件 |
 | Hermes Agent | `~/.hermes/plugins/ping_island/` 官方 plugin hooks | Hermes CLI 终端宿主 | 用户输入、工具活动、模型回复、会话结束通知 |
 | Pi Agent | `~/.pi/agent/extensions/ping_island/` 下的官方 extension | Pi Agent 终端宿主 | Extension 事件转发、客户端识别、终端云团宠物 |
+| Oh My Pi (OMP) | `~/.omp/agent/hooks/pre/ping-island.ts` 下的 TypeScript hook | OMP 终端宿主 | 会话与工具活动、工具审批、`ask` 问答、独立橙色像素宠物 |
 | Qwen Code | `~/.qwen/settings.json` 中的官方 hooks | 兼容终端宿主、远程 SSH 会话 | 权限追问、通知弹窗、Stop / SessionEnd 处理、远程 hooks 转发 |
 | Kimi CLI | `~/.kimi/config.toml` 中的官方 `[[hooks]]` | 兼容终端宿主 | 工具活动、通知、回合完成、会话结束处理 |
 | Kimi App | `~/Library/Application Support/kimi-desktop/` 下内置 kimi-code 内核 config 中的官方 `[[hooks]]` | Kimi 桌面版 | 桌面版聊天与 Agent 回合，Kimi 重写内核配置后自动补装 |
@@ -285,7 +288,7 @@ my-pack/
 ## 工作原理
 
 ```text
-Claude / Codex / Gemini CLI / Hermes Agent / Pi Agent / Qwen Code / Kimi CLI / OpenCode / Cursor / Qoder / CodeBuddy / WorkBuddy / Copilot / ...
+Claude / Codex / Gemini CLI / Hermes Agent / Pi Agent / Oh My Pi (OMP) / Qwen Code / Kimi CLI / OpenCode / Cursor / Qoder / CodeBuddy / WorkBuddy / Copilot / ...
   -> hook 或 app-server 事件
     -> Ping Island 监控与归一化层
       -> SessionStore
@@ -299,6 +302,7 @@ Claude / Codex / Gemini CLI / Hermes Agent / Pi Agent / Qwen Code / Kimi CLI / O
 - Codex 会话既可以来自 hooks，也可以来自 `codex app-server` websocket 实时同步。
 - Gemini CLI hooks 会安装到 `~/.gemini/settings.json`，其中工具 matcher 要使用 Gemini 的正则语法。
 - Pi Agent 通过生成到 `~/.pi/agent/extensions/ping_island/` 下的 TypeScript extension 接入，并通过 Claude 兼容桥接层转发带有 Pi 客户端元数据的事件。
+- Oh My Pi（OMP）通过生成到 `~/.omp/agent/hooks/pre/ping-island.ts` 的 TypeScript hook 接入，以独立的 OMP 客户端身份转发事件。内置 `ask` 问题优先交给 Island 回答；桥接不可用或连接未收到回答便关闭时，回退到 OMP 原生问答界面。
 - Qwen Code hooks 会安装到 `~/.qwen/settings.json`，桥接层沿用官方事件名，并把 `Stop` / `SessionEnd` / `Notification` 的消息内容转成 Island 可直接展示的提示与弹窗文案。
 - Kimi CLI hooks 会安装到 `~/.kimi/config.toml`，安装器会保留无关 TOML 配置，并把 Kimi 的 `Stop` 映射为回合完成、`SessionEnd` 映射为会话结束。
 - OpenCode 使用生成到 `~/.config/opencode/plugins/` 下的插件文件接入。

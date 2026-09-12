@@ -47,6 +47,7 @@
   <img src="docs/images/mascots/gemini.gif" width="36" alt="Gemini CLI mascot" title="Gemini CLI">&nbsp;
   <img src="docs/images/mascots/hermes.gif" width="36" alt="Hermes Agent mascot" title="Hermes Agent">&nbsp;
   <img src="docs/images/mascots/pi.gif" width="36" alt="Pi Agent mascot" title="Pi Agent">&nbsp;
+  <img src="docs/images/mascots/omp.gif" width="36" alt="Oh My Pi mascot" title="Oh My Pi (OMP)">&nbsp;
   <img src="docs/images/mascots/qwen.gif" width="36" alt="Qwen Code mascot" title="Qwen Code">&nbsp;
   <img src="docs/images/mascots/kimi.gif" width="36" alt="Kimi CLI mascot" title="Kimi CLI">&nbsp;
   <img src="docs/images/mascots/openclaw.gif" width="36" alt="OpenClaw mascot" title="OpenClaw">&nbsp;
@@ -57,7 +58,7 @@
   <img src="docs/images/mascots/copilot.gif" width="36" alt="GitHub Copilot mascot" title="GitHub Copilot">
 </p>
 <p align="center">
-  <sub>Claude Code · Codex · Gemini CLI · Antigravity CLI · Hermes Agent · Pi Agent · Qwen Code · Kimi CLI · OpenClaw · OpenCode · Cursor · Qoder IDE · Qoder CN IDE · CodeBuddy · GitHub Copilot</sub>
+  <sub>Claude Code · Codex · Gemini CLI · Antigravity CLI · Hermes Agent · Pi Agent · Oh My Pi · Qwen Code · Kimi CLI · OpenClaw · OpenCode · Cursor · Qoder IDE · Qoder CN IDE · CodeBuddy · GitHub Copilot</sub>
 </p>
 
 <a id="lets-try-it"></a>
@@ -127,7 +128,7 @@ For the full notarized release flow and the GitHub Releases backed Sparkle appca
 
 ## What is Ping Island?
 
-Ping Island is a macOS menu bar app that expands into a compact session surface when your coding agents need attention. It listens to Claude-style hooks, Codex hooks, Gemini CLI hooks, Antigravity CLI plugin hooks, Hermes Agent plugin hooks, Pi Agent extension hooks, Qwen Code hooks, Kimi CLI hooks, OpenClaw internal hooks plus session transcripts, the Codex app-server, OpenCode plugins, and compatible IDE integrations so approvals, input requests, completions, and session summaries show up without babysitting terminal tabs.
+Ping Island is a macOS menu bar app that expands into a compact session surface when your coding agents need attention. It listens to Claude-style hooks, Codex hooks, Gemini CLI hooks, Antigravity CLI plugin hooks, Hermes Agent plugin hooks, Pi Agent extension hooks, Oh My Pi hooks, Qwen Code hooks, Kimi CLI hooks, OpenClaw internal hooks plus session transcripts, the Codex app-server, OpenCode plugins, and compatible IDE integrations so approvals, input requests, completions, and session summaries show up without babysitting terminal tabs.
 
 If you have seen [Vibe Island](https://vibeisland.app/), Ping Island is positioned as an independent open-source alternative in the same category: a native macOS notch/menu bar surface for monitoring and controlling AI coding sessions.
 
@@ -140,7 +141,7 @@ Ping Island focuses on the moments that actually interrupt coding flow, then kee
 - **Claude Code auto-approve** - Turn on per-session auto-approval when you want Claude Code to stop pausing on every permission request.
 - **One-click return** - Jump back to the right iTerm2, Ghostty, Terminal.app, tmux pane, or IDE window.
 - **SSH terminal support** - Bootstrap a remote PingIslandBridge over SSH, rewrite remote hooks to point back at your Mac, forward remote Codex app-server activity and usage snapshots, and keep remote terminal activity visible in the same local Island UI.
-- **Multi-agent coverage** - Track Claude Code, Codex, Gemini CLI, Antigravity CLI, Hermes Agent, Pi Agent, Qwen Code, Kimi CLI, OpenClaw, OpenCode, Cursor, Qoder IDE, Qoder CN IDE, CodeBuddy, WorkBuddy, GitHub Copilot, and other compatible sessions in one place.
+- **Multi-agent coverage** - Track Claude Code, Codex, Gemini CLI, Antigravity CLI, Hermes Agent, Pi Agent, Oh My Pi (OMP), Qwen Code, Kimi CLI, OpenClaw, OpenCode, Cursor, Qoder IDE, Qoder CN IDE, CodeBuddy, WorkBuddy, GitHub Copilot, and other compatible sessions in one place.
 - **OpenClaw gateway support** - Follow OpenClaw sessions from managed internal hooks, then refill the conversation from OpenClaw's local session transcripts so the Island UI can show the actual back-and-forth instead of a single inbound message.
 - **Codex hook + app-server sync** - Support Codex CLI hooks, live app-server threads, and rollout parsing fallback when needed.
 - **Experience themes** - Choose PingIsland native, macOS, or Pixel (with two classic palettes); themes coordinate window chrome, icons, controls, motion, and semantic audio.
@@ -149,6 +150,7 @@ Ping Island focuses on the moments that actually interrupt coding flow, then kee
 - **Buddy detach in v0.5.0+** - Drag the active Buddy out of the notch so it can stay nearby as an independent floating companion.
 - **Hermes courier-fox mascot** - Hermes Agent uses a gold courier fox with a winged helmet and satchel so plugin-hook sessions stay visually distinct from the Claude/Qwen family.
 - **Pi terminal-cloud mascot** - Pi Agent uses its own terminal-cloud mascot so extension-hook sessions are easy to spot in the Island UI.
+- **Oh My Pi mascot and prompts** - Oh My Pi (OMP) has its own orange pixel mascot, with tool approvals and `ask` questions answerable from the Island.
 - **Qwen capybara mascot** - Qwen Code now ships with a mint-scarf capybara mascot tuned for prompt, reply, and notification-heavy flows.
 - **Kimi keyboard-orb mascot** - Kimi CLI keeps its original blue keyboard-orb mascot so its hook sessions stay visually distinct in the README strip and app UI.
 
@@ -163,6 +165,7 @@ Ping Island focuses on the moments that actually interrupt coding flow, then kee
 | Antigravity CLI | Generated native plugin under `~/.gemini/antigravity-cli/plugins/ping-island/` | Compatible terminal hosts and remote SSH sessions | Model invocation, tool activity, errors, and turn-stop status while preserving Antigravity's native permission prompts |
 | Hermes Agent | Official plugin hooks in `~/.hermes/plugins/ping_island/` | Hermes CLI terminal host | User prompts, tool activity, assistant replies, session-end notifications |
 | Pi Agent | Official extension under `~/.pi/agent/extensions/ping_island/` | Pi Agent terminal host | Extension event forwarding, client-aware session tracking, terminal-cloud mascot |
+| Oh My Pi (OMP) | TypeScript hook at `~/.omp/agent/hooks/pre/ping-island.ts` | OMP terminal host | Session and tool activity, tool approvals, `ask` replies, dedicated orange pixel mascot |
 | Qwen Code | Official hooks in `~/.qwen/settings.json` | Compatible terminal hosts and remote SSH sessions | Permission prompts, notification popups, stop/session-end handling, remote hook forwarding |
 | Kimi CLI | Official `[[hooks]]` entries in `~/.kimi/config.toml` | Compatible terminal hosts | Tool activity, notifications, turn completion, session-end handling |
 | Kimi App | Official `[[hooks]]` entries in the bundled kimi-code kernel config under `~/Library/Application Support/kimi-desktop/` | Kimi desktop app | Chat and agent turns from the desktop app, with automatic repair when Kimi rewrites its kernel config |
@@ -321,7 +324,7 @@ Sound packs can use `.wav`, `.mp3`, or `.ogg` files. If a selected pack does not
 ## How It Works
 
 ```text
-Claude / Codex / Gemini CLI / Antigravity CLI / Hermes Agent / Pi Agent / Qwen Code / Kimi CLI / OpenCode / Cursor / Qoder IDE / Qoder CN IDE / CodeBuddy / WorkBuddy / Copilot / ...
+Claude / Codex / Gemini CLI / Antigravity CLI / Hermes Agent / Pi Agent / Oh My Pi (OMP) / Qwen Code / Kimi CLI / OpenCode / Cursor / Qoder IDE / Qoder CN IDE / CodeBuddy / WorkBuddy / Copilot / ...
   -> hook or app-server event
     -> Ping Island monitor + normalization layer
       -> SessionStore
@@ -336,6 +339,7 @@ Implementation details worth knowing:
 - Gemini CLI hooks are installed into `~/.gemini/settings.json`; tool matchers use Gemini's regex-based hook matcher syntax.
 - Antigravity CLI uses a generated native plugin under `~/.gemini/antigravity-cli/plugins/ping-island/`; Ping Island returns `ask` from its observational `PreToolUse` hook so Antigravity's own permission engine remains authoritative.
 - Pi Agent is wired through a generated TypeScript extension under `~/.pi/agent/extensions/ping_island/` and forwards events through the Claude-compatible bridge with Pi-specific client metadata.
+- Oh My Pi (OMP) uses a generated TypeScript hook at `~/.omp/agent/hooks/pre/ping-island.ts` and forwards events with its own OMP client identity. Built-in `ask` questions are routed to Island first, falling back to OMP's native question UI if the bridge is unavailable or the connection closes without an answer.
 - Qwen Code hooks are installed into `~/.qwen/settings.json`; the bridge follows the official event names and uses `Stop` / `SessionEnd` / `Notification` messages to surface popup-ready summaries in Island.
 - Kimi CLI hooks are installed into `~/.kimi/config.toml`; Ping Island preserves unrelated TOML content and maps Kimi `Stop` to turn completion while `SessionEnd` closes the session.
 - OpenCode is wired through a generated plugin file under `~/.config/opencode/plugins/` and enabled from the documented global config at `~/.config/opencode/opencode.json`; legacy `config.json` entries are still recognized for cleanup.
