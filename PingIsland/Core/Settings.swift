@@ -2070,6 +2070,9 @@ enum AppSettings {
         island8BitSound: Island8BitSound,
         soundPackFallback: NotificationEvent
     ) {
+        guard soundEnabled, isSoundEnabled(for: soundPackFallback) else { return }
+        guard !areReminderNotificationsSuppressed else { return }
+
         switch soundThemeMode {
         case .builtIn:
             playSound(named: systemSound.soundName)
