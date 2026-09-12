@@ -1565,6 +1565,11 @@ class HookSocketServer {
     private var permissionFailureHandler: PermissionFailureHandler?
     private let queue = DispatchQueue(label: "com.wudanwu.pingisland.socket", qos: .userInitiated)
 
+    /// Identity of the socket file this instance bound. A relaunched instance claims the
+    /// shared path by unlinking whatever is already there, so a superseded instance must
+    /// never remove a path that the newer one owns by now.
+    private var boundSocketIdentity: SocketFileIdentity?
+
     private var pendingPermissions: [String: [PendingPermission]] = [:]
     private let permissionsLock = NSLock()
     private var recentInterventionResponses = RecentInterventionResponseStore()
@@ -1646,6 +1651,7 @@ class HookSocketServer {
 
         BridgeRuntimePaths.prepareRuntimeDirectory()
         unlink(Self.socketPath)
+        boundSocketIdentity = nil
 
         serverSocket = socket(AF_UNIX, SOCK_STREAM, 0)
         guard serverSocket >= 0 else {
@@ -1684,6 +1690,8 @@ class HookSocketServer {
             return
         }
 
+        boundSocketIdentity = SocketFileIdentity.current(path: socketPath)
+
         chmod(Self.socketPath, 0o777)
 
         guard listen(serverSocket, 10) == 0 else {
@@ -1711,7 +1719,9 @@ class HookSocketServer {
     func stop() {
         acceptSource?.cancel()
         acceptSource = nil
-        unlink(Self.socketPath)
+        queue.async { [weak self] in
+            self?.removeBoundSocketPath()
+        }
 
         permissionsLock.lock()
         for (_, pendings) in pendingPermissions {
@@ -1721,6 +1731,32 @@ class HookSocketServer {
         }
         pendingPermissions.removeAll()
         permissionsLock.unlock()
+    }
+
+    /// Remove the shared socket path only while it still resolves to the socket this
+    /// instance bound. When another instance has already claimed the path, deleting it
+    /// would leave that instance listening on an unlinked socket: every later bridge
+    /// delivery fails with `connection_failed` and the island silently stops updating.
+    private func removeBoundSocketPath() {
+        defer { boundSocketIdentity = nil }
+        guard let boundSocketIdentity,
+              SocketFileIdentity.current(path: Self.socketPath) == boundSocketIdentity else {
+            return
+        }
+
+        unlink(Self.socketPath)
+    }
+
+    /// Device + inode of a socket file, so ownership survives path reuse by another instance.
+    struct SocketFileIdentity: Equatable {
+        let device: dev_t
+        let inode: ino_t
+
+        static func current(path: String) -> SocketFileIdentity? {
+            var info = stat()
+            guard lstat(path, &info) == 0 else { return nil }
+            return SocketFileIdentity(device: info.st_dev, inode: info.st_ino)
+        }
     }
 
     func respondToPermission(toolUseId: String, decision: String, reason: String? = nil) {

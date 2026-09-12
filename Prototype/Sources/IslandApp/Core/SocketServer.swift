@@ -11,6 +11,11 @@ actor SocketServer {
     private var listenerFD: Int32 = -1
     private var acceptTask: Task<Void, Never>?
 
+    /// Identity of the socket file this server bound. A relaunched instance claims the
+    /// shared path by unlinking whatever is already there, so a superseded instance must
+    /// never remove a path that the newer one owns by now.
+    private var boundSocketIdentity: SocketFileIdentity?
+
     init(socketPath: String, sessionStore: SessionStore, approvalCoordinator: ApprovalCoordinator) {
         self.socketPath = socketPath
         self.sessionStore = sessionStore
@@ -21,6 +26,7 @@ actor SocketServer {
         await stop()
 
         unlink(socketPath)
+        boundSocketIdentity = nil
 
         listenerFD = socket(AF_UNIX, SOCK_STREAM, 0)
         guard listenerFD >= 0 else {
@@ -47,6 +53,8 @@ actor SocketServer {
         guard bindResult == 0 else {
             throw POSIXError(.EADDRINUSE)
         }
+
+        boundSocketIdentity = SocketFileIdentity.current(path: socketPath)
 
         guard listen(listenerFD, 16) == 0 else {
             throw POSIXError(.EIO)
@@ -92,7 +100,33 @@ actor SocketServer {
         if let task {
             await task.value
         }
+        removeBoundSocketPath()
+    }
+
+    /// Remove the shared socket path only while it still resolves to the socket this
+    /// server bound. When another instance has already claimed the path, deleting it
+    /// would leave that instance listening on an unlinked socket: every later bridge
+    /// delivery fails with `connection_failed` and the island silently stops updating.
+    private func removeBoundSocketPath() {
+        defer { boundSocketIdentity = nil }
+        guard let boundSocketIdentity,
+              SocketFileIdentity.current(path: socketPath) == boundSocketIdentity else {
+            return
+        }
+
         unlink(socketPath)
+    }
+
+    /// Device + inode of a socket file, so ownership survives path reuse by another instance.
+    private struct SocketFileIdentity: Equatable {
+        let device: dev_t
+        let inode: ino_t
+
+        static func current(path: String) -> SocketFileIdentity? {
+            var info = stat()
+            guard lstat(path, &info) == 0 else { return nil }
+            return SocketFileIdentity(device: info.st_dev, inode: info.st_ino)
+        }
     }
 
     private func handle(clientFD: Int32) async {

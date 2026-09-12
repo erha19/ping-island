@@ -43,6 +43,57 @@ func socketServerPersistsStateOnlyEnvelopes() async throws {
     }
 }
 
+/// Relaunch overlap: a newer instance claims the shared socket path by unlinking whatever
+/// is already there, and the previous instance then exits. Its `stop()` used to unlink that
+/// path unconditionally, which left the live instance listening on an unlinked socket, so
+/// every later bridge delivery failed with `connection_failed` until the app was relaunched.
+@Test
+func supersededSocketServerStopKeepsTheLiveSocketPath() async throws {
+    try await withTemporaryDirectory { directory in
+        let socketPath = directory.appending(path: "island.sock").path()
+        let store = SessionStore { _ in }
+        let coordinator = ApprovalCoordinator()
+
+        let superseded = SocketServer(
+            socketPath: socketPath,
+            sessionStore: store,
+            approvalCoordinator: coordinator
+        )
+        try await superseded.start()
+
+        let live = SocketServer(
+            socketPath: socketPath,
+            sessionStore: store,
+            approvalCoordinator: coordinator
+        )
+        try await live.start()
+
+        await superseded.stop()
+
+        #expect(FileManager.default.fileExists(atPath: socketPath))
+
+        let envelope = BridgeEnvelope(
+            id: UUID(),
+            provider: .claude,
+            eventType: "PostToolUse",
+            sessionKey: "claude:socket-ownership",
+            title: "Socket Ownership",
+            preview: "Superseded server stopped",
+            cwd: "/tmp/socket-ownership",
+            status: SessionStatus(kind: .active)
+        )
+
+        let response = try TestSocketClient.send(envelope: envelope, socketPath: socketPath)
+
+        #expect(response.requestID == envelope.id)
+        #expect(response.errorMessage == nil)
+
+        await live.stop()
+
+        #expect(!FileManager.default.fileExists(atPath: socketPath))
+    }
+}
+
 @Test
 func socketServerReturnsApprovalDecisionForInteractiveEnvelopes() async throws {
     try await withTemporaryDirectory { directory in
