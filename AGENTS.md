@@ -43,6 +43,7 @@ This file is a routing layer for coding agents working in this repo. Keep it sho
 - Global shortcuts and shortcut persistence: `PingIsland/Services/Shared/GlobalShortcutManager.swift`, `PingIsland/Utilities/GlobalShortcut.swift`, `PingIsland/Core/Settings.swift`, `PingIsland/UI/Views/SettingsWindowView.swift`
 - Claude hook ingress: `Prototype/Sources/IslandBridge/`, `PingIsland/Services/Hooks/HookInstaller.swift`, `PingIsland/Services/Hooks/HookSocketServer.swift`
   - `PingIslandBridge` is the unified Claude/Codex hook entrypoint and is responsible for terminal, tmux, SSH-remote, and IDE terminal context capture before envelopes hit Swift code
+  - `AskUserQuestion` must remain answerable under `bypassPermissions` and session auto-approval. A question response already allows the tool with `updatedInput`; never mark its tracked tool as waiting for approval, or the next hook resurrects a redundant approval card.
   - State-only hook delivery is acknowledged by the app after envelope decoding and routing; keep bridge socket writes complete and do not report `deliveryOutcome=delivered` without a matching app acknowledgement
 - Codex ingress: `PingIsland/Services/Codex/`, `PingIsland/UI/Views/CodexSessionView.swift`
   - App-server discovery may only launch a bundled `codex` binary from the canonical `com.openai.codex` app. Other IDEs can embed a binary with the same filename; their app identity must not be applied to every Codex thread. Rollout `originator` stays host/source metadata and must not replace the canonical Codex client name.

@@ -84,9 +84,8 @@ struct HookEvent: Sendable {
     let bridgeIntervention: SessionIntervention?
     let bridgeExpectsResponse: Bool?
     let suppressInAppPrompt: Bool
-    /// True when Codex fires a PermissionRequest hook with `permission_mode=bypassPermissions`,
-    /// meaning Codex has already auto-approved the tool call internally.  Island should
-    /// respond to the hook immediately without showing an approval card.
+    /// True for a PermissionRequest with `permission_mode=bypassPermissions` (Claude or Codex).
+    /// Tool approvals can return immediately; question requests must still wait for an answer.
     let codexBypassPermissions: Bool
 
     nonisolated init(

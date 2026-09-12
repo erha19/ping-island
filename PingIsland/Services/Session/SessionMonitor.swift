@@ -1266,10 +1266,12 @@ class SessionMonitor: ObservableObject {
         return (toolUseId, answers, updatedInput)
     }
 
-    private nonisolated static func shouldAutoApproveClaudePermission(for event: HookEvent) async -> Bool {
+    nonisolated static func shouldAutoApproveClaudePermission(for event: HookEvent) async -> Bool {
         guard event.provider == .claude,
               event.event == "PermissionRequest",
-              event.status == "waiting_for_approval"
+              event.status == "waiting_for_approval",
+              !event.isAskUserQuestionRequest,
+              event.bridgeIntervention?.kind != .question
         else {
             return false
         }

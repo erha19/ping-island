@@ -17,6 +17,89 @@ final class ClaudeAskUserQuestionSessionTests: XCTestCase {
         await store.process(.sessionArchived(sessionId: sessionId))
     }
 
+    func testBypassPermissionQuestionWaitsForAnswerWithoutApproval() async throws {
+        for mode in ["default", "acceptEdits", "plan", "bypassPermissions"] {
+            let sessionId = "claude-question-\(UUID().uuidString)"
+            let event = try decodePermissionEvent(sessionId: sessionId, mode: mode, tool: "AskUserQuestion")
+            let store = SessionStore.shared
+            XCTAssertTrue(event.expectsResponse)
+            XCTAssertTrue(event.isAskUserQuestionRequest)
+            await store.process(.hookReceived(makeClaudePreToolUseQuestionEvent(sessionId: sessionId)))
+            await store.process(.hookReceived(event))
+            var session = await store.session(for: sessionId)
+            XCTAssertEqual(session?.phase, .waitingForInput, mode)
+            XCTAssertEqual(session?.intervention?.kind, .question, mode)
+            XCTAssertNil(session?.activePermission, mode)
+            if case .toolCall(let tool) = session?.chatItems.first(where: { $0.id == "toolu_\(sessionId)" })?.type {
+                XCTAssertEqual(tool.status, .running, mode)
+            } else {
+                XCTFail("Missing tracked question tool: \(mode)")
+            }
+
+            await store.process(.interventionResolved(
+                sessionId: sessionId, nextPhase: .processing,
+                submittedAnswers: ["Pick one": ["A"]]
+            ))
+            await store.process(.hookReceived(makeClaudePostToolUseEvent(
+                sessionId: sessionId, tool: "AskUserQuestion", toolUseId: "toolu_\(sessionId)"
+            )))
+            session = await store.session(for: sessionId)
+            XCTAssertEqual(session?.phase, .processing, mode)
+            XCTAssertNil(session?.intervention, mode)
+            XCTAssertFalse(session?.needsApprovalResponse ?? true, mode)
+            await store.process(.sessionArchived(sessionId: sessionId))
+        }
+    }
+
+    func testBypassOrdinaryToolStillSkipsApproval() async throws {
+        for provider in ["claude", "codex"] {
+            let sessionId = "bypass-tool-\(UUID().uuidString)"
+            let event = try decodePermissionEvent(
+                sessionId: sessionId, mode: "bypassPermissions", tool: "Bash", provider: provider
+            )
+            XCTAssertTrue(event.codexBypassPermissions)
+            await SessionStore.shared.process(.hookReceived(event))
+            let session = await SessionStore.shared.session(for: sessionId)
+            XCTAssertNil(session)
+        }
+    }
+
+    @MainActor
+    func testSessionAutoApprovalStillWaitsForQuestionAnswer() async throws {
+        let sessionId = "auto-approve-question-\(UUID().uuidString)"
+        let event = try decodePermissionEvent(sessionId: sessionId, mode: "default", tool: "AskUserQuestion")
+        let store = SessionStore.shared
+        await store.process(.hookReceived(event))
+        await store.process(.permissionAutoApprovalChanged(sessionId: sessionId, isEnabled: true))
+        let autoApprove = await SessionMonitor.shouldAutoApproveClaudePermission(for: event)
+        XCTAssertFalse(autoApprove)
+        let ordinaryTool = try decodePermissionEvent(sessionId: sessionId, mode: "default", tool: "Bash")
+        let autoApproveTool = await SessionMonitor.shouldAutoApproveClaudePermission(for: ordinaryTool)
+        XCTAssertTrue(autoApproveTool)
+        let session = await store.session(for: sessionId)
+        XCTAssertEqual(session?.phase, .waitingForInput)
+        XCTAssertEqual(session?.intervention?.kind, .question)
+        await store.process(.sessionArchived(sessionId: sessionId))
+    }
+
+    private func decodePermissionEvent(
+        sessionId: String, mode: String, tool: String, provider: String = "claude"
+    ) throws -> HookEvent {
+        let input: [String: Any] = tool == "AskUserQuestion"
+            ? ["questions": [["question": "Pick one", "options": [["label": "A"], ["label": "B"]]]]]
+            : ["command": "pwd"]
+        let inputJSON = String(decoding: try JSONSerialization.data(withJSONObject: input), as: UTF8.self)
+        let envelope: [String: Any] = [
+            "id": UUID().uuidString, "provider": provider, "eventType": "PermissionRequest",
+            "sessionKey": "\(provider):\(sessionId)", "cwd": "/tmp/project",
+            "terminalContext": [:], "expectsResponse": true,
+            "status": ["kind": "waitingForApproval"],
+            "metadata": ["permission_mode": mode, "tool_name": tool,
+                         "tool_use_id": "toolu_\(sessionId)", "tool_input_json": inputJSON]
+        ]
+        return try HookSocketServer.decodeHookEvent(from: JSONSerialization.data(withJSONObject: envelope))
+    }
+
     func testPreToolUseQuestionDoesNotBlockPlainClaudeCode() {
         let event = makeClaudePreToolUseQuestionEvent(sessionId: "claude-pretool-\(UUID().uuidString)")
 
