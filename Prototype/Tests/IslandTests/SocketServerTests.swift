@@ -51,46 +51,54 @@ func socketServerPersistsStateOnlyEnvelopes() async throws {
 func supersededSocketServerStopKeepsTheLiveSocketPath() async throws {
     try await withTemporaryDirectory { directory in
         let socketPath = directory.appending(path: "island.sock").path()
-        let store = SessionStore { _ in }
+        let liveRecorder = await MainActor.run { SnapshotRecorder() }
+        let liveStore = SessionStore { snapshot in
+            liveRecorder.snapshot = snapshot
+        }
         let coordinator = ApprovalCoordinator()
 
-        let superseded = SocketServer(
+        try await withRunningSocketServer(
             socketPath: socketPath,
-            sessionStore: store,
+            sessionStore: SessionStore { _ in },
             approvalCoordinator: coordinator
-        )
-        try await superseded.start()
+        ) { superseded in
+            try await withRunningSocketServer(
+                socketPath: socketPath,
+                sessionStore: liveStore,
+                approvalCoordinator: coordinator
+            ) { _ in
+                await superseded.stop()
 
-        let live = SocketServer(
-            socketPath: socketPath,
-            sessionStore: store,
-            approvalCoordinator: coordinator
-        )
-        try await live.start()
+                try #require(FileManager.default.fileExists(atPath: socketPath))
 
-        await superseded.stop()
+                let envelope = BridgeEnvelope(
+                    id: UUID(),
+                    provider: .claude,
+                    eventType: "PostToolUse",
+                    sessionKey: "claude:socket-ownership",
+                    title: "Socket Ownership",
+                    preview: "Superseded server stopped",
+                    cwd: "/tmp/socket-ownership",
+                    status: SessionStatus(kind: .active)
+                )
 
-        #expect(FileManager.default.fileExists(atPath: socketPath))
+                let response = try await Task.detached {
+                    try TestSocketClient.send(envelope: envelope, socketPath: socketPath)
+                }.value
 
-        let envelope = BridgeEnvelope(
-            id: UUID(),
-            provider: .claude,
-            eventType: "PostToolUse",
-            sessionKey: "claude:socket-ownership",
-            title: "Socket Ownership",
-            preview: "Superseded server stopped",
-            cwd: "/tmp/socket-ownership",
-            status: SessionStatus(kind: .active)
-        )
+                #expect(response.requestID == envelope.id)
+                #expect(response.errorMessage == nil)
+                try await waitUntil(description: "replacement server should ingest the envelope") {
+                    await MainActor.run {
+                        liveRecorder.sessions.contains {
+                            $0.id == envelope.sessionKey && $0.preview == envelope.preview
+                        }
+                    }
+                }
+            }
 
-        let response = try TestSocketClient.send(envelope: envelope, socketPath: socketPath)
-
-        #expect(response.requestID == envelope.id)
-        #expect(response.errorMessage == nil)
-
-        await live.stop()
-
-        #expect(!FileManager.default.fileExists(atPath: socketPath))
+            #expect(!FileManager.default.fileExists(atPath: socketPath))
+        }
     }
 }
 

@@ -132,8 +132,14 @@ actor SocketServer {
     private func handle(clientFD: Int32) async {
         defer { close(clientFD) }
 
+        // A bridge or a superseded server's wake-up connection can disconnect
+        // before a reply. Match the shipping server's per-socket SIGPIPE policy.
+        var noSigpipe: Int32 = 1
+        setsockopt(clientFD, SOL_SOCKET, SO_NOSIGPIPE, &noSigpipe, socklen_t(MemoryLayout<Int32>.size))
+
         do {
             let data = try Self.readAll(from: clientFD)
+            guard !data.isEmpty else { return }
             if String(data: data, encoding: .utf8)?
                 .trimmingCharacters(in: .whitespacesAndNewlines) == Self.healthCheckRequest {
                 try Self.writeHealthCheckResponse(to: clientFD)
