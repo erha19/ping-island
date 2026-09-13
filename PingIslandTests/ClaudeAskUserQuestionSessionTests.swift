@@ -17,6 +17,48 @@ final class ClaudeAskUserQuestionSessionTests: XCTestCase {
         await store.process(.sessionArchived(sessionId: sessionId))
     }
 
+    /// Every permission mode other than `default` never fires
+    /// `PermissionRequest` for a question: the bridge holds the `PreToolUse`
+    /// hook open instead and reports it through `expectsResponse`.
+    func testPreToolUseQuestionIsAnswerableWhileBridgeWaits() async {
+        let sessionId = "claude-question-\(UUID().uuidString)"
+        let store = SessionStore.shared
+        let event = makeClaudePreToolUseQuestionEvent(sessionId: sessionId, bridgeExpectsResponse: true)
+
+        XCTAssertTrue(event.expectsResponse)
+        XCTAssertTrue(event.isAskUserQuestionRequest)
+        await store.process(.hookReceived(event))
+
+        let session = await store.session(for: sessionId)
+        XCTAssertEqual(session?.phase, .waitingForInput)
+        XCTAssertEqual(session?.intervention?.kind, .question)
+        XCTAssertEqual(
+            session?.intervention?.resolvedQuestions.first?.options.map(\.title),
+            ["会话层", "UI 层"]
+        )
+        XCTAssertNil(session?.activePermission)
+
+        await store.process(.sessionArchived(sessionId: sessionId))
+    }
+
+    /// Without the bridge holding the hook open there is no channel to send an
+    /// answer through, so the island must not offer a form whose answer would
+    /// be dropped.
+    func testPreToolUseQuestionIsNotAnswerableWhenBridgeIsNotWaiting() async {
+        let sessionId = "claude-question-\(UUID().uuidString)"
+        let store = SessionStore.shared
+        let event = makeClaudePreToolUseQuestionEvent(sessionId: sessionId, bridgeExpectsResponse: false)
+
+        XCTAssertFalse(event.expectsResponse)
+        XCTAssertFalse(event.isAskUserQuestionRequest)
+        await store.process(.hookReceived(event))
+
+        let session = await store.session(for: sessionId)
+        XCTAssertNil(session?.intervention)
+
+        await store.process(.sessionArchived(sessionId: sessionId))
+    }
+
     func testBypassPermissionQuestionWaitsForAnswerWithoutApproval() async throws {
         for mode in ["default", "acceptEdits", "plan", "bypassPermissions"] {
             let sessionId = "claude-question-\(UUID().uuidString)"
@@ -615,7 +657,10 @@ final class ClaudeAskUserQuestionSessionTests: XCTestCase {
         )
     }
 
-    private func makeClaudePreToolUseQuestionEvent(sessionId: String) -> HookEvent {
+    private func makeClaudePreToolUseQuestionEvent(
+        sessionId: String,
+        bridgeExpectsResponse: Bool = false
+    ) -> HookEvent {
         HookEvent(
             sessionId: sessionId,
             cwd: "/tmp/project",
@@ -646,7 +691,8 @@ final class ClaudeAskUserQuestionSessionTests: XCTestCase {
             ],
             toolUseId: "toolu_\(sessionId)",
             notificationType: nil,
-            message: nil
+            message: nil,
+            bridgeExpectsResponse: bridgeExpectsResponse
         )
     }
 

@@ -2363,11 +2363,14 @@ func claudePostToolUseResolvedQuestionDoesNotKeepSocketOpen() throws {
 }
 
 @Test
-func claudeCodePreToolUseAskUserQuestionIsNonBlocking() throws {
+func claudeCodePreToolUseAskUserQuestionIsNonBlockingInDefaultPermissionMode() throws {
+    // In `default` mode the blocking `PermissionRequest` hook owns the answer,
+    // so the earlier PreToolUse event must stay status-only.
     let payload = """
     {
       "hook_event_name": "PreToolUse",
       "tool_name": "AskUserQuestion",
+      "permission_mode": "default",
       "tool_input": {
         "questions": [
           {"id": "q1", "question": "Pick one", "options": [{"label": "A"}, {"label": "B"}]}
@@ -2388,6 +2391,97 @@ func claudeCodePreToolUseAskUserQuestionIsNonBlocking() throws {
     #expect(envelope.status?.kind == .runningTool)
     #expect(envelope.expectsResponse == false)
     #expect(envelope.intervention == nil)
+}
+
+@Test
+func claudeCodePreToolUseAskUserQuestionWithoutPermissionModeIsNonBlocking() throws {
+    // No `permission_mode` means an older client whose PermissionRequest
+    // behavior is unknown: keep the conservative status-only handling.
+    let payload = """
+    {
+      "hook_event_name": "PreToolUse",
+      "tool_name": "AskUserQuestion",
+      "tool_input": {
+        "questions": [
+          {"id": "q1", "question": "Pick one", "options": [{"label": "A"}, {"label": "B"}]}
+        ]
+      },
+      "session_id": "claude-aq"
+    }
+    """.data(using: .utf8)!
+
+    let envelope = HookPayloadMapper.makeEnvelope(
+        source: .claude,
+        arguments: ["island-bridge", "--source", "claude"],
+        environment: ["PWD": "/tmp/demo"],
+        stdinData: payload
+    )
+
+    #expect(envelope.expectsResponse == false)
+    #expect(envelope.intervention == nil)
+}
+
+@Test
+func claudeCodeAutoModePreToolUseAskUserQuestionSurfacesAnswerableQuestion() throws {
+    // Auto mode never fires PermissionRequest for a question, so the
+    // PreToolUse hook is the only channel the answer can travel through.
+    let payload = """
+    {
+      "hook_event_name": "PreToolUse",
+      "tool_name": "AskUserQuestion",
+      "permission_mode": "auto",
+      "tool_input": {
+        "questions": [
+          {"id": "q1", "header": "Scope", "question": "Pick one", "options": [{"label": "A"}, {"label": "B"}]}
+        ]
+      },
+      "session_id": "claude-aq"
+    }
+    """.data(using: .utf8)!
+
+    let envelope = HookPayloadMapper.makeEnvelope(
+        source: .claude,
+        arguments: ["island-bridge", "--source", "claude"],
+        environment: ["PWD": "/tmp/demo"],
+        stdinData: payload
+    )
+
+    #expect(envelope.eventType == "PreToolUse")
+    #expect(envelope.expectsResponse)
+    #expect(envelope.intervention?.kind == .question)
+}
+
+@Test
+func claudeCodePreToolUseAnswerUsesPermissionDecisionPayload() throws {
+    // Claude Code only reads an answer from a PreToolUse hook through
+    // `permissionDecision` + `updatedInput`; the `decision.behavior` shape is
+    // ignored there and the answer would be dropped.
+    let response = BridgeResponse(
+        requestID: UUID(),
+        decision: .answer([:]),
+        updatedInput: [
+            "questions": .array([
+                .object([
+                    "id": .string("q1"),
+                    "question": .string("Pick one"),
+                    "options": .array([.object(["label": .string("A")])])
+                ])
+            ]),
+            "answers": .object(["Pick one": .string("A")])
+        ]
+    )
+    let payload = HookPayloadMapper.stdoutPayload(
+        for: .claude,
+        response: response,
+        eventType: "PreToolUse",
+        metadata: ["tool_name": "AskUserQuestion", "permission_mode": "auto"]
+    )
+    let json = try #require(JSONSerialization.jsonObject(with: Data(payload.utf8)) as? [String: Any])
+    let hookSpecificOutput = try #require(json["hookSpecificOutput"] as? [String: Any])
+    #expect(hookSpecificOutput["permissionDecision"] as? String == "allow")
+    let updatedInput = try #require(hookSpecificOutput["updatedInput"] as? [String: Any])
+    let answers = try #require(updatedInput["answers"] as? [String: String])
+    #expect(answers["Pick one"] == "A")
 }
 
 @Test

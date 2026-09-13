@@ -278,7 +278,14 @@ extension HookEvent {
         }
 
         if clientInfo.isPlainClaudeCodeRouting, ingress != .nativeRuntime {
-            return event == "PermissionRequest"
+            // Claude Code asks a question through `PermissionRequest` in
+            // `default` permission mode, and through `PreToolUse` everywhere
+            // else. Answering is only possible while the bridge is holding the
+            // hook open for it (`expectsResponse`), which the bridge decides —
+            // see `HookPayloadMapper.shouldSurfaceQuestionIntervention`.
+            let ownsAnswerChannel = event == "PermissionRequest"
+                || (event == "PreToolUse" && expectsResponse)
+            return ownsAnswerChannel
                 && Self.questionToolNames.contains(normalizedToolNameForIntervention ?? "")
                 && !(questionPayloads?.isEmpty ?? true)
         }

@@ -202,7 +202,10 @@ public enum HookPayloadMapper {
                     return "{}"
                 }
 
-                if eventType.contains("Question") || eventType == "UserInputRequest" || eventType == "UserPromptSubmit" {
+                if eventType.contains("Question")
+                    || eventType == "UserInputRequest"
+                    || eventType == "UserPromptSubmit"
+                    || isPlainClaudePreToolUseAnswer(provider: provider, eventType: eventType, clientKind: clientKind) {
                     return """
                     {"hookSpecificOutput":{"hookEventName":"\(eventType)","permissionDecision":"allow","updatedInput":\(payloadJson)}}
                     """
@@ -362,6 +365,20 @@ public enum HookPayloadMapper {
         "task",
         "todowrite"
     ]
+
+    /// Claude Code reads an answer from a `PreToolUse` hook only through
+    /// `permissionDecision` + `updatedInput`; the legacy `decision.behavior`
+    /// shape (which the PermissionRequest hook uses) is ignored there, and the
+    /// answer would be dropped even though the island collected it.
+    private static func isPlainClaudePreToolUseAnswer(
+        provider: AgentProvider,
+        eventType: String,
+        clientKind: String?
+    ) -> Bool {
+        provider == .claude
+            && clientKind == nil
+            && eventType == "PreToolUse"
+    }
 
     private static func shouldPreserveFullUpdatedInputForClaudeAnswer(
         response: BridgeResponse,
@@ -1899,6 +1916,7 @@ public enum HookPayloadMapper {
         if clientKind == nil {
             if provider == .claude {
                 return eventType == "UserInputRequest"
+                    || isPlainClaudePreToolQuestionEvent(eventType: eventType, payload: payload)
                     || isQoderWorkPermissionQuestionEvent(eventType: eventType, payload: payload)
             }
             return isQoderWorkPreToolQuestionEvent(eventType: eventType, payload: payload)
@@ -1907,6 +1925,32 @@ public enum HookPayloadMapper {
         }
 
         return eventType == "PreToolUse" || eventType == "UserInputRequest"
+    }
+
+    /// Claude Code fires `PreToolUse` for `AskUserQuestion` before the
+    /// `PermissionRequest` prompt. In `default` permission mode the blocking
+    /// `PermissionRequest` hook owns the answer, so the earlier `PreToolUse`
+    /// event stays status-only.
+    ///
+    /// Every other permission mode (auto, acceptEdits, plan,
+    /// bypassPermissions) never fires `PermissionRequest` for a question, so
+    /// the `PreToolUse` hook is the only channel an answer can travel through.
+    /// Without this the island renders a question the user can fill in, and
+    /// the answer is dropped.
+    private static func isPlainClaudePreToolQuestionEvent(
+        eventType: String,
+        payload: [String: Any]
+    ) -> Bool {
+        guard eventType == "PreToolUse" else {
+            return false
+        }
+        // Require an explicit non-default mode: an absent `permission_mode`
+        // means an older client whose PermissionRequest behavior we cannot
+        // predict, so keep the conservative status-only behavior there.
+        guard let permissionMode = normalizedPermissionMode(from: payload) else {
+            return false
+        }
+        return permissionMode != "default"
     }
 
     private static func isCodeBuddyCLIAskUserQuestionNotification(

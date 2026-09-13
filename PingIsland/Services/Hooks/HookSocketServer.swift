@@ -202,7 +202,11 @@ struct HookEvent: Sendable {
                     && normalizedTool == "askuserquestion"
                     && toolInput?["questions"] != nil
                     && !isAnsweredAskUserQuestionEvent
-                    && !isPlainClaudeCodeClient
+                    // Plain Claude Code answers through `PermissionRequest` in
+                    // `default` permission mode. In every other mode the bridge
+                    // holds this PreToolUse hook open instead and reports it
+                    // through `expectsResponse`.
+                    && (!isPlainClaudeCodeClient || bridgeExpectsResponse == true)
             )
             || (
                 event == "PermissionRequest"
