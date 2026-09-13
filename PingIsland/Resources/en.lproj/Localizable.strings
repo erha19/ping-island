@@ -29,6 +29,8 @@
 "当前没有正在运行或需要处理的会话时，自动隐藏 Island" = "Automatically hide Island when there are no running sessions or conversations needing attention";
 "智能抑制" = "Smart suppression";
 "当前正在看终端时，不自动弹出通知面板" = "Do not auto-open the notification panel while you are already looking at the terminal";
+"在电脑前时不打断" = "Don't interrupt while I'm at the computer";
+"键盘或鼠标 30 秒内有活动时不自动弹出面板，仅保留刘海状态提示；你离开后恢复自动弹出" = "Keep the panel collapsed while keyboard or mouse activity was seen within the last 30 seconds, and keep only the notch status cue. Auto-open resumes once you step away.";
 "完成时自动展开会话" = "Auto-open completed sessions";
 "消息完成后自动弹出结果面板；关闭后只保留刘海状态提示和提示音" = "Automatically open the result panel when a reply is finished. When off, keep only the notch status cue and sound.";
 "上下文压缩时自动展开提醒" = "Auto-open context compression alerts";

@@ -3336,6 +3336,13 @@ private struct SettingsPanelContentView: View {
                 SettingsLineDivider()
 
                 SettingsToggleLine(
+                    title: "在电脑前时不打断",
+                    subtitle: "键盘或鼠标 30 秒内有活动时不自动弹出面板，仅保留刘海状态提示；你离开后恢复自动弹出",
+                    isOn: $settings.suppressAutoOpenWhileUserActive
+                )
+                SettingsLineDivider()
+
+                SettingsToggleLine(
                     title: "完成时自动展开会话",
                     subtitle: "消息完成后自动弹出结果面板；关闭后只保留刘海状态提示和提示音",
                     isOn: $settings.autoOpenCompletionPanel

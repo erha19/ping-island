@@ -421,6 +421,7 @@ final class AppSettingsStore: ObservableObject {
         static let autoHideWhenIdle = "autoHideWhenIdle"
         static let autoCollapseOnLeave = "autoCollapseOnLeave"
         static let smartSuppression = "smartSuppression"
+        static let suppressAutoOpenWhileUserActive = "suppressAutoOpenWhileUserActive"
         static let autoOpenCompletionPanel = "autoOpenCompletionPanel"
         static let autoOpenCompactedNotificationPanel = "autoOpenCompactedNotificationPanel"
         static let showAgentDetail = "showAgentDetail"
@@ -737,6 +738,17 @@ final class AppSettingsStore: ObservableObject {
             guard !isBootstrapping else { return }
             defaults.set(smartSuppression, forKey: Keys.smartSuppression)
             recordTelemetrySettingChange(key: Keys.smartSuppression, value: smartSuppression.description)
+        }
+    }
+
+    @Published var suppressAutoOpenWhileUserActive: Bool {
+        didSet {
+            guard !isBootstrapping else { return }
+            defaults.set(suppressAutoOpenWhileUserActive, forKey: Keys.suppressAutoOpenWhileUserActive)
+            recordTelemetrySettingChange(
+                key: Keys.suppressAutoOpenWhileUserActive,
+                value: suppressAutoOpenWhileUserActive.description
+            )
         }
     }
 
@@ -1531,6 +1543,12 @@ final class AppSettingsStore: ObservableObject {
             exists: persistedKeys.contains(Keys.smartSuppression),
             default: true
         ))
+        _suppressAutoOpenWhileUserActive = Published(initialValue: Self.boolValue(
+            from: defaults,
+            key: Keys.suppressAutoOpenWhileUserActive,
+            exists: persistedKeys.contains(Keys.suppressAutoOpenWhileUserActive),
+            default: true
+        ))
         _autoOpenCompletionPanel = Published(initialValue: Self.boolValue(
             from: defaults,
             key: Keys.autoOpenCompletionPanel,
@@ -1812,6 +1830,11 @@ enum AppSettings {
     static var smartSuppression: Bool {
         get { shared.smartSuppression }
         set { shared.smartSuppression = newValue }
+    }
+
+    static var suppressAutoOpenWhileUserActive: Bool {
+        get { shared.suppressAutoOpenWhileUserActive }
+        set { shared.suppressAutoOpenWhileUserActive = newValue }
     }
 
     static var autoOpenCompletionPanel: Bool {

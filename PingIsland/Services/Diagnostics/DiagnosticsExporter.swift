@@ -803,6 +803,7 @@ actor DiagnosticsExporter {
                     "autoHideWhenIdle": AppSettings.autoHideWhenIdle,
                     "autoCollapseOnLeave": AppSettings.autoCollapseOnLeave,
                     "smartSuppression": AppSettings.smartSuppression,
+                    "suppressAutoOpenWhileUserActive": AppSettings.suppressAutoOpenWhileUserActive,
                     "autoOpenCompletionPanel": AppSettings.autoOpenCompletionPanel,
                     "showAgentDetail": AppSettings.showAgentDetail,
                     "subagentVisibilityMode": AppSettings.subagentVisibilityMode.rawValue,

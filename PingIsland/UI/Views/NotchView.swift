@@ -1050,8 +1050,12 @@ struct NotchView: View {
             return
         }
 
-        let shouldSuppressAutoOpen = settings.smartSuppression &&
-            TerminalVisibilityDetector.isTerminalVisibleOnCurrentSpace()
+        let shouldSuppressAutoOpen = AutoOpenSuppressionPolicy.shouldSuppressAutoOpen(
+            smartSuppressionEnabled: settings.smartSuppression,
+            isTerminalVisible: TerminalVisibilityDetector.isTerminalVisibleOnCurrentSpace(),
+            suppressWhileUserActive: settings.suppressAutoOpenWhileUserActive,
+            idleSeconds: SystemUserIdleTimeReader.idleTime()
+        )
 
         if viewModel.shouldSuppressAutomaticPresentation {
             previousPendingIds = currentIds
