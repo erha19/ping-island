@@ -7248,10 +7248,11 @@ private struct SoundEventSection<Content: View>: View {
 }
 
 private struct SoundStartupLine: View {
+    @ObservedObject private var settings = AppSettings.shared
     let preview: () -> Void
 
     private var isPreviewEnabled: Bool {
-        AppSettings.soundEnabled && !AppSettings.areReminderNotificationsSuppressed
+        settings.soundEnabled && !AppSettings.areReminderNotificationsSuppressed
     }
 
     var body: some View {
