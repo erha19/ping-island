@@ -2,6 +2,51 @@ import XCTest
 @testable import Ping_Island
 
 final class SessionManualAttentionTrackerTests: XCTestCase {
+    func testSuppressedApprovalIsConsumedAndOnlyANewRequestCanAutoOpen() {
+        var tracker = SessionManualAttentionTracker()
+        let approval = makeApprovalSession(toolUseId: "tool-1")
+
+        XCTAssertNil(tracker.consumeNewAttentionSession(from: [approval], suppressAutoOpen: true))
+        XCTAssertNil(tracker.consumeNewAttentionSession(from: [approval], suppressAutoOpen: false))
+
+        let nextApproval = makeApprovalSession(toolUseId: "tool-2")
+        XCTAssertEqual(
+            tracker.consumeNewAttentionSession(from: [nextApproval], suppressAutoOpen: false),
+            nextApproval
+        )
+    }
+
+    func testSuppressedQuestionIsConsumedAndOnlyANewQuestionCanAutoOpen() {
+        var tracker = SessionManualAttentionTracker()
+        let question = SessionState(
+            sessionId: "terminal-routed-question",
+            cwd: "/tmp/project",
+            suppressInAppPromptControls: true,
+            phase: .waitingForInput
+        )
+
+        XCTAssertNil(tracker.consumeNewAttentionSession(from: [question], suppressAutoOpen: true))
+        XCTAssertNil(tracker.consumeNewAttentionSession(from: [question], suppressAutoOpen: false))
+        XCTAssertNil(tracker.consumeNewAttentionSession(from: []))
+        XCTAssertEqual(tracker.consumeNewAttentionSession(from: [question]), question)
+    }
+
+    func testSuppressedDelayedApprovalIsConsumedWhenDelayExpires() throws {
+        var tracker = SessionManualAttentionTracker()
+        let now = Date()
+        let approval = makeApprovalSession(toolUseId: "tool-auto", autoApprovePermissions: true)
+
+        XCTAssertNil(tracker.consumeNewAttentionSession(from: [approval], suppressAutoOpen: true, now: now))
+        let readyAt = try XCTUnwrap(tracker.nextDelayedAttentionDate(from: [approval], now: now))
+        XCTAssertNil(tracker.consumeNewAttentionSession(from: [approval], suppressAutoOpen: true, now: readyAt))
+        XCTAssertNil(tracker.nextDelayedAttentionDate(from: [approval], now: readyAt))
+        XCTAssertNil(tracker.consumeNewAttentionSession(
+            from: [approval],
+            suppressAutoOpen: false,
+            now: readyAt.addingTimeInterval(30)
+        ))
+    }
+
     func testTerminalRoutedPromptTriggersAttentionNotification() {
         var tracker = SessionManualAttentionTracker()
         let session = SessionState(

@@ -159,6 +159,7 @@ final class DetachedIslandWindowController: NSWindowController, NSWindowDelegate
     private let onClose: () -> Void
     private let onPetAnchorChanged: (CGPoint) -> Void
     private let energyModePublisher: AnyPublisher<EnergyMode, Never>
+    private let shouldSuppressAttentionAutoOpen: @MainActor () -> Bool
     var onRedockRequested: (() -> Void)?
     private let interactionModel = DetachedIslandInteractionModel()
     private let bubbleViewState = DetachedIslandBubbleViewState()
@@ -204,13 +205,17 @@ final class DetachedIslandWindowController: NSWindowController, NSWindowDelegate
         sessionMonitor: SessionMonitor,
         onClose: @escaping () -> Void,
         onPetAnchorChanged: @escaping (CGPoint) -> Void = { _ in },
-        energyModePublisher: AnyPublisher<EnergyMode, Never>? = nil
+        energyModePublisher: AnyPublisher<EnergyMode, Never>? = nil,
+        shouldSuppressAttentionAutoOpen: @escaping @MainActor () -> Bool = {
+            AutoOpenSuppressionPolicy.shouldSuppressAutoOpen(settings: AppSettings.shared)
+        }
     ) {
         self.viewModel = viewModel
         self.sessionMonitor = sessionMonitor
         self.onClose = onClose
         self.onPetAnchorChanged = onPetAnchorChanged
         self.energyModePublisher = energyModePublisher ?? EnergyGovernor.shared.$mode.eraseToAnyPublisher()
+        self.shouldSuppressAttentionAutoOpen = shouldSuppressAttentionAutoOpen
         self.lastAppliedLayout = Self.windowLayout(
             for: viewModel,
             sessionMonitor: sessionMonitor
@@ -333,7 +338,7 @@ final class DetachedIslandWindowController: NSWindowController, NSWindowDelegate
             activatesApplication: activatesApplication
         )
         if presentsAutomaticContent {
-            presentExistingAttentionIfNeeded()
+            handleManualAttentionChange()
             presentFloatingSettingsHintIfNeeded()
         } else {
             primeExistingAttentionTracking()
@@ -372,7 +377,7 @@ final class DetachedIslandWindowController: NSWindowController, NSWindowDelegate
             activatesApplication: activatesApplication
         )
         if presentsAutomaticContent {
-            presentExistingAttentionIfNeeded()
+            handleManualAttentionChange()
             presentFloatingSettingsHintIfNeeded()
         } else {
             primeExistingAttentionTracking()
@@ -1323,6 +1328,7 @@ final class DetachedIslandWindowController: NSWindowController, NSWindowDelegate
     }
 
     private func presentExistingAttentionIfNeeded() {
+        guard !shouldSuppressAttentionAutoOpen() else { return }
         guard interactionModel.bubbleState != .pinned else { return }
         guard DetachedIslandContentModel.canPresentBubble(
             from: sessionMonitor.instances,
@@ -1344,7 +1350,8 @@ final class DetachedIslandWindowController: NSWindowController, NSWindowDelegate
 
     private func handleManualAttentionChange() {
         guard let targetSession = manualAttentionTracker.consumeNewAttentionSession(
-            from: sessionMonitor.instances
+            from: sessionMonitor.instances,
+            suppressAutoOpen: interactionModel.bubbleState != .pinned && shouldSuppressAttentionAutoOpen()
         ) else {
             scheduleDelayedManualAttentionPresentationIfNeeded()
             return

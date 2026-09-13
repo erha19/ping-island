@@ -3340,6 +3340,7 @@ private struct SettingsPanelContentView: View {
                     subtitle: "键盘或鼠标 30 秒内有活动时不自动弹出面板，仅保留刘海状态提示；你离开后恢复自动弹出",
                     isOn: $settings.suppressAutoOpenWhileUserActive
                 )
+                .disabled(!settings.smartSuppression)
                 SettingsLineDivider()
 
                 SettingsToggleLine(

@@ -19,6 +19,17 @@ enum AutoOpenSuppressionPolicy {
     /// is allowed to auto-expand again.
     static let userActiveIdleThreshold: TimeInterval = 30
 
+    @MainActor
+    static func shouldSuppressAutoOpen(settings: AppSettingsStore) -> Bool {
+        guard settings.smartSuppression else { return false }
+        return shouldSuppressAutoOpen(
+            smartSuppressionEnabled: settings.smartSuppression,
+            isTerminalVisible: TerminalVisibilityDetector.isTerminalVisibleOnCurrentSpace(),
+            suppressWhileUserActive: settings.suppressAutoOpenWhileUserActive,
+            idleSeconds: SystemUserIdleTimeReader.idleTime()
+        )
+    }
+
     nonisolated static func shouldSuppressAutoOpen(
         smartSuppressionEnabled: Bool,
         isTerminalVisible: Bool,

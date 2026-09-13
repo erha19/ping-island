@@ -1050,13 +1050,6 @@ struct NotchView: View {
             return
         }
 
-        let shouldSuppressAutoOpen = AutoOpenSuppressionPolicy.shouldSuppressAutoOpen(
-            smartSuppressionEnabled: settings.smartSuppression,
-            isTerminalVisible: TerminalVisibilityDetector.isTerminalVisibleOnCurrentSpace(),
-            suppressWhileUserActive: settings.suppressAutoOpenWhileUserActive,
-            idleSeconds: SystemUserIdleTimeReader.idleTime()
-        )
-
         if viewModel.shouldSuppressAutomaticPresentation {
             previousPendingIds = currentIds
             return
@@ -1064,7 +1057,7 @@ struct NotchView: View {
 
         if !newPendingIds.isEmpty &&
            viewModel.status == .closed &&
-           !shouldSuppressAutoOpen {
+           !AutoOpenSuppressionPolicy.shouldSuppressAutoOpen(settings: settings) {
             viewModel.notchOpen(reason: .notification)
         }
 
@@ -1118,7 +1111,10 @@ struct NotchView: View {
     }
 
     private func handleManualAttentionChange(_ instances: [SessionState]) {
-        guard let targetSession = manualAttentionTracker.consumeNewAttentionSession(from: instances) else {
+        guard let targetSession = manualAttentionTracker.consumeNewAttentionSession(
+            from: instances,
+            suppressAutoOpen: AutoOpenSuppressionPolicy.shouldSuppressAutoOpen(settings: settings)
+        ) else {
             scheduleDelayedManualAttentionPresentationIfNeeded(instances)
             return
         }

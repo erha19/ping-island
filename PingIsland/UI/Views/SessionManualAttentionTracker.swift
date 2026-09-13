@@ -17,6 +17,7 @@ struct SessionManualAttentionTracker {
 
     mutating func consumeNewAttentionSession(
         from instances: [SessionState],
+        suppressAutoOpen: @autoclosure () -> Bool = false,
         now: Date = Date()
     ) -> SessionState? {
         let approvalSessions = instances.filter { $0.needsApprovalResponse }
@@ -117,6 +118,9 @@ struct SessionManualAttentionTracker {
 
         let target = attentionCandidates.sorted(by: attentionSort).first
         markDelayedApprovalNotificationPresentedIfNeeded(for: target)
+        // Suppressed edges are still consumed, including delayed auto-approve
+        // requests. Going idle later must not replay an old notification.
+        guard target != nil, !suppressAutoOpen() else { return nil }
         return target
     }
 

@@ -6,6 +6,19 @@ import XCTest
 
 @MainActor
 final class DetachedIslandWindowControllerTests: XCTestCase {
+    private var originalSmartSuppression = true
+
+    override func setUp() async throws {
+        try await super.setUp()
+        originalSmartSuppression = AppSettings.smartSuppression
+        AppSettings.smartSuppression = false
+    }
+
+    override func tearDown() async throws {
+        AppSettings.smartSuppression = originalSmartSuppression
+        try await super.tearDown()
+    }
+
     func testDetachedHostingViewStaysTransparent() throws {
         let viewModel = makeViewModel()
         let sessionMonitor = makeSessionMonitor()
@@ -905,6 +918,97 @@ final class DetachedIslandWindowControllerTests: XCTestCase {
         wait(for: [bubblePresented], timeout: 1.0)
     }
 
+    func testSuppressedAttentionDoesNotOpenOrReplayButExplicitHoverStillWorks() {
+        let sessionMonitor = makeSessionMonitor()
+        let suppressAutoOpen = CurrentValueSubject<Bool, Never>(true)
+        let controller = DetachedIslandWindowController(
+            viewModel: makeViewModel(),
+            sessionMonitor: sessionMonitor,
+            onClose: {},
+            shouldSuppressAttentionAutoOpen: { suppressAutoOpen.value }
+        )
+        defer { controller.dismiss() }
+
+        let attention = makeSession(
+            id: "suppressed-attention",
+            phase: .waitingForInput,
+            intervention: makeIntervention(id: "question-1", kind: .question, message: "Need your answer")
+        )
+        controller.applySessionSnapshotForTesting([attention])
+        XCTAssertEqual(controller.renderedBubbleStateForTesting, .hidden)
+        XCTAssertFalse(controller.isBubbleVisibleForTesting)
+
+        suppressAutoOpen.send(false)
+        controller.applySessionSnapshotForTesting([attention])
+        XCTAssertEqual(controller.renderedBubbleStateForTesting, .hidden)
+
+        suppressAutoOpen.send(true)
+        controller.presentHoverBubbleForTesting()
+        XCTAssertEqual(controller.renderedBubbleStateForTesting, .hoverPreview)
+        XCTAssertTrue(controller.isBubbleVisibleForTesting)
+        XCTAssertEqual(controller.currentExpandedRoute, .attentionNotification(attention))
+    }
+
+    func testSuppressedExistingAttentionDoesNotOpenOnFloatingPresentation() {
+        let sessionMonitor = makeSessionMonitor()
+        let suppressAutoOpen = CurrentValueSubject<Bool, Never>(true)
+        sessionMonitor.instances = [makeSession(
+            id: "existing-attention",
+            phase: .waitingForInput,
+            intervention: makeIntervention(id: "question-1", kind: .question, message: "Need your answer")
+        )]
+        let controller = DetachedIslandWindowController(
+            viewModel: makeViewModel(),
+            sessionMonitor: sessionMonitor,
+            onClose: {},
+            shouldSuppressAttentionAutoOpen: { suppressAutoOpen.value }
+        )
+        defer { controller.dismiss() }
+
+        controller.present(atPetAnchor: CGPoint(x: 1200, y: 220), activatesApplication: false)
+
+        XCTAssertEqual(controller.renderedBubbleStateForTesting, .hidden)
+        XCTAssertFalse(controller.isBubbleVisibleForTesting)
+
+        suppressAutoOpen.send(false)
+        controller.applySessionSnapshotForTesting(sessionMonitor.instances)
+        XCTAssertEqual(controller.renderedBubbleStateForTesting, .hidden)
+    }
+
+    func testAttentionSuppressionPreservesExplicitClickAndPinnedAttentionHighlight() {
+        let sessionMonitor = makeSessionMonitor()
+        let attention = makeSession(
+            id: "suppressed-attention",
+            phase: .waitingForInput,
+            intervention: makeIntervention(id: "question-1", kind: .question, message: "Need your answer")
+        )
+        let controller = DetachedIslandWindowController(
+            viewModel: makeViewModel(),
+            sessionMonitor: sessionMonitor,
+            onClose: {},
+            shouldSuppressAttentionAutoOpen: { true }
+        )
+        defer { controller.dismiss() }
+
+        controller.applySessionSnapshotForTesting([attention])
+        controller.simulatePetTapForTesting()
+        XCTAssertEqual(controller.renderedBubbleStateForTesting, .hoverPreview)
+        XCTAssertTrue(controller.isBubbleVisibleForTesting)
+        XCTAssertEqual(controller.currentExpandedRoute, .attentionNotification(attention))
+
+        controller.togglePinnedBubbleForTesting()
+        XCTAssertEqual(controller.renderedBubbleStateForTesting, .pinned)
+
+        let nextAttention = makeSession(
+            id: "next-attention",
+            phase: .waitingForInput,
+            intervention: makeIntervention(id: "question-2", kind: .question, message: "Another answer")
+        )
+        controller.applySessionSnapshotForTesting([nextAttention])
+        XCTAssertEqual(controller.renderedBubbleStateForTesting, .pinned)
+        XCTAssertEqual(controller.highlightedSessionStableID, nextAttention.stableId)
+    }
+
     func testCompletedSessionAutoOpensCompletionBubbleInFloatingMode() {
         let originalAutoOpenCompletionPanel = AppSettings.autoOpenCompletionPanel
         AppSettings.autoOpenCompletionPanel = true
@@ -917,7 +1021,8 @@ final class DetachedIslandWindowControllerTests: XCTestCase {
         let controller = DetachedIslandWindowController(
             viewModel: viewModel,
             sessionMonitor: sessionMonitor,
-            onClose: {}
+            onClose: {},
+            shouldSuppressAttentionAutoOpen: { true }
         )
         defer { controller.dismiss() }
 
