@@ -50,12 +50,13 @@ func routePromptsToTerminalDropsApprovalIntervention() throws {
     #expect(envelope.expectsResponse == false)
 }
 
-@Test
-func routePromptsToTerminalDropsAskUserQuestionIntervention() throws {
+@Test(arguments: ["default", "auto", "acceptEdits", "plan", "bypassPermissions", "dontAsk"])
+func routePromptsToTerminalDropsAskUserQuestionIntervention(mode: String) throws {
     let payload = """
     {
       "hook_event_name": "PreToolUse",
       "tool_name": "AskUserQuestion",
+      "permission_mode": "\(mode)",
       "tool_input": {
         "questions": [
           {"id": "q1", "question": "Pick one", "options": ["A", "B"]}
@@ -2421,15 +2422,13 @@ func claudeCodePreToolUseAskUserQuestionWithoutPermissionModeIsNonBlocking() thr
     #expect(envelope.intervention == nil)
 }
 
-@Test
-func claudeCodeAutoModePreToolUseAskUserQuestionSurfacesAnswerableQuestion() throws {
-    // Auto mode never fires PermissionRequest for a question, so the
-    // PreToolUse hook is the only channel the answer can travel through.
+@Test(arguments: ["auto", "acceptEdits", "plan", "bypassPermissions", "dontAsk"])
+func claudeCodeNonDefaultPreToolUseAskUserQuestionSurfacesAnswerableQuestion(mode: String) throws {
     let payload = """
     {
       "hook_event_name": "PreToolUse",
       "tool_name": "AskUserQuestion",
-      "permission_mode": "auto",
+      "permission_mode": "\(mode)",
       "tool_input": {
         "questions": [
           {"id": "q1", "header": "Scope", "question": "Pick one", "options": [{"label": "A"}, {"label": "B"}]}
@@ -2449,6 +2448,32 @@ func claudeCodeAutoModePreToolUseAskUserQuestionSurfacesAnswerableQuestion() thr
     #expect(envelope.eventType == "PreToolUse")
     #expect(envelope.expectsResponse)
     #expect(envelope.intervention?.kind == .question)
+}
+
+@Test(arguments: ["auto", "acceptEdits", "plan", "bypassPermissions", "dontAsk"])
+func claudeCodeOrdinaryToolWithQuestionsDoesNotRequestAnAnswer(mode: String) {
+    let payload = """
+    {
+      "hook_event_name": "PreToolUse",
+      "tool_name": "mcp__survey__create_survey",
+      "permission_mode": "\(mode)",
+      "tool_input": {
+        "questions": [{"question": "Which framework?", "options": [{"label": "SwiftUI"}]}]
+      },
+      "session_id": "claude-survey"
+    }
+    """.data(using: .utf8)!
+
+    let envelope = HookPayloadMapper.makeEnvelope(
+        source: .claude,
+        arguments: ["island-bridge", "--source", "claude"],
+        environment: ["PWD": "/tmp/demo"],
+        stdinData: payload
+    )
+
+    #expect(envelope.expectsResponse == false)
+    #expect(envelope.intervention == nil)
+    #expect(envelope.status?.kind == .runningTool)
 }
 
 @Test

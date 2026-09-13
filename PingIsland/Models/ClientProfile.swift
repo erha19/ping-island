@@ -564,7 +564,8 @@ enum ClientProfileRegistry {
             brand: .claude,
             events: [
                 HookInstallEventDescriptor(name: "UserPromptSubmit", templates: [.plain]),
-                HookInstallEventDescriptor(name: "PreToolUse", templates: [.matcher("*")]),
+                // Non-default permission modes answer questions through PreToolUse.
+                HookInstallEventDescriptor(name: "PreToolUse", templates: [.matcher("*")], timeout: 86_400),
                 HookInstallEventDescriptor(name: "PostToolUse", templates: [.matcher("*")]),
                 HookInstallEventDescriptor(name: "PermissionRequest", templates: [.matcher("*")], timeout: 86_400),
                 HookInstallEventDescriptor(name: "Notification", templates: [.matcher("*")]),

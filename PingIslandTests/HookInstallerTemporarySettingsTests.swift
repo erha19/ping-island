@@ -14,6 +14,12 @@ final class HookInstallerTemporarySettingsTests: XCTestCase {
         XCTAssertNotNil(hooks["PreToolUse"])
         XCTAssertNotNil(hooks["PermissionRequest"])
         XCTAssertNotNil(hooks["Stop"])
+
+        for event in ["PreToolUse", "PermissionRequest"] {
+            let entries = try XCTUnwrap(hooks[event] as? [[String: Any]])
+            let command = try XCTUnwrap((entries.first?["hooks"] as? [[String: Any]])?.first)
+            XCTAssertEqual(command["timeout"] as? Int, 86_400, event)
+        }
     }
 
     func testCreateTemporaryQoderCLISettingsQuotesClientName() throws {

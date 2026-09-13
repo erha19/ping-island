@@ -40,9 +40,11 @@ func installerMergesClaudeHooksWithoutDroppingExistingValues() throws {
     }
     #expect(sessionStartCommands.contains { $0.contains("/.ping-island/bin/ping-island-bridge --source claude") })
 
-    let permissionRequest = try #require(hooks["PermissionRequest"] as? [[String: Any]])
-    let installedHook = try #require(permissionRequest.last?["hooks"] as? [[String: Any]])
-    #expect(installedHook.first?["timeout"] as? Int == 86_400)
+    for event in ["PreToolUse", "PermissionRequest"] {
+        let entries = try #require(hooks[event] as? [[String: Any]])
+        let installedHook = try #require(entries.last?["hooks"] as? [[String: Any]])
+        #expect(installedHook.first?["timeout"] as? Int == 86_400)
+    }
     #expect(hooks["SessionEnd"] != nil)
     #expect(hooks["PreCompact"] != nil)
 }
@@ -188,6 +190,11 @@ func installerDeduplicatesManagedHooksButKeepsUnrelatedHooks() throws {
     #expect(preToolUseCommands.contains("/usr/bin/true"))
     #expect(preToolUseCommands.contains { $0.contains("/.ping-island/bin/ping-island-bridge --source claude") })
     #expect(preToolUseCommands.filter { $0.contains("/.ping-island/bin/ping-island-bridge --source claude") }.count == 1)
+    let upgradedClaudeHook = try #require(preToolUse
+        .compactMap { $0["hooks"] as? [[String: Any]] }
+        .flatMap { $0 }
+        .first { ($0["command"] as? String)?.contains("ping-island-bridge --source claude") == true })
+    #expect(upgradedClaudeHook["timeout"] as? Int == 86_400)
 
     let codexData = try Data(contentsOf: codexHooksURL)
     let codexJSON = try #require(JSONSerialization.jsonObject(with: codexData) as? [String: Any])

@@ -435,6 +435,10 @@ final class RemoteHookConfigurationTests: XCTestCase {
         let existingJSON = """
         {
           "hooks": {
+            "PreToolUse": [{
+              "matcher": "*",
+              "hooks": [{"type": "command", "command": "/remote/.ping-island/bin/ping-island-bridge --source claude"}]
+            }],
             "UserPromptSubmit": [
               {
                 "hooks": [
@@ -469,6 +473,14 @@ final class RemoteHookConfigurationTests: XCTestCase {
         let promptEntries = try XCTUnwrap(hooks["UserPromptSubmit"] as? [[String: Any]])
 
         XCTAssertEqual(promptEntries.count, 2)
+
+        for event in ["PreToolUse", "PermissionRequest"] {
+            let entries = try XCTUnwrap(hooks[event] as? [[String: Any]])
+            XCTAssertEqual(entries.count, 1, event)
+            let hook = try XCTUnwrap((entries.first?["hooks"] as? [[String: Any]])?.first)
+            XCTAssertEqual(hook["command"] as? String, command)
+            XCTAssertEqual(hook["timeout"] as? Int, 86_400, event)
+        }
     }
 
     func testManagedConfigurationDataRemovesLocalOnlyCommandsForRemoteInstall() throws {

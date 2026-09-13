@@ -178,7 +178,7 @@ struct HookInstaller {
             hooks[event] = installHookArray(
                 existing: hooks[event],
                 command: bridgeCommand(source: "claude"),
-                timeout: event == "PermissionRequest" ? 86_400 : nil
+                timeout: event == "PermissionRequest" || event == "PreToolUse" ? 86_400 : nil
             )
         }
 

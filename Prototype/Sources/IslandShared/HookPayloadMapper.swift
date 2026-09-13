@@ -1941,7 +1941,8 @@ public enum HookPayloadMapper {
         eventType: String,
         payload: [String: Any]
     ) -> Bool {
-        guard eventType == "PreToolUse" else {
+        guard eventType == "PreToolUse",
+              questionToolNames.contains(normalizedToolName(from: payload) ?? "") else {
             return false
         }
         // Require an explicit non-default mode: an absent `permission_mode`
