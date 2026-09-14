@@ -394,6 +394,45 @@ final class SessionCompletionStateEvaluatorTests: XCTestCase {
         )
     }
 
+    func testRemoteCodexLateReplyRequiresObservedReadinessChange() {
+        let now = Date()
+        var session = makeCodexCompletedSession(now: now)
+        session.ingress = .remoteBridge
+        session.conversationInfo = ConversationInfo(
+            summary: nil, lastMessage: "Done", lastMessageRole: "assistant",
+            lastToolName: nil, firstUserMessage: nil, lastUserMessageDate: nil
+        )
+
+        for wasCompletedReady in [nil, true, false] as [Bool?] {
+            XCTAssertEqual(
+                SessionCompletionNotificationPolicy.shouldQueueCompletedNotification(
+                    for: session,
+                    previousPhase: .idle,
+                    wasCompletedReady: wasCompletedReady,
+                    isEnabled: true,
+                    now: now
+                ),
+                wasCompletedReady == false
+            )
+        }
+        XCTAssertFalse(SessionCompletionNotificationPolicy.shouldQueueCompletedNotification(
+            for: session, previousPhase: nil, wasCompletedReady: false, isEnabled: true, now: now
+        ))
+        XCTAssertFalse(SessionCompletionNotificationPolicy.shouldQueueCompletedNotification(
+            for: session, previousPhase: .idle, wasCompletedReady: false, isEnabled: false, now: now
+        ))
+
+        session.lastActivity = now.addingTimeInterval(-120)
+        XCTAssertFalse(SessionCompletionNotificationPolicy.shouldQueueCompletedNotification(
+            for: session, previousPhase: .idle, wasCompletedReady: false, isEnabled: true, now: now
+        ))
+        session.lastActivity = now
+        session.ingress = .codexAppServer
+        XCTAssertFalse(SessionCompletionNotificationPolicy.shouldQueueCompletedNotification(
+            for: session, previousPhase: .idle, wasCompletedReady: false, isEnabled: true, now: now
+        ))
+    }
+
     func testCodexWaitingForInputDoesNotQueueCompletionNotification() {
         let now = Date()
         let session = makeCodexCompletedSession(phase: .waitingForInput, now: now)
