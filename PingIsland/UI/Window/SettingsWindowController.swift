@@ -86,7 +86,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         height: AppSettings.maximumSettingsWindowSize.height
     )
 
-    private init() {
+    init() {
         let hostingController = NSHostingController(
             rootView: AppLocalizedRootView {
                 SettingsWindowView()
