@@ -46,6 +46,15 @@ public enum HookPayloadMapper {
         let terminalContext = makeTerminalContext(environment: effectiveEnvironment, payload: payload)
         let sessionKey = detectSessionKey(payload: payload, environment: effectiveEnvironment, provider: source)
         var metadata = mergedMetadata(arguments: arguments, payload: payload, terminalContext: terminalContext)
+        if source == .codex, eventType == "UserPromptSubmit" || eventType == "Stop" {
+            // The remote bridge forwards this body separately from the compact
+            // preview because the Mac cannot recover it from the remote rollout.
+            let messageKey = eventType == "Stop" ? "last_assistant_message" : "prompt"
+            if let message = sanitizedMessageText(payload[messageKey] as? String)
+                ?? sanitizedMessageText(payload["message"] as? String) {
+                metadata["message"] = message
+            }
+        }
         if runtimeConfig.routePromptsToTerminal {
             // Marker the app side reads to skip building an in-app prompt for
             // this event. Keeps the envelope flowing for status updates only.
@@ -2362,7 +2371,7 @@ public enum HookPayloadMapper {
         return string
     }
 
-    private static func sanitizedDisplayText(_ text: String?) -> String? {
+    private static func sanitizedMessageText(_ text: String?) -> String? {
         guard let text else { return nil }
 
         var cleaned = text
@@ -2376,13 +2385,30 @@ public enum HookPayloadMapper {
             with: " ",
             options: .regularExpression
         )
-        cleaned = cleaned
+        let scalars = cleaned.unicodeScalars
+        guard !cleaned.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              let firstContent = scalars.firstIndex(where: { !$0.properties.isWhitespace }),
+              let lastContent = scalars.lastIndex(where: { !$0.properties.isWhitespace }) else {
+            return nil
+        }
+
+        // Trim surrounding blank lines without removing the first content line's indentation.
+        let leadingNewline = scalars[..<firstContent].lastIndex { $0 == "\r" || $0 == "\n" }
+        let trailingNewline = scalars[scalars.index(after: lastContent)...].firstIndex {
+            $0 == "\r" || $0 == "\n"
+        }
+        let start = leadingNewline.map { scalars.index(after: $0) } ?? scalars.startIndex
+        let end = trailingNewline ?? scalars.endIndex
+        return String(scalars[start..<end])
+    }
+
+    private static func sanitizedDisplayText(_ text: String?) -> String? {
+        guard let cleaned = sanitizedMessageText(text) else { return nil }
+        return cleaned
             .replacingOccurrences(of: "\r", with: " ")
             .replacingOccurrences(of: "\n", with: " ")
             .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
-
-        return cleaned.isEmpty ? nil : cleaned
     }
 }
 

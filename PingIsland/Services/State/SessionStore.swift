@@ -527,6 +527,10 @@ actor SessionStore {
             processKimiHookCompletion(event: event, session: &session)
         }
 
+        // Remote Codex rollout files are not available on the Mac. Preserve
+        // hook-carried turn boundaries and final replies as conversation state.
+        processRemoteCodexHookConversation(event: event, session: &session)
+
         let shouldPreserveEndedStopForAnsweredQuestion =
             event.status == "ended"
             && event.event == "Stop"
@@ -646,7 +650,8 @@ actor SessionStore {
             session: session,
             incomingPhase: newPhase,
             referenceDate: Date(),
-            previousLastActivity: previousLastActivity
+            previousLastActivity: previousLastActivity,
+            hasCodexTurnCompletionEvidence: event.isRemoteCodexTurnCompletion
         ) {
             session.lastActivity = previousLastActivity
         } else if let resumedPhase = resumedPhaseForFreshHookActivity(
@@ -979,6 +984,60 @@ actor SessionStore {
         default:
             break
         }
+    }
+
+    private func processRemoteCodexHookConversation(event: HookEvent, session: inout SessionState) {
+        guard event.provider == .codex, event.ingress == .remoteBridge else { return }
+
+        if event.event == "UserPromptSubmit" {
+            let userMessage = SessionTextSanitizer.sanitizedMessageText(event.message)
+            let timestamp = Date()
+            if let userMessage {
+                session.chatItems.append(ChatHistoryItem(
+                    id: "remote-codex-user-\(UUID().uuidString)",
+                    type: .user(userMessage),
+                    timestamp: timestamp
+                ))
+            }
+            session.conversationInfo = ConversationInfo(
+                summary: session.conversationInfo.summary,
+                lastMessage: userMessage,
+                lastMessageRole: "user",
+                lastToolName: nil,
+                firstUserMessage: session.conversationInfo.firstUserMessage ?? userMessage,
+                lastUserMessageDate: timestamp
+            )
+            return
+        }
+
+        guard event.isRemoteCodexTurnCompletion else { return }
+        let assistantMessage = SessionTextSanitizer.sanitizedMessageText(event.message)
+        let hasTurnActivity = session.phase != .idle && session.phase != .ended
+        // An empty Stop invalidates an older reply only after new turn activity.
+        guard assistantMessage != nil || (hasTurnActivity && session.lastMessageRole == "assistant") else {
+            return
+        }
+
+        // Fresh tool activity can start a turn even if its prompt hook was lost.
+        let isReplay = !hasTurnActivity
+            && session.lastMessageRole == "assistant"
+            && session.conversationInfo.lastMessage == assistantMessage
+        if let assistantMessage, !isReplay {
+            session.chatItems.append(ChatHistoryItem(
+                id: "remote-codex-stop-\(UUID().uuidString)",
+                type: .assistant(assistantMessage),
+                timestamp: Date()
+            ))
+        }
+        session.previewText = assistantMessage
+        session.conversationInfo = ConversationInfo(
+            summary: session.conversationInfo.summary,
+            lastMessage: assistantMessage,
+            lastMessageRole: assistantMessage == nil ? nil : "assistant",
+            lastToolName: nil,
+            firstUserMessage: session.conversationInfo.firstUserMessage,
+            lastUserMessageDate: session.conversationInfo.lastUserMessageDate
+        )
     }
 
     /// Build chat history items from Hermes hook events so the conversation is

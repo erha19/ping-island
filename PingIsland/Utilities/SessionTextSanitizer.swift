@@ -8,22 +8,23 @@
 import Foundation
 
 enum SessionTextSanitizer {
-    static func sanitizedDisplayText(_ text: String?) -> String? {
+    /// Remove client-injected boilerplate without flattening conversation content.
+    static func sanitizedMessageText(_ text: String?) -> String? {
         guard let text else { return nil }
 
         var cleaned = text
         cleaned = cleaned.replacingOccurrences(
-            of: #"(?is)^Conversation info \(untrusted metadata\):\s*```json.*?```\s*"#,
+            of: #"(?is)^Conversation info \(untrusted metadata\):\s*```json.*?```"#,
             with: "",
             options: .regularExpression
         )
         cleaned = cleaned.replacingOccurrences(
-            of: #"(?is)^Sender \(untrusted metadata\):\s*```json.*?```\s*"#,
+            of: #"(?is)^\s*Sender \(untrusted metadata\):\s*```json.*?```"#,
             with: "",
             options: .regularExpression
         )
         cleaned = cleaned.replacingOccurrences(
-            of: #"(?is)^System:\s*\[[^\]]+\]\s*Node:.*?(?:\n\s*\n|\z)"#,
+            of: #"(?is)^\s*System:\s*\[[^\]]+\]\s*Node:.*?(?:\n\s*\n|\z)"#,
             with: "",
             options: .regularExpression
         )
@@ -31,7 +32,7 @@ enum SessionTextSanitizer {
         // (`<meta awareness="low" timestamp="..." />`), which would otherwise become
         // the session's visible title.
         cleaned = cleaned.replacingOccurrences(
-            of: #"(?is)^\s*<meta\b[^>]*/>\s*"#,
+            of: #"(?is)^\s*<meta\b[^>]*/>"#,
             with: "",
             options: .regularExpression
         )
@@ -45,13 +46,30 @@ enum SessionTextSanitizer {
             with: " ",
             options: .regularExpression
         )
-        cleaned = cleaned
+        let scalars = cleaned.unicodeScalars
+        guard !cleaned.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              let firstContent = scalars.firstIndex(where: { !$0.properties.isWhitespace }),
+              let lastContent = scalars.lastIndex(where: { !$0.properties.isWhitespace }) else {
+            return nil
+        }
+
+        // Trim surrounding blank lines without removing the first content line's indentation.
+        let leadingNewline = scalars[..<firstContent].lastIndex { $0 == "\r" || $0 == "\n" }
+        let trailingNewline = scalars[scalars.index(after: lastContent)...].firstIndex {
+            $0 == "\r" || $0 == "\n"
+        }
+        let start = leadingNewline.map { scalars.index(after: $0) } ?? scalars.startIndex
+        let end = trailingNewline ?? scalars.endIndex
+        return String(scalars[start..<end])
+    }
+
+    static func sanitizedDisplayText(_ text: String?) -> String? {
+        guard let cleaned = sanitizedMessageText(text) else { return nil }
+        return cleaned
             .replacingOccurrences(of: "\r", with: " ")
             .replacingOccurrences(of: "\n", with: " ")
             .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
-
-        return cleaned.isEmpty ? nil : cleaned
     }
 
     static func boundedDisplayText(

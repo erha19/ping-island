@@ -65,6 +65,7 @@ struct NotchView: View {
     @State private var isHovering: Bool = false
     @State private var isBouncing: Bool = false
     @State private var previousCompletionNotificationPhases: [String: SessionPhase] = [:]
+    @State private var previousCompletionReadiness: [String: Bool] = [:]
     @State private var completionNotificationQueue: [SessionCompletionNotification] = []
     @State private var activeCompletionNotification: SessionCompletionNotification?
     @State private var completionNotificationDismissWorkItem: DispatchWorkItem?
@@ -1199,10 +1200,19 @@ struct NotchView: View {
         previousCompletionNotificationPhases = Dictionary(
             uniqueKeysWithValues: instances.map { ($0.stableId, $0.phase) }
         )
+        previousCompletionReadiness = Dictionary(uniqueKeysWithValues: instances.map {
+            ($0.stableId, SessionCompletionStateEvaluator.isCompletedReadySession($0))
+        })
         synchronizeCompletionNotifications(with: instances)
     }
 
     private func handleCompletionNotificationChange(_ instances: [SessionState]) {
+        // Observe suppressed completions too, so they are not replayed later.
+        defer {
+            previousCompletionReadiness = Dictionary(uniqueKeysWithValues: instances.map {
+                ($0.stableId, SessionCompletionStateEvaluator.isCompletedReadySession($0))
+            })
+        }
         synchronizeCompletionNotifications(with: instances)
 
         if areReminderNotificationsSuppressed {
@@ -1285,6 +1295,7 @@ struct NotchView: View {
         SessionCompletionNotificationPolicy.shouldQueueCompletedNotification(
             for: session,
             previousPhase: previousPhase,
+            wasCompletedReady: previousCompletionReadiness[session.stableId],
             isEnabled: settings.autoOpenCompletionPanel
         )
     }

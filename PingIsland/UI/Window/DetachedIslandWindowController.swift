@@ -185,6 +185,7 @@ final class DetachedIslandWindowController: NSWindowController, NSWindowDelegate
     private var isPetInNotchZone = false
     private var isPetSecondaryClickArmed = false
     private var previousCompletionNotificationPhases: [String: SessionPhase] = [:]
+    private var previousCompletionReadiness: [String: Bool] = [:]
     private var completionNotificationQueue: [SessionCompletionNotification] = []
     private var currentEnergyMode: EnergyMode = .quietBackground
     var bubbleHoverGraceDelay: TimeInterval = 3
@@ -1616,10 +1617,19 @@ final class DetachedIslandWindowController: NSWindowController, NSWindowDelegate
         previousCompletionNotificationPhases = Dictionary(
             uniqueKeysWithValues: instances.map { ($0.stableId, $0.phase) }
         )
+        previousCompletionReadiness = Dictionary(uniqueKeysWithValues: instances.map {
+            ($0.stableId, SessionCompletionStateEvaluator.isCompletedReadySession($0))
+        })
         synchronizeCompletionNotifications(with: instances)
     }
 
     private func handleCompletionNotificationChange(_ instances: [SessionState]) {
+        // Observe suppressed completions too, so they are not replayed later.
+        defer {
+            previousCompletionReadiness = Dictionary(uniqueKeysWithValues: instances.map {
+                ($0.stableId, SessionCompletionStateEvaluator.isCompletedReadySession($0))
+            })
+        }
         synchronizeCompletionNotifications(with: instances)
 
         if AppSettings.areReminderNotificationsSuppressed {
@@ -1699,6 +1709,7 @@ final class DetachedIslandWindowController: NSWindowController, NSWindowDelegate
         SessionCompletionNotificationPolicy.shouldQueueCompletedNotification(
             for: session,
             previousPhase: previousPhase,
+            wasCompletedReady: previousCompletionReadiness[session.stableId],
             isEnabled: AppSettings.autoOpenCompletionPanel
         )
     }
