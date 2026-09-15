@@ -108,7 +108,7 @@ final class UpdateManager: ObservableObject {
     func showReleaseNotes() {}
 
     nonisolated static func hasActiveSessions(in sessions: [SessionState]) -> Bool {
-        sessions.contains(where: { $0.phase.isActive })
+        sessions.contains(where: \.isExecutionActive)
     }
 
     nonisolated static func isValidFeedURL(_ value: String) -> Bool {
@@ -502,7 +502,7 @@ final class UpdateManager: NSObject, ObservableObject {
     }
 
     nonisolated static func hasActiveSessions(in sessions: [SessionState]) -> Bool {
-        sessions.contains(where: { $0.phase.isActive })
+        sessions.contains(where: \.isExecutionActive)
     }
 
     nonisolated static func isValidFeedURL(_ value: String) -> Bool {

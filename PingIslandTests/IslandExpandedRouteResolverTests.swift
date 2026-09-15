@@ -2,6 +2,25 @@ import XCTest
 @testable import Ping_Island
 
 final class IslandExpandedRouteResolverTests: XCTestCase {
+    func testHoverPreviewRetainsConnectedCompletionStates() {
+        let completed = [SessionPhase.waitingForInput, .idle, .ended].enumerated().map {
+            makeSession(id: "completed-\($0.offset)", phase: $0.element)
+        }
+        XCTAssertEqual(
+            Set(IslandExpandedRouteResolver.activePreviewSessions(from: completed).map(\.sessionId)),
+            Set(completed.map(\.sessionId))
+        )
+        let disconnected = completed.map { session in
+            var copy = session
+            copy.connectionState = .disconnected
+            return copy
+        }
+        XCTAssertTrue(IslandExpandedRouteResolver.activePreviewSessions(from: disconnected).isEmpty)
+        var stale = makeSession(id: "stale", phase: .idle)
+        stale.lastActivity = Date().addingTimeInterval(-24 * 60 * 60)
+        XCTAssertTrue(IslandExpandedRouteResolver.activePreviewSessions(from: [stale]).isEmpty)
+    }
+
     func testClickResolvesToSessionList() {
         let route = IslandExpandedRouteResolver.resolve(
             surface: .docked,

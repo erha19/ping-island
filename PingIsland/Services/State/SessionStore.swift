@@ -318,7 +318,8 @@ actor SessionStore {
             latestTurnId: existing?.latestTurnId,
             completionSequence: existing?.completionSequence ?? 0,
             lastActivity: Date(),
-            createdAt: existing?.createdAt ?? handle.createdAt
+            createdAt: existing?.createdAt ?? handle.createdAt,
+            lifecycleIncarnationID: existing?.lifecycleIncarnationID ?? UUID()
         )
 
         sessions[handle.sessionID] = session
@@ -453,39 +454,45 @@ actor SessionStore {
             }
         }
 
-        let tree = (event.pid != nil || event.tty != nil) ? ProcessTreeBuilder.shared.buildTree() : [:]
+        let canInspectProcessLocally = event.ingress.usesLocalProcessNamespace
+        let tree = canInspectProcessLocally && (event.pid != nil || event.tty != nil)
+            ? ProcessTreeBuilder.shared.buildTree()
+            : [:]
         let hadActiveClaudeQuestion = session.intervention?.kind == .question
             && session.clientInfo.isPlainClaudeCodeRouting
 
         session.provider = event.provider
         session.clientInfo = normalizedClientInfo(session.clientInfo, merging: event.clientInfo, provider: event.provider, sessionId: sessionId)
         session.ingress = event.ingress
+        session.connectionState = .connected
         applyHookWorkspace(event.cwd, to: &session)
         session.pid = event.pid
-        if let pid = event.pid {
+        if canInspectProcessLocally, let pid = event.pid {
             session.isInTmux = ProcessTreeBuilder.shared.isInTmux(pid: pid, tree: tree)
         }
         if let tty = event.tty {
             session.tty = tty.replacingOccurrences(of: "/dev/", with: "")
         }
-        if let runtimeClientInfo = await runtimeClientInfo(for: session, tree: tree) {
-            session.clientInfo = normalizedClientInfo(session.clientInfo, merging: runtimeClientInfo, provider: event.provider, sessionId: sessionId)
-        }
-        await TerminalAutomationPermissionCoordinator.shared.prepareIfNeeded(
-            provider: event.provider,
-            clientInfo: session.clientInfo,
-            sessionId: sessionId
-        )
-        if let enrichedGhosttyClientInfo = await enrichedGhosttyClientInfoIfNeeded(
-            current: session.clientInfo,
-            event: event,
-            workspacePath: session.cwd
-        ) {
-            session.clientInfo = normalizedClientInfo(
-                session.clientInfo.merged(with: enrichedGhosttyClientInfo),
+        if canInspectProcessLocally {
+            if let runtimeClientInfo = await runtimeClientInfo(for: session, tree: tree) {
+                session.clientInfo = normalizedClientInfo(session.clientInfo, merging: runtimeClientInfo, provider: event.provider, sessionId: sessionId)
+            }
+            await TerminalAutomationPermissionCoordinator.shared.prepareIfNeeded(
                 provider: event.provider,
+                clientInfo: session.clientInfo,
                 sessionId: sessionId
             )
+            if let enrichedGhosttyClientInfo = await enrichedGhosttyClientInfoIfNeeded(
+                current: session.clientInfo,
+                event: event,
+                workspacePath: session.cwd
+            ) {
+                session.clientInfo = normalizedClientInfo(
+                    session.clientInfo.merged(with: enrichedGhosttyClientInfo),
+                    provider: event.provider,
+                    sessionId: sessionId
+                )
+            }
         }
 
         // After the await points another event may have mutated the persisted
@@ -1957,7 +1964,8 @@ actor SessionStore {
         _ payload: FileUpdatePayload,
         conversationInfoLoader: (@Sendable () async -> ConversationInfo)? = nil
     ) async {
-        guard let sourceSession = sessions[payload.sessionId] else { return }
+        guard let sourceSession = sessions[payload.sessionId],
+              sourceSession.ingress.usesLocalProcessNamespace else { return }
         let conversationInfo: ConversationInfo
         if let conversationInfoLoader {
             conversationInfo = await conversationInfoLoader()
@@ -2776,9 +2784,10 @@ actor SessionStore {
 
         for (sessionId, var session) in sessions {
             guard session.provider == .claude else { continue }
-            guard session.ingress != .nativeRuntime else { continue }
+            guard session.ingress.usesLocalProcessNamespace,
+                  session.ingress != .nativeRuntime else { continue }
             guard session.phase != .ended else { continue }
-            guard !session.needsManualAttention else { continue }
+            guard !session.needsPromptNotification else { continue }
 
             let now = Date()
             let idleSeconds = now.timeIntervalSince(session.lastActivity)
@@ -2832,6 +2841,7 @@ actor SessionStore {
             guard session.ingress == .hookBridge else { continue }
             guard session.phase != .ended else { continue }
             guard session.pid == nil || session.pid == 0 else { continue }
+            guard !session.needsPromptNotification else { continue }
             guard pendingHookResponse(in: session) == nil else { continue }
             guard now.timeIntervalSince(session.lastActivity) >= Self.hookSessionIdleExpiry else {
                 continue
@@ -2896,8 +2906,10 @@ actor SessionStore {
         var removedAny = false
         for (sessionId, session) in Array(sessions) {
             let endedReap = session.phase == .ended
+            guard endedReap || !session.needsPromptNotification else { continue }
             let pidIsDead: Bool = {
-                guard let pid = session.pid, pid > 0 else { return false }
+                guard session.ingress.usesLocalProcessNamespace,
+                      let pid = session.pid, pid > 0 else { return false }
                 return !SessionProcessLiveness.isAlive(pid, lastSeenAlive: session.lastActivity)
             }()
             guard endedReap || pidIsDead else { continue }
@@ -2921,6 +2933,7 @@ actor SessionStore {
     }
 
     private func scheduleFinalSessionSync(for session: SessionState) {
+        guard session.ingress.usesLocalProcessNamespace else { return }
         if let sessionFilePath = session.clientInfo.sessionFilePath, !sessionFilePath.isEmpty {
             if session.provider == .codex {
                 scheduleCodexRolloutSync(
@@ -3556,10 +3569,34 @@ actor SessionStore {
         Array(sessions.values)
     }
 
+    /// A broken SSH attachment makes remote execution unknown, not running or
+    /// actionable. Preserve the last lifecycle until the bridge reconnects.
+    func markRemoteSessionsDisconnected(endpointID: UUID, legacyRemoteHost: String?) {
+        let normalizedHost = legacyRemoteHost?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased() ?? ""
+        var changed = false
+        for (sessionID, var session) in sessions {
+            guard session.ingress == .remoteBridge else { continue }
+            let matchesEndpoint = session.clientInfo.remoteEndpointID == endpointID
+            let matchesLegacyHost = session.clientInfo.remoteEndpointID == nil
+                && !normalizedHost.isEmpty
+                && session.clientInfo.remoteHost?
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .lowercased() == normalizedHost
+            guard (matchesEndpoint || matchesLegacyHost),
+                  session.connectionState != .disconnected else { continue }
+            session.connectionState = .disconnected
+            sessions[sessionID] = session
+            changed = true
+        }
+        if changed { publishState() }
+    }
+
     func requestFileSync(for sessionId: String) {
         let resolvedSessionId = resolveCodexSessionAlias(sessionId)
         guard let session = sessions[resolvedSessionId] else { return }
-        guard session.ingress != .remoteBridge else { return }
+        guard session.ingress.usesLocalProcessNamespace else { return }
 
         if session.provider == .codex {
             scheduleCodexRolloutSync(
@@ -4619,7 +4656,7 @@ actor SessionStore {
                 incoming: event.clientInfo,
                 sessionId: event.sessionId
             ),
-            ingress: .hookBridge,
+            ingress: event.ingress,
             latestHookMessage: Self.normalizedHookMessage(event.message),
             phase: event.sessionPhase,
             lastActivity: Date()

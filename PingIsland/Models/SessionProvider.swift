@@ -32,6 +32,11 @@ enum SessionIngress: String, Equatable, Sendable {
     case codexAppServer
     case nativeRuntime
     case desktopAppMonitor
+
+    /// Remote bridge PIDs and terminal identifiers belong to the remote host.
+    nonisolated var usesLocalProcessNamespace: Bool {
+        self != .remoteBridge
+    }
 }
 
 enum SessionClientKind: String, Codable, Equatable, Sendable {
@@ -55,6 +60,7 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
     var threadSource: String?
     var transport: String?
     var remoteHost: String?
+    var remoteEndpointID: UUID?
     var sessionFilePath: String?
     var terminalBundleIdentifier: String?
     var terminalProgram: String?
@@ -76,6 +82,7 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
         threadSource: String? = nil,
         transport: String? = nil,
         remoteHost: String? = nil,
+        remoteEndpointID: UUID? = nil,
         sessionFilePath: String? = nil,
         terminalBundleIdentifier: String? = nil,
         terminalProgram: String? = nil,
@@ -96,6 +103,7 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
         self.threadSource = threadSource?.nonEmpty
         self.transport = transport?.nonEmpty
         self.remoteHost = remoteHost?.nonEmpty
+        self.remoteEndpointID = remoteEndpointID
         self.sessionFilePath = sessionFilePath?.nonEmpty
         self.terminalBundleIdentifier = terminalBundleIdentifier?.nonEmpty
         self.terminalProgram = terminalProgram?.nonEmpty
@@ -964,6 +972,9 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
         }
         if let remoteHost = newer.remoteHost?.nonEmpty {
             merged.remoteHost = remoteHost
+        }
+        if let remoteEndpointID = newer.remoteEndpointID {
+            merged.remoteEndpointID = remoteEndpointID
         }
         if let sessionFilePath = newer.sessionFilePath?.nonEmpty {
             merged.sessionFilePath = sessionFilePath

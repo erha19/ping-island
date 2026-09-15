@@ -119,6 +119,7 @@ enum SessionCompletionPreviewBuilder {
 
 nonisolated enum SessionCompletionStateEvaluator {
     static func isCompletedReadySession(_ session: SessionState) -> Bool {
+        guard session.connectionState == .connected else { return false }
         guard case nil = session.intervention else { return false }
         guard session.phase == .waitingForInput || isCompletedCodexIdleSession(session) else {
             return false

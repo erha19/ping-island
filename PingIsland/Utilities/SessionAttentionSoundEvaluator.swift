@@ -3,17 +3,14 @@ import Foundation
 /// Decides whether a given session should contribute to the
 /// `attentionRequired` notification-sound edge set.
 ///
-/// Two UI sites — `NotchView` and `DetachedIslandWindowController` — use this
-/// to compute the `attentionSessions` set whose membership delta drives the
-/// sound. Sessions in always-allow mode (`autoApprovePermissions == true`)
-/// are excluded so auto-approved `PermissionRequest` events do not chime,
-/// matching the existing `SoundManager.handleEvent` gate in
-/// `SessionMonitor.handleIncomingHookEvent`.
+/// The single `SessionMonitor` sound edge tracker uses this per-session
+/// predicate. Disconnected sessions and sessions in always-allow mode must not
+/// chime for stale or automatically handled permission requests.
 enum SessionAttentionSoundEvaluator {
     /// Whether this session is currently eligible to fire an
     /// `attentionRequired` sound on the phase-edge channel.
     nonisolated static func shouldContributeToAttentionSoundEdge(_ session: SessionState) -> Bool {
-        guard !session.autoApprovePermissions else { return false }
+        guard session.connectionState == .connected, !session.autoApprovePermissions else { return false }
         return session.needsApprovalResponse
             || session.needsQuestionResponse
             || session.suppressInAppPromptControls

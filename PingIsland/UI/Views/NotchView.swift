@@ -80,7 +80,7 @@ struct NotchView: View {
 
     /// Whether any tracked session is currently processing or compacting
     private var isAnyProcessing: Bool {
-        sessionMonitor.instances.contains { $0.phase == .processing || $0.phase == .compacting }
+        sessionMonitor.instances.contains(where: \.isExecutionActive)
     }
 
     /// Whether any tracked session has a pending permission request
@@ -91,7 +91,7 @@ struct NotchView: View {
     /// Whether any session needs explicit human intervention (for example multi-choice questions).
     private var hasHumanIntervention: Bool {
         sessionMonitor.instances.contains {
-            $0.phase == .waitingForInput && $0.intervention != nil
+            $0.needsManualAttention && $0.needsQuestionResponse
         }
     }
 
@@ -103,12 +103,12 @@ struct NotchView: View {
     }
 
     private var activeSessions: [SessionState] {
-        sessionMonitor.instances.filter(\.phase.isActive)
+        sessionMonitor.instances.filter(\.isExecutionActive)
     }
 
     private var countedClosedSessions: [SessionState] {
         sessionMonitor.instances.filter { session in
-            session.phase.isActive || session.phase.needsAttention
+            session.isExecutionActive || session.needsManualAttention
         }
     }
 
@@ -225,13 +225,14 @@ struct NotchView: View {
         }
 
         if let active = sessionMonitor.instances
-            .filter({ $0.phase.isActive })
+            .filter(\.isExecutionActive)
             .sorted(by: { $0.lastActivity > $1.lastActivity })
             .first {
             return active
         }
 
         return sessionMonitor.instances
+            .filter { $0.connectionState == .connected }
             .sorted(by: { $0.lastActivity > $1.lastActivity })
             .first
     }
@@ -293,11 +294,10 @@ struct NotchView: View {
         if viewModel.isDetachmentGestureActive {
             return .dragging
         }
-        return MascotStatus.closedNotchStatus(
-            representativePhase: representativeClosedSession?.phase,
-            hasPendingPermission: hasPendingPermission,
-            hasHumanIntervention: hasHumanIntervention
-        )
+        if let session = representativeClosedSession {
+            return MascotStatus(session: session)
+        }
+        return .idle
     }
 
     private func latestHookMessageSession(from instances: [SessionState]) -> SessionState? {
@@ -1065,7 +1065,7 @@ struct NotchView: View {
     }
 
     private func primeStartupPresentationState(_ instances: [SessionState]) {
-        previousPendingIds = Set(instances.filter(\.needsAttention).map(\.stableId))
+        previousPendingIds = Set(instances.filter(\.needsManualAttention).map(\.stableId))
         previousCompletedReadyIds = Set(
             instances
                 .filter { SessionCompletionStateEvaluator.isCompletedReadySession($0) }

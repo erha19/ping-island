@@ -32,7 +32,7 @@ struct SessionSoundEdgeTracker {
         var errorToolIDs: Set<String>
 
         init(_ session: SessionState) {
-            isProcessing = session.phase.contributesToProcessingSoundEdge
+            isProcessing = session.contributesToProcessingSoundEdge
             needsAttention = SessionAttentionSoundEvaluator.shouldContributeToAttentionSoundEdge(session)
             completionKey = SessionCompletionKey.make(for: session)
             isResourceLimited = session.phase == .compacting
@@ -81,10 +81,11 @@ struct SessionSoundEdgeTracker {
         var attentionSessions: [SessionState] = []
         var completedSessions: [SessionState] = []
         var processingSessions: [SessionState] = []
-        let newSessions = sessions.filter { records[$0.stableId] == nil }
-        let rapidSubmitSessions = rapidSubmitTracker.observe(sessions)
+        let connectedSessions = sessions.filter { $0.connectionState == .connected }
+        let newSessions = connectedSessions.filter { records[$0.stableId] == nil }
+        let rapidSubmitSessions = rapidSubmitTracker.observe(connectedSessions)
 
-        for session in sessions {
+        for session in connectedSessions {
             let previous = records[session.stableId]?.snapshot
             let current = Snapshot(session)
 
