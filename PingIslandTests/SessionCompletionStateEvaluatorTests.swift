@@ -530,7 +530,7 @@ final class SessionCompletionStateEvaluatorTests: XCTestCase {
     }
 
     @MainActor
-    func testNotificationQueuePreservesConcurrentCompletionsAndTurnSnapshots() throws {
+    func testNotificationQueuePreservesConcurrentCompletionsAndTurnSnapshots() async throws {
         let registry = SessionCompletionNotificationRegistry()
         let firstSession = SessionState(
             sessionId: "codex-completed",

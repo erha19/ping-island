@@ -69,6 +69,10 @@ struct SessionState: Equatable, Identifiable, Sendable {
     var codexSubagentRole: String?
     var latestTurnId: String?
     var completionSequence: UInt64
+    /// Explicit Codex abort evidence; an ordinary idle refresh cannot clear it.
+    var isCodexTurnInterrupted: Bool
+    /// In-memory compaction cycle, independent of completed assistant turns.
+    var compactionSequence: UInt64
     var linkedParentSessionId: String?
     var linkedSubagentDisplayTitle: String?
     var heuristicSubagentDisplayTitle: String?
@@ -162,6 +166,8 @@ struct SessionState: Equatable, Identifiable, Sendable {
         needsClearReconciliation: Bool = false,
         latestTurnId: String? = nil,
         completionSequence: UInt64 = 0,
+        isCodexTurnInterrupted: Bool = false,
+        compactionSequence: UInt64 = 0,
         lastActivity: Date = Date(),
         createdAt: Date = Date(),
         lifecycleIncarnationID: UUID = UUID()
@@ -186,6 +192,8 @@ struct SessionState: Equatable, Identifiable, Sendable {
         self.codexSubagentRole = codexSubagentRole
         self.latestTurnId = latestTurnId
         self.completionSequence = completionSequence
+        self.isCodexTurnInterrupted = isCodexTurnInterrupted
+        self.compactionSequence = compactionSequence
         self.linkedParentSessionId = linkedParentSessionId
         self.linkedSubagentDisplayTitle = linkedSubagentDisplayTitle
         self.heuristicSubagentDisplayTitle = heuristicSubagentDisplayTitle

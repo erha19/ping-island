@@ -54,6 +54,7 @@ nonisolated struct SessionCompletionNotification: Equatable, Identifiable {
 
     enum Identity: Hashable {
         case completed(SessionCompletionKey)
+        case compacted(sessionId: String, incarnationID: UUID, sequence: UInt64)
         case lifecycle(kind: Kind, sessionId: String, sequence: UInt64, turnId: String?)
     }
 
@@ -69,6 +70,12 @@ nonisolated struct SessionCompletionNotification: Equatable, Identifiable {
         self.queuedAt = queuedAt
         if kind == .completed, let key = SessionCompletionKey.make(for: session) {
             self.identity = .completed(key)
+        } else if kind == .compacted {
+            self.identity = .compacted(
+                sessionId: session.sessionId,
+                incarnationID: session.lifecycleIncarnationID,
+                sequence: session.compactionSequence
+            )
         } else {
             self.identity = .lifecycle(
                 kind: kind,
@@ -142,7 +149,7 @@ nonisolated enum SessionCompletionStateEvaluator {
         guard case nil = session.intervention else { return false }
         guard !session.needsPromptNotification else { return false }
         if session.provider == .codex {
-            return session.phase == .idle
+            return session.phase == .idle && !session.isCodexTurnInterrupted
         }
         return session.phase == .waitingForInput || isCompletedOpenCodeIdleSession(session)
     }

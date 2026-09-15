@@ -317,6 +317,8 @@ actor SessionStore {
             needsClearReconciliation: existing?.needsClearReconciliation ?? false,
             latestTurnId: existing?.latestTurnId,
             completionSequence: existing?.completionSequence ?? 0,
+            isCodexTurnInterrupted: existing?.isCodexTurnInterrupted ?? false,
+            compactionSequence: existing?.compactionSequence ?? 0,
             lastActivity: Date(),
             createdAt: existing?.createdAt ?? handle.createdAt,
             lifecycleIncarnationID: existing?.lifecycleIncarnationID ?? UUID()
@@ -744,6 +746,10 @@ actor SessionStore {
             preserveClaudeQuestion: hadActiveClaudeQuestion
         )
 
+        recordCompactionTransition(from: phaseBeforeHook, in: &session)
+        if session.provider == .codex, session.phase == .processing, !preservesExistingPhase {
+            session.isCodexTurnInterrupted = false
+        }
         sessions[sessionId] = session
         IslandTrace.emit(
             "hook.applied",
@@ -1619,7 +1625,9 @@ actor SessionStore {
             guard child.phase != mirroredPhase else { continue }
             guard child.phase.canTransition(to: mirroredPhase) else { continue }
 
+            let previousPhase = child.phase
             child.phase = mirroredPhase
+            recordCompactionTransition(from: previousPhase, in: &child)
             child.lastActivity = max(child.lastActivity, parent.lastActivity)
             sessions[sessionId] = child
         }
@@ -1639,6 +1647,12 @@ actor SessionStore {
             return .waitingForApproval(context)
         case .ended:
             return .ended
+        }
+    }
+
+    private func recordCompactionTransition(from previousPhase: SessionPhase, in session: inout SessionState) {
+        if session.phase == .compacting, previousPhase != .compacting {
+            session.compactionSequence &+= 1
         }
     }
 
@@ -2016,6 +2030,9 @@ actor SessionStore {
             if wasCompletedReady && session.phase == .processing {
                 session.completionSequence &+= 1
             }
+            if hasNewUserActivity, session.phase == .processing {
+                session.isCodexTurnInterrupted = false
+            }
         }
 
         session.conversationInfo = conversationInfo
@@ -2186,12 +2203,15 @@ actor SessionStore {
         // Transcript enrichment never owns the user's approval setting, even
         // when the toggle changes without a corresponding phase transition.
         committed.autoApprovePermissions = latest.autoApprovePermissions
+        committed.compactionSequence = latest.compactionSequence
         let lifecycleChangedWhileEnriching = latest.phase != original.phase
             || latest.intervention != original.intervention
             || latest.pendingInterventions != original.pendingInterventions
             || latest.suppressInAppPromptControls != original.suppressInAppPromptControls
             || latest.latestTurnId != original.latestTurnId
             || latest.completionSequence != original.completionSequence
+            || latest.isCodexTurnInterrupted != original.isCodexTurnInterrupted
+            || latest.compactionSequence != original.compactionSequence
 
         if lifecycleChangedWhileEnriching {
             committed.phase = latest.phase
@@ -2201,6 +2221,7 @@ actor SessionStore {
             committed.suppressInAppPromptControls = latest.suppressInAppPromptControls
             committed.latestTurnId = latest.latestTurnId
             committed.completionSequence = latest.completionSequence
+            committed.isCodexTurnInterrupted = latest.isCodexTurnInterrupted
         }
         sessions[update.sessionId] = committed
         return committed
@@ -2665,6 +2686,11 @@ actor SessionStore {
 
     private func processInterrupt(sessionId: String) async {
         guard var session = sessions[sessionId] else { return }
+        if session.provider == .codex {
+            session.isCodexTurnInterrupted = true
+            // Snapshots generated before this local interrupt are not resumed work.
+            session.lastActivity = max(session.lastActivity, Date())
+        }
 
         // Clear subagent state
         session.subagentState = SubagentState()
@@ -3750,6 +3776,7 @@ actor SessionStore {
             createdAt: initialCreatedAt
         )
         let wasCompletedReady = SessionCompletionStateEvaluator.isCompletedReadySession(session)
+        let previousPhase = session.phase
         if let createdAt {
             session.createdAt = mergedCreatedAt(existing: session.createdAt, incoming: createdAt)
         }
@@ -3837,6 +3864,10 @@ actor SessionStore {
 
         if wasCompletedReady && session.phase.isActive {
             session.completionSequence &+= 1
+        }
+        recordCompactionTransition(from: previousPhase, in: &session)
+        if session.phase == .processing, incomingActivityAt > (existingLastActivity ?? .distantPast) {
+            session.isCodexTurnInterrupted = false
         }
 
         let placeholderCandidate = isLikelyEmptyCodexPlaceholder(session)
@@ -3940,6 +3971,7 @@ actor SessionStore {
             createdAt: snapshot.createdAt
         )
         let wasCompletedReady = SessionCompletionStateEvaluator.isCompletedReadySession(session)
+        let previousPhase = session.phase
         session.createdAt = mergedCreatedAt(existing: session.createdAt, incoming: snapshot.createdAt)
         let snapshotPhase = snapshot.phase
         let hasCodexTurnCompletionEvidence = snapshotPhase == .idle
@@ -3967,6 +3999,16 @@ actor SessionStore {
         let shouldPreserveActiveTurnState = !snapshot.isTurnInterrupted
             && (shouldPreserveActivePhase || shouldPreserveStaleActivePhase)
         if !shouldPreserveActiveTurnState {
+            // An ordinary idle refresh or a late running snapshot is not
+            // evidence that the explicitly aborted turn resumed.
+            if snapshot.isTurnInterrupted {
+                session.isCodexTurnInterrupted = true
+            } else if (snapshotPhase == .processing && snapshot.updatedAt > (existingLastActivity ?? .distantPast))
+                || (snapshot.latestTurnId != nil
+                    && snapshot.latestTurnId != session.latestTurnId
+                    && snapshot.updatedAt >= (existingLastActivity ?? .distantPast)) {
+                session.isCodexTurnInterrupted = false
+            }
             if let name = snapshot.name, !name.isEmpty {
                 session.sessionName = name
             }
@@ -4039,6 +4081,7 @@ actor SessionStore {
         if wasCompletedReady && session.phase.isActive {
             session.completionSequence &+= 1
         }
+        recordCompactionTransition(from: previousPhase, in: &session)
 
         let placeholderCandidate = isLikelyEmptyCodexPlaceholder(session)
         Self.logger.debug(
@@ -4823,6 +4866,8 @@ actor SessionStore {
             needsClearReconciliation: previousSession.needsClearReconciliation,
             latestTurnId: previousSession.latestTurnId,
             completionSequence: previousSession.completionSequence,
+            isCodexTurnInterrupted: previousSession.isCodexTurnInterrupted,
+            compactionSequence: previousSession.compactionSequence,
             lastActivity: previousSession.lastActivity,
             createdAt: previousSession.createdAt
         )
