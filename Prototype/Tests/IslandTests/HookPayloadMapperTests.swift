@@ -3,6 +3,68 @@ import IslandShared
 import Testing
 
 @Test
+func codexPermissionReviewerUsesOnlyTheMatchingTurn() async throws {
+    try await withTemporaryDirectory { directory in
+        let rollout = directory.appending(path: "rollout.jsonl")
+        try """
+        {"type":"turn_context","payload":{"turn_id":"manual-turn","approvals_reviewer":"guardian_subagent"}}
+        {"type":"turn_context","payload":{"turn_id":"auto-turn","approvals_reviewer":"auto_review"}}
+        """.write(to: rollout, atomically: true, encoding: .utf8)
+
+        for (turnID, expected) in [
+            ("manual-turn", "guardian_subagent"),
+            ("auto-turn", "auto_review"),
+            ("missing-turn", nil)
+        ] as [(String, String?)] {
+            let payload = try JSONSerialization.data(withJSONObject: [
+                "hook_event_name": "PermissionRequest",
+                "session_id": "reviewer-test",
+                "turn_id": turnID,
+                "transcript_path": rollout.path(),
+                "permission_mode": "default"
+            ])
+            let envelope = HookPayloadMapper.makeEnvelope(
+                source: .codex,
+                arguments: ["bridge", "--source", "codex"],
+                environment: ["PWD": directory.path()],
+                stdinData: payload
+            )
+            #expect(envelope.metadata["approvals_reviewer"] == expected)
+            #expect(envelope.metadata["permission_mode"] == "default")
+        }
+    }
+}
+
+@Test
+func codexReviewerLookupSkipsLargeToolOutputWithoutChangingPolicy() async throws {
+    try await withTemporaryDirectory { directory in
+        let rollout = directory.appending(path: "long-rollout.jsonl")
+        let context = "{\"type\":\"turn_context\",\"payload\":{\"turn_id\":\"active-turn\",\"approvals_reviewer\":\"auto_review\"}}\n"
+        let output = "{\"type\":\"response_item\",\"payload\":{\"output\":\""
+            + String(repeating: "x", count: 5 * 1_024 * 1_024) + "\"}}\n"
+        try (context + output).write(to: rollout, atomically: true, encoding: .utf8)
+        let payload = try JSONSerialization.data(withJSONObject: [
+            "hook_event_name": "PermissionRequest",
+            "session_id": "long-review",
+            "turn_id": "active-turn",
+            "transcript_path": rollout.path(),
+            "approval_policy": "on-request",
+            "sandbox_mode": "workspace-write",
+            "permission_mode": "default"
+        ])
+        let envelope = HookPayloadMapper.makeEnvelope(
+            source: .codex,
+            arguments: ["bridge", "--source", "codex"],
+            environment: ["PWD": directory.path()],
+            stdinData: payload
+        )
+        #expect(envelope.metadata["approvals_reviewer"] == "auto_review")
+        #expect(envelope.metadata["approval_policy"] == "on-request")
+        #expect(envelope.metadata["sandbox_mode"] == "workspace-write")
+    }
+}
+
+@Test
 func mapsApprovalEventFromClaudePayload() throws {
     let payload = """
     {

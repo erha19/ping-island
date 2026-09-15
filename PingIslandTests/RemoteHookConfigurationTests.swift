@@ -772,6 +772,31 @@ final class RemoteHookConfigurationTests: XCTestCase {
         )
     }
 
+    func testRemoteCodexReviewerMetadataIsOptionalForOlderBridges() throws {
+        let base = """
+        {"requestID":"00000000-0000-0000-0000-000000000001", "sessionID":"codex-remote",
+         "cwd":"/work", "event":"PermissionRequest", "status":"waiting_for_approval",
+         "provider":"codex", "expectsResponse":true,
+         "clientInfo":{"kind":"codexCLI"}}
+        """
+        let legacy = try JSONDecoder().decode(RemoteHookEventPayload.self, from: Data(base.utf8))
+        XCTAssertNil(legacy.approvalsReviewer)
+        XCTAssertNil(legacy.permissionMode)
+
+        let withReviewer = base.replacingOccurrences(
+            of: "\"clientInfo\"", with: "\"permissionMode\":\"default\",\"approvalsReviewer\":\"auto_review\",\"clientInfo\""
+        )
+        let current = try JSONDecoder().decode(RemoteHookEventPayload.self, from: Data(withReviewer.utf8))
+        XCTAssertEqual(current.approvalsReviewer, "auto_review")
+        XCTAssertEqual(current.permissionMode, "default")
+        XCTAssertTrue(CodexAutomaticApprovalReviewResolver.shouldDeferToCodex(
+            provider: current.provider,
+            eventType: current.event,
+            metadata: ["approvals_reviewer": current.approvalsReviewer ?? "",
+                       "permission_mode": current.permissionMode ?? ""]
+        ))
+    }
+
     func testResolvedRemoteToolUseIDDoesNotSynthesizeForFireAndForgetEvents() {
         XCTAssertNil(
             RemoteConnectorManager.resolvedRemoteToolUseID(

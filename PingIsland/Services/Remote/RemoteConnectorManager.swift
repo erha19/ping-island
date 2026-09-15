@@ -598,6 +598,31 @@ final class RemoteConnectorManager: ObservableObject {
 
         case .hookEvent(let eventMessage):
             let payload = eventMessage.payload
+            if payload.expectsResponse,
+               CodexAutomaticApprovalReviewResolver.shouldDeferToCodex(
+                   provider: payload.provider,
+                   eventType: payload.event,
+                   metadata: [
+                       "approvals_reviewer": payload.approvalsReviewer ?? "",
+                       "permission_mode": payload.permissionMode ?? ""
+                   ]
+               ) {
+                // A nil-decision response releases the remote hook and lets
+                // Codex run its own automatic reviewer.
+                if let connector = connectors[endpointID] {
+                    do {
+                        try await connector.sendDecision(
+                            requestID: payload.requestID,
+                            decision: "defer",
+                            reason: nil,
+                            updatedInput: nil
+                        )
+                    } catch {
+                        logger.error("Failed to defer remote Codex review: \(error.localizedDescription, privacy: .public)")
+                    }
+                }
+                return
+            }
             guard let provider = SessionProvider(rawValue: payload.provider) else {
                 return
             }

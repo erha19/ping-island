@@ -16,6 +16,11 @@ actor CodexRolloutParser {
         let lastReadByteCount: Int
     }
 
+    private struct ApprovalContext {
+        var policy: String?
+        var reviewer: String?
+    }
+
     private struct CachedSnapshot {
         let modificationDate: Date
         let fileIdentifier: UInt64?
@@ -25,12 +30,14 @@ actor CodexRolloutParser {
         let isDiscardingOversizedLine: Bool
         let nextLineIndex: Int
         let parsedSnapshot: CodexThreadSnapshot
+        let approvalContext: ApprovalContext
         let visibleSnapshot: CodexThreadSnapshot?
         let metrics: DebugReadMetrics
     }
 
     private struct ReadResult {
         let parsedSnapshot: CodexThreadSnapshot?
+        let approvalContext: ApprovalContext
         let pendingData: Data
         let isDiscardingOversizedLine: Bool
         let nextLineIndex: Int
@@ -99,6 +106,7 @@ actor CodexRolloutParser {
             isDiscardingOversizedLine: isDiscardingOversizedLine,
             startingLineIndex: startingLineIndex,
             seedSnapshot: seedSnapshot,
+            approvalContext: canReadIncrementally ? (previous?.approvalContext ?? ApprovalContext()) : ApprovalContext(),
             fallbackThreadId: threadId,
             fallbackCwd: fallbackCwd,
             clientInfo: clientInfo
@@ -106,6 +114,7 @@ actor CodexRolloutParser {
             return nil
         }
 
+        var visibleApprovalContext = readResult.approvalContext
         let visibleSnapshot = parseRollout(
             "",
             fileURL: fileURL,
@@ -113,6 +122,7 @@ actor CodexRolloutParser {
             fallbackCwd: fallbackCwd,
             clientInfo: clientInfo,
             seedSnapshot: parsedSnapshot,
+            approvalContext: &visibleApprovalContext,
             startingLineIndex: readResult.nextLineIndex,
             applyAuxiliaryFilter: true
         )
@@ -132,6 +142,7 @@ actor CodexRolloutParser {
             isDiscardingOversizedLine: readResult.isDiscardingOversizedLine,
             nextLineIndex: readResult.nextLineIndex,
             parsedSnapshot: parsedSnapshot,
+            approvalContext: readResult.approvalContext,
             visibleSnapshot: visibleSnapshot,
             metrics: metrics
         )
@@ -156,6 +167,7 @@ actor CodexRolloutParser {
         isDiscardingOversizedLine initialDiscardingState: Bool,
         startingLineIndex: Int,
         seedSnapshot: CodexThreadSnapshot?,
+        approvalContext initialApprovalContext: ApprovalContext,
         fallbackThreadId: String,
         fallbackCwd: String,
         clientInfo: SessionClientInfo?
@@ -172,6 +184,7 @@ actor CodexRolloutParser {
         }
 
         var parsedSnapshot = seedSnapshot
+        var approvalContext = initialApprovalContext
         var pendingData = initialPendingData
         var isDiscardingOversizedLine = initialDiscardingState
         var nextLineIndex = startingLineIndex
@@ -190,6 +203,7 @@ actor CodexRolloutParser {
                 fallbackCwd: fallbackCwd,
                 clientInfo: clientInfo,
                 seedSnapshot: parsedSnapshot,
+                approvalContext: &approvalContext,
                 startingLineIndex: batchStartIndex,
                 applyAuxiliaryFilter: false
             )
@@ -275,6 +289,7 @@ actor CodexRolloutParser {
         flushBatch()
         return ReadResult(
             parsedSnapshot: parsedSnapshot,
+            approvalContext: approvalContext,
             pendingData: pendingData,
             isDiscardingOversizedLine: isDiscardingOversizedLine,
             nextLineIndex: nextLineIndex,
@@ -289,6 +304,7 @@ actor CodexRolloutParser {
         fallbackCwd: String,
         clientInfo: SessionClientInfo?,
         seedSnapshot: CodexThreadSnapshot? = nil,
+        approvalContext: inout ApprovalContext,
         startingLineIndex: Int = 0,
         applyAuxiliaryFilter: Bool = true
     ) -> CodexThreadSnapshot? {
@@ -324,6 +340,11 @@ actor CodexRolloutParser {
         var phase: SessionPhase = seedSnapshot?.phase ?? .idle
         var isTurnInterrupted = seedSnapshot?.isTurnInterrupted ?? false
         var intervention: SessionIntervention? = seedSnapshot?.intervention
+        if intervention?.metadata["source"] == "rollout_pending_mcp" {
+            // This is an inferred reminder, not an actual pending request.
+            intervention = nil
+            if phase == .waitingForInput { phase = .processing }
+        }
         var sessionName: String? = seedSnapshot?.name
         var origin: String? = seedSnapshot?.clientInfo?.origin
         var originator: String? = seedSnapshot?.clientInfo?.originator
@@ -376,8 +397,16 @@ actor CodexRolloutParser {
 
             case "turn_context":
                 let payload = json["payload"] as? [String: Any] ?? [:]
-                latestTurnId = stringValue(payload["turn_id"]) ?? latestTurnId
+                let turnId = stringValue(payload["turn_id"])
+                if let turnId, turnId != latestTurnId {
+                    approvalContext = ApprovalContext()
+                }
+                latestTurnId = turnId ?? latestTurnId
                 resolvedCwd = stringValue(payload["cwd"]) ?? resolvedCwd
+                approvalContext.policy = stringValue(payload["approval_policy"])
+                    ?? stringValue(payload["approvalPolicy"]) ?? approvalContext.policy
+                approvalContext.reviewer = stringValue(payload["approvals_reviewer"])
+                    ?? stringValue(payload["approvalsReviewer"]) ?? approvalContext.reviewer
 
             case "event_msg":
                 let payload = json["payload"] as? [String: Any] ?? [:]
@@ -627,6 +656,7 @@ actor CodexRolloutParser {
             || normalizedClientInfo.hasInteractiveCodexTerminalRouting
 
         if prefersCLIContext,
+           Self.shouldInferPendingMCPApproval(approvalContext),
            let inferredIntervention = Self.pendingMCPApprovalIntervention(from: historyItems) {
             intervention = inferredIntervention
             phase = .waitingForInput
@@ -778,6 +808,12 @@ actor CodexRolloutParser {
                 timestamp: historyItems[index].timestamp
             )
         }
+    }
+
+    private static func shouldInferPendingMCPApproval(_ context: ApprovalContext) -> Bool {
+        let policy = context.policy?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return policy != "never"
+            && CodexAppServerMonitor.shouldSurfaceAutoApprovalReview(approvalsReviewer: context.reviewer)
     }
 
     private static func pendingMCPApprovalIntervention(from historyItems: [ChatHistoryItem]) -> SessionIntervention? {

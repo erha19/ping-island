@@ -3,6 +3,206 @@ import XCTest
 @testable import Ping_Island
 
 final class CodexAppServerMonitorTests: XCTestCase {
+    func testThreadReadPreservesApprovalAndQuestionArrivingAfterResolution() async throws {
+        for method in ["item/commandExecution/requestApproval", "item/tool/requestUserInput"] {
+            let monitor = CodexAppServerMonitor()
+            let store = SessionStore.shared
+            let id = "refresh-request-\(UUID().uuidString)"
+            try await deliver([
+                "id": "r1", "method": "item/commandExecution/requestApproval",
+                "params": ["threadId": id, "command": ["printf", "first"]]
+            ], to: monitor)
+            try await deliver(["method": "serverRequest/resolved", "params": [
+                "threadId": id, "requestId": "r1"
+            ]], to: monitor)
+            let nextRequest = try JSONSerialization.data(withJSONObject: [
+                "id": "r2", "method": method, "params": [
+                    "threadId": id, "command": ["printf", "second"],
+                    "questions": [["id": "q1", "header": "Choice", "question": "Continue?", "options": []]]
+                ]
+            ])
+            let response = try JSONSerialization.data(withJSONObject: ["thread": [
+                "id": id, "cwd": "/tmp/codex-review", "source": "cli",
+                "status": ["type": "idle"], "turns": []
+            ]])
+
+            // Exercise readThread's real parse + Store commit, not the disconnected
+            // notification no-op. Only the RPC transport is replaced.
+            let snapshot = try await monitor.readThread(threadId: id, responseLoader: {
+                await monitor.handle(.data(nextRequest))
+                return response
+            })
+            XCTAssertEqual(snapshot.intervention?.id, "r2")
+            let session = await store.session(for: id)
+            XCTAssertEqual(session?.intervention?.id, "r2")
+            XCTAssertTrue(session?.needsPromptNotification == true)
+            if method == "item/tool/requestUserInput" {
+                XCTAssertEqual(session?.intervention?.kind, .question)
+                let answered = await monitor.answer(threadId: id, answers: ["q1": ["Yes"]])
+                XCTAssertTrue(answered)
+            } else {
+                XCTAssertEqual(session?.intervention?.kind, .approval)
+                await monitor.approve(threadId: id, forSession: false)
+            }
+            let resolved = await store.session(for: id)
+            XCTAssertNil(resolved?.intervention)
+            await monitor.stop()
+            await store.process(.sessionArchived(sessionId: id))
+        }
+    }
+
+    func testReadCommitCannotResurrectRequestResolvedAfterParsing() async throws {
+        let monitor = CodexAppServerMonitor()
+        let store = SessionStore.shared
+        let id = "refresh-resolved-\(UUID().uuidString)"
+        try await deliver([
+            "id": "r1", "method": "item/commandExecution/requestApproval",
+            "params": ["threadId": id, "command": ["printf", "first"]]
+        ], to: monitor)
+        let session = await store.session(for: id)
+        let readState = CodexThreadReadState(intervention: session?.intervention)
+        let parsed = await monitor.parseThreadSnapshot([
+            "id": id, "cwd": "/tmp/codex-review", "source": "cli",
+            "status": ["type": "active"], "turns": []
+        ])
+        let snapshot = try XCTUnwrap(parsed)
+        await monitor.deny(threadId: id)
+        await store.syncCodexThreadSnapshot(snapshot, readState: readState)
+        let resolved = await store.session(for: id)
+        XCTAssertNil(resolved?.intervention)
+        XCTAssertEqual(resolved?.phase, .processing)
+        await monitor.stop()
+        await store.process(.sessionArchived(sessionId: id))
+    }
+
+    private func deliver(_ object: [String: Any], to monitor: CodexAppServerMonitor) async throws {
+        let data = try JSONSerialization.data(withJSONObject: object)
+        await monitor.handle(.data(data))
+    }
+
+    func testAutoReviewStaysWithCodexWhileRealApprovalRemainsPending() async throws {
+        let monitor = CodexAppServerMonitor()
+        let store = SessionStore.shared
+        let threadID = "auto-review-\(UUID().uuidString)"
+        await store.upsertCodexSession(
+            sessionId: threadID, name: nil, preview: nil, cwd: "/tmp/codex-review",
+            phase: .processing, intervention: nil, clientInfo: .codexCLI()
+        )
+        try await deliver(["method": "thread/settings/updated", "params": [
+            "threadId": threadID, "threadSettings": [
+                "approvalPolicy": "on-request", "approvalsReviewer": " AUTO-REVIEW "
+            ]
+        ]], to: monitor)
+        let review: [String: Any] = [
+            "threadId": threadID, "targetItemId": "review-tool",
+            "review": ["status": "inProgress"],
+            "action": ["type": "command", "command": "printf done"]
+        ]
+        try await deliver(["method": "item/autoApprovalReview/started", "params": review], to: monitor)
+        var session = await store.session(for: threadID)
+        XCTAssertEqual(session?.phase, .processing)
+        XCTAssertNil(session?.intervention)
+
+        try await deliver([
+            "id": "approval-1", "method": "item/commandExecution/requestApproval",
+            "params": ["threadId": threadID, "command": ["printf", "done"], "callId": "command-1"]
+        ], to: monitor)
+        try await deliver(["method": "item/autoApprovalReview/started", "params": review], to: monitor)
+        try await deliver(["method": "item/autoApprovalReview/completed", "params": review], to: monitor)
+        session = await store.session(for: threadID)
+        XCTAssertEqual(session?.intervention?.id, "approval-1")
+        XCTAssertEqual(session?.intervention?.kind, .approval)
+        try await deliver(["method": "serverRequest/resolved", "params": [
+            "threadId": threadID, "requestId": "older-approval"
+        ]], to: monitor)
+        session = await store.session(for: threadID)
+        XCTAssertEqual(session?.intervention?.id, "approval-1")
+        try await deliver(["method": "serverRequest/resolved", "params": [
+            "threadId": threadID, "requestId": "approval-1"
+        ]], to: monitor)
+        session = await store.session(for: threadID)
+        XCTAssertNil(session?.intervention)
+        await monitor.stop()
+        await store.process(.sessionArchived(sessionId: threadID))
+    }
+
+    func testManualReviewStillSurfacesAfterReviewerSettingChanges() async throws {
+        let monitor = CodexAppServerMonitor()
+        let store = SessionStore.shared
+        let threadID = "manual-review-\(UUID().uuidString)"
+        await store.upsertCodexSession(
+            sessionId: threadID, name: nil, preview: nil, cwd: "/tmp/codex-review",
+            phase: .processing, intervention: nil, clientInfo: .codexCLI()
+        )
+        for reviewer in ["auto_review", "guardian_subagent"] {
+            try await deliver(["method": "thread/settings/updated", "params": [
+                "threadId": threadID, "threadSettings": ["approvals_reviewer": reviewer]
+            ]], to: monitor)
+        }
+        let review: [String: Any] = [
+            "threadId": threadID, "targetItemId": "manual-tool",
+            "review": ["status": "inProgress"],
+            "action": ["type": "mcpToolCall", "server": "test", "toolName": "read"]
+        ]
+        try await deliver(["method": "item/autoApprovalReview/started", "params": review], to: monitor)
+        var session = await store.session(for: threadID)
+        XCTAssertEqual(session?.intervention?.id, "manual-tool")
+        try await deliver(["method": "item/autoApprovalReview/completed", "params": [
+            "threadId": threadID, "targetItemId": "older-tool"
+        ]], to: monitor)
+        session = await store.session(for: threadID)
+        XCTAssertEqual(session?.intervention?.id, "manual-tool")
+        try await deliver(["method": "item/autoApprovalReview/completed", "params": review], to: monitor)
+        session = await store.session(for: threadID)
+        XCTAssertNil(session?.intervention)
+        await monitor.stop()
+        await store.process(.sessionArchived(sessionId: threadID))
+    }
+
+    func testApprovalSettingsStayScopedToOneThread() {
+        let root: [String: Any] = ["electron-persisted-atom-state": [
+            "heartbeat-thread-permissions-by-id": [
+                "thread-1": ["approvalPolicy": "on-request", "approvalsReviewer": "auto_review"]
+            ]
+        ]]
+        let actual = CodexAppServerMonitor.approvalSettings(from: root, threadId: "thread-1")
+        XCTAssertEqual(actual.approvalPolicy, "on-request")
+        XCTAssertEqual(actual.approvalsReviewer, "auto_review")
+        XCTAssertNil(CodexAppServerMonitor.approvalSettings(
+            from: root, threadId: "thread-2"
+        ).approvalsReviewer)
+        XCTAssertFalse(CodexAppServerMonitor.shouldSurfaceAutoApprovalReview(
+            approvalsReviewer: " AUTO-REVIEW "
+        ))
+        XCTAssertTrue(CodexAppServerMonitor.shouldSurfaceAutoApprovalReview(
+            approvalsReviewer: "guardian_subagent"
+        ))
+    }
+
+    func testAppServerMCPInferenceRespectsReviewerAndNeverPolicy() async throws {
+        let monitor = CodexAppServerMonitor()
+        let threadID = "mcp-review-cache-\(UUID().uuidString)"
+        let thread: [String: Any] = [
+            "id": threadID, "source": "cli", "originator": "codex-tui", "cwd": "/tmp/reviewer-test",
+            "status": ["type": "active"], "turns": [["id": "turn", "items": [[
+                "id": "mcp-item", "type": "mcpToolCall", "server": "test", "tool": "read", "status": "inProgress"
+            ]]]]
+        ]
+        for (policy, reviewer, shouldInfer) in [
+            ("on-request", "auto_review", false),
+            (" NEVER ", "user", false),
+            ("on-request", "guardian_subagent", true)
+        ] {
+            try await deliver(["method": "thread/settings/updated", "params": [
+                "threadId": threadID,
+                "threadSettings": ["approvalPolicy": policy, "approvalsReviewer": reviewer]
+            ]], to: monitor)
+            let snapshot = await monitor.parseThreadSnapshot(thread)
+            XCTAssertEqual(snapshot?.intervention != nil, shouldInfer)
+        }
+        await monitor.stop()
+    }
+
     func testClientIdentityUsesRuntimeSourceSeparatelyFromTaskSource() {
         let monitor = CodexAppServerMonitor.shared
         for thread: [String: Any] in [

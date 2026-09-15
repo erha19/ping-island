@@ -3820,7 +3820,8 @@ actor SessionStore {
 
     func syncCodexThreadSnapshot(
         _ snapshot: CodexThreadSnapshot,
-        ingress: SessionIngress = .codexAppServer
+        ingress: SessionIngress = .codexAppServer,
+        readState: CodexThreadReadState? = nil
     ) {
         if case .none = snapshot.intervention,
            CodexAuxiliaryHookFilter.isCodexAuxiliaryThread(
@@ -3921,16 +3922,19 @@ actor SessionStore {
         session.codexSubagentDepth = snapshot.subagentDepth
         session.codexSubagentNickname = snapshot.subagentNickname
         session.codexSubagentRole = snapshot.subagentRole
+        let interventionChangedDuringRead = readState.map { $0.intervention != session.intervention } ?? false
         let shouldPreserveExternalIntervention = !snapshot.isTurnInterrupted && shouldPreserveExternalCodexIntervention(
             current: session.intervention,
             incoming: snapshot.intervention,
             nextPhase: snapshotPhase,
             clientKind: session.clientInfo.kind
         )
-        if !shouldPreserveExternalIntervention {
+        if !shouldPreserveExternalIntervention && !interventionChangedDuringRead {
             session.intervention = snapshot.intervention
         }
-        if shouldPreserveExternalIntervention {
+        if interventionChangedDuringRead {
+            // A newer request or resolution owns both the card and its phase.
+        } else if shouldPreserveExternalIntervention {
             if let hookPermissionPhase = restoredCodexHookPermissionPhase(from: session.intervention) {
                 session.phase = hookPermissionPhase
             } else if !session.phase.needsAttention {
@@ -4087,9 +4091,15 @@ actor SessionStore {
         return incomingActivityAt < currentLastActivity
     }
 
-    func resolveCodexIntervention(sessionId: String, nextPhase: SessionPhase = .processing) {
+    func resolveCodexIntervention(
+        sessionId: String,
+        nextPhase: SessionPhase = .processing,
+        requestId: String? = nil
+    ) {
         let resolvedSessionId = resolveCodexSessionAlias(sessionId)
         guard var session = sessions[resolvedSessionId] else { return }
+        // Delayed replies may not clear a newer approval request.
+        if let requestId, session.intervention?.id != requestId { return }
         session.intervention = nil
         session.phase = nextPhase
         session.lastActivity = Date()

@@ -8,6 +8,8 @@ import Glibc
 #endif
 
 public enum HookPayloadMapper {
+    private static let codexRolloutReadChunkBytes = 64 * 1_024
+    private static let maximumCodexRolloutContextBytes = 4 * 1_024 * 1_024
     private static let questionToolNames: Set<String> = [
         "askuserquestion",
         "askfollowupquestion"
@@ -46,6 +48,18 @@ public enum HookPayloadMapper {
         let terminalContext = makeTerminalContext(environment: effectiveEnvironment, payload: payload)
         let sessionKey = detectSessionKey(payload: payload, environment: effectiveEnvironment, provider: source)
         var metadata = mergedMetadata(arguments: arguments, payload: payload, terminalContext: terminalContext)
+        if source == .codex, eventType == "PermissionRequest" {
+            let reviewer = nonEmpty(metadata["approvals_reviewer"])
+                ?? nonEmpty(metadata["approvalsReviewer"])
+                ?? nonEmpty(metadata["approval_reviewer"])
+                ?? codexApprovalReviewer(
+                    transcriptPath: metadata["transcript_path"], turnID: metadata["turn_id"]
+                )
+            // Resolve on the originating host: a remote rollout is not readable
+            // by the app. This changes no approval or sandbox policy.
+            metadata["approvals_reviewer"] = reviewer?
+                .lowercased().replacingOccurrences(of: "-", with: "_")
+        }
         if runtimeConfig.routePromptsToTerminal {
             // Marker the app side reads to skip building an in-app prompt for
             // this event. Keeps the envelope flowing for status updates only.
@@ -1076,6 +1090,63 @@ public enum HookPayloadMapper {
             metadata["cwd"] = resolvedCWD
         }
         return metadata
+    }
+
+    private static func codexApprovalReviewer(transcriptPath: String?, turnID: String?) -> String? {
+        guard let transcriptPath = nonEmpty(transcriptPath),
+              let turnID = nonEmpty(turnID),
+              let handle = FileHandle(forReadingAtPath: transcriptPath) else {
+            return nil
+        }
+        defer { try? handle.close() }
+
+        func matchingReviewer(in line: Data) -> (matched: Bool, reviewer: String?) {
+            guard let json = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
+                  json["type"] as? String == "turn_context",
+                  let context = json["payload"] as? [String: Any],
+                  context["turn_id"] as? String == turnID else { return (false, nil) }
+            return (true, nonEmpty(context["approvals_reviewer"] as? String)
+                ?? nonEmpty(context["approvalsReviewer"] as? String))
+        }
+
+        do {
+            var endOffset = try handle.seekToEnd()
+            var suffix = Data()
+            var discardingOversizedLine = false
+            // Bound each read and retained line, not the search range: long tool
+            // output may put the matching turn context far behind the hook.
+            while endOffset > 0 {
+                let count = Int(min(UInt64(codexRolloutReadChunkBytes), endOffset))
+                endOffset -= UInt64(count)
+                try handle.seek(toOffset: endOffset)
+                guard let chunk = try handle.read(upToCount: count), chunk.count == count else { return nil }
+                let fragments = chunk.split(separator: 0x0A, omittingEmptySubsequences: false)
+                for fragment in fragments.dropFirst().reversed() {
+                    if !discardingOversizedLine, fragment.count + suffix.count <= maximumCodexRolloutContextBytes {
+                        var line = Data(fragment)
+                        line.append(suffix)
+                        let result = matchingReviewer(in: line)
+                        if result.matched { return result.reviewer }
+                    }
+                    suffix.removeAll(keepingCapacity: false)
+                    discardingOversizedLine = false
+                }
+                if let prefix = fragments.first, !discardingOversizedLine {
+                    if prefix.count + suffix.count > maximumCodexRolloutContextBytes {
+                        suffix.removeAll(keepingCapacity: false)
+                        discardingOversizedLine = true
+                    } else {
+                        var combined = Data(prefix)
+                        combined.append(suffix)
+                        suffix = combined
+                    }
+                }
+            }
+            if !discardingOversizedLine { return matchingReviewer(in: suffix).reviewer }
+        } catch {
+            return nil
+        }
+        return nil
     }
 
     private static func detectedSourceProcessName() -> String? {

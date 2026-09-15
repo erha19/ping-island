@@ -35,6 +35,63 @@ func islandBridgeHealthCheckRoundTripsThroughSocketServer() async throws {
 }
 
 @Test
+func remoteAgentDefersCodexAutomaticReviewWithoutAllowingIt() async throws {
+    let executable = try TestRuntime.executableURL(named: "PingIslandBridge")
+    let socketID = UUID().uuidString.prefix(8)
+    let hookSocketPath = "/tmp/pi-\(socketID)-h.sock"
+    let controlSocketPath = "/tmp/pi-\(socketID)-c.sock"
+    let service = try RunningProcess(
+        executableURL: executable,
+        arguments: [
+            "--mode", "remote-agent-service",
+            "--hook-socket", hookSocketPath,
+            "--control-socket", controlSocketPath
+        ]
+    )
+    defer {
+        service.terminate()
+        _ = service.waitForExit()
+        try? FileManager.default.removeItem(atPath: hookSocketPath)
+        try? FileManager.default.removeItem(atPath: controlSocketPath)
+    }
+
+    try await waitUntil(description: "remote agent service should create sockets") {
+        FileManager.default.fileExists(atPath: hookSocketPath)
+            && FileManager.default.fileExists(atPath: controlSocketPath)
+    }
+    let control = try RemoteApprovalControlClient(socketPath: controlSocketPath)
+    try await control.readHello()
+    let hookRequest = Task.detached {
+        try TestSocketClient.send(
+            envelope: BridgeEnvelope(
+                provider: .codex,
+                eventType: "PermissionRequest",
+                sessionKey: "codex:remote-auto-review",
+                title: "Bash",
+                preview: "Run tests",
+                cwd: "/tmp/remote-auto-review",
+                status: SessionStatus(kind: .waitingForApproval),
+                expectsResponse: true,
+                metadata: [
+                    "session_id": "remote-auto-review",
+                    "tool_name": "Bash",
+                    "permission_mode": "default",
+                    "approvals_reviewer": "auto_review"
+                ]
+            ),
+            socketPath: hookSocketPath
+        )
+    }
+
+    let event = try await control.readHookEvent()
+    #expect(event.payload.permissionMode == "default")
+    #expect(event.payload.approvalsReviewer == "auto_review")
+    try await control.sendDefer(requestID: event.payload.requestID)
+    let response = try await hookRequest.value
+    #expect(response.decision == nil)
+}
+
+@Test
 func islandBridgeHealthCheckFailsWhenSocketIsUnavailable() throws {
     let executable = try TestRuntime.executableURL(named: "PingIslandBridge")
     let process = try RunningProcess(
@@ -598,12 +655,80 @@ private struct TestRemoteHookEventMessage: Decodable {
 }
 
 private struct TestRemoteHookEventPayload: Decodable {
+    let requestID: UUID
     let sessionID: String
     let cwd: String
     let status: String
     let provider: String
+    let permissionMode: String?
     let message: String?
+    let approvalsReviewer: String?
     let clientInfo: TestRemoteHookClientInfoPayload
+}
+
+private final class RemoteApprovalControlClient {
+    private let fd: Int32
+    private var buffer = Data()
+
+    init(socketPath: String) throws {
+        let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+        guard fd >= 0 else { throw POSIXError(.EIO) }
+        var address = sockaddr_un()
+        address.sun_family = sa_family_t(AF_UNIX)
+        let path = socketPath.utf8CString.map(UInt8.init(bitPattern:))
+        guard path.count <= MemoryLayout.size(ofValue: address.sun_path) else {
+            close(fd); throw POSIXError(.ENAMETOOLONG)
+        }
+        withUnsafeMutableBytes(of: &address.sun_path) { $0.copyBytes(from: path) }
+        let result = withUnsafePointer(to: &address) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                connect(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
+            }
+        }
+        guard result == 0 else { close(fd); throw POSIXError(.ECONNREFUSED) }
+        _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) | O_NONBLOCK)
+        self.fd = fd
+    }
+
+    deinit { close(fd) }
+
+    private struct Hello: Decodable { let type: String }
+    func readHello() async throws { _ = try await next(Hello.self) }
+    func readHookEvent() async throws -> TestRemoteHookEventMessage {
+        try await next(TestRemoteHookEventMessage.self)
+    }
+
+    private func next<T: Decodable>(_ type: T.Type) async throws -> T {
+        var bytes = [UInt8](repeating: 0, count: 4_096)
+        let deadline = ContinuousClock().now + .seconds(8)
+        while ContinuousClock().now < deadline {
+            while let newline = buffer.firstIndex(of: 0x0A) {
+                let line = Data(buffer[..<newline])
+                buffer.removeSubrange(...newline)
+                if let value = try? JSONDecoder().decode(type, from: line) { return value }
+            }
+            let count = read(fd, &bytes, bytes.count)
+            if count > 0 { buffer.append(bytes, count: count) }
+            else if count == 0 { throw POSIXError(.ECONNRESET) }
+            else if errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR { throw POSIXError(.EIO) }
+            else { try await Task.sleep(for: .milliseconds(5)) }
+        }
+        throw TestSupportError.timedOut("remote control message")
+    }
+
+    func sendDefer(requestID: UUID) async throws {
+        let data = try JSONSerialization.data(withJSONObject: [
+            "type": "decision", "requestID": requestID.uuidString, "decision": "defer"
+        ]) + Data("\n".utf8)
+        var offset = 0
+        while offset < data.count {
+            let count = data.withUnsafeBytes { write(fd, $0.baseAddress?.advanced(by: offset), data.count - offset) }
+            if count > 0 { offset += count }
+            else if count < 0 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) {
+                try await Task.sleep(for: .milliseconds(5))
+            } else { throw POSIXError(.EIO) }
+        }
+    }
 }
 
 private struct TestRemoteHookClientInfoPayload: Decodable {

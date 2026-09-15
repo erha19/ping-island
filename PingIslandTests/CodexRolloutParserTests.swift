@@ -3,6 +3,57 @@ import XCTest
 @testable import Ping_Island
 
 final class CodexRolloutParserTests: XCTestCase {
+    func testReviewerInferenceTracksIncrementalTurnSettings() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let threadID = "reviewer-incremental-\(UUID().uuidString)"
+        let file = directory.appendingPathComponent("rollout.jsonl")
+        let header = """
+        {"type":"session_meta","payload":{"id":"\(threadID)","cwd":"/tmp/reviewer-project","source":"cli"}}
+        {"type":"turn_context","payload":{"turn_id":"turn-1","approval_policy":"on-request","approvals_reviewer":"auto_review"}}
+        """
+        let padding = Array(repeating: "{\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\"}}", count: 140)
+            .joined(separator: "\n")
+        let call = """
+        {"type":"event_msg","payload":{"type":"task_started"}}
+        {"type":"response_item","payload":{"type":"function_call","name":"mcp__test__read","arguments":"{}","call_id":"call-1"}}
+        """
+        try (header + "\n" + padding + "\n" + call + "\n").write(to: file, atomically: true, encoding: .utf8)
+        let parser = CodexRolloutParser()
+        let client = SessionClientInfo(kind: .codexCLI, sessionFilePath: file.path)
+        var snapshot = await parser.parseThread(
+            threadId: threadID, fallbackCwd: "/tmp/reviewer-project", clientInfo: client
+        )
+        XCTAssertEqual(snapshot?.phase, .processing)
+        XCTAssertNil(snapshot?.intervention)
+
+        let handle = try FileHandle(forWritingTo: file)
+        defer { try? handle.close() }
+        try handle.seekToEnd()
+        for (reviewer, expectedPhase) in [
+            ("guardian_subagent", SessionPhase.waitingForInput),
+            ("auto_review", .processing)
+        ] {
+            try handle.write(contentsOf: Data(
+                "{\"type\":\"turn_context\",\"payload\":{\"turn_id\":\"turn-1\",\"approvalsReviewer\":\"\(reviewer)\"}}\n".utf8
+            ))
+            snapshot = await parser.parseThread(
+                threadId: threadID, fallbackCwd: "/tmp/reviewer-project", clientInfo: client
+            )
+            XCTAssertEqual(snapshot?.phase, expectedPhase)
+        }
+        // An unknown reviewer on a new turn must not inherit auto_review.
+        try handle.write(contentsOf: Data("{\"type\":\"turn_context\",\"payload\":{\"turn_id\":\"turn-2\"}}\n".utf8))
+        snapshot = await parser.parseThread(
+            threadId: threadID, fallbackCwd: "/tmp/reviewer-project", clientInfo: client
+        )
+        XCTAssertEqual(snapshot?.phase, .waitingForInput)
+        let metrics = await parser.debugReadMetrics(forFilePath: file.path)
+        XCTAssertEqual(metrics?.fullRebuildCount, 1)
+        XCTAssertEqual(metrics?.incrementalReadCount, 3)
+    }
+
     func testAuxiliaryRolloutsUseSourceOrOpeningPromptAcrossIncrementalReads() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
