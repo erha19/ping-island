@@ -2002,6 +2002,7 @@ actor SessionStore {
             //
             // `lastActivity` is read before the assignment below moves it to now.
             let previousLastActivity = session.lastActivity
+            let wasCompletedReady = SessionCompletionStateEvaluator.isCompletedReadySession(session)
             let hasNewUserActivity = payload.isIncremental
                 && payload.messages.contains { $0.role == .user && $0.timestamp > previousLastActivity }
             if session.phase != .ended || hasNewUserActivity {
@@ -2012,6 +2013,9 @@ actor SessionStore {
                 allowEndedResume: hasNewUserActivity,
                 hasUserActivity: hasNewUserActivity
             )
+            if wasCompletedReady && session.phase == .processing {
+                session.completionSequence &+= 1
+            }
         }
 
         session.conversationInfo = conversationInfo
@@ -2179,10 +2183,24 @@ actor SessionStore {
     func commitTranscriptUpdate(_ update: SessionState, basedOn original: SessionState) -> SessionState? {
         guard let latest = sessions[update.sessionId] else { return nil }
         var committed = update
-        if latest.phase == .ended,
-           original.phase != .ended || latest.lastActivity != original.lastActivity {
-            markSessionEnded(&committed, refreshActivity: false)
+        // Transcript enrichment never owns the user's approval setting, even
+        // when the toggle changes without a corresponding phase transition.
+        committed.autoApprovePermissions = latest.autoApprovePermissions
+        let lifecycleChangedWhileEnriching = latest.phase != original.phase
+            || latest.intervention != original.intervention
+            || latest.pendingInterventions != original.pendingInterventions
+            || latest.suppressInAppPromptControls != original.suppressInAppPromptControls
+            || latest.latestTurnId != original.latestTurnId
+            || latest.completionSequence != original.completionSequence
+
+        if lifecycleChangedWhileEnriching {
+            committed.phase = latest.phase
             committed.lastActivity = latest.lastActivity
+            committed.intervention = latest.intervention
+            committed.pendingInterventions = latest.pendingInterventions
+            committed.suppressInAppPromptControls = latest.suppressInAppPromptControls
+            committed.latestTurnId = latest.latestTurnId
+            committed.completionSequence = latest.completionSequence
         }
         sessions[update.sessionId] = committed
         return committed
@@ -3731,6 +3749,7 @@ actor SessionStore {
             lastActivity: incomingActivityAt,
             createdAt: initialCreatedAt
         )
+        let wasCompletedReady = SessionCompletionStateEvaluator.isCompletedReadySession(session)
         if let createdAt {
             session.createdAt = mergedCreatedAt(existing: session.createdAt, incoming: createdAt)
         }
@@ -3814,6 +3833,10 @@ actor SessionStore {
             if !previewMetadata.isEmpty {
                 session.previewText = previewMetadata
             }
+        }
+
+        if wasCompletedReady && session.phase.isActive {
+            session.completionSequence &+= 1
         }
 
         let placeholderCandidate = isLikelyEmptyCodexPlaceholder(session)
@@ -3916,6 +3939,7 @@ actor SessionStore {
             lastActivity: snapshot.updatedAt,
             createdAt: snapshot.createdAt
         )
+        let wasCompletedReady = SessionCompletionStateEvaluator.isCompletedReadySession(session)
         session.createdAt = mergedCreatedAt(existing: session.createdAt, incoming: snapshot.createdAt)
         let snapshotPhase = snapshot.phase
         let hasCodexTurnCompletionEvidence = snapshotPhase == .idle
@@ -4010,6 +4034,10 @@ actor SessionStore {
                 existing: existingLastActivity,
                 incoming: snapshot.updatedAt
             )
+        }
+
+        if wasCompletedReady && session.phase.isActive {
+            session.completionSequence &+= 1
         }
 
         let placeholderCandidate = isLikelyEmptyCodexPlaceholder(session)

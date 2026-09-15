@@ -3,7 +3,7 @@ import XCTest
 @testable import Ping_Island
 
 final class SessionCompletionStateEvaluatorTests: XCTestCase {
-    func testCodexCompletionKeyUsesStableTurnAndAssistantItemIdentifiers() throws {
+    func testCodexCompletionKeyUsesStableTurnIndependentOfTranscript() throws {
         var session = SessionState(
             sessionId: "codex-completion-key",
             cwd: "/tmp/project",
@@ -28,7 +28,16 @@ final class SessionCompletionStateEvaluatorTests: XCTestCase {
         XCTAssertEqual(first, replay)
         XCTAssertEqual(first.sessionId, "codex-completion-key")
         XCTAssertEqual(first.turnId, "turn-1")
-        XCTAssertEqual(first.assistantItemId, "assistant-1")
+        session.chatItems.append(ChatHistoryItem(
+            id: "assistant-2",
+            type: .assistant("Late transcript detail"),
+            timestamp: Date(timeIntervalSince1970: 20)
+        ))
+        XCTAssertEqual(first, SessionCompletionKey.make(for: session))
+        session.completionSequence += 1
+        XCTAssertEqual(first, SessionCompletionKey.make(for: session))
+        session.latestTurnId = "turn-2"
+        XCTAssertNotEqual(first, SessionCompletionKey.make(for: session))
     }
 
     @MainActor
@@ -130,10 +139,10 @@ final class SessionCompletionStateEvaluatorTests: XCTestCase {
         )
 
         XCTAssertFalse(SessionCompletionStateEvaluator.hasCompletedAssistantReply(for: session))
-        XCTAssertFalse(SessionCompletionStateEvaluator.isCompletedReadySession(session))
+        XCTAssertTrue(SessionCompletionStateEvaluator.isCompletedReadySession(session))
     }
 
-    func testCompletedReadySessionRequiresWaitingForInputAssistantReply() {
+    func testCompletedReadySessionAcceptsWaitingForInputAssistantReply() {
         let session = SessionState(
             sessionId: "assistant-tail",
             cwd: "/tmp/project",
@@ -174,6 +183,32 @@ final class SessionCompletionStateEvaluatorTests: XCTestCase {
 
         XCTAssertTrue(SessionCompletionStateEvaluator.hasCompletedAssistantReply(for: session))
         XCTAssertTrue(SessionCompletionStateEvaluator.isCompletedReadySession(session))
+    }
+
+    func testStopWithoutFinalTranscriptStillQueuesOneCompletion() throws {
+        let now = Date()
+        var session = SessionState(
+            sessionId: "hook-only-stop",
+            cwd: "/tmp/project",
+            provider: .claude,
+            phase: .waitingForInput,
+            completionSequence: 4,
+            lastActivity: now,
+            createdAt: now.addingTimeInterval(-100)
+        )
+        XCTAssertTrue(SessionCompletionNotificationPolicy.shouldQueueCompletedNotification(
+            for: session,
+            previousPhase: .waitingForInput,
+            isEnabled: true,
+            now: now
+        ))
+        let originalKey = try XCTUnwrap(SessionCompletionKey.make(for: session))
+        session.chatItems = [ChatHistoryItem(
+            id: "late-assistant",
+            type: .assistant("Done"),
+            timestamp: now.addingTimeInterval(1)
+        )]
+        XCTAssertEqual(SessionCompletionKey.make(for: session), originalKey)
     }
 
     func testCodexIdleAssistantReplyIsCompletedReadySession() {
@@ -494,70 +529,36 @@ final class SessionCompletionStateEvaluatorTests: XCTestCase {
         )
     }
 
-    func testCompletionNotificationPolicyDetectsActiveSessionBlocker() {
-        let codex = SessionState(
+    @MainActor
+    func testNotificationQueuePreservesConcurrentCompletionsAndTurnSnapshots() throws {
+        let registry = SessionCompletionNotificationRegistry()
+        let firstSession = SessionState(
             sessionId: "codex-completed",
             cwd: "/tmp/project",
             provider: .codex,
             clientInfo: SessionClientInfo.codexApp(threadId: "codex-completed"),
             phase: .idle,
-            chatItems: [
-                ChatHistoryItem(id: "assistant", type: .assistant("Done"), timestamp: Date())
-            ]
+            latestTurnId: "turn-1"
         )
-        let activeClaude = SessionState(
-            sessionId: "claude-active",
-            cwd: "/tmp/project",
-            provider: .claude,
-            phase: .processing
-        )
-        let waitingClaude = SessionState(
-            sessionId: "claude-waiting",
-            cwd: "/tmp/project",
-            provider: .claude,
-            phase: .waitingForInput
-        )
-        let completedWaitingClaude = SessionState(
+        let secondSession = SessionState(
             sessionId: "claude-completed",
             cwd: "/tmp/project",
             provider: .claude,
             phase: .waitingForInput,
-            chatItems: [
-                ChatHistoryItem(id: "assistant", type: .assistant("Done"), timestamp: Date())
-            ]
+            completionSequence: 2
         )
-        let activeCodex = SessionState(
-            sessionId: "codex-active",
-            cwd: "/tmp/project",
-            provider: .codex,
-            clientInfo: SessionClientInfo.codexApp(threadId: "codex-active"),
-            phase: .processing
-        )
+        let first = SessionCompletionNotification(session: firstSession, kind: .completed)
+        let second = SessionCompletionNotification(session: secondSession, kind: .completed)
+        registry.enqueue(first)
+        registry.enqueue(second)
+        registry.enqueue(first)
 
-        XCTAssertTrue(
-            SessionCompletionNotificationPolicy.hasBlockingActiveSession(
-                for: codex,
-                in: [codex, activeClaude]
-            )
-        )
-        XCTAssertTrue(
-            SessionCompletionNotificationPolicy.hasBlockingActiveSession(
-                for: codex,
-                in: [codex, waitingClaude]
-            )
-        )
-        XCTAssertFalse(
-            SessionCompletionNotificationPolicy.hasBlockingActiveSession(
-                for: codex,
-                in: [codex, completedWaitingClaude]
-            )
-        )
-        XCTAssertTrue(
-            SessionCompletionNotificationPolicy.hasBlockingActiveSession(
-                for: codex,
-                in: [codex, activeCodex]
-            )
-        )
+        XCTAssertEqual(registry.pendingNotifications.count, 2)
+        XCTAssertEqual(try XCTUnwrap(registry.dequeueNext()).identity, first.identity)
+        XCTAssertEqual(try XCTUnwrap(registry.dequeueNext()).identity, second.identity)
+        XCTAssertNil(registry.dequeueNext())
+        registry.enqueue(first)
+        XCTAssertTrue(registry.pendingNotifications.isEmpty)
     }
 
     private func makeCodexCompletedSession(

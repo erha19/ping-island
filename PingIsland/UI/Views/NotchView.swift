@@ -65,7 +65,10 @@ struct NotchView: View {
     @State private var isHovering: Bool = false
     @State private var isBouncing: Bool = false
     @State private var previousCompletionNotificationPhases: [String: SessionPhase] = [:]
-    @State private var completionNotificationQueue: [SessionCompletionNotification] = []
+    private let completionNotificationRegistry = SessionCompletionNotificationRegistry.shared
+    private var completionNotificationQueue: [SessionCompletionNotification] {
+        completionNotificationRegistry.pendingNotifications
+    }
     @State private var activeCompletionNotification: SessionCompletionNotification?
     @State private var completionNotificationDismissWorkItem: DispatchWorkItem?
     @State private var shouldDismissCompletionNotificationOnHoverExit: Bool = false
@@ -407,9 +410,13 @@ struct NotchView: View {
                 viewModel.setManualAttentionActive(hasManualAttentionIndicator)
                 handleProcessingChange()
                 primeStartupPresentationState(sessionMonitor.instances)
+                DispatchQueue.main.async { maybePresentNextCompletionNotification() }
                 scheduleDetachmentHintPresentationIfNeeded(delay: Self.startupDetachmentHintDelay)
             }
             .onDisappear {
+                completionNotificationDismissWorkItem?.cancel()
+                completionNotificationDismissWorkItem = nil
+                activeCompletionNotification = nil
                 cancelScheduledDetachmentHintPresentation()
                 cancelScheduledDelayedManualAttentionPresentation()
             }
@@ -884,7 +891,7 @@ struct NotchView: View {
             onAttentionActionCompleted: {},
             onCompletionNotificationHoverChanged: handleCompletionNotificationHover,
             onDismissCompletionNotification: {
-                clearCompletionNotifications(keepPanelOpen: true)
+                dismissActiveCompletionNotification(closePanel: true, advanceQueue: true)
             }
         )
         .frame(width: notchSize.width - 24) // Fixed width to prevent text reflow
@@ -939,7 +946,7 @@ struct NotchView: View {
             // Clear completed-ready timestamps only when manually opened (user acknowledged)
             if viewModel.openReason == .click || viewModel.openReason == .hover {
                 completionReadyTimestamps.removeAll()
-                clearCompletionNotifications(keepPanelOpen: true)
+                dismissActiveCompletionNotification(closePanel: false, advanceQueue: false)
             }
         case .closed:
             if oldStatus == .opened {
@@ -1125,7 +1132,7 @@ struct NotchView: View {
             return
         }
 
-        clearCompletionNotifications(keepPanelOpen: true)
+        dismissActiveCompletionNotification(closePanel: false, advanceQueue: false)
 
         if viewModel.shouldSuppressAutomaticPresentation {
             return
@@ -1199,11 +1206,11 @@ struct NotchView: View {
         previousCompletionNotificationPhases = Dictionary(
             uniqueKeysWithValues: instances.map { ($0.stableId, $0.phase) }
         )
-        synchronizeCompletionNotifications(with: instances)
+        synchronizeCompletionNotifications()
     }
 
     private func handleCompletionNotificationChange(_ instances: [SessionState]) {
-        synchronizeCompletionNotifications(with: instances)
+        synchronizeCompletionNotifications()
 
         if areReminderNotificationsSuppressed {
             if activeCompletionNotification != nil || !completionNotificationQueue.isEmpty {
@@ -1220,21 +1227,11 @@ struct NotchView: View {
             uniqueKeysWithValues: instances.map { ($0.stableId, $0.phase) }
         )
 
-        // Ambient popups are one-shot notifications. If the notch is already expanded for
-        // some other reason, drop new ones instead of queueing them to appear later on
-        // top of the normal expanded UI.
-        if viewModel.status == .opened && activeCompletionNotification == nil {
-            previousCompletionNotificationPhases = currentPhases
-            completionNotificationQueue.removeAll()
-            return
-        }
-
         let newNotifications = instances
             .compactMap { session -> SessionCompletionNotification? in
                 completionNotificationCandidate(
                     for: session,
-                    previousPhase: previousCompletionNotificationPhases[session.stableId],
-                    allSessions: instances
+                    previousPhase: previousCompletionNotificationPhases[session.stableId]
                 )
             }
             .sorted { $0.session.lastActivity < $1.session.lastActivity }
@@ -1249,8 +1246,7 @@ struct NotchView: View {
 
     private func completionNotificationCandidate(
         for session: SessionState,
-        previousPhase: SessionPhase?,
-        allSessions: [SessionState]
+        previousPhase: SessionPhase?
     ) -> SessionCompletionNotification? {
         let kind: SessionCompletionNotification.Kind
         if shouldQueueCompactedNotification(for: session, previousPhase: previousPhase) {
@@ -1263,19 +1259,8 @@ struct NotchView: View {
             return nil
         }
 
-        guard !isCompletionNotificationConsumed(session: session, kind: kind) else {
-            return nil
-        }
-
-        if SessionCompletionNotificationPolicy.hasBlockingActiveSession(
-            for: session,
-            in: allSessions
-        ) {
-            markCompletionNotificationConsumed(session: session, kind: kind)
-            return nil
-        }
-
-        return SessionCompletionNotification(session: session, kind: kind)
+        let notification = SessionCompletionNotification(session: session, kind: kind)
+        return completionNotificationRegistry.isConsumed(notification) ? nil : notification
     }
 
     private func shouldQueueCompletedNotification(
@@ -1311,42 +1296,12 @@ struct NotchView: View {
         )
     }
 
-    private func synchronizeCompletionNotifications(with instances: [SessionState]) {
-        let sessionsById = Dictionary(uniqueKeysWithValues: instances.map { ($0.stableId, $0) })
-
-        if let active = activeCompletionNotification {
-            if let latest = sessionsById[active.session.stableId] {
-                activeCompletionNotification?.session = latest
-            } else {
-                dismissActiveCompletionNotification(closePanel: false, advanceQueue: true)
-            }
-        }
-
-        completionNotificationQueue = completionNotificationQueue.compactMap { notification in
-            guard let latest = sessionsById[notification.session.stableId] else { return nil }
-            var updated = notification
-            updated.session = latest
-            return updated
-        }
+    private func synchronizeCompletionNotifications() {
+        // Queued results are snapshots; a later turn must not replace their content.
     }
 
     private func enqueueCompletionNotification(_ notification: SessionCompletionNotification) {
-        if let active = activeCompletionNotification,
-           active.session.stableId == notification.session.stableId {
-            activeCompletionNotification?.session = notification.session
-            return
-        }
-
-        if let queuedIndex = completionNotificationQueue.firstIndex(where: {
-            $0.session.stableId == notification.session.stableId
-        }) {
-            var updated = completionNotificationQueue[queuedIndex]
-            updated.session = notification.session
-            completionNotificationQueue[queuedIndex] = updated
-            return
-        }
-
-        completionNotificationQueue.append(notification)
+        completionNotificationRegistry.enqueue(notification)
     }
 
     private func maybePresentNextCompletionNotification() {
@@ -1357,15 +1312,12 @@ struct NotchView: View {
         guard !hasPendingPermission && !hasHumanIntervention else { return }
         guard case .instances = viewModel.contentType else { return }
 
-        if viewModel.status == .opened && viewModel.openReason != .notification {
-            return
-        }
+        guard viewModel.status == .closed else { return }
 
         guard let nextNotification = dequeueNextPresentableCompletionNotification() else {
             return
         }
         activeCompletionNotification = nextNotification
-        markCompletionNotificationConsumed(nextNotification)
         shouldDismissCompletionNotificationOnHoverExit = false
 
         if viewModel.status != .opened || viewModel.openReason != .notification {
@@ -1376,26 +1328,7 @@ struct NotchView: View {
     }
 
     private func dequeueNextPresentableCompletionNotification() -> SessionCompletionNotification? {
-        while !completionNotificationQueue.isEmpty {
-            let notification = completionNotificationQueue.removeFirst()
-            guard isCompletionNotificationPresentable(notification) else {
-                markCompletionNotificationConsumed(notification)
-                continue
-            }
-            return notification
-        }
-        return nil
-    }
-
-    private func isCompletionNotificationPresentable(_ notification: SessionCompletionNotification) -> Bool {
-        guard !isCompletionNotificationConsumed(notification) else { return false }
-        guard SessionCompletionNotificationPolicy.hasRecentNotificationActivity(notification.session) else {
-            return false
-        }
-        return !SessionCompletionNotificationPolicy.hasBlockingActiveSession(
-            for: notification.session,
-            in: sessionMonitor.instances
-        )
+        completionNotificationRegistry.dequeueNext()
     }
 
     private func scheduleCompletionNotificationDismissal(for notificationID: UUID) {
@@ -1418,11 +1351,7 @@ struct NotchView: View {
         matching shouldRemove: (SessionCompletionNotification.Kind) -> Bool,
         keepPanelOpen: Bool
     ) {
-        let removedQueuedNotifications = completionNotificationQueue.filter { shouldRemove($0.kind) }
-        completionNotificationQueue.removeAll { shouldRemove($0.kind) }
-        for notification in removedQueuedNotifications {
-            markCompletionNotificationConsumed(notification)
-        }
+        completionNotificationRegistry.removePending(matching: shouldRemove)
 
         if let activeCompletionNotification, shouldRemove(activeCompletionNotification.kind) {
             dismissActiveCompletionNotification(closePanel: !keepPanelOpen, advanceQueue: true)
@@ -1482,28 +1411,8 @@ struct NotchView: View {
         }
     }
 
-    private func isCompletionNotificationConsumed(
-        session: SessionState,
-        kind: SessionCompletionNotification.Kind
-    ) -> Bool {
-        guard kind == .completed else { return false }
-        return SessionCompletionNotificationRegistry.shared.isConsumed(session: session)
-    }
-
-    private func isCompletionNotificationConsumed(_ notification: SessionCompletionNotification) -> Bool {
-        isCompletionNotificationConsumed(session: notification.session, kind: notification.kind)
-    }
-
-    private func markCompletionNotificationConsumed(
-        session: SessionState,
-        kind: SessionCompletionNotification.Kind
-    ) {
-        guard kind == .completed else { return }
-        SessionCompletionNotificationRegistry.shared.markConsumed(session: session)
-    }
-
     private func markCompletionNotificationConsumed(_ notification: SessionCompletionNotification) {
-        markCompletionNotificationConsumed(session: notification.session, kind: notification.kind)
+        completionNotificationRegistry.markConsumed(notification)
     }
 
     private func openSettingsWindow() {
