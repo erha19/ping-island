@@ -1,7 +1,119 @@
 import Combine
+import CryptoKit
+import Darwin
 import Foundation
 import os.log
 import Security
+
+private struct RemoteBridgeInstallationStatus {
+    let binaryURL: URL
+    let isCurrent: Bool
+}
+
+/// Serial, bounded control-frame writes never block the UI actor. The duplicated
+/// descriptor belongs to this writer; cancellation stops a partial frame and the
+/// connection is discarded rather than continuing a corrupted stream.
+nonisolated final class RemoteControlWriter: @unchecked Sendable {
+    enum Failure: Error, Equatable { case closed, bufferLimitExceeded, timedOut }
+    private let queue = DispatchQueue(label: "com.wudanwu.pingisland.remote-control-writer", qos: .userInitiated)
+    private let lock = NSLock()
+    private let handle: FileHandle
+    private let maximumBytes: Int
+    private let maximumMessages: Int
+    private let timeout: TimeInterval
+    private var cancelled = false
+    private var pendingBytes = 0
+    private var pendingMessages = 0
+
+    init(handle: FileHandle, maximumBytes: Int = 16 * 1_024 * 1_024, maximumMessages: Int = 4_096, timeout: TimeInterval = 5) throws {
+        let descriptor = dup(handle.fileDescriptor)
+        guard descriptor >= 0 else { throw POSIXError(.EIO) }
+        let flags = fcntl(descriptor, F_GETFL)
+        guard flags >= 0, fcntl(descriptor, F_SETFL, flags | O_NONBLOCK) == 0,
+              fcntl(descriptor, F_SETNOSIGPIPE, 1) == 0 else {
+            close(descriptor)
+            throw POSIXError(.EIO)
+        }
+        self.handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
+        self.maximumBytes = max(1, maximumBytes)
+        self.maximumMessages = max(1, maximumMessages)
+        self.timeout = max(0.001, timeout)
+    }
+
+    var bufferedByteCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return pendingBytes
+    }
+
+    func write(_ data: Data) async throws {
+        try Task.checkCancellation()
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                lock.lock()
+                if cancelled {
+                    lock.unlock()
+                    continuation.resume(throwing: Failure.closed)
+                    return
+                }
+                guard data.count <= maximumBytes - pendingBytes, pendingMessages < maximumMessages else {
+                    lock.unlock()
+                    continuation.resume(throwing: Failure.bufferLimitExceeded)
+                    return
+                }
+                pendingBytes += data.count
+                pendingMessages += 1
+                lock.unlock()
+                queue.async { [self] in
+                    let result = Result { try writeFrame(data) }
+                    lock.lock()
+                    pendingBytes -= data.count
+                    pendingMessages -= 1
+                    lock.unlock()
+                    if case .failure = result { cancel() }
+                    continuation.resume(with: result)
+                }
+            }
+        } onCancel: {
+            self.cancel()
+        }
+    }
+
+    func cancel() {
+        lock.lock()
+        guard !cancelled else { lock.unlock(); return }
+        cancelled = true
+        lock.unlock()
+        queue.async { [self] in try? handle.close() }
+    }
+
+    private func checkOpen() throws {
+        lock.lock()
+        defer { lock.unlock() }
+        if cancelled { throw Failure.closed }
+    }
+
+    private func writeFrame(_ data: Data) throws {
+        let deadline = DispatchTime.now().uptimeNanoseconds + UInt64(timeout * 1_000_000_000)
+        var offset = 0
+        while offset < data.count {
+            try checkOpen()
+            guard DispatchTime.now().uptimeNanoseconds < deadline else { throw Failure.timedOut }
+            let count = data.withUnsafeBytes {
+                Darwin.write(handle.fileDescriptor, $0.baseAddress?.advanced(by: offset), data.count - offset)
+            }
+            if count > 0 { offset += count; continue }
+            if count < 0, errno == EINTR { continue }
+            if count < 0, errno == EAGAIN || errno == EWOULDBLOCK {
+                var descriptor = pollfd(fd: handle.fileDescriptor, events: Int16(POLLOUT), revents: 0)
+                let result = poll(&descriptor, 1, 50)
+                if result < 0, errno != EINTR { throw POSIXError(.EIO) }
+                continue
+            }
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        }
+    }
+}
 
 @MainActor
 final class RemoteConnectorManager: ObservableObject {
@@ -14,10 +126,14 @@ final class RemoteConnectorManager: ObservableObject {
     private let logger = Logger(subsystem: "com.wudanwu.pingisland", category: "Remote")
     private let persistenceKey = "RemoteConnectorManager.endpoints.v1"
 
-    private var eventHandler: (@Sendable (HookEvent) -> Void)?
+    private var eventHandler: (@Sendable (HookEvent) async -> Void)?
     private var codexUsageHandler: (@Sendable (CodexUsageSnapshot) -> Void)?
     private var permissionFailureHandler: (@Sendable (_ sessionId: String, _ toolUseId: String) -> Void)?
     private var connectors: [UUID: RemoteAttachConnector] = [:]
+    private var reconnectTasks: [UUID: Task<Void, Never>] = [:]
+    private var reconnectAttempts: [UUID: Int] = [:]
+    private var connectionAttempts = RemoteConnectionAttemptRegistry()
+    private let processedEvents = RemoteProcessedEventLedger()
     private var pendingRequests = RemotePendingRequestStore()
     private var ephemeralPasswords: [UUID: String] = [:]
     private var hasStarted = false
@@ -31,7 +147,7 @@ final class RemoteConnectorManager: ObservableObject {
     }
 
     func start(
-        onEvent: @escaping @Sendable (HookEvent) -> Void,
+        onEvent: @escaping @Sendable (HookEvent) async -> Void,
         onCodexUsage: (@Sendable (CodexUsageSnapshot) -> Void)? = nil,
         onPermissionFailure: (@Sendable (_ sessionId: String, _ toolUseId: String) -> Void)? = nil
     ) {
@@ -49,6 +165,12 @@ final class RemoteConnectorManager: ObservableObject {
 
     func stop() {
         hasStarted = false
+        connectionAttempts.invalidateAll()
+        for task in reconnectTasks.values {
+            task.cancel()
+        }
+        reconnectTasks.removeAll()
+        reconnectAttempts.removeAll()
         for connector in connectors.values {
             connector.stop()
         }
@@ -117,6 +239,8 @@ final class RemoteConnectorManager: ObservableObject {
 
     func connect(endpointID: UUID, password: String?, forceBootstrap: Bool = false) {
         guard let endpoint = endpoint(for: endpointID) else { return }
+        cancelReconnect(endpointID: endpointID, resetAttempt: true)
+        let generation = connectionAttempts.begin(endpointID: endpointID, explicit: true)
 
         let trimmedPassword = password?.trimmingCharacters(in: .whitespacesAndNewlines)
         let requestedPassword = trimmedPassword?.isEmpty == false ? trimmedPassword : nil
@@ -148,8 +272,32 @@ final class RemoteConnectorManager: ObservableObject {
                     self.applyProbe(probe, to: endpointID, passwordWasUsed: effectivePassword != nil)
                 }
 
-                let shouldBootstrap = await MainActor.run {
+                var shouldBootstrap = await MainActor.run {
                     self.shouldBootstrapRemoteAgent(endpointID: endpointID, forceBootstrap: forceBootstrap)
+                }
+                var bridgeInstallationStatus: RemoteBridgeInstallationStatus?
+
+                if !shouldBootstrap {
+                    try checkConnectionAttempt(endpointID: endpointID, generation: generation)
+                    stage = "bridge-version-check"
+                    do {
+                        bridgeInstallationStatus = try await remoteBridgeInstallationStatus(
+                            endpointID: endpointID,
+                            password: effectivePassword,
+                            probe: probe
+                        )
+                        if bridgeInstallationStatus?.isCurrent == false {
+                            shouldBootstrap = true
+                            logger.notice(
+                                "Remote bridge checksum mismatch endpoint=\(endpoint.id.uuidString, privacy: .public) target=\(endpoint.sshTarget, privacy: .public); scheduling bootstrap"
+                            )
+                        }
+                    } catch {
+                        shouldBootstrap = true
+                        logger.error(
+                            "Remote bridge version check failed endpoint=\(endpoint.id.uuidString, privacy: .public) target=\(endpoint.sshTarget, privacy: .public); bootstrap required error=\(error.localizedDescription, privacy: .public)"
+                        )
+                    }
                 }
 
                 if shouldBootstrap {
@@ -164,14 +312,21 @@ final class RemoteConnectorManager: ObservableObject {
                             )
                         )
                     }
-                    stage = forceBootstrap ? "bootstrap-forced" : "bootstrap-initial"
-                    try await bootstrapRemoteAgent(endpointID: endpointID, password: effectivePassword, probe: probe)
+                    try checkConnectionAttempt(endpointID: endpointID, generation: generation)
+                    stage = forceBootstrap ? "bootstrap-forced" : "bootstrap-required"
+                    try await bootstrapRemoteAgent(
+                        endpointID: endpointID,
+                        password: effectivePassword,
+                        probe: probe,
+                        installationStatus: bridgeInstallationStatus
+                    )
                 } else {
                     logger.notice(
                         "Remote bootstrap skipped endpoint=\(endpoint.id.uuidString, privacy: .public) target=\(endpoint.sshTarget, privacy: .public) reason=reuse_existing_install"
                     )
                 }
 
+                try checkConnectionAttempt(endpointID: endpointID, generation: generation)
                 stage = "runtime-config"
                 try await writeRemoteRuntimeConfig(
                     endpointID: endpointID,
@@ -180,17 +335,21 @@ final class RemoteConnectorManager: ObservableObject {
                 )
 
                 do {
-                stage = "ensure-remote-agent"
-                try await ensureRemoteAgentRunning(endpointID: endpointID, password: effectivePassword)
+                    try checkConnectionAttempt(endpointID: endpointID, generation: generation)
+                    stage = "ensure-remote-agent"
+                    try await ensureRemoteAgentRunning(endpointID: endpointID, password: effectivePassword)
 
-                stage = "attach-cleanup-local"
-                try await cleanupLocalAttachProcesses(endpointID: endpointID)
+                    try checkConnectionAttempt(endpointID: endpointID, generation: generation)
+                    stage = "attach-cleanup-local"
+                    try await cleanupLocalAttachProcesses(endpointID: endpointID)
 
-                stage = "attach-cleanup"
-                try await cleanupRemoteAttachProcesses(endpointID: endpointID, password: effectivePassword)
+                    try checkConnectionAttempt(endpointID: endpointID, generation: generation)
+                    stage = "attach-cleanup"
+                    try await cleanupRemoteAttachProcesses(endpointID: endpointID, password: effectivePassword)
 
+                    try checkConnectionAttempt(endpointID: endpointID, generation: generation)
                     stage = "attach"
-                    try await attach(endpointID: endpointID, password: effectivePassword)
+                    try await attach(endpointID: endpointID, password: effectivePassword, generation: generation)
                 } catch {
                     guard !shouldBootstrap else {
                         throw error
@@ -211,9 +370,16 @@ final class RemoteConnectorManager: ObservableObject {
                         )
                     }
 
+                    try checkConnectionAttempt(endpointID: endpointID, generation: generation)
                     stage = "bootstrap-retry"
-                    try await bootstrapRemoteAgent(endpointID: endpointID, password: effectivePassword, probe: probe)
+                    try await bootstrapRemoteAgent(
+                        endpointID: endpointID,
+                        password: effectivePassword,
+                        probe: probe,
+                        installationStatus: bridgeInstallationStatus
+                    )
 
+                    try checkConnectionAttempt(endpointID: endpointID, generation: generation)
                     stage = "runtime-config-retry"
                     try await writeRemoteRuntimeConfig(
                         endpointID: endpointID,
@@ -221,14 +387,17 @@ final class RemoteConnectorManager: ObservableObject {
                         config: AppSettings.shared.bridgeRuntimeConfigSnapshot
                     )
 
+                    try checkConnectionAttempt(endpointID: endpointID, generation: generation)
                     stage = "ensure-remote-agent"
                     try await ensureRemoteAgentRunning(endpointID: endpointID, password: effectivePassword)
 
+                    try checkConnectionAttempt(endpointID: endpointID, generation: generation)
                     stage = "attach-cleanup"
                     try await cleanupRemoteAttachProcesses(endpointID: endpointID, password: effectivePassword)
 
+                    try checkConnectionAttempt(endpointID: endpointID, generation: generation)
                     stage = "attach"
-                    try await attach(endpointID: endpointID, password: effectivePassword)
+                    try await attach(endpointID: endpointID, password: effectivePassword, generation: generation)
                 }
                 await MainActor.run {
                     self.persistCredentialAfterSuccessfulConnection(
@@ -237,6 +406,8 @@ final class RemoteConnectorManager: ObservableObject {
                     )
                 }
             } catch {
+                guard !Task.isCancelled, connectionAttempts.isCurrent(endpointID: endpointID, generation: generation) else { return }
+                if suspendAfterAuthenticationFailure(endpointID: endpointID, error: error) { return }
                 await MainActor.run {
                     let errorDescription = Self.presentableConnectionError(
                         stage: stage,
@@ -259,6 +430,7 @@ final class RemoteConnectorManager: ObservableObject {
                             credentialSource: credential.source
                         )
                     )
+                    self.scheduleReconnect(endpointID: endpointID)
                 }
             }
         }
@@ -418,7 +590,8 @@ final class RemoteConnectorManager: ObservableObject {
         }
     }
 
-    private func attach(endpointID: UUID, password: String?) async throws {
+    private func attach(endpointID: UUID, password: String?, generation: UUID) async throws {
+        try checkConnectionAttempt(endpointID: endpointID, generation: generation)
         guard let endpoint = endpoint(for: endpointID) else { return }
 
         connectors.removeValue(forKey: endpointID)?.stop()
@@ -431,17 +604,20 @@ final class RemoteConnectorManager: ObservableObject {
             endpoint: endpoint,
             password: password,
             onMessage: { [weak self] message in
-                await self?.handle(message: message, endpointID: endpointID)
+                await self?.handle(message: message, endpointID: endpointID, generation: generation)
             },
             onDisconnect: { [weak self] error in
                 guard let manager = self else { return }
                 Task { @MainActor in
+                    guard manager.connectionAttempts.isCurrent(endpointID: endpointID, generation: generation) else { return }
                     manager.handleDisconnect(endpointID: endpointID, error: error)
                 }
             }
         )
 
         try await connector.start()
+        do { try checkConnectionAttempt(endpointID: endpointID, generation: generation) }
+        catch { connector.stop(); throw error }
         connectors[endpointID] = connector
         setState(
             for: endpointID,
@@ -518,8 +694,20 @@ final class RemoteConnectorManager: ObservableObject {
         updateState: Bool,
         detail: String = "已断开远程转发连接"
     ) {
+        connectionAttempts.invalidate(endpointID: endpointID)
+        cancelReconnect(endpointID: endpointID, resetAttempt: true)
         connectors.removeValue(forKey: endpointID)?.stop()
         pendingRequests.removeAll(for: endpointID)
+        let remoteHost = Self.resolvedRemoteHostHint(
+            payloadRemoteHost: nil,
+            endpoint: endpoint(for: endpointID)
+        )
+        Task {
+            await SessionStore.shared.markRemoteSessionsDisconnected(
+                endpointID: endpointID,
+                legacyRemoteHost: remoteHost
+            )
+        }
         if updateState {
             setState(for: endpointID, phase: .disconnected, detail: detail)
         }
@@ -567,9 +755,11 @@ final class RemoteConnectorManager: ObservableObject {
         )
     }
 
-    private func handle(message: RemoteInboundMessage, endpointID: UUID) async {
+    private func handle(message: RemoteInboundMessage, endpointID: UUID, generation: UUID) async {
+        guard connectionAttempts.isCurrent(endpointID: endpointID, generation: generation) else { return }
         switch message {
         case .hello(let hello):
+            reconnectAttempts.removeValue(forKey: endpointID)
             logger.notice(
                 "Remote daemon hello endpoint=\(endpointID.uuidString, privacy: .public) hostname=\(hello.hostname, privacy: .public) version=\(hello.version, privacy: .public)"
             )
@@ -597,8 +787,56 @@ final class RemoteConnectorManager: ObservableObject {
             codexUsageHandler?(snapshot)
 
         case .hookEvent(let eventMessage):
+            // Keep ACKs tied to the connection which delivered this event, even
+            // when ingestion suspends long enough for a reconnect.
+            let connector = connectors[endpointID]
             let payload = eventMessage.payload
+            if payload.expectsResponse,
+               CodexAutomaticApprovalReviewResolver.shouldDeferToCodex(
+                   provider: payload.provider,
+                   eventType: payload.event,
+                   metadata: [
+                       "approvals_reviewer": payload.approvalsReviewer ?? "",
+                       "permission_mode": payload.permissionMode ?? ""
+                   ]
+               ) {
+                // A nil-decision response releases the remote hook and lets
+                // Codex run its own automatic reviewer.
+                if let connector = connectors[endpointID] {
+                    do {
+                        try await connector.sendDecision(
+                            requestID: payload.requestID,
+                            decision: "defer",
+                            reason: nil,
+                            updatedInput: nil
+                        )
+                    } catch {
+                        logger.error("Failed to defer remote Codex review: \(error.localizedDescription, privacy: .public)")
+                    }
+                }
+                return
+            }
             guard let provider = SessionProvider(rawValue: payload.provider) else {
+                try? await Self.deliverRemoteHookEvent(nil, onEvent: eventHandler) {
+                    try await connector?.acknowledgeIgnoredEvent(payload)
+                }
+                return
+            }
+            if payload.expectsResponse,
+               let decision = Self.immediateRemoteCodexPermissionDecision(
+                   provider: payload.provider,
+                   eventType: payload.event,
+                   permissionMode: payload.permissionMode
+               ) {
+                // Only an explicit bypassPermissions PermissionRequest may be
+                // approved without asking the user.
+                await Self.deliverImmediatePermissionResponse(
+                    requestID: payload.requestID, decision: decision, connector: connector
+                ) { error in
+                    logger.error(
+                        "Failed to send immediate remote Codex response session=\(payload.sessionID.prefix(8), privacy: .public) endpoint=\(endpointID.uuidString, privacy: .public) error=\(error.localizedDescription, privacy: .public)"
+                    )
+                }
                 return
             }
             let resolvedToolUseID = Self.resolvedRemoteToolUseID(
@@ -621,6 +859,7 @@ final class RemoteConnectorManager: ObservableObject {
                 threadSource: payload.clientInfo.threadSource,
                 transport: payload.clientInfo.transport,
                 remoteHost: resolvedRemoteHost,
+                remoteEndpointID: endpointID,
                 sessionFilePath: payload.clientInfo.sessionFilePath,
                 terminalBundleIdentifier: payload.clientInfo.terminalBundleIdentifier,
                 terminalProgram: payload.clientInfo.terminalProgram,
@@ -646,23 +885,71 @@ final class RemoteConnectorManager: ObservableObject {
                 notificationType: payload.notificationType,
                 message: payload.message,
                 ingress: .remoteBridge,
-                bridgeExpectsResponse: payload.expectsResponse
+                bridgeExpectsResponse: payload.expectsResponse,
+                codexBypassPermissions: Self.isRemoteCodexBypassPermissionRequest(
+                    provider: payload.provider, eventType: payload.event, permissionMode: payload.permissionMode
+                )
             )
 
             if event.shouldFilterBeforeApprovalHandling {
+                try? await Self.deliverRemoteHookEvent(event, onEvent: eventHandler) {
+                    try await connector?.acknowledgeIgnoredEvent(payload)
+                }
                 return
             }
+            guard let eventHandler else { return }
 
-            if payload.expectsResponse, let toolUseID = resolvedToolUseID {
-                pendingRequests.append(PendingRemoteRequest(
-                    endpointID: endpointID,
-                    requestID: payload.requestID,
-                    sessionID: payload.sessionID
-                ), for: toolUseID)
+            let processed = await processedEvents.processOnce(
+                endpointID: endpointID, requestID: payload.requestID,
+                isCurrent: { [self] in connectionAttempts.isCurrent(endpointID: endpointID, generation: generation) }
+            ) { [self] in
+                guard connectionAttempts.isCurrent(endpointID: endpointID, generation: generation) else { return false }
+                if payload.expectsResponse, let toolUseID = resolvedToolUseID {
+                    pendingRequests.append(PendingRemoteRequest(
+                        endpointID: endpointID,
+                        requestID: payload.requestID,
+                        sessionID: payload.sessionID
+                    ), for: toolUseID)
+                }
+                await eventHandler(event)
+                return true
             }
-
-            eventHandler?(event)
+            guard processed, connectionAttempts.isCurrent(endpointID: endpointID, generation: generation) else { return }
+            // A lost ACK may replay after reconnect. Re-ACK the request without
+            // repeating state transitions, sounds, or pending-intervention inserts.
+            try? await connector?.sendAcknowledgement(requestID: payload.requestID)
         }
+    }
+
+    static func deliverImmediatePermissionResponse(
+        requestID: UUID,
+        decision: String,
+        connector: RemoteAttachConnector?,
+        onFailure: (Error) -> Void
+    ) async {
+        do {
+            try await connector?.sendDecision(requestID: requestID, decision: decision, reason: nil, updatedInput: nil)
+        } catch {
+            // The transport owns disconnect notification. In particular, EPIPE
+            // waits for SSH's termination/authentication result; stopping/removing
+            // the connector here would suppress that callback and its reconnect.
+            onFailure(error)
+        }
+    }
+
+    /// A processed-event ACK means ingestion completed, not merely that a Task
+    /// was scheduled. Unknown/filtered events are acknowledged too so they do
+    /// not poison the durable replay queue. Missing handlers remain retryable.
+    static func deliverRemoteHookEvent(
+        _ event: HookEvent?,
+        onEvent: (@Sendable (HookEvent) async -> Void)?,
+        acknowledge: () async throws -> Void
+    ) async rethrows {
+        if let event, !event.shouldFilterBeforeApprovalHandling {
+            guard let onEvent else { return }
+            await onEvent(event)
+        }
+        try await acknowledge()
     }
 
     nonisolated static func remoteUsageSourcePath(
@@ -675,8 +962,32 @@ final class RemoteConnectorManager: ObservableObject {
         return "\(prefix)\(separator)\(sourceFilePath)"
     }
 
+    private func suspendAfterAuthenticationFailure(endpointID: UUID, error: Error) -> Bool {
+        guard let failure = error as? RemoteConnectorError, case .authenticationRejected = failure else { return false }
+        connectionAttempts.suspendAfterAuthenticationRejection(endpointID: endpointID)
+        cancelReconnect(endpointID: endpointID, resetAttempt: true)
+        connectors.removeValue(forKey: endpointID)?.stop()
+        pendingRequests.removeAll(for: endpointID)
+        ephemeralPasswords.removeValue(forKey: endpointID)
+        credentialStore.deletePassword(for: endpointID)
+        setState(for: endpointID, phase: .failed, detail: failure.localizedDescription,
+                 lastError: failure.localizedDescription, requiresPassword: true)
+        logger.notice("Remote automatic reconnect suspended after authentication rejection endpoint=\(endpointID.uuidString, privacy: .public)")
+        return true
+    }
+
     private func handleDisconnect(endpointID: UUID, error: Error?) {
         connectors.removeValue(forKey: endpointID)
+        pendingRequests.removeAll(for: endpointID)
+        let remoteHost = Self.resolvedRemoteHostHint(
+            payloadRemoteHost: nil, endpoint: endpoint(for: endpointID)
+        )
+        Task {
+            await SessionStore.shared.markRemoteSessionsDisconnected(
+                endpointID: endpointID, legacyRemoteHost: remoteHost
+            )
+        }
+        if let error, suspendAfterAuthenticationFailure(endpointID: endpointID, error: error) { return }
         logger.error(
             "Remote attach disconnected endpoint=\(endpointID.uuidString, privacy: .public) error=\(error?.localizedDescription ?? "none", privacy: .public)"
         )
@@ -687,6 +998,107 @@ final class RemoteConnectorManager: ObservableObject {
             lastError: error?.localizedDescription,
             requiresPassword: endpoint(for: endpointID)?.authMode == .passwordSession
         )
+        scheduleReconnect(endpointID: endpointID)
+    }
+
+    private func scheduleReconnect(endpointID: UUID) {
+        guard hasStarted,
+              connectionAttempts.allowsAutomaticRetry(endpointID: endpointID),
+              reconnectTasks[endpointID] == nil,
+              let endpoint = endpoint(for: endpointID),
+              shouldAutoReconnectOnStart(endpoint: endpoint) else {
+            return
+        }
+
+        let attempt = (reconnectAttempts[endpointID] ?? 0) + 1
+        reconnectAttempts[endpointID] = attempt
+        let delay = Self.runtimeReconnectDelaySeconds(forAttempt: attempt)
+        logger.notice(
+            "Remote reconnect scheduled endpoint=\(endpointID.uuidString, privacy: .public) attempt=\(attempt, privacy: .public) delay=\(delay, privacy: .public)s"
+        )
+        setState(
+            for: endpointID,
+            phase: .degraded,
+            detail: AppLocalization.format("远程转发已断开，%.0f 秒后自动重连…", delay),
+            requiresPassword: false
+        )
+
+        let generation = connectionAttempts.begin(endpointID: endpointID)
+        reconnectTasks[endpointID] = Task { [weak self] in
+            do {
+                try await Task<Never, Never>.sleep(
+                    nanoseconds: UInt64(delay * 1_000_000_000)
+                )
+            } catch {
+                return
+            }
+            guard !Task.isCancelled else { return }
+            await self?.attemptReconnect(endpointID: endpointID, generation: generation)
+        }
+    }
+
+    private func attemptReconnect(endpointID: UUID, generation: UUID) async {
+        defer {
+            if connectionAttempts.isCurrent(endpointID: endpointID, generation: generation) {
+                reconnectTasks.removeValue(forKey: endpointID)
+            }
+        }
+        guard hasStarted,
+              connectionAttempts.isCurrent(endpointID: endpointID, generation: generation),
+              let endpoint = endpoint(for: endpointID),
+              shouldAutoReconnectOnStart(endpoint: endpoint) else { return }
+
+        let credential = resolvedCredential(for: endpointID, requestedPassword: nil)
+        let password = credential.password
+        setState(for: endpointID, phase: .connecting,
+                 detail: AppLocalization.string("正在自动重连远程转发…"), lastError: nil, requiresPassword: false)
+        do {
+            try await Self.runConnectionSteps([
+                { try await self.ensureRemoteAgentRunning(endpointID: endpointID, password: password) },
+                { try await self.cleanupLocalAttachProcesses(endpointID: endpointID) },
+                { try await self.cleanupRemoteAttachProcesses(endpointID: endpointID, password: password) },
+                { try await self.attach(endpointID: endpointID, password: password, generation: generation) }
+            ], isCurrent: {
+                self.hasStarted && self.connectionAttempts.isCurrent(endpointID: endpointID, generation: generation)
+            })
+        } catch {
+            guard hasStarted, !Task.isCancelled,
+                  connectionAttempts.isCurrent(endpointID: endpointID, generation: generation) else { return }
+            if suspendAfterAuthenticationFailure(endpointID: endpointID, error: error) { return }
+            logger.error("Remote reconnect failed endpoint=\(endpointID.uuidString, privacy: .public) error=\(error.localizedDescription, privacy: .public)")
+            setState(for: endpointID, phase: .degraded,
+                     detail: AppLocalization.string("远程自动重连失败"), lastError: error.localizedDescription,
+                     requiresPassword: endpoint.authMode == .passwordSession && password == nil)
+            // The attempt is finished now, not before its first await.
+            reconnectTasks.removeValue(forKey: endpointID)
+            scheduleReconnect(endpointID: endpointID)
+        }
+    }
+
+    private func checkConnectionAttempt(endpointID: UUID, generation: UUID) throws {
+        try Task.checkCancellation()
+        guard connectionAttempts.isCurrent(endpointID: endpointID, generation: generation) else {
+            throw CancellationError()
+        }
+    }
+
+    static func runConnectionSteps(
+        _ steps: [() async throws -> Void], isCurrent: () -> Bool
+    ) async throws {
+        for step in steps {
+            try Task.checkCancellation()
+            guard isCurrent() else { throw CancellationError() }
+            try await step()
+            try Task.checkCancellation()
+            guard isCurrent() else { throw CancellationError() }
+        }
+    }
+
+    private func cancelReconnect(endpointID: UUID, resetAttempt: Bool) {
+        reconnectTasks.removeValue(forKey: endpointID)?.cancel()
+        if resetAttempt {
+            reconnectAttempts.removeValue(forKey: endpointID)
+        }
     }
 
     private func applyProbe(_ probe: RemoteHostProbe, to endpointID: UUID, passwordWasUsed: Bool) {
@@ -705,19 +1117,13 @@ final class RemoteConnectorManager: ObservableObject {
         )
     }
 
-    private func bootstrapRemoteAgent(endpointID: UUID, password: String?, probe: RemoteHostProbe) async throws {
-        guard let endpoint = endpoint(for: endpointID) else { return }
+    private func remoteBridgeInstallationStatus(
+        endpointID: UUID,
+        password: String?,
+        probe: RemoteHostProbe
+    ) async throws -> RemoteBridgeInstallationStatus? {
+        guard let endpoint = endpoint(for: endpointID) else { return nil }
         let bridgeBinaryURL = try await assetResolver.resolveBinaryURL(for: probe)
-        let stagedBridgePath = "\(endpoint.remoteInstallRoot)/bin/PingIslandBridge.tmp"
-        let remoteHookProfiles = Self.remoteManagedHookProfiles()
-        logger.notice(
-            "Remote bootstrap starting endpoint=\(endpoint.id.uuidString, privacy: .public) target=\(endpoint.sshTarget, privacy: .public) binary=\(bridgeBinaryURL.path, privacy: .public) installRoot=\(endpoint.remoteInstallRoot, privacy: .public)"
-        )
-        guard remoteHookProfiles.contains(where: { $0.id == "claude-hooks" }) else {
-            throw RemoteConnectorError.missingClaudeHookProfile
-        }
-
-        // Check if bridge binary already exists and is executable on remote
         let bridgeBinaryPath = "\(endpoint.remoteInstallRoot)/bin/PingIslandBridge"
         let launcherPath = "\(endpoint.remoteInstallRoot)/bin/ping-island-bridge"
         let bridgeExists = (try? await RemoteSSHCommandRunner.remoteFileExists(
@@ -732,7 +1138,64 @@ final class RemoteConnectorManager: ObservableObject {
             remotePath: launcherPath,
             password: password
         )) ?? false
-        let bridgeAlreadyInstalled = bridgeExists && launcherExists
+        let localBridgeChecksum = try Self.sha256Hex(of: bridgeBinaryURL)
+        let remoteBridgeChecksum: String? = if bridgeExists {
+            try? await RemoteSSHCommandRunner.runSSH(
+                target: endpoint.sshTarget,
+                port: endpoint.sshPort,
+                password: password,
+                remoteCommand: Self.remoteBridgeChecksumCommand(path: bridgeBinaryPath),
+                acceptNewHostKey: true
+            ).stdout
+                .split(whereSeparator: \.isWhitespace)
+                .first
+                .map(String.init)
+        } else {
+            nil
+        }
+        return RemoteBridgeInstallationStatus(
+            binaryURL: bridgeBinaryURL,
+            isCurrent: Self.isRemoteBridgeInstallationCurrent(
+                bridgeExists: bridgeExists,
+                launcherExists: launcherExists,
+                localChecksum: localBridgeChecksum,
+                remoteChecksum: remoteBridgeChecksum
+            )
+        )
+    }
+
+    private func bootstrapRemoteAgent(
+        endpointID: UUID,
+        password: String?,
+        probe: RemoteHostProbe,
+        installationStatus: RemoteBridgeInstallationStatus? = nil
+    ) async throws {
+        guard let endpoint = endpoint(for: endpointID) else { return }
+        let resolvedInstallationStatus: RemoteBridgeInstallationStatus
+        if let installationStatus {
+            resolvedInstallationStatus = installationStatus
+        } else {
+            guard let status = try await remoteBridgeInstallationStatus(
+                endpointID: endpointID,
+                password: password,
+                probe: probe
+            ) else {
+                return
+            }
+            resolvedInstallationStatus = status
+        }
+        let bridgeBinaryURL = resolvedInstallationStatus.binaryURL
+        let bridgeAlreadyInstalled = resolvedInstallationStatus.isCurrent
+        let stagedBridgePath = "\(endpoint.remoteInstallRoot)/bin/PingIslandBridge.tmp"
+        let bridgeBinaryPath = "\(endpoint.remoteInstallRoot)/bin/PingIslandBridge"
+        let launcherPath = "\(endpoint.remoteInstallRoot)/bin/ping-island-bridge"
+        let remoteHookProfiles = Self.remoteManagedHookProfiles()
+        logger.notice(
+            "Remote bootstrap starting endpoint=\(endpoint.id.uuidString, privacy: .public) target=\(endpoint.sshTarget, privacy: .public) binary=\(bridgeBinaryURL.path, privacy: .public) installRoot=\(endpoint.remoteInstallRoot, privacy: .public)"
+        )
+        guard remoteHookProfiles.contains(where: { $0.id == "claude-hooks" }) else {
+            throw RemoteConnectorError.missingClaudeHookProfile
+        }
 
         _ = try await RemoteSSHCommandRunner.runSSH(
             target: endpoint.sshTarget,
@@ -756,7 +1219,7 @@ final class RemoteConnectorManager: ObservableObject {
 
         if bridgeAlreadyInstalled {
             logger.notice(
-                "Remote bootstrap skipped SCP — bridge binary already exists at \(bridgeBinaryPath, privacy: .public)"
+                "Remote bootstrap skipped SCP — bridge checksum matches at \(bridgeBinaryPath, privacy: .public)"
             )
         } else {
             do {
@@ -973,6 +1436,27 @@ final class RemoteConnectorManager: ObservableObject {
             refreshed.lastBootstrapAt = Date()
             updateEndpoint(refreshed)
         }
+    }
+
+    nonisolated static func remoteBridgeChecksumCommand(path: String) -> String {
+        let quotedPath = shellQuote(path)
+        return "if command -v sha256sum >/dev/null 2>&1; then sha256sum \(quotedPath); else shasum -a 256 \(quotedPath); fi"
+    }
+
+    nonisolated static func isRemoteBridgeInstallationCurrent(
+        bridgeExists: Bool,
+        launcherExists: Bool,
+        localChecksum: String,
+        remoteChecksum: String?
+    ) -> Bool {
+        bridgeExists
+            && launcherExists
+            && remoteChecksum == localChecksum
+    }
+
+    nonisolated private static func sha256Hex(of url: URL) throws -> String {
+        let digest = SHA256.hash(data: try Data(contentsOf: url))
+        return digest.map { String(format: "%02x", $0) }.joined()
     }
 
     private func uninstallRemoteAgent(endpointID: UUID, password: String?, probe: RemoteHostProbe) async throws {
@@ -1195,6 +1679,20 @@ final class RemoteConnectorManager: ObservableObject {
         return sanitizedNonEmpty(sshTarget.split(separator: "@").last.map(String.init) ?? sshTarget)
     }
 
+    nonisolated static func isRemoteCodexBypassPermissionRequest(
+        provider: String, eventType: String, permissionMode: String?
+    ) -> Bool {
+        provider == "codex" && eventType == "PermissionRequest" && permissionMode == "bypassPermissions"
+    }
+
+    nonisolated static func immediateRemoteCodexPermissionDecision(
+        provider: String, eventType: String, permissionMode: String?
+    ) -> String? {
+        isRemoteCodexBypassPermissionRequest(
+            provider: provider, eventType: eventType, permissionMode: permissionMode
+        ) ? "approve" : nil
+    }
+
     nonisolated static func resolvedRemoteToolUseID(
         toolUseID: String?,
         expectsResponse: Bool,
@@ -1228,7 +1726,8 @@ final class RemoteConnectorManager: ObservableObject {
     }
 
     private func shouldAutoReconnectOnStart(endpoint: RemoteEndpoint) -> Bool {
-        Self.shouldAutoReconnectOnLaunch(
+        guard connectionAttempts.allowsAutomaticRetry(endpointID: endpoint.id) else { return false }
+        return Self.shouldAutoReconnectOnLaunch(
             endpoint: endpoint,
             hasReusablePassword: hasReusablePassword(for: endpoint.id)
         )
@@ -1268,6 +1767,11 @@ final class RemoteConnectorManager: ObservableObject {
         }
     }
 
+    nonisolated static func runtimeReconnectDelaySeconds(forAttempt attempt: Int) -> TimeInterval {
+        let exponent = max(0, min(attempt - 1, 5))
+        return min(pow(2, Double(exponent)), 30)
+    }
+
     nonisolated static func normalizedLinuxBridgeArchitecture(_ architecture: String) -> String? {
         switch architecture.lowercased() {
         case "x86_64", "amd64":
@@ -1293,6 +1797,18 @@ final class RemoteConnectorManager: ObservableObject {
 
     nonisolated static func remoteLinuxBridgeLegacyArchiveAssetName(normalizedArchitecture: String) -> String {
         remoteLinuxBridgeLegacyBinaryAssetName(normalizedArchitecture: normalizedArchitecture) + ".zip"
+    }
+
+    nonisolated static func remoteLinuxBridgeOverrideURL(
+        normalizedArchitecture: String,
+        homeDirectory: URL
+    ) -> URL {
+        homeDirectory
+            .appendingPathComponent(".ping-island", isDirectory: true)
+            .appendingPathComponent("custom-bridges", isDirectory: true)
+            .appendingPathComponent(
+                remoteLinuxBridgeBinaryAssetName(normalizedArchitecture: normalizedArchitecture)
+            )
     }
 
     func hasReusablePassword(for endpointID: UUID) -> Bool {
@@ -1509,6 +2025,7 @@ final class RemoteConnectorManager: ObservableObject {
             .joined(separator: " ")
         return """
         mkdir -p \(directoryList)
+        chmod 700 \(shellQuote("\(installRoot)/run")) \(shellQuote("\(installRoot)/logs"))
         pkill -f \(shellQuote(agentPattern)) >/dev/null 2>&1 || true
         sleep 1
         rm -f \(shellQuote(controlSocketPath)) \(shellQuote(hookSocketPath)) \(shellQuote("\(installRoot)/bin/PingIslandBridge.tmp"))
@@ -1523,6 +2040,7 @@ final class RemoteConnectorManager: ObservableObject {
         let servicePattern = "\(installRoot)/bin/[P]ingIslandBridge --mode remote-agent-service"
         return """
         mkdir -p \(shellQuote("\(installRoot)/run")) \(shellQuote("\(installRoot)/logs"))
+        chmod 700 \(shellQuote("\(installRoot)/run")) \(shellQuote("\(installRoot)/logs"))
         if [ -S \(shellQuote(controlSocketPath)) ] && pgrep -f \(shellQuote(servicePattern)) >/dev/null 2>&1; then
           exit 0
         fi
@@ -1801,6 +2319,7 @@ private enum RemoteConnectorError: LocalizedError {
     case localBridgeBinaryMissing
     case missingClaudeHookProfile
     case invalidRemoteMessage
+    case authenticationRejected
     case unsupportedRemotePlatform(String)
     case remoteBridgeDownloadFailed(String)
     case sshFailure(String)
@@ -1813,6 +2332,8 @@ private enum RemoteConnectorError: LocalizedError {
             return "未找到 hooks 配置模板"
         case .invalidRemoteMessage:
             return "远程桥接返回了无法识别的消息"
+        case .authenticationRejected:
+            return "远程 SSH 身份验证失败，请重新连接"
         case .unsupportedRemotePlatform(let detail):
             return detail
         case .remoteBridgeDownloadFailed(let detail):
@@ -1823,7 +2344,8 @@ private enum RemoteConnectorError: LocalizedError {
     }
 }
 
-private final class RemoteAttachConnector {
+@MainActor
+final class RemoteAttachConnector {
     nonisolated private static let logger = Logger(subsystem: "com.wudanwu.pingisland", category: "Remote")
 
     private let endpoint: RemoteEndpoint
@@ -1832,14 +2354,15 @@ private final class RemoteAttachConnector {
     private let onDisconnect: @Sendable (Error?) -> Void
 
     private var process: Process?
-    private var stdinHandle: FileHandle?
+    private var controlWriter: RemoteControlWriter?
     private var stdoutHandle: FileHandle?
     private var stdoutBuffer = Data()
+    private var messageDeliveryTask: Task<Void, Never>?
     private let disconnectLock = NSLock()
     private var didFinishDisconnect = false
     private var suppressDisconnectCallback = false
 
-    init(
+    fileprivate init(
         endpoint: RemoteEndpoint,
         password: String?,
         onMessage: @escaping @Sendable (RemoteInboundMessage) async -> Void,
@@ -1849,6 +2372,19 @@ private final class RemoteAttachConnector {
         self.password = password
         self.onMessage = onMessage
         self.onDisconnect = onDisconnect
+    }
+
+    // Exercise transport response/termination ownership without starting SSH.
+    init(controlWriter: RemoteControlWriter, onDisconnect: @escaping @Sendable (Error?) -> Void) {
+        endpoint = RemoteEndpoint(displayName: "Transport", sshTarget: "unused.example.test")
+        password = nil
+        onMessage = { _ in }
+        self.onDisconnect = onDisconnect
+        self.controlWriter = controlWriter
+    }
+
+    func processTerminated(_ error: Error?) {
+        finishDisconnect(error)
     }
 
     func start() async throws {
@@ -1866,22 +2402,34 @@ private final class RemoteAttachConnector {
         process.standardError = stderrPipe
         process.standardInput = stdinPipe
 
-        try process.run()
+        let writer = try RemoteControlWriter(handle: stdinPipe.fileHandleForWriting)
+        do { try process.run() } catch { writer.cancel(); throw error }
         Self.logger.notice(
             "Remote attach process launched endpoint=\(self.endpoint.id.uuidString, privacy: .public) target=\(self.endpoint.sshTarget, privacy: .public) pid=\(process.processIdentifier, privacy: .public)"
         )
         self.process = process
-        self.stdinHandle = stdinPipe.fileHandleForWriting
+        self.controlWriter = writer
+        try? stdinPipe.fileHandleForWriting.close()
         self.stdoutHandle = stdoutPipe.fileHandleForReading
         stdoutPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
-            self?.drainStdout(from: handle)
+            // Drain on the readability callback, before scheduling actor work;
+            // otherwise repeated callbacks can queue blocking reads of an empty pipe.
+            let chunk = handle.availableData
+            if chunk.isEmpty { handle.readabilityHandler = nil }
+            Task { @MainActor in
+                self?.receiveStdout(chunk)
+            }
         }
+        let endpointID = endpoint.id
         process.terminationHandler = { [weak self] process in
             let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
             let stderr = String(data: stderrData, encoding: .utf8)?
                 .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let authenticationRejected = RemoteAuthenticationFailure.isRejection(stderr: stderr, exitCode: process.terminationStatus)
             let error: Error? = if process.terminationStatus == 0 {
                 nil
+            } else if authenticationRejected {
+                RemoteConnectorError.authenticationRejected
             } else {
                 RemoteConnectorError.sshFailure(
                     stderr.isEmpty ? "SSH attach 已断开" : "SSH attach 已断开: \(Self.excerpt(stderr))"
@@ -1890,17 +2438,19 @@ private final class RemoteAttachConnector {
 
             if process.terminationStatus == 0 {
                 Self.logger.notice(
-                    "Remote attach process exited cleanly endpoint=\(self?.endpoint.id.uuidString ?? "unknown", privacy: .public) status=\(process.terminationStatus, privacy: .public)"
+                    "Remote attach process exited cleanly endpoint=\(endpointID.uuidString, privacy: .public) status=\(process.terminationStatus, privacy: .public)"
                 )
+            } else if authenticationRejected {
+                Self.logger.error("Remote attach authentication rejected endpoint=\(endpointID.uuidString, privacy: .public)")
             } else {
                 Self.logger.error(
-                    "Remote attach process exited endpoint=\(self?.endpoint.id.uuidString ?? "unknown", privacy: .public) status=\(process.terminationStatus, privacy: .public) stderr=\(Self.excerpt(stderr), privacy: .public)"
+                    "Remote attach process exited endpoint=\(endpointID.uuidString, privacy: .public) status=\(process.terminationStatus, privacy: .public) stderr=\(Self.excerpt(stderr), privacy: .public)"
                 )
             }
 
             if let self {
                 Task { @MainActor in
-                    self.finishDisconnect(error)
+                    self.processTerminated(error)
                 }
             }
         }
@@ -1913,7 +2463,8 @@ private final class RemoteAttachConnector {
             process.terminate()
         }
         process = nil
-        stdinHandle = nil
+        controlWriter?.cancel()
+        controlWriter = nil
         stdoutHandle = nil
         stdoutBuffer.removeAll(keepingCapacity: false)
     }
@@ -1930,16 +2481,43 @@ private final class RemoteAttachConnector {
             reason: reason,
             updatedInput: updatedInput
         )
-        let data = try JSONEncoder().encode(message) + Data("\n".utf8)
-        try stdinHandle?.write(contentsOf: data)
+        try await writeControlMessage(message)
     }
 
-    private func drainStdout(from handle: FileHandle) {
+    func sendAcknowledgement(requestID: UUID) async throws {
+        try await writeControlMessage(RemoteAcknowledgementMessage(requestID: requestID))
+    }
+
+    func acknowledgeIgnoredEvent(_ payload: RemoteHookEventPayload) async throws {
+        if payload.expectsResponse {
+            // Decisions also acknowledge delivery. A no-decision response lets
+            // the provider proceed and releases a filtered blocking hook.
+            try await sendDecision(requestID: payload.requestID, decision: "defer", reason: nil, updatedInput: nil)
+        } else {
+            try await sendAcknowledgement(requestID: payload.requestID)
+        }
+    }
+
+    private func writeControlMessage<T: Encodable>(_ message: T) async throws {
+        guard let controlWriter else { throw RemoteConnectorError.invalidRemoteMessage }
+        let data = try JSONEncoder().encode(message) + Data("\n".utf8)
         do {
-            let chunk = handle.availableData
+            try await controlWriter.write(data)
+        } catch {
+            // EPIPE means SSH closed stdin; its termination callback supplies the
+            // authoritative authentication error rather than an eager generic retry.
+            if (error as? POSIXError)?.code != .EPIPE { finishDisconnect(error) }
+            throw error
+        }
+    }
+
+    private func receiveStdout(_ chunk: Data) {
+        guard !suppressDisconnectCallback, !didFinishDisconnect else { return }
+        do {
             if chunk.isEmpty {
-                handle.readabilityHandler = nil
-                finishDisconnect(nil)
+                stdoutHandle?.readabilityHandler = nil
+                // The termination callback carries the SSH authentication result.
+                // Do not turn EOF into a generic retry before that result arrives.
                 return
             }
             stdoutBuffer.append(chunk)
@@ -1959,7 +2537,10 @@ private final class RemoteAttachConnector {
             guard !line.isEmpty else { continue }
             do {
                 let message = try JSONDecoder().decode(RemoteInboundMessage.self, from: line)
-                Task {
+                let previousDelivery = messageDeliveryTask
+                messageDeliveryTask = Task {
+                    await previousDelivery?.value
+                    guard !Task.isCancelled, !self.suppressDisconnectCallback, !self.didFinishDisconnect else { return }
                     await self.onMessage(message)
                 }
             } catch {
@@ -1976,6 +2557,7 @@ private final class RemoteAttachConnector {
         defer { disconnectLock.unlock() }
         guard !didFinishDisconnect else { return }
         didFinishDisconnect = true
+        controlWriter?.cancel()
         guard !suppressDisconnectCallback else { return }
         onDisconnect(error)
     }
@@ -1991,7 +2573,7 @@ private final class RemoteAttachConnector {
     }
 }
 
-private enum RemoteInboundMessage: Decodable {
+fileprivate enum RemoteInboundMessage: Decodable {
     case hello(RemoteDaemonHello)
     case hookEvent(RemoteHookEventMessage)
     case codexUsage(RemoteCodexUsageMessage)
@@ -2162,6 +2744,10 @@ private enum RemoteSSHCommandRunner {
             acceptNewHostKey: acceptNewHostKey
         )
         let result = try await run(process: process)
+        if RemoteAuthenticationFailure.isRejection(stderr: result.stderr, exitCode: result.exitCode) {
+            // Authentication diagnostics may contain interactive prompts; do not log them.
+            throw RemoteConnectorError.authenticationRejected
+        }
         if result.exitCode == 0 {
             logger.debug(
                 "SSH exec completed target=\(target, privacy: .public) port=\(port, privacy: .public) exitCode=\(result.exitCode, privacy: .public) stdout=\(excerpt(result.stdout), privacy: .public) stderr=\(excerpt(result.stderr), privacy: .public)"
@@ -2376,6 +2962,24 @@ private final class RemoteBridgeAssetResolver {
 
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0"
         let binaryAssetName = RemoteConnectorManager.remoteLinuxBridgeBinaryAssetName(normalizedArchitecture: normalizedArch)
+        let overrideURL = RemoteConnectorManager.remoteLinuxBridgeOverrideURL(
+            normalizedArchitecture: normalizedArch,
+            homeDirectory: fileManager.homeDirectoryForCurrentUser
+        )
+        var overrideIsDirectory: ObjCBool = false
+        if fileManager.fileExists(atPath: overrideURL.path, isDirectory: &overrideIsDirectory) {
+            guard !overrideIsDirectory.boolValue,
+                  fileManager.isReadableFile(atPath: overrideURL.path),
+                  fileManager.isExecutableFile(atPath: overrideURL.path) else {
+                throw RemoteConnectorError.remoteBridgeDownloadFailed(
+                    AppLocalization.format(
+                        "私有 Linux bridge 不可读或不可执行：%@",
+                        overrideURL.path
+                    )
+                )
+            }
+            return overrideURL
+        }
         let assetCandidates = [
             (
                 archive: RemoteConnectorManager.remoteLinuxBridgeArchiveAssetName(normalizedArchitecture: normalizedArch),

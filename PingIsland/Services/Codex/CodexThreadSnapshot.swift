@@ -1,5 +1,9 @@
 import Foundation
 
+nonisolated struct CodexThreadReadState: Sendable {
+    let intervention: SessionIntervention?
+}
+
 struct CodexThreadSnapshot: Equatable, Sendable {
     let threadId: String
     let name: String?

@@ -72,7 +72,7 @@ enum SameWorkspaceSessionSupersession {
         guard workspaceKey(for: session) != nil else { return false }
         // Ended sessions stay in the list until the user archives them.
         guard session.phase != .ended else { return false }
-        guard !session.needsManualAttention else { return false }
+        guard !session.needsPromptNotification else { return false }
         guard now.timeIntervalSince(session.lastActivity) >= recentActivityLivenessWindow else {
             return false
         }

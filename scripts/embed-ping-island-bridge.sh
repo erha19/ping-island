@@ -38,7 +38,9 @@ for arch in "${archs[@]}"; do
     --scratch-path "$arch_scratch_path" \
     --triple "$arch-apple-macosx$DEPLOYMENT_TARGET"
 
-  bridge_path=$(find "$arch_scratch_path" -type f -path "*/$BUILD_CONFIGURATION/$PRODUCT_NAME" | head -n 1)
+  # Newer SwiftPM uses capitalized Products/Debug and Products/Release; release
+  # also contains a non-executable DWARF file with the same basename.
+  bridge_path=$(find "$arch_scratch_path" -type f -name "$PRODUCT_NAME" -perm -u+x | head -n 1)
   if [[ -z "$bridge_path" || ! -x "$bridge_path" ]]; then
     echo "error: Failed to build $PRODUCT_NAME for $arch" >&2
     exit 1

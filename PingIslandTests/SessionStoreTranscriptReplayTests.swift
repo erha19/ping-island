@@ -108,6 +108,17 @@ final class SessionStoreTranscriptReplayTests: XCTestCase {
             .processing,
             "A user message written after the turn ended is the user starting the next one"
         )
+        XCTAssertEqual(afterPrompt.completionSequence, finished.completionSequence + 1)
+
+        await store.process(.hookReceived(
+            makeEvent(sessionId: sessionId, event: "Stop", status: "waiting_for_input")
+        ))
+        let secondCompletion = await store.session(for: sessionId)
+        XCTAssertNotEqual(
+            SessionCompletionKey.make(for: finished),
+            secondCompletion.flatMap(SessionCompletionKey.make),
+            "A new turn without a prompt hook must get a distinct completion identity"
+        )
 
         await store.process(.sessionArchived(sessionId: sessionId))
     }

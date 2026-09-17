@@ -108,7 +108,8 @@ struct IdleReminderSoundTracker {
         now: Date = Date()
     ) -> [SessionState] {
         let eligible = sessions.filter { session in
-            session.phase == .waitingForInput
+            session.connectionState == .connected
+                && session.phase == .waitingForInput
                 && now.timeIntervalSince(session.lastActivity) >= Self.reminderDelay
         }
         let eligibleIDs = Set(eligible.map(\.stableId))

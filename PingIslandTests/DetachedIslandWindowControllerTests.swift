@@ -1054,7 +1054,37 @@ final class DetachedIslandWindowControllerTests: XCTestCase {
         wait(for: [bubblePresented], timeout: 1.0)
     }
 
-    func testCodexCompletionBubbleDoesNotAutoOpenWhileClaudeSessionIsActive() {
+    func testHiddenFloatingWindowKeepsCompletionUntilPresented() {
+        let originalAutoOpenCompletionPanel = AppSettings.autoOpenCompletionPanel
+        AppSettings.autoOpenCompletionPanel = true
+        defer { AppSettings.autoOpenCompletionPanel = originalAutoOpenCompletionPanel }
+
+        let viewModel = makeViewModel()
+        let sessionMonitor = makeSessionMonitor()
+        let registry = SessionCompletionNotificationRegistry()
+        let sessionId = "hidden-completion-\(UUID().uuidString)"
+        let activityAt = Date()
+        let processing = makeCodexCompletedSession(id: sessionId, phase: .processing, lastActivity: activityAt)
+        let completed = makeCodexCompletedSession(id: sessionId, lastActivity: activityAt)
+        sessionMonitor.instances = [processing]
+        let controller = DetachedIslandWindowController(
+            viewModel: viewModel,
+            sessionMonitor: sessionMonitor,
+            completionNotificationRegistry: registry,
+            onClose: {}
+        )
+        defer { controller.dismiss() }
+
+        controller.applySessionSnapshotForTesting([completed])
+        XCTAssertNil(controller.currentActiveCompletionNotificationForTesting)
+        XCTAssertEqual(registry.pendingNotifications.count, 1)
+
+        controller.present(atPetAnchor: CGPoint(x: 1200, y: 220))
+        XCTAssertEqual(controller.currentActiveCompletionNotificationForTesting?.session.sessionId, sessionId)
+        XCTAssertTrue(registry.pendingNotifications.isEmpty)
+    }
+
+    func testCodexCompletionBubbleOpensWhileClaudeSessionIsActive() {
         let originalAutoOpenCompletionPanel = AppSettings.autoOpenCompletionPanel
         AppSettings.autoOpenCompletionPanel = true
         defer { AppSettings.autoOpenCompletionPanel = originalAutoOpenCompletionPanel }
@@ -1082,15 +1112,15 @@ final class DetachedIslandWindowControllerTests: XCTestCase {
         controller.present(atPetAnchor: CGPoint(x: 1200, y: 220))
         controller.applySessionSnapshotForTesting([activeClaude, codexCompleted])
 
-        let suppressed = expectation(description: "codex completion stays suppressed by active claude")
+        let presented = expectation(description: "codex completion appears despite active claude")
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-            XCTAssertNil(controller.currentActiveCompletionNotificationForTesting)
-            XCTAssertEqual(controller.renderedBubbleStateForTesting, .hidden)
-            XCTAssertFalse(controller.isBubbleVisibleForTesting)
-            suppressed.fulfill()
+            XCTAssertEqual(controller.currentActiveCompletionNotificationForTesting?.session.sessionId, sessionId)
+            XCTAssertEqual(controller.renderedBubbleStateForTesting, .hoverPreview)
+            XCTAssertTrue(controller.isBubbleVisibleForTesting)
+            presented.fulfill()
         }
 
-        wait(for: [suppressed], timeout: 1.0)
+        wait(for: [presented], timeout: 1.0)
 
         controller.applySessionSnapshotForTesting([
             makeCodexCompletedSession(id: sessionId, phase: .processing, lastActivity: activityAt)
@@ -1099,18 +1129,17 @@ final class DetachedIslandWindowControllerTests: XCTestCase {
             makeCodexCompletedSession(id: sessionId, lastActivity: activityAt)
         ])
 
-        let notReopened = expectation(description: "suppressed codex completion does not reopen later")
+        let notDuplicated = expectation(description: "replayed codex completion is not queued twice")
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-            XCTAssertNil(controller.currentActiveCompletionNotificationForTesting)
-            XCTAssertEqual(controller.renderedBubbleStateForTesting, .hidden)
-            XCTAssertFalse(controller.isBubbleVisibleForTesting)
-            notReopened.fulfill()
+            XCTAssertEqual(controller.currentActiveCompletionNotificationForTesting?.session.sessionId, sessionId)
+            XCTAssertTrue(controller.pendingCompletionNotificationsForTesting.isEmpty)
+            notDuplicated.fulfill()
         }
 
-        wait(for: [notReopened], timeout: 1.0)
+        wait(for: [notDuplicated], timeout: 1.0)
     }
 
-    func testCodexCompletionBubbleDoesNotAutoOpenWhileAnotherCodexSessionIsActive() {
+    func testCodexCompletionBubbleOpensWhileAnotherCodexSessionIsActive() {
         let originalAutoOpenCompletionPanel = AppSettings.autoOpenCompletionPanel
         AppSettings.autoOpenCompletionPanel = true
         defer { AppSettings.autoOpenCompletionPanel = originalAutoOpenCompletionPanel }
@@ -1146,104 +1175,209 @@ final class DetachedIslandWindowControllerTests: XCTestCase {
         controller.present(atPetAnchor: CGPoint(x: 1200, y: 220))
         controller.applySessionSnapshotForTesting([activeCodex, codexCompleted])
 
-        let suppressed = expectation(description: "codex completion stays suppressed by active codex")
+        let presented = expectation(description: "codex completion appears despite another active codex")
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            XCTAssertEqual(controller.currentActiveCompletionNotificationForTesting?.session.sessionId, completedSessionId)
+            XCTAssertEqual(controller.renderedBubbleStateForTesting, .hoverPreview)
+            XCTAssertTrue(controller.isBubbleVisibleForTesting)
+            presented.fulfill()
+        }
+
+        wait(for: [presented], timeout: 1.0)
+    }
+
+    func testRemoteCodexEmptyStopOpensOnceAndLateReplyDoesNotReplay() throws {
+        for phase in [SessionPhase.idle, .processing] {
+            for pid in [nil, 4242] as [Int?] {
+                try XCTContext.runActivity(named: "phase: \(phase), PID: \(String(describing: pid))") { _ in
+                    try assertRemoteCodexEmptyStopOpensOnce(initialPhase: phase, hookPID: pid)
+                }
+            }
+        }
+    }
+
+    private func assertRemoteCodexEmptyStopOpensOnce(
+        initialPhase: SessionPhase,
+        hookPID: Int? = nil
+    ) throws {
+        let sessionId = "remote-codex-late-reply-\(UUID().uuidString)"
+        var initial = makeSession(id: sessionId, phase: initialPhase, clientInfo: .codexCLI())
+        initial.provider = .codex
+        initial.ingress = .remoteBridge
+        initial.pid = initialPhase == .processing ? hookPID : nil
+
+        try withRemoteCodexController(initial: initial) { controller in
+            // Discovery snapshots omit the PID carried by real remote hooks.
+            var snapshot = initial
+            snapshot.pid = nil
+            controller.applySessionSnapshotForTesting([snapshot])
+            XCTAssertNil(controller.currentActiveCompletionNotificationForTesting)
+
+            var emptyStop = snapshot
+            emptyStop.phase = .idle
+            emptyStop.pid = hookPID
+            emptyStop.hasRemoteCodexTurnCompletion = true
+            controller.applySessionSnapshotForTesting([emptyStop])
+            let notification = try XCTUnwrap(controller.currentActiveCompletionNotificationForTesting)
+            XCTAssertNil(notification.session.lastMessage)
+            XCTAssertEqual(notification.kind, .completed)
+            XCTAssertEqual(controller.currentExpandedRoute, .completionNotification(notification))
+
+            var reply = makeCodexCompletedSession(id: sessionId)
+            reply.clientInfo = .codexCLI()
+            reply.ingress = .remoteBridge
+            reply.pid = hookPID.map { $0 + 1 }
+            reply.hasRemoteCodexTurnCompletion = true
+            var replay = reply
+            replay.pid = nil
+            controller.applySessionSnapshotForTesting([replay])
+            XCTAssertEqual(controller.currentActiveCompletionNotificationForTesting?.id, notification.id)
+            XCTAssertNil(controller.currentActiveCompletionNotificationForTesting?.session.lastMessage)
+            XCTAssertTrue(controller.pendingCompletionNotificationsForTesting.isEmpty)
+
+            controller.applySessionSnapshotForTesting([reply])
+            XCTAssertEqual(controller.currentActiveCompletionNotificationForTesting?.id, notification.id)
+            let dismissed = expectation(description: "late reply notification dismisses without replay")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                XCTAssertNil(controller.currentActiveCompletionNotificationForTesting)
+                controller.applySessionSnapshotForTesting([reply])
+                XCTAssertNil(controller.currentActiveCompletionNotificationForTesting)
+                XCTAssertTrue(controller.pendingCompletionNotificationsForTesting.isEmpty)
+                dismissed.fulfill()
+            }
+            wait(for: [dismissed], timeout: 1.0)
+        }
+    }
+
+    func testSuppressedRemoteCodexLateReplyDoesNotReplayAfterUnmuting() {
+        let cases: [(pid: Int?, disconnect: Bool)] = [(nil, false), (4242, false), (4242, true)]
+        for phase in [SessionPhase.idle, .processing] {
+            for (pid, disconnect) in cases {
+                XCTContext.runActivity(named: "phase: \(phase), PID: \(String(describing: pid)), disconnect: \(disconnect)") { _ in
+                    assertSuppressedRemoteCodexStopDoesNotReplay(
+                        initialPhase: phase, hookPID: pid, disconnectBeforeUnmuting: disconnect
+                    )
+                }
+            }
+        }
+    }
+
+    private func assertSuppressedRemoteCodexStopDoesNotReplay(
+        initialPhase: SessionPhase,
+        hookPID: Int? = nil,
+        disconnectBeforeUnmuting: Bool = false
+    ) {
+        let originalMuteUntil = AppSettings.temporarilyMuteNotificationsUntil
+        AppSettings.muteReminderNotifications(for: 60)
+        defer { AppSettings.temporarilyMuteNotificationsUntil = originalMuteUntil }
+
+        let sessionId = "remote-codex-suppressed-late-reply-\(UUID().uuidString)"
+        var initial = makeSession(id: sessionId, phase: initialPhase, clientInfo: .codexCLI())
+        initial.provider = .codex
+        initial.ingress = .remoteBridge
+
+        withRemoteCodexController(initial: initial) { controller in
+            var emptyStop = initial
+            emptyStop.phase = .idle
+            emptyStop.pid = hookPID
+            emptyStop.hasRemoteCodexTurnCompletion = true
+            controller.applySessionSnapshotForTesting([emptyStop])
+            XCTAssertNil(controller.currentActiveCompletionNotificationForTesting)
+
+            var reply = makeCodexCompletedSession(id: sessionId)
+            reply.clientInfo = .codexCLI()
+            reply.ingress = .remoteBridge
+            reply.pid = hookPID.map { $0 + 1 }
+            reply.hasRemoteCodexTurnCompletion = true
+            controller.applySessionSnapshotForTesting([reply])
+            XCTAssertNil(controller.currentActiveCompletionNotificationForTesting)
+
+            var replay = reply
+            replay.pid = nil
+            controller.applySessionSnapshotForTesting([replay])
+
+            if disconnectBeforeUnmuting {
+                replay.connectionState = .disconnected
+                controller.applySessionSnapshotForTesting([replay])
+                XCTAssertFalse(SessionCompletionStateEvaluator.isCompletedReadySession(replay))
+                XCTAssertNil(SessionCompletionKey.make(for: replay))
+                XCTAssertNil(controller.currentActiveCompletionNotificationForTesting)
+            }
+
+            AppSettings.clearReminderNotificationMute()
+            XCTAssertFalse(AppSettings.areReminderNotificationsSuppressed)
+            controller.applySessionSnapshotForTesting([reply])
             XCTAssertNil(controller.currentActiveCompletionNotificationForTesting)
             XCTAssertEqual(controller.renderedBubbleStateForTesting, .hidden)
             XCTAssertFalse(controller.isBubbleVisibleForTesting)
-            suppressed.fulfill()
-        }
+            XCTAssertTrue(controller.pendingCompletionNotificationsForTesting.isEmpty)
 
-        wait(for: [suppressed], timeout: 1.0)
+            if disconnectBeforeUnmuting {
+                // The next turn must still notify after the skipped turn reconnects.
+                var next = reply
+                next.phase = .processing
+                next.hasRemoteCodexTurnCompletion = false
+                next.completionSequence += 1
+                controller.applySessionSnapshotForTesting([next])
+                next.phase = .idle
+                next.hasRemoteCodexTurnCompletion = true
+                controller.applySessionSnapshotForTesting([next])
+                XCTAssertEqual(
+                    controller.currentActiveCompletionNotificationForTesting?.identity,
+                    SessionCompletionNotification(session: next, kind: .completed).identity
+                )
+            }
+        }
     }
 
-    func testRemoteCodexLateReplyOpensOnceAfterIdleWasObserved() throws {
+    func testPresentDoesNotReplayExistingRemoteCodexCompletion() {
+        for state in [SessionConnectionState.connected, .disconnected] {
+            XCTContext.runActivity(named: "initial connection: \(state)") { _ in
+                assertPresentDoesNotReplayRemoteCodexCompletion(connectionState: state)
+            }
+        }
+    }
+
+    private func assertPresentDoesNotReplayRemoteCodexCompletion(connectionState: SessionConnectionState) {
+        var completed = makeCodexCompletedSession(id: "remote-codex-existing-\(UUID().uuidString)")
+        completed.ingress = .remoteBridge
+        completed.connectionState = connectionState
+        completed.hasRemoteCodexTurnCompletion = true
+        withRemoteCodexController(initial: completed) { controller in
+            for (pid, state) in [
+                (nil, SessionConnectionState.connected), (4242, .disconnected),
+                (nil, .connected), (4243, .connected)
+            ] as [(Int?, SessionConnectionState)] {
+                completed.pid = pid
+                completed.connectionState = state
+                controller.applySessionSnapshotForTesting([completed])
+
+                XCTAssertNil(controller.currentActiveCompletionNotificationForTesting)
+                XCTAssertTrue(controller.pendingCompletionNotificationsForTesting.isEmpty)
+            }
+        }
+    }
+
+    private func withRemoteCodexController(
+        initial: SessionState,
+        _ body: (DetachedIslandWindowController) throws -> Void
+    ) rethrows {
         let originalAutoOpenCompletionPanel = AppSettings.autoOpenCompletionPanel
         AppSettings.autoOpenCompletionPanel = true
         defer { AppSettings.autoOpenCompletionPanel = originalAutoOpenCompletionPanel }
 
-        let sessionId = "remote-codex-late-reply-\(UUID().uuidString)"
-        var processing = makeSession(id: sessionId, phase: .processing, clientInfo: .codexCLI())
-        processing.provider = .codex
-        processing.ingress = .remoteBridge
         let sessionMonitor = makeSessionMonitor()
-        sessionMonitor.instances = [processing]
+        sessionMonitor.instances = [initial]
         let controller = DetachedIslandWindowController(
             viewModel: makeViewModel(),
             sessionMonitor: sessionMonitor,
+            completionNotificationRegistry: SessionCompletionNotificationRegistry(),
             onClose: {}
         )
         controller.completionNotificationDismissDelay = 0.1
         defer { controller.dismiss() }
         controller.present(atPetAnchor: CGPoint(x: 1200, y: 220))
-
-        var emptyStop = processing
-        emptyStop.phase = .idle
-        controller.applySessionSnapshotForTesting([emptyStop])
-        XCTAssertNil(controller.currentActiveCompletionNotificationForTesting)
-
-        var reply = makeCodexCompletedSession(id: sessionId)
-        reply.clientInfo = .codexCLI()
-        reply.ingress = .remoteBridge
-        controller.applySessionSnapshotForTesting([reply])
-        let notification = try XCTUnwrap(controller.currentActiveCompletionNotificationForTesting)
-        XCTAssertEqual(notification.session.lastMessage, "All done")
-        XCTAssertEqual(notification.kind, .completed)
-        XCTAssertEqual(controller.currentExpandedRoute, .completionNotification(notification))
-
-        controller.applySessionSnapshotForTesting([reply])
-        XCTAssertEqual(controller.currentActiveCompletionNotificationForTesting?.id, notification.id)
-        let dismissed = expectation(description: "late reply notification dismisses without replay")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-            XCTAssertNil(controller.currentActiveCompletionNotificationForTesting)
-            controller.applySessionSnapshotForTesting([reply])
-            XCTAssertNil(controller.currentActiveCompletionNotificationForTesting)
-            dismissed.fulfill()
-        }
-        wait(for: [dismissed], timeout: 1.0)
-    }
-
-    func testSuppressedRemoteCodexLateReplyDoesNotReplayAfterUnmuting() {
-        let originalAutoOpenCompletionPanel = AppSettings.autoOpenCompletionPanel
-        let originalMuteUntil = AppSettings.temporarilyMuteNotificationsUntil
-        AppSettings.autoOpenCompletionPanel = true
-        AppSettings.muteReminderNotifications(for: 60)
-        defer {
-            AppSettings.autoOpenCompletionPanel = originalAutoOpenCompletionPanel
-            AppSettings.temporarilyMuteNotificationsUntil = originalMuteUntil
-        }
-
-        let sessionId = "remote-codex-suppressed-late-reply-\(UUID().uuidString)"
-        var processing = makeSession(id: sessionId, phase: .processing, clientInfo: .codexCLI())
-        processing.provider = .codex
-        processing.ingress = .remoteBridge
-        let sessionMonitor = makeSessionMonitor()
-        sessionMonitor.instances = [processing]
-        let controller = DetachedIslandWindowController(
-            viewModel: makeViewModel(),
-            sessionMonitor: sessionMonitor,
-            onClose: {}
-        )
-        defer { controller.dismiss() }
-        controller.present(atPetAnchor: CGPoint(x: 1200, y: 220))
-
-        var emptyStop = processing
-        emptyStop.phase = .idle
-        controller.applySessionSnapshotForTesting([emptyStop])
-        XCTAssertNil(controller.currentActiveCompletionNotificationForTesting)
-
-        var reply = makeCodexCompletedSession(id: sessionId)
-        reply.clientInfo = .codexCLI()
-        reply.ingress = .remoteBridge
-        controller.applySessionSnapshotForTesting([reply])
-        XCTAssertNil(controller.currentActiveCompletionNotificationForTesting)
-
-        AppSettings.clearReminderNotificationMute()
-        XCTAssertFalse(AppSettings.areReminderNotificationsSuppressed)
-        controller.applySessionSnapshotForTesting([reply])
-        XCTAssertNil(controller.currentActiveCompletionNotificationForTesting)
-        XCTAssertEqual(controller.renderedBubbleStateForTesting, .hidden)
-        XCTAssertFalse(controller.isBubbleVisibleForTesting)
+        try body(controller)
     }
 
     func testDismissedCodexCompletionDoesNotReopenAfterThreadRefresh() {

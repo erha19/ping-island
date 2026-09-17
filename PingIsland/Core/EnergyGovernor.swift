@@ -210,8 +210,8 @@ final class EnergyGovernor: ObservableObject {
     private func updateSessions(_ sessions: [SessionState]) {
         let now = Date()
         let next = EnergyGovernorInputs(
-            hasActiveSession: sessions.contains { $0.phase.isActive },
-            hasAttentionSession: sessions.contains { $0.needsAttention },
+            hasActiveSession: sessions.contains { $0.isExecutionActive },
+            hasAttentionSession: sessions.contains { $0.needsManualAttention },
             hasRecentSessionActivity: sessions.contains {
                 !$0.shouldHideFromPrimaryUI &&
                 now.timeIntervalSince($0.lastActivity) <= Self.idleVisibleAnimationGraceDuration

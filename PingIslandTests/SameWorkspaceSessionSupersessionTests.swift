@@ -66,6 +66,21 @@ final class SameWorkspaceSessionSupersessionTests: XCTestCase {
 
     // MARK: - Concurrent sessions
 
+    func testTerminalOnlyQuestionSurvivesNewerWorkspaceActivity() {
+        for pid in [nil, 999_999] as [Int?] {
+            var question = session(id: "question", pid: pid, phase: .waitingForInput, activityOffset: 0)
+            question.suppressInAppPromptControls = true
+            let newer = session(id: "newer", phase: .processing, activityOffset: 120)
+            XCTAssertFalse(question.needsManualAttention)
+            XCTAssertTrue(question.needsPromptNotification)
+            let visible = SameWorkspaceSessionSupersession.removingSupersededSessions(
+                from: [question, newer], now: reference.addingTimeInterval(120),
+                isProcessAlive: { _, _ in false }
+            )
+            XCTAssertEqual(Set(visible.map(\.sessionId)), ["question", "newer"])
+        }
+    }
+
     func testTwoLiveSessionsInOneDirectoryBothStayVisible() {
         let older = session(id: "older", pid: 101, phase: .processing, activityOffset: 0)
         let newer = session(id: "newer", pid: 102, phase: .processing, activityOffset: 5)

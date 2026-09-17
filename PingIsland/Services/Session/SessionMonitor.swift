@@ -142,7 +142,9 @@ class SessionMonitor: ObservableObject {
             await runtimeCoordinator.start()
         }
         RemoteConnectorManager.shared.start(
-            onEvent: handleHookEvent,
+            onEvent: { [self] event in
+                await handleIncomingHookEvent(event)
+            },
             onCodexUsage: { [weak self] snapshot in
                 Task { @MainActor in
                     await self?.applyRemoteCodexUsageSnapshot(snapshot)
@@ -160,7 +162,8 @@ class SessionMonitor: ObservableObject {
 
     func handleIncomingHookEvent(_ event: HookEvent) async {
         let effectiveEvent: HookEvent
-        if await runtimeCoordinator.managesNativeSession(sessionID: event.sessionId, provider: event.provider) {
+        if event.ingress.usesLocalProcessNamespace,
+           await runtimeCoordinator.managesNativeSession(sessionID: event.sessionId, provider: event.provider) {
             effectiveEvent = event.withIngress(.nativeRuntime)
         } else {
             effectiveEvent = event
@@ -871,7 +874,7 @@ class SessionMonitor: ObservableObject {
 
     private func refreshVisibleSessions() {
         let visibleSessions = filteredVisibleSessions(from: allSessions)
-        let pendingSessions = visibleSessions.filter { $0.needsAttention }
+        let pendingSessions = visibleSessions.filter(\.needsManualAttention)
         recordNewAttentionRequests(in: pendingSessions)
         handleSessionSoundTransitions(visibleSessions)
         handleIdleReminderSound(visibleSessions)
@@ -939,7 +942,8 @@ class SessionMonitor: ObservableObject {
     /// notifying the user.
     private func shouldPlayNotificationSound(for sessions: [SessionState]) async -> Bool {
         for session in sessions {
-            guard let pid = session.pid else { return true }
+            guard session.ingress.usesLocalProcessNamespace,
+                  let pid = session.pid else { return true }
             if !(await TerminalVisibilityDetector.isSessionFocused(sessionPid: pid)) {
                 return true
             }

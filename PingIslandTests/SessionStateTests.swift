@@ -36,6 +36,104 @@ final class SessionStateTests: XCTestCase {
         )
     }
 
+    func testCompletedWaitingTurnDoesNotRequireManualAttention() {
+        let session = SessionState(
+            sessionId: "completed-waiting",
+            cwd: "/tmp/session-state-project",
+            phase: .waitingForInput
+        )
+        XCTAssertFalse(session.isExecutionActive)
+        XCTAssertFalse(session.needsManualAttention)
+        XCTAssertFalse(session.canInteract)
+        XCTAssertFalse(session.needsPromptNotification)
+        XCTAssertNil(session.attentionRequestedAt)
+        // Preserve the broader legacy API for callers not migrated to manual attention.
+        XCTAssertTrue(session.needsAttention)
+    }
+
+    func testConnectionStateGatesExecutionAndRealInterventions() {
+        var session = SessionState(
+            sessionId: "remote-attention",
+            cwd: "/srv/session-state-project",
+            ingress: .remoteBridge,
+            phase: .processing
+        )
+        XCTAssertTrue(session.isExecutionActive)
+        XCTAssertTrue(session.contributesToProcessingSoundEdge)
+        session.connectionState = .disconnected
+        XCTAssertFalse(session.isExecutionActive)
+        XCTAssertFalse(session.contributesToProcessingSoundEdge)
+        XCTAssertEqual(MascotStatus(session: session), .idle)
+        XCTAssertTrue(session.shouldShowArchiveActionInPrimaryUI)
+
+        session.phase = .waitingForApproval(PermissionContext(
+            toolUseId: "remote-tool", toolName: "Bash", toolInput: nil, receivedAt: Date()
+        ))
+        session.suppressInAppPromptControls = true
+        XCTAssertFalse(session.needsApprovalResponse)
+        XCTAssertFalse(session.needsManualAttention)
+        XCTAssertFalse(session.canInteract)
+        XCTAssertFalse(session.canSubmitApprovalFromIsland)
+        XCTAssertFalse(session.needsPromptNotification)
+        XCTAssertNil(session.attentionRequestedAt)
+        session.connectionState = .connected
+        XCTAssertTrue(session.needsManualAttention)
+        XCTAssertTrue(session.canInteract)
+        XCTAssertTrue(session.canSubmitApprovalFromIsland)
+
+        session.phase = .waitingForInput
+        session.intervention = SessionIntervention(
+            id: "remote-question", kind: .question, title: "Choose", message: "Choose an option",
+            options: [], questions: [], supportsSessionScope: false, metadata: [:]
+        )
+        XCTAssertTrue(session.needsQuestionResponse)
+        XCTAssertTrue(session.needsManualAttention)
+        session.connectionState = .disconnected
+        XCTAssertFalse(session.needsQuestionResponse)
+        XCTAssertFalse(session.needsManualAttention)
+        XCTAssertFalse(session.canInteract)
+    }
+
+    func testRemoteCodexTranscriptCannotSupersedeALocalPlaceholder() {
+        let now = Date()
+        let local = SessionState(
+            sessionId: "local-placeholder", cwd: "/tmp/shared-project", provider: .codex,
+            phase: .processing, lastActivity: now
+        )
+        let remote = SessionState(
+            sessionId: "remote-thread", cwd: "/tmp/shared-project", provider: .codex,
+            clientInfo: SessionClientInfo(kind: .codexCLI, sessionFilePath: "/srv/rollout.jsonl"),
+            ingress: .remoteBridge, sessionName: "Remote thread", phase: .processing, lastActivity: now
+        )
+        XCTAssertFalse(local.shouldRebindToExistingCodexThread(comparedTo: remote, maximumRecencyGap: 60))
+        XCTAssertFalse(local.shouldHideAsDuplicateCodexPlaceholder(comparedTo: remote))
+    }
+
+    func testDisconnectedProcessingDoesNotOutrankNewerIdleSession() {
+        let now = Date()
+        let disconnected = SessionState(
+            sessionId: "disconnected", cwd: "/srv/project", ingress: .remoteBridge,
+            connectionState: .disconnected, phase: .processing,
+            lastActivity: now.addingTimeInterval(-60)
+        )
+        let idle = SessionState(sessionId: "idle", cwd: "/tmp/project", lastActivity: now)
+        XCTAssertTrue(idle.shouldSortBeforeInQueue(disconnected))
+        XCTAssertFalse(disconnected.shouldSortBeforeInQueue(idle))
+    }
+
+    func testRemoteEndpointIdentityMergesAndDecodesLegacyClientInfo() throws {
+        let legacyData = Data(#"{"kind":"claudeCode","remoteHost":"example.invalid"}"#.utf8)
+        let legacy = try JSONDecoder().decode(SessionClientInfo.self, from: legacyData)
+        XCTAssertNil(legacy.remoteEndpointID)
+        let endpointID = UUID()
+        let merged = legacy.merged(with: SessionClientInfo(kind: .claudeCode, remoteEndpointID: endpointID))
+        XCTAssertEqual(merged.remoteEndpointID, endpointID)
+        XCTAssertEqual(merged.merged(with: legacy).remoteEndpointID, endpointID)
+        XCTAssertEqual(try JSONDecoder().decode(SessionClientInfo.self, from: JSONEncoder().encode(merged)), merged)
+        XCTAssertFalse(SessionIngress.remoteBridge.usesLocalProcessNamespace)
+        XCTAssertTrue(SessionIngress.hookBridge.usesLocalProcessNamespace)
+    }
+
     func testDisplayTitleFallsBackToSummaryThenFirstUserMessage() {
         let withSummary = SessionState(
             sessionId: "summary-session",
@@ -361,17 +459,47 @@ final class SessionStateTests: XCTestCase {
         XCTAssertTrue(session.shouldSuppressInAppPromptControls(routePromptsToTerminal: true))
     }
 
-    func testEventSuppressedPromptControlsRemainNotificationEligible() {
+    func testTerminalRoutedPromptStaysVisibleWithoutEnablingInlineControls() {
         let session = SessionState(
             sessionId: "terminal-routed-question",
-            cwd: "/tmp/project",
+            cwd: "/tmp/terminal-routed-project",
             suppressInAppPromptControls: true,
-            phase: .waitingForInput
+            phase: .waitingForInput,
+            lastActivity: Date().addingTimeInterval(-(31 * 60))
         )
 
         XCTAssertTrue(session.needsPromptNotification)
+        XCTAssertFalse(session.needsManualAttention)
         XCTAssertFalse(session.needsApprovalResponse)
         XCTAssertFalse(session.needsQuestionResponse)
+        XCTAssertFalse(session.canInteract)
+        XCTAssertFalse(session.canSubmitApprovalFromIsland)
+        XCTAssertFalse(session.shouldAutoArchiveFromPrimaryUI)
+        XCTAssertFalse(session.shouldHideFromPrimaryUI, "An unanswered prompt is not an empty restored row")
+        XCTAssertFalse(session.shouldUseMinimalCompactPresentation)
+        XCTAssertEqual(session.attentionRequestedAt, session.lastActivity)
+
+        let completed = SessionState(
+            sessionId: "completed-waiting", cwd: "/tmp/terminal-routed-project", phase: .waitingForInput
+        )
+        XCTAssertTrue(session.shouldSortBeforeInQueue(completed))
+        XCTAssertFalse(completed.shouldSortBeforeInQueue(session))
+
+        var disconnected = session
+        disconnected.ingress = .remoteBridge
+        disconnected.connectionState = .disconnected
+        XCTAssertFalse(disconnected.needsPromptNotification)
+        XCTAssertFalse(disconnected.canInteract)
+        XCTAssertTrue(disconnected.shouldAutoArchiveFromPrimaryUI)
+        XCTAssertTrue(disconnected.shouldHideFromPrimaryUI)
+        XCTAssertNil(disconnected.attentionRequestedAt)
+        XCTAssertTrue(completed.shouldSortBeforeInQueue(disconnected))
+
+        var ordinaryCompleted = session
+        ordinaryCompleted.suppressInAppPromptControls = false
+        XCTAssertFalse(ordinaryCompleted.needsPromptNotification)
+        XCTAssertFalse(ordinaryCompleted.canInteract)
+        XCTAssertTrue(ordinaryCompleted.shouldAutoArchiveFromPrimaryUI)
     }
 
     func testClaudeCodeWaitingForApprovalWithoutSessionScopeDoesNotExposeAutoApproveAction() {

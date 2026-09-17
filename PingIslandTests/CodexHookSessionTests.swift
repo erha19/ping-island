@@ -3,6 +3,24 @@ import XCTest
 @testable import Ping_Island
 
 final class CodexHookSessionTests: XCTestCase {
+    func testAutomaticReviewerDefersWithoutBypassingManualOrQuestionRequests() {
+        let metadata = ["approvals_reviewer": " AUTO-REVIEW ", "permission_mode": "default"]
+        XCTAssertTrue(CodexAutomaticApprovalReviewResolver.shouldDeferToCodex(
+            provider: "codex", eventType: "PermissionRequest", metadata: metadata
+        ))
+        XCTAssertFalse(CodexAutomaticApprovalReviewResolver.shouldDeferToCodex(
+            provider: "codex", eventType: "PreToolUse", metadata: metadata
+        ))
+        XCTAssertFalse(CodexAutomaticApprovalReviewResolver.shouldDeferToCodex(
+            provider: "codex", eventType: "PermissionRequest",
+            metadata: ["approvals_reviewer": "guardian_subagent", "permission_mode": "default"]
+        ))
+        XCTAssertFalse(CodexAutomaticApprovalReviewResolver.shouldDeferToCodex(
+            provider: "codex", eventType: "PermissionRequest",
+            metadata: ["approvals_reviewer": "auto_review", "permission_mode": "bypassPermissions"]
+        ))
+    }
+
     func testDesktopRepairReplacesCurrentMemoryAcrossEveryIngress() async {
         for ingress in ["hook", "summary", "snapshot"] {
             let sessionId = "codex-routing-repair-\(UUID().uuidString)"

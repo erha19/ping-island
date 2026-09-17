@@ -99,7 +99,7 @@ struct IslandDetachedContentResolver {
             return attention
         }
 
-        if let active = sessions.filter({ $0.phase.isActive })
+        if let active = sessions.filter(\.isExecutionActive)
             .sorted(by: { $0.lastActivity > $1.lastActivity })
             .first {
             return active
@@ -126,7 +126,7 @@ struct IslandDetachedContentResolver {
 enum IslandMascotResolver {
     static func sourceSession(from sessions: [SessionState]) -> SessionState? {
         sessions
-            .filter { $0.phase.isActive || $0.needsManualAttention }
+            .filter { $0.isExecutionActive || $0.needsManualAttention }
             .sorted(by: {
                 ($0.attentionRequestedAt ?? $0.lastActivity) > ($1.attentionRequestedAt ?? $1.lastActivity)
             })

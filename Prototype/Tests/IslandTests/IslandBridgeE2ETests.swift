@@ -35,6 +35,63 @@ func islandBridgeHealthCheckRoundTripsThroughSocketServer() async throws {
 }
 
 @Test
+func remoteAgentDefersCodexAutomaticReviewWithoutAllowingIt() async throws {
+    let executable = try TestRuntime.executableURL(named: "PingIslandBridge")
+    let socketID = UUID().uuidString.prefix(8)
+    let hookSocketPath = "/tmp/pi-\(socketID)-h.sock"
+    let controlSocketPath = "/tmp/pi-\(socketID)-c.sock"
+    let service = try RunningProcess(
+        executableURL: executable,
+        arguments: [
+            "--mode", "remote-agent-service",
+            "--hook-socket", hookSocketPath,
+            "--control-socket", controlSocketPath
+        ]
+    )
+    defer {
+        service.terminate()
+        _ = service.waitForExit()
+        try? FileManager.default.removeItem(atPath: hookSocketPath)
+        try? FileManager.default.removeItem(atPath: controlSocketPath)
+    }
+
+    try await waitUntil(description: "remote agent service should create sockets") {
+        FileManager.default.fileExists(atPath: hookSocketPath)
+            && FileManager.default.fileExists(atPath: controlSocketPath)
+    }
+    let control = try RemoteApprovalControlClient(socketPath: controlSocketPath)
+    try await control.readHello()
+    let hookRequest = Task.detached {
+        try TestSocketClient.send(
+            envelope: BridgeEnvelope(
+                provider: .codex,
+                eventType: "PermissionRequest",
+                sessionKey: "codex:remote-auto-review",
+                title: "Bash",
+                preview: "Run tests",
+                cwd: "/tmp/remote-auto-review",
+                status: SessionStatus(kind: .waitingForApproval),
+                expectsResponse: true,
+                metadata: [
+                    "session_id": "remote-auto-review",
+                    "tool_name": "Bash",
+                    "permission_mode": "default",
+                    "approvals_reviewer": "auto_review"
+                ]
+            ),
+            socketPath: hookSocketPath
+        )
+    }
+
+    let event = try await control.readHookEvent()
+    #expect(event.payload.permissionMode == "default")
+    #expect(event.payload.approvalsReviewer == "auto_review")
+    try await control.sendDefer(requestID: event.payload.requestID)
+    let response = try await hookRequest.value
+    #expect(response.decision == nil)
+}
+
+@Test
 func islandBridgeHealthCheckFailsWhenSocketIsUnavailable() throws {
     let executable = try TestRuntime.executableURL(named: "PingIslandBridge")
     let process = try RunningProcess(
@@ -377,15 +434,20 @@ func remoteAgentFailsOpenWhenNoControlClientIsAttached() async throws {
     #expect(response.reason == nil)
 }
 
-@Test
-func remoteAgentForwardsCodexAppServerStateUpdates() async throws {
+@Test(arguments: ["task_started", "task_complete"])
+func remoteAgentForwardsCodexAppServerStateUpdates(latestLifecycleEvent: String) async throws {
     try await withTemporaryDirectory { directory in
         let executable = try TestRuntime.executableURL(named: "PingIslandBridge")
         let codexHome = directory.appending(path: ".codex", directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: codexHome, withIntermediateDirectories: true)
+        let rolloutURL = directory.appending(path: "rollout.jsonl")
+        try """
+        {"type":"event_msg","payload":{"type":"\(latestLifecycleEvent)"}}
+        """.write(to: rolloutURL, atomically: true, encoding: .utf8)
         try createCodexStateDatabase(
             at: codexHome.appending(path: "state_5.sqlite"),
-            updatedAtMs: Int64(Date().timeIntervalSince1970 * 1000)
+            updatedAtMs: Int64(Date().timeIntervalSince1970 * 1000),
+            rolloutPath: rolloutURL.path()
         )
 
         let socketID = UUID().uuidString.prefix(8)
@@ -405,6 +467,7 @@ func remoteAgentForwardsCodexAppServerStateUpdates() async throws {
             _ = service.waitForExit()
             try? FileManager.default.removeItem(atPath: hookSocketPath)
             try? FileManager.default.removeItem(atPath: controlSocketPath)
+            try? FileManager.default.removeItem(atPath: controlSocketPath + ".outbox")
         }
 
         try await waitUntil(description: "remote agent service should create control socket") {
@@ -423,7 +486,7 @@ func remoteAgentForwardsCodexAppServerStateUpdates() async throws {
         #expect(event.payload.message == "Remote Codex is editing files")
         #expect(event.payload.clientInfo.kind == "codexCLI")
         #expect(event.payload.clientInfo.transport == "ssh")
-        #expect(event.payload.clientInfo.sessionFilePath == "/home/dev/.codex/sessions/rollout.jsonl")
+        #expect(event.payload.clientInfo.sessionFilePath == rolloutURL.path())
     }
 }
 
@@ -484,6 +547,266 @@ func remoteAgentForwardsCodexUsageSnapshots() async throws {
     }
 }
 
+@Test(arguments: [false, true])
+func remoteAgentSurvivesDelayedResponseAfterHookSocketCloses(expectsResponse: Bool) async throws {
+    try await withTemporaryDirectory { directory in
+        let fixture = try RemoteServiceFixture(home: directory)
+        defer { fixture.stop() }
+        try await fixture.waitForSockets()
+        let control = try RemoteTestControl(socketPath: fixture.controlSocketPath)
+        try await control.readHello()
+        let requestID = UUID()
+        let envelope = BridgeEnvelope(
+            id: requestID, provider: .claude, eventType: expectsResponse ? "PermissionRequest" : "Stop",
+            sessionKey: "claude:closed-hook", cwd: "/work/project", expectsResponse: expectsResponse,
+            metadata: ["session_id": "closed-hook", "tool_name": "Bash"]
+        )
+        try sendRemoteHookAndClose(envelope, socketPath: fixture.hookSocketPath)
+        let event = try await control.readHookEvent()
+        #expect(event.payload.requestID == requestID)
+        try await control.send(requestID: requestID, decision: expectsResponse ? "defer" : nil)
+        try await waitUntil(description: "delayed response should retire event") { [outboxURL = fixture.outboxURL] in
+            (try? Data(contentsOf: outboxURL).isEmpty) == true
+        }
+        // Opening a second control connection proves Darwin EPIPE did not kill
+        // the service after writing the delayed ACK/decision to the closed hook.
+        let nextControl = try RemoteTestControl(socketPath: fixture.controlSocketPath)
+        try await nextControl.readHello()
+    }
+}
+
+private func sendRemoteHookAndClose(_ envelope: BridgeEnvelope, socketPath: String) throws {
+    let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+    guard fd >= 0 else { throw POSIXError(.EIO) }
+    defer { close(fd) }
+    var address = sockaddr_un()
+    address.sun_family = sa_family_t(AF_UNIX)
+    let path = socketPath.utf8CString.map(UInt8.init(bitPattern:))
+    guard path.count <= MemoryLayout.size(ofValue: address.sun_path) else { throw POSIXError(.ENAMETOOLONG) }
+    withUnsafeMutableBytes(of: &address.sun_path) { $0.copyBytes(from: path) }
+    let result = withUnsafePointer(to: &address) {
+        $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { connect(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) }
+    }
+    guard result == 0 else { throw POSIXError(.ECONNREFUSED) }
+    let data = try BridgeCodec.encodeEnvelope(envelope)
+    var offset = 0
+    while offset < data.count {
+        let count = data.withUnsafeBytes { write(fd, $0.baseAddress?.advanced(by: offset), data.count - offset) }
+        if count > 0 { offset += count }
+        else if count < 0, errno == EINTR { continue }
+        else { throw POSIXError(.EIO) }
+    }
+    shutdown(fd, SHUT_WR)
+}
+
+@Test
+func remoteAgentReplaysUnacknowledgedEventAfterReconnectAndServiceRestart() async throws {
+    try await withTemporaryDirectory { directory in
+        let fixture = try RemoteServiceFixture(home: directory)
+        defer { fixture.stop() }
+        try await fixture.waitForSockets()
+        let requestID = UUID()
+        _ = try TestSocketClient.send(envelope: BridgeEnvelope(
+            id: requestID, provider: .claude, eventType: "Stop", sessionKey: "claude:remote-replay",
+            preview: "finished remotely", cwd: "/work/project", status: SessionStatus(kind: .completed),
+            expectsResponse: false, metadata: ["session_id": "remote-replay"]
+        ), socketPath: fixture.hookSocketPath)
+        #expect(try Data(contentsOf: fixture.outboxURL).isEmpty == false)
+        for _ in 0..<2 {
+            let control = try RemoteTestControl(socketPath: fixture.controlSocketPath)
+            try await control.readHello()
+            let event = try await control.readHookEvent()
+            #expect(event.payload.requestID == requestID)
+            control.closeConnection() // No ACK: the same event must replay.
+        }
+        try fixture.restart()
+        try await fixture.waitForSockets()
+        let control = try RemoteTestControl(socketPath: fixture.controlSocketPath)
+        try await control.readHello()
+        let replay = try await control.readHookEvent()
+        #expect(replay.payload.requestID == requestID)
+        #expect(replay.payload.sessionID == "remote-replay")
+        try await control.send(requestID: requestID)
+        try await waitUntil(description: "processed ACK should clear durable replay") { [outboxURL = fixture.outboxURL] in
+            (try? Data(contentsOf: outboxURL).isEmpty) == true
+        }
+    }
+}
+
+@Test
+func remoteAgentDeliversLargeFramesAndAcknowledgesOnlyProcessedEvents() async throws {
+    try await withTemporaryDirectory { directory in
+        let fixture = try RemoteServiceFixture(home: directory)
+        defer { fixture.stop() }
+        try await fixture.waitForSockets()
+        let control = try RemoteTestControl(socketPath: fixture.controlSocketPath)
+        try await control.readHello()
+        let requestID = UUID()
+        let text = String(repeating: "remote result ", count: 40_000)
+        let hookSocketPath = fixture.hookSocketPath
+        let request = Task.detached {
+            try TestSocketClient.send(envelope: BridgeEnvelope(
+                id: requestID, provider: .claude, eventType: "Stop", sessionKey: "claude:large-frame",
+                preview: text, cwd: "/work/project", status: SessionStatus(kind: .completed),
+                expectsResponse: false, metadata: ["session_id": "large-frame"]
+            ), socketPath: hookSocketPath)
+        }
+        let event = try await control.readHookEvent()
+        #expect(event.payload.message == text)
+        #expect(try Data(contentsOf: fixture.outboxURL).isEmpty == false)
+        // Receipt alone is insufficient; an app processed-event ACK retires it.
+        try await control.send(requestID: requestID)
+        let response = try await request.value
+        #expect(response.requestID == requestID)
+        #expect(response.decision == nil)
+        try await waitUntil(description: "large frame should be retired after ACK") { [outboxURL = fixture.outboxURL] in
+            (try? Data(contentsOf: outboxURL).isEmpty) == true
+        }
+    }
+}
+
+@Test
+func remoteAgentOutboxRecoveryBoundsRecordsBytesAndDropsStaleApprovals() async throws {
+    try await withTemporaryDirectory { directory in
+        func record(message: String, expectsResponse: Bool = false) throws -> Data {
+            try JSONSerialization.data(withJSONObject: [
+                "type": "hook_event", "payload": [
+                    "requestID": UUID().uuidString, "sessionID": "bounded-replay", "cwd": "/work/project",
+                    "event": "Stop", "status": "idle", "provider": "claude", "message": message,
+                    "expectsResponse": expectsResponse, "clientInfo": ["kind": "claudeCode"]
+                ]
+            ]) + Data("\n".utf8)
+        }
+        var manyRecords = Data()
+        for index in 0..<4_100 { manyRecords.append(try record(message: "event-\(index)")) }
+        manyRecords.append(try record(message: "orphaned approval", expectsResponse: true))
+        let countFixture = try RemoteServiceFixture(home: directory, seedOutbox: manyRecords)
+        defer { countFixture.stop() }
+        try await countFixture.waitForSockets()
+        let recovered = try Data(contentsOf: countFixture.outboxURL)
+        #expect(recovered.split(separator: 0x0A).count == 4_096)
+        #expect(String(decoding: recovered, as: UTF8.self).contains("orphaned approval") == false)
+        let attributes = try FileManager.default.attributesOfItem(atPath: countFixture.outboxURL.path())
+        #expect((attributes[.posixPermissions] as? NSNumber)?.intValue == 0o600)
+
+        var largeRecords = Data()
+        for _ in 0..<18 { largeRecords.append(try record(message: String(repeating: "x", count: 1_024 * 1_024))) }
+        let byteFixture = try RemoteServiceFixture(home: directory, seedOutbox: largeRecords)
+        defer { byteFixture.stop() }
+        try await byteFixture.waitForSockets()
+        let bounded = try Data(contentsOf: byteFixture.outboxURL)
+        #expect(bounded.count <= 16 * 1_024 * 1_024)
+        #expect(bounded.isEmpty == false)
+    }
+}
+
+private final class RemoteServiceFixture {
+    let hookSocketPath: String
+    let controlSocketPath: String
+    let outboxURL: URL
+    private let executable: URL
+    private let environment: [String: String]
+    private let arguments: [String]
+    private var service: RunningProcess
+
+    init(home: URL, seedOutbox: Data? = nil) throws {
+        let id = UUID().uuidString.prefix(8)
+        hookSocketPath = "/tmp/pi-\(id)-h.sock"
+        controlSocketPath = "/tmp/pi-\(id)-c.sock"
+        outboxURL = URL(fileURLWithPath: controlSocketPath + ".outbox")
+        executable = try TestRuntime.executableURL(named: "PingIslandBridge")
+        environment = bridgeTestEnvironment(["HOME": home.path()])
+        arguments = ["--mode", "remote-agent-service", "--hook-socket", hookSocketPath, "--control-socket", controlSocketPath]
+        if let seedOutbox { try seedOutbox.write(to: outboxURL) }
+        service = try RunningProcess(executableURL: executable, arguments: arguments, environment: environment)
+    }
+
+    func waitForSockets() async throws {
+        try await waitUntil(timeout: .seconds(5), description: "remote replay fixture should create sockets") {
+            [hookSocketPath, controlSocketPath] in
+            FileManager.default.fileExists(atPath: hookSocketPath)
+                && FileManager.default.fileExists(atPath: controlSocketPath)
+        }
+    }
+
+    func restart() throws {
+        service.terminate()
+        _ = service.waitForExit()
+        try? FileManager.default.removeItem(atPath: hookSocketPath)
+        try? FileManager.default.removeItem(atPath: controlSocketPath)
+        service = try RunningProcess(executableURL: executable, arguments: arguments, environment: environment)
+    }
+
+    func stop() {
+        service.terminate()
+        _ = service.waitForExit()
+        try? FileManager.default.removeItem(atPath: hookSocketPath)
+        try? FileManager.default.removeItem(atPath: controlSocketPath)
+        try? FileManager.default.removeItem(at: outboxURL)
+    }
+}
+
+private final class RemoteTestControl {
+    private var fd: Int32
+    private var buffer = Data()
+
+    init(socketPath: String) throws {
+        fd = socket(AF_UNIX, SOCK_STREAM, 0)
+        guard fd >= 0 else { throw POSIXError(.EIO) }
+        var address = sockaddr_un()
+        address.sun_family = sa_family_t(AF_UNIX)
+        let path = socketPath.utf8CString.map(UInt8.init(bitPattern:))
+        guard path.count <= MemoryLayout.size(ofValue: address.sun_path) else {
+            close(fd); throw POSIXError(.ENAMETOOLONG)
+        }
+        withUnsafeMutableBytes(of: &address.sun_path) { $0.copyBytes(from: path) }
+        let result = withUnsafePointer(to: &address) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { connect(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) }
+        }
+        guard result == 0 else { close(fd); throw POSIXError(.ECONNREFUSED) }
+        _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) | O_NONBLOCK)
+    }
+
+    deinit { closeConnection() }
+    func closeConnection() { if fd >= 0 { close(fd); fd = -1 } }
+
+    private struct Hello: Decodable { let type: String; let hostname: String }
+    func readHello() async throws { _ = try await next(Hello.self) }
+    func readHookEvent() async throws -> TestRemoteHookEventMessage { try await next(TestRemoteHookEventMessage.self) }
+
+    private func next<T: Decodable>(_ type: T.Type) async throws -> T {
+        var bytes = [UInt8](repeating: 0, count: 4_096)
+        let deadline = ContinuousClock().now + .seconds(8)
+        while ContinuousClock().now < deadline {
+            while let newline = buffer.firstIndex(of: 0x0A) {
+                let line = Data(buffer[..<newline])
+                buffer.removeSubrange(...newline)
+                if let value = try? JSONDecoder().decode(type, from: line) { return value }
+            }
+            let count = read(fd, &bytes, bytes.count)
+            if count > 0 { buffer.append(bytes, count: count) }
+            else if count == 0 { throw POSIXError(.ECONNRESET) }
+            else if errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR { throw POSIXError(.EIO) }
+            else { try await Task.sleep(for: .milliseconds(5)) }
+        }
+        throw TestSupportError.timedOut("remote control message")
+    }
+
+    func send(requestID: UUID, decision: String? = nil) async throws {
+        var object: [String: Any] = ["type": decision == nil ? "ack" : "decision", "requestID": requestID.uuidString]
+        if let decision { object["decision"] = decision }
+        let data = try JSONSerialization.data(withJSONObject: object) + Data("\n".utf8)
+        var offset = 0
+        while offset < data.count {
+            let count = data.withUnsafeBytes { write(fd, $0.baseAddress?.advanced(by: offset), data.count - offset) }
+            if count > 0 { offset += count }
+            else if count < 0 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) {
+                try await Task.sleep(for: .milliseconds(5))
+            } else { throw POSIXError(.EIO) }
+        }
+    }
+}
+
 private func bridgeTestEnvironment(_ values: [String: String] = [:]) -> [String: String] {
     var environment = values
     environment[BridgeRuntimeConfig.configPathEnvironmentKey] =
@@ -491,7 +814,11 @@ private func bridgeTestEnvironment(_ values: [String: String] = [:]) -> [String:
     return environment
 }
 
-private func createCodexStateDatabase(at url: URL, updatedAtMs: Int64) throws {
+private func createCodexStateDatabase(
+    at url: URL,
+    updatedAtMs: Int64,
+    rolloutPath: String
+) throws {
     try runSQLite(
         databaseURL: url,
         sql: """
@@ -512,7 +839,7 @@ private func createCodexStateDatabase(at url: URL, updatedAtMs: Int64) throws {
         );
         INSERT INTO threads VALUES (
           'remote-codex-thread',
-          '/home/dev/.codex/sessions/rollout.jsonl',
+          '\(rolloutPath)',
           1,
           1,
           'vscode',
@@ -598,12 +925,80 @@ private struct TestRemoteHookEventMessage: Decodable {
 }
 
 private struct TestRemoteHookEventPayload: Decodable {
+    let requestID: UUID
     let sessionID: String
     let cwd: String
     let status: String
     let provider: String
+    let permissionMode: String?
     let message: String?
+    let approvalsReviewer: String?
     let clientInfo: TestRemoteHookClientInfoPayload
+}
+
+private final class RemoteApprovalControlClient {
+    private let fd: Int32
+    private var buffer = Data()
+
+    init(socketPath: String) throws {
+        let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+        guard fd >= 0 else { throw POSIXError(.EIO) }
+        var address = sockaddr_un()
+        address.sun_family = sa_family_t(AF_UNIX)
+        let path = socketPath.utf8CString.map(UInt8.init(bitPattern:))
+        guard path.count <= MemoryLayout.size(ofValue: address.sun_path) else {
+            close(fd); throw POSIXError(.ENAMETOOLONG)
+        }
+        withUnsafeMutableBytes(of: &address.sun_path) { $0.copyBytes(from: path) }
+        let result = withUnsafePointer(to: &address) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                connect(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
+            }
+        }
+        guard result == 0 else { close(fd); throw POSIXError(.ECONNREFUSED) }
+        _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) | O_NONBLOCK)
+        self.fd = fd
+    }
+
+    deinit { close(fd) }
+
+    private struct Hello: Decodable { let type: String }
+    func readHello() async throws { _ = try await next(Hello.self) }
+    func readHookEvent() async throws -> TestRemoteHookEventMessage {
+        try await next(TestRemoteHookEventMessage.self)
+    }
+
+    private func next<T: Decodable>(_ type: T.Type) async throws -> T {
+        var bytes = [UInt8](repeating: 0, count: 4_096)
+        let deadline = ContinuousClock().now + .seconds(8)
+        while ContinuousClock().now < deadline {
+            while let newline = buffer.firstIndex(of: 0x0A) {
+                let line = Data(buffer[..<newline])
+                buffer.removeSubrange(...newline)
+                if let value = try? JSONDecoder().decode(type, from: line) { return value }
+            }
+            let count = read(fd, &bytes, bytes.count)
+            if count > 0 { buffer.append(bytes, count: count) }
+            else if count == 0 { throw POSIXError(.ECONNRESET) }
+            else if errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR { throw POSIXError(.EIO) }
+            else { try await Task.sleep(for: .milliseconds(5)) }
+        }
+        throw TestSupportError.timedOut("remote control message")
+    }
+
+    func sendDefer(requestID: UUID) async throws {
+        let data = try JSONSerialization.data(withJSONObject: [
+            "type": "decision", "requestID": requestID.uuidString, "decision": "defer"
+        ]) + Data("\n".utf8)
+        var offset = 0
+        while offset < data.count {
+            let count = data.withUnsafeBytes { write(fd, $0.baseAddress?.advanced(by: offset), data.count - offset) }
+            if count > 0 { offset += count }
+            else if count < 0 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) {
+                try await Task.sleep(for: .milliseconds(5))
+            } else { throw POSIXError(.EIO) }
+        }
+    }
 }
 
 private struct TestRemoteHookClientInfoPayload: Decodable {

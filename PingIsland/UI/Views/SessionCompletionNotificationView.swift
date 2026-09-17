@@ -8,8 +8,8 @@ private struct SessionCompletionContentHeightPreferenceKey: PreferenceKey {
     }
 }
 
-struct SessionCompletionNotification: Equatable, Identifiable {
-    enum Kind: String, Equatable {
+nonisolated struct SessionCompletionNotification: Equatable, Identifiable {
+    enum Kind: String, Hashable, Sendable {
         case completed
         case ended
         case compacted
@@ -47,9 +47,16 @@ struct SessionCompletionNotification: Equatable, Identifiable {
     }
 
     let id: UUID
-    var session: SessionState
+    let session: SessionState
     let kind: Kind
     let queuedAt: Date
+    let identity: Identity
+
+    enum Identity: Hashable {
+        case completed(SessionCompletionKey)
+        case compacted(sessionId: String, incarnationID: UUID, sequence: UInt64)
+        case lifecycle(kind: Kind, sessionId: String, sequence: UInt64, turnId: String?)
+    }
 
     init(
         id: UUID = UUID(),
@@ -61,34 +68,66 @@ struct SessionCompletionNotification: Equatable, Identifiable {
         self.session = session
         self.kind = kind
         self.queuedAt = queuedAt
+        if kind == .completed, let key = SessionCompletionKey.make(for: session) {
+            self.identity = .completed(key)
+        } else if kind == .compacted {
+            self.identity = .compacted(
+                sessionId: session.sessionId,
+                incarnationID: session.lifecycleIncarnationID,
+                sequence: session.compactionSequence
+            )
+        } else {
+            self.identity = .lifecycle(
+                kind: kind,
+                sessionId: session.sessionId,
+                sequence: session.completionSequence,
+                turnId: session.latestTurnId
+            )
+        }
     }
 }
 
 enum SessionCompletionPreviewBuilder {
     static func latestUserText(for session: SessionState) -> String? {
+        let isRemoteCodex = session.provider == .codex && session.ingress == .remoteBridge
         for item in session.chatItems.reversed() {
             if case .user(let text) = item.type {
+                // An empty prompt still advances this boundary without adding
+                // a chat item. Do not pair an older question with the new reply.
+                if isRemoteCodex {
+                    guard let submittedAt = session.conversationInfo.lastUserMessageDate,
+                          item.timestamp >= submittedAt else { return nil }
+                }
                 return sanitized(text)
             }
         }
-        return sanitized(session.firstUserMessage)
+        return isRemoteCodex ? nil : sanitized(session.firstUserMessage)
     }
 
     static func latestAssistantText(for session: SessionState) -> String? {
+        // A remote turn can complete without a prompt or reply body. Keep the
+        // notification, but do not present an earlier turn's text as its result.
+        if session.provider == .codex,
+           session.ingress == .remoteBridge,
+           session.lastMessageRole != "assistant" {
+            return nil
+        }
+
+        var activityFallback: String?
         for item in session.chatItems.reversed() {
             switch item.type {
             case .assistant(let text):
-                return sanitized(text)
+                if let text = sanitized(text) { return text }
             case .thinking(let text):
-                return sanitized(text)
+                activityFallback = activityFallback ?? sanitized(text)
             case .toolCall(let tool):
                 let preview = sanitized(tool.inputPreview)
                 let label = MCPToolFormatter.formatToolName(tool.name)
-                return preview.map { "\(label) \($0)" } ?? label
+                activityFallback = activityFallback ?? (preview.map { "\(label) \($0)" } ?? label)
             case .interrupted:
-                return "已中断"
+                activityFallback = activityFallback ?? "已中断"
             case .user:
-                continue
+                return activityFallback
             }
         }
 
@@ -96,7 +135,7 @@ enum SessionCompletionPreviewBuilder {
             return sanitized(intervention.summaryText)
         }
 
-        return sanitized(session.previewText) ?? sanitized(session.lastMessage)
+        return sanitized(session.previewText) ?? sanitized(session.lastMessage) ?? activityFallback
     }
 
     static func latestAssistantText(
@@ -118,16 +157,24 @@ enum SessionCompletionPreviewBuilder {
 }
 
 nonisolated enum SessionCompletionStateEvaluator {
+    /// A Stop or completed idle turn is authoritative even if its final text is
+    /// written to the transcript later, or never sent by a remote hook.
     static func isCompletedReadySession(_ session: SessionState) -> Bool {
+        guard session.connectionState == .connected else { return false }
         guard case nil = session.intervention else { return false }
-        guard session.phase == .waitingForInput || isCompletedCodexIdleSession(session) else {
-            return false
+        guard !session.needsPromptNotification else { return false }
+        if session.provider == .codex {
+            // Remote discovery reports idle metadata before any Stop is observed.
+            if session.ingress == .remoteBridge, !session.hasRemoteCodexTurnCompletion {
+                return false
+            }
+            return session.phase == .idle && !session.isCodexTurnInterrupted
         }
-        return hasCompletedAssistantReply(for: session)
+        return session.phase == .waitingForInput || isCompletedOpenCodeIdleSession(session)
     }
 
-    private static func isCompletedCodexIdleSession(_ session: SessionState) -> Bool {
-        session.provider == .codex && session.phase == .idle
+    private static func isCompletedOpenCodeIdleSession(_ session: SessionState) -> Bool {
+        session.phase == .idle && session.clientInfo.brand == .opencode
     }
 
     static func allowsEndedNotificationAfterWaitingForInput(_ session: SessionState) -> Bool {
@@ -139,17 +186,8 @@ nonisolated enum SessionCompletionStateEvaluator {
             || session.clientInfo.isKimiClient
     }
 
-    /// Treat tool-only or commentary-only updates as in-progress. A completion notification
-    /// should only fire once the session has an actual assistant reply ready for the user.
+    /// Transcript evidence remains useful for previews, but is not a completion gate.
     static func hasCompletedAssistantReply(for session: SessionState) -> Bool {
-        // Missing prompt or reply text can leave an older assistant item at the
-        // end of remote history. Require a reply from the current turn as well.
-        if session.provider == .codex,
-           session.ingress == .remoteBridge,
-           session.lastMessageRole != "assistant" {
-            return false
-        }
-
         for item in session.chatItems.reversed() {
             switch item.type {
             case .assistant:
@@ -167,28 +205,87 @@ nonisolated enum SessionCompletionStateEvaluator {
 final class SessionCompletionNotificationRegistry {
     static let shared = SessionCompletionNotificationRegistry()
 
-    private var consumedCompletionKeys = Set<SessionCompletionKey>()
+    private var consumedIdentities = Set<SessionCompletionNotification.Identity>()
+    private var pending: [SessionCompletionNotification] = []
 
-    private init() {}
+    var pendingNotifications: [SessionCompletionNotification] { pending }
 
     func isConsumed(session: SessionState) -> Bool {
         guard let key = SessionCompletionKey.make(for: session) else { return false }
-        return consumedCompletionKeys.contains(key)
+        return consumedIdentities.contains(.completed(key))
     }
 
     func markConsumed(session: SessionState) {
         guard let key = SessionCompletionKey.make(for: session) else { return }
-        consumedCompletionKeys.insert(key)
+        consumedIdentities.insert(.completed(key))
+    }
+
+    func isConsumed(_ notification: SessionCompletionNotification) -> Bool {
+        consumedIdentities.contains(notification.identity)
+    }
+
+    func markConsumed(_ notification: SessionCompletionNotification) {
+        consumedIdentities.insert(notification.identity)
+    }
+
+    func enqueue(_ notification: SessionCompletionNotification) {
+        guard !isConsumed(notification),
+              !pending.contains(where: { $0.identity == notification.identity }) else { return }
+        pending.append(notification)
+    }
+
+    func dequeueNext() -> SessionCompletionNotification? {
+        pending.removeAll(where: isConsumed)
+        guard !pending.isEmpty else { return nil }
+        let next = pending.removeFirst()
+        markConsumed(next)
+        return next
+    }
+
+    func removePending(matching predicate: (SessionCompletionNotification.Kind) -> Bool) {
+        let removed = pending.filter { predicate($0.kind) }
+        pending.removeAll { predicate($0.kind) }
+        for notification in removed {
+            markConsumed(notification)
+        }
     }
 }
 
 enum SessionCompletionNotificationPolicy {
     private static let notificationRecencyWindow: TimeInterval = 60
 
+    static func trackingStates(
+        for sessions: [SessionState]
+    ) -> [String: (phase: SessionPhase, completionKey: SessionCompletionKey?)] {
+        Dictionary(uniqueKeysWithValues: sessions.map {
+            (trackingID(for: $0), trackingState(for: $0))
+        })
+    }
+
+    static func trackingState(
+        for session: SessionState
+    ) -> (phase: SessionPhase, completionKey: SessionCompletionKey?) {
+        var snapshot = session
+        if snapshot.provider == .codex, snapshot.ingress == .remoteBridge {
+            // Losing transport must not erase the observed turn identity.
+            // Notification eligibility still checks the actual connection state.
+            snapshot.connectionState = .connected
+        }
+        return (phase: session.phase, completionKey: SessionCompletionKey.make(for: snapshot))
+    }
+
+    static func trackingID(for session: SessionState) -> String {
+        // Remote discovery omits the PID that hooks may report or change.
+        if session.provider == .codex, session.ingress == .remoteBridge {
+            return session.sessionId
+        }
+        return session.stableId
+    }
+
     static func shouldQueueCompletedNotification(
         for session: SessionState,
         previousPhase: SessionPhase?,
-        wasCompletedReady: Bool? = nil,
+        previousCompletionKey: SessionCompletionKey? = nil,
         isEnabled: Bool,
         now: Date = Date()
     ) -> Bool {
@@ -196,19 +293,20 @@ enum SessionCompletionNotificationPolicy {
         guard SessionCompletionStateEvaluator.isCompletedReadySession(session) else { return false }
 
         if session.provider == .codex {
-            guard session.phase == .idle else { return false }
-            // A remote Stop can settle the phase before its final reply arrives.
-            let isLateRemoteReply = session.ingress == .remoteBridge
-                && previousPhase == .idle
-                && wasCompletedReady == false
-            guard let previousPhase,
-                  isCodexCompletionSourcePhase(previousPhase) || isLateRemoteReply else {
+            guard session.phase == .idle, let previousPhase else { return false }
+            if session.ingress == .remoteBridge, previousPhase == .idle {
+                // Discovery and Stop can both be idle; only a new Stop key queues a popup.
+                guard SessionCompletionKey.make(for: session) != previousCompletionKey else {
+                    return false
+                }
+            } else if !isCodexCompletionSourcePhase(previousPhase) {
                 return false
             }
             return wasTrackedOrRecentlyCreated(session, previousPhase: previousPhase, now: now)
         }
 
-        guard previousPhase != .waitingForInput else { return false }
+        // A question can be resolved without changing waitingForInput; the
+        // completion identity, not the phase alone, deduplicates that transition.
         return wasTrackedOrRecentlyCreated(session, previousPhase: previousPhase, now: now)
     }
 
@@ -249,32 +347,11 @@ enum SessionCompletionNotificationPolicy {
         now.timeIntervalSince(session.lastActivity) <= notificationRecencyWindow
     }
 
-    static func hasBlockingActiveSession(
-        for session: SessionState,
-        in sessions: [SessionState]
-    ) -> Bool {
-        sessions.contains { candidate in
-            guard candidate.stableId != session.stableId else { return false }
-            return isBlockingActiveSession(candidate)
-        }
-    }
-
     private static func isCodexCompletionSourcePhase(_ phase: SessionPhase) -> Bool {
         switch phase {
         case .processing, .waitingForInput, .waitingForApproval:
             return true
         case .idle, .ended, .compacting:
-            return false
-        }
-    }
-
-    private static func isBlockingActiveSession(_ session: SessionState) -> Bool {
-        switch session.phase {
-        case .processing, .waitingForApproval, .compacting:
-            return true
-        case .waitingForInput:
-            return !SessionCompletionStateEvaluator.isCompletedReadySession(session)
-        case .idle, .ended:
             return false
         }
     }
@@ -344,7 +421,11 @@ struct SessionCompletionNotificationView: View {
     }
 
     private var userText: String? {
-        SessionCompletionPreviewBuilder.latestUserText(for: session)
+        let text = SessionCompletionPreviewBuilder.latestUserText(for: session)
+        if session.provider == .codex, session.ingress == .remoteBridge {
+            return text
+        }
+        return text ?? session.titleOnlySubagentDisplayTitle
     }
 
     private var assistantText: String? {
@@ -436,15 +517,19 @@ struct SessionCompletionNotificationView: View {
     private var contentCard: some View {
         let content = VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Text(appLocalized: "你：")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(.white.opacity(0.48))
+                if let userText {
+                    Text(appLocalized: "你：")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.48))
 
-                Text(userText ?? session.titleOnlySubagentDisplayTitle)
-                    .font(.system(size: bodyFontSize, weight: .semibold))
-                    .foregroundColor(.white.opacity(0.88))
-                    .lineLimit(2)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    Text(userText)
+                        .font(.system(size: bodyFontSize, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.88))
+                        .lineLimit(2)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    Spacer(minLength: 0)
+                }
 
                 Text(AppLocalization.string(notification.kind.statusLabelKey))
                     .font(.system(size: 13, weight: .bold))

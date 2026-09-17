@@ -156,7 +156,7 @@ final class SessionKeepAwakeController: ObservableObject {
 
         if observeSessions {
             SessionStore.shared.sessionsPublisher
-                .map { sessions in sessions.contains { $0.phase.isActive } }
+                .map { sessions in sessions.contains(where: \.isExecutionActive) }
                 .removeDuplicates()
                 .receive(on: DispatchQueue.main)
                 .sink { [weak self] hasWorkingSession in

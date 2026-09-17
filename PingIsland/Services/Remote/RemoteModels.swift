@@ -1,7 +1,7 @@
 import Foundation
 
 struct RemoteSSHLink: Equatable, Sendable {
-    static let defaultPort = 22
+    nonisolated static let defaultPort = 22
 
     let username: String?
     let host: String
@@ -372,6 +372,7 @@ struct RemoteHookEventPayload: Codable, Sendable {
     let event: String
     let status: String
     let provider: String
+    let approvalsReviewer: String?
     let pid: Int?
     let tty: String?
     let tool: String?
@@ -380,6 +381,7 @@ struct RemoteHookEventPayload: Codable, Sendable {
     let notificationType: String?
     let message: String?
     let expectsResponse: Bool
+    let permissionMode: String?
     let clientInfo: RemoteHookClientInfoPayload
 }
 
@@ -400,6 +402,102 @@ struct RemoteDecisionMessage: Encodable, Sendable {
     let decision: String
     let reason: String?
     let updatedInput: [String: RemoteJSONValue]?
+}
+
+struct RemoteAcknowledgementMessage: Encodable, Sendable {
+    let type: String = "ack"
+    let requestID: UUID
+}
+
+/// Connection attempts outlive individual awaits; only the current generation
+/// may attach or update endpoint state. Authentication rejection requires an
+/// explicit connect, not another timer tick.
+nonisolated struct RemoteConnectionAttemptRegistry {
+    private var generations: [UUID: UUID] = [:]
+    private var authenticationSuspended: Set<UUID> = []
+
+    mutating func begin(endpointID: UUID, explicit: Bool = false) -> UUID {
+        if explicit { authenticationSuspended.remove(endpointID) }
+        let generation = UUID()
+        generations[endpointID] = generation
+        return generation
+    }
+
+    func isCurrent(endpointID: UUID, generation: UUID) -> Bool {
+        generations[endpointID] == generation && allowsAutomaticRetry(endpointID: endpointID)
+    }
+
+    func allowsAutomaticRetry(endpointID: UUID) -> Bool { !authenticationSuspended.contains(endpointID) }
+    mutating func invalidate(endpointID: UUID) { generations.removeValue(forKey: endpointID) }
+    mutating func invalidateAll() { generations.removeAll() }
+    mutating func suspendAfterAuthenticationRejection(endpointID: UUID) {
+        authenticationSuspended.insert(endpointID)
+        invalidate(endpointID: endpointID)
+    }
+}
+
+nonisolated enum RemoteAuthenticationFailure {
+    static func isRejection(stderr: String, exitCode: Int32) -> Bool {
+        guard exitCode == 255 else { return false }
+        let message = stderr.lowercased()
+        return message.contains("permission denied (publickey")
+            || message.contains("permission denied (password")
+            || message.contains("permission denied (keyboard-interactive")
+            || message.contains("permission denied, please try again")
+            || message.contains("authentication failed")
+            || message.contains("too many authentication failures")
+            || message.contains("no supported authentication methods available")
+    }
+}
+
+@MainActor
+final class RemoteProcessedEventLedger {
+    private struct Key: Hashable { let endpointID: UUID; let requestID: UUID }
+    private let capacity: Int
+    private var completed: Set<Key> = []
+    private var order: [Key] = []
+    private struct Flight {
+        let id: UUID
+        let task: Task<Bool, Never>
+    }
+    private var inFlight: [Key: Flight] = [:]
+
+    init(capacity: Int = 16_384) { self.capacity = max(1, capacity) }
+
+    @discardableResult
+    func processOnce(
+        endpointID: UUID,
+        requestID: UUID,
+        isCurrent: @escaping @MainActor () -> Bool = { true },
+        operation: @escaping @MainActor () async -> Bool
+    ) async -> Bool {
+        let key = Key(endpointID: endpointID, requestID: requestID)
+        guard isCurrent() else { return false }
+        if completed.contains(key) { return true }
+        while let existing = inFlight[key] {
+            let processed = await existing.task.value
+            guard isCurrent() else { return false }
+            if processed { return true }
+            // A newer connection may be waiting on a discarded old-generation
+            // task. Retry its own operation rather than completing or ACKing it.
+            if inFlight[key]?.id == existing.id { inFlight.removeValue(forKey: key) }
+        }
+        let flightID = UUID()
+        let task = Task { @MainActor in
+            // Scheduling introduced an actor hop: validate again at the actual
+            // insertion/ingestion boundary, not only before creating the Task.
+            guard isCurrent() else { return false }
+            return await operation()
+        }
+        inFlight[key] = Flight(id: flightID, task: task)
+        let processed = await task.value
+        if inFlight[key]?.id == flightID { inFlight.removeValue(forKey: key) }
+        if processed, completed.insert(key).inserted {
+            order.append(key)
+            if order.count > capacity { completed.remove(order.removeFirst()) }
+        }
+        return processed
+    }
 }
 
 enum RemoteJSONValue: Codable, Equatable, Sendable {

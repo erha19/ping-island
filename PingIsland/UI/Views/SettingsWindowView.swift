@@ -2545,7 +2545,12 @@ private final class SettingsWindowThemeBridgeView: NSView {
             backdrop = SettingsWindowBackdropView(frame: frameView.bounds)
             backdrop.identifier = SettingsWindowBackdropView.identifier
             backdrop.autoresizingMask = [.width, .height]
-            frameView.addSubview(backdrop, positioned: .below, relativeTo: window.contentView)
+        }
+
+        // Keep the backdrop below the content and native window controls,
+        // including when theme updates reuse an existing backdrop.
+        if frameView.subviews.first !== backdrop {
+            frameView.addSubview(backdrop, positioned: .below, relativeTo: nil)
         }
 
         // One AppKit backdrop owns the base color from the native titlebar
@@ -2570,6 +2575,8 @@ private final class SettingsWindowBackdropView: NSView {
     private let sidebarTint = NSView()
     private let detailTint = NSView()
     private var sidebarWidth: CGFloat = 0
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)

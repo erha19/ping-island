@@ -278,10 +278,12 @@ actor CodexAppServerMonitor {
     private var websocket: URLSessionWebSocketTask?
     private var receiveTask: Task<Void, Never>?
     private var threadListRefreshTask: Task<Void, Never>?
+    private var notificationRefreshTasks: [String: Task<Void, Never>] = [:]
     private var requestSequence = 0
     private var pendingResponses: [String: CheckedContinuation<[String: Any], Error>] = [:]
     private var pendingRequestsByThread: [String: PendingRequest] = [:]
     private var threadApprovalModes: [String: String] = [:]  // threadId → approvalMode
+    private var threadApprovalReviewers: [String: String] = [:]
     private var rolloutRecoveryCache = CodexRolloutRecoveryCache()
     private var recoveredNotLoadedThreadVersions: [String: String] = [:]
     private var lastThreadDiagnostics: [ThreadDiagnosticsSnapshot] = []
@@ -290,7 +292,7 @@ actor CodexAppServerMonitor {
     private nonisolated static let notLoadedRecoveryWindow: TimeInterval = 10 * 60
     private nonisolated static let maximumFutureActivitySkew: TimeInterval = 60
 
-    private init() {}
+    init() {}
 
     func start() async {
         if websocket != nil {
@@ -335,6 +337,8 @@ actor CodexAppServerMonitor {
     func stop() {
         threadListRefreshTask?.cancel()
         threadListRefreshTask = nil
+        for task in notificationRefreshTasks.values { task.cancel() }
+        notificationRefreshTasks.removeAll()
         receiveTask?.cancel()
         receiveTask = nil
         websocket?.cancel(with: .goingAway, reason: nil)
@@ -343,6 +347,7 @@ actor CodexAppServerMonitor {
         process = nil
         pendingRequestsByThread.removeAll()
         threadApprovalModes.removeAll()
+        threadApprovalReviewers.removeAll()
         rolloutRecoveryCache.removeAll()
         recoveredNotLoadedThreadVersions.removeAll()
         lastThreadDiagnostics.removeAll()
@@ -452,18 +457,29 @@ actor CodexAppServerMonitor {
         return ["answers": formattedAnswers]
     }
 
-    func readThread(threadId: String, includeTurns: Bool = true) async throws -> CodexThreadSnapshot {
-        if websocket == nil {
+    func readThread(
+        threadId: String,
+        includeTurns: Bool = true,
+        responseLoader: (@Sendable () async throws -> Data)? = nil
+    ) async throws -> CodexThreadSnapshot {
+        if websocket == nil, responseLoader == nil {
             await start()
         }
 
-        let response = try await sendRequest(
-            method: "thread/read",
-            params: [
-                "threadId": threadId,
-                "includeTurns": includeTurns
-            ]
-        )
+        let currentSession = await SessionStore.shared.session(for: threadId)
+        let readState = CodexThreadReadState(intervention: currentSession?.intervention)
+        let response: [String: Any]
+        if let responseLoader {
+            response = try JSONSerialization.jsonObject(with: await responseLoader()) as? [String: Any] ?? [:]
+        } else {
+            response = try await sendRequest(
+                method: "thread/read",
+                params: [
+                    "threadId": threadId,
+                    "includeTurns": includeTurns
+                ]
+            )
+        }
 
         guard let thread = response["thread"] as? [String: Any],
               let snapshot = parseThreadSnapshot(thread) else {
@@ -472,7 +488,7 @@ actor CodexAppServerMonitor {
             ])
         }
 
-        await SessionStore.shared.syncCodexThreadSnapshot(snapshot)
+        await SessionStore.shared.syncCodexThreadSnapshot(snapshot, readState: readState)
         return snapshot
     }
 
@@ -673,6 +689,8 @@ actor CodexAppServerMonitor {
         websocket = nil
         threadListRefreshTask?.cancel()
         threadListRefreshTask = nil
+        for task in notificationRefreshTasks.values { task.cancel() }
+        notificationRefreshTasks.removeAll()
     }
 
     private func ensureThreadListRefreshLoop() {
@@ -724,7 +742,7 @@ actor CodexAppServerMonitor {
         }
     }
 
-    private func handle(_ message: URLSessionWebSocketTask.Message) async {
+    func handle(_ message: URLSessionWebSocketTask.Message) async {
         let data: Data
         switch message {
         case .data(let raw):
@@ -803,9 +821,14 @@ actor CodexAppServerMonitor {
             )
 
         case "item/autoApprovalReview/started":
-            guard let threadId = params["threadId"] as? String,
+            guard let threadId = params["threadId"] as? String else { return }
+            // Automatic reviews belong to Codex; only genuine manual guardian
+            // requests should interrupt the user.
+            guard !isAutomaticApprovalReviewThread(threadId),
+                  pendingRequestsByThread[threadId] == nil,
                   let session = await SessionStore.shared.session(for: threadId),
                   session.clientInfo.kind == .codexCLI,
+                  session.intervention == nil || session.intervention?.metadata["source"] == "guardian_review",
                   let intervention = Self.guardianReviewIntervention(from: params) else {
                 return
             }
@@ -821,8 +844,32 @@ actor CodexAppServerMonitor {
 
         case "item/autoApprovalReview/completed":
             guard let threadId = params["threadId"] as? String else { return }
-            await SessionStore.shared.resolveCodexIntervention(sessionId: threadId, nextPhase: .processing)
-            _ = try? await readThread(threadId: threadId, includeTurns: true)
+            if let targetItemId = params["targetItemId"] as? String,
+               let session = await SessionStore.shared.session(for: threadId),
+               session.intervention?.metadata["source"] == "guardian_review",
+               session.intervention?.id == targetItemId {
+                await SessionStore.shared.resolveCodexIntervention(
+                    sessionId: threadId, nextPhase: .processing, requestId: targetItemId
+                )
+            }
+            // The receive loop owns RPC replies; reading inline deadlocks it.
+            scheduleNotificationRefresh(threadId: threadId)
+
+        case "serverRequest/resolved":
+            guard let threadId = params["threadId"] as? String,
+                  let requestIdValue = params["requestId"], !(requestIdValue is NSNull) else { return }
+            let requestId = stringify(requestIdValue)
+            guard pendingRequestsByThread[threadId]?.requestId == requestId else { return }
+            pendingRequestsByThread.removeValue(forKey: threadId)
+            await SessionStore.shared.resolveCodexIntervention(
+                sessionId: threadId, nextPhase: .processing, requestId: requestId
+            )
+            scheduleNotificationRefresh(threadId: threadId)
+
+        case "thread/settings/updated":
+            guard let threadId = params["threadId"] as? String,
+                  let settings = params["threadSettings"] as? [String: Any] else { return }
+            updateApprovalSettings(threadId: threadId, settings: settings)
 
         case "thread/started":
             if let thread = params["thread"] as? [String: Any] {
@@ -848,12 +895,28 @@ actor CodexAppServerMonitor {
             logger.info("Codex thread archived thread=\(threadId, privacy: .public)")
             await clearRolloutRecoveryState(threadId: threadId)
             recoveredNotLoadedThreadVersions.removeValue(forKey: threadId)
+            threadApprovalModes.removeValue(forKey: threadId)
+            threadApprovalReviewers.removeValue(forKey: threadId)
             removeThreadDiagnostics(threadId: threadId)
             await SessionStore.shared.process(.sessionEnded(sessionId: threadId))
 
         default:
             break
         }
+    }
+
+    private func scheduleNotificationRefresh(threadId: String) {
+        guard websocket != nil, notificationRefreshTasks[threadId] == nil else { return }
+        // The receive loop owns RPC replies; a separate task avoids deadlock.
+        notificationRefreshTasks[threadId] = Task { [weak self] in
+            await self?.runNotificationRefresh(threadId: threadId)
+        }
+    }
+
+    private func runNotificationRefresh(threadId: String) async {
+        defer { notificationRefreshTasks.removeValue(forKey: threadId) }
+        guard !Task.isCancelled, websocket != nil else { return }
+        _ = try? await readThread(threadId: threadId, includeTurns: true)
     }
 
     // MARK: - Codex approval-policy helpers
@@ -869,34 +932,65 @@ actor CodexAppServerMonitor {
     /// 1. In-memory cache populated from WebSocket thread list / thread/read responses.
     /// 2. `~/.codex/.codex-global-state.json` — per-thread heartbeat entry only.
     private func isAutoApproveThread(_ threadId: String) -> Bool {
-        if let cached = threadApprovalModes[threadId] {
-            return cached == "never"
+        let policy = threadApprovalModes[threadId] ?? Self.approvalPolicyFromGlobalState(threadId: threadId)
+        return policy?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "never"
+    }
+
+    private func isAutomaticApprovalReviewThread(_ threadId: String) -> Bool {
+        let reviewer = threadApprovalReviewers[threadId]
+            ?? Self.approvalsReviewerFromGlobalState(threadId: threadId)
+        return !Self.shouldSurfaceAutoApprovalReview(approvalsReviewer: reviewer)
+    }
+
+    private func updateApprovalSettings(threadId: String, settings: [String: Any]) {
+        let policyKeys = ["approvalPolicy", "approval_policy", "approvalMode", "approval_mode"]
+        let reviewerKeys = ["approvalsReviewer", "approvals_reviewer", "approval_reviewer"]
+        if policyKeys.contains(where: { settings[$0] != nil }) {
+            threadApprovalModes[threadId] = policyKeys.compactMap { settings[$0] as? String }.first
         }
-        return Self.approvalPolicyFromGlobalState(threadId: threadId) == "never"
+        if reviewerKeys.contains(where: { settings[$0] != nil }) {
+            threadApprovalReviewers[threadId] = reviewerKeys.compactMap { settings[$0] as? String }.first
+        }
+    }
+
+    nonisolated static func shouldSurfaceAutoApprovalReview(approvalsReviewer: String?) -> Bool {
+        approvalsReviewer?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: "-", with: "_") != "auto_review"
+    }
+
+    nonisolated private static func globalApprovalSettings(threadId: String)
+        -> (approvalPolicy: String?, approvalsReviewer: String?) {
+        guard let data = try? Data(contentsOf: URL(
+            fileURLWithPath: NSHomeDirectory().appending("/.codex/.codex-global-state.json")
+        )), let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return (nil, nil)
+        }
+        return approvalSettings(from: root, threadId: threadId)
     }
 
     nonisolated static func approvalPolicyFromGlobalState(threadId: String) -> String? {
-        guard
-            let data = try? Data(contentsOf: URL(
-                fileURLWithPath: NSHomeDirectory()
-                    .appending("/.codex/.codex-global-state.json")
-            )),
-            let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-            let atomState = root["electron-persisted-atom-state"] as? [String: Any]
-        else {
-            return nil
-        }
+        globalApprovalSettings(threadId: threadId).approvalPolicy
+    }
 
-        // Check per-thread heartbeat permissions (most authoritative for Desktop threads).
-        // CLI-only sessions (e.g. agentloop) are not present here; their approval policy
-        // is signalled by permission_mode=bypassPermissions in the hook payload instead.
-        if let permsMap = atomState["heartbeat-thread-permissions-by-id"] as? [String: Any],
-           let entry = permsMap[threadId] as? [String: Any],
-           let policy = entry["approvalPolicy"] as? String {
-            return policy
-        }
+    nonisolated static func approvalsReviewerFromGlobalState(threadId: String) -> String? {
+        globalApprovalSettings(threadId: threadId).approvalsReviewer
+    }
 
-        return nil
+    nonisolated static func approvalSettings(
+        from root: [String: Any], threadId: String
+    ) -> (approvalPolicy: String?, approvalsReviewer: String?) {
+        // Never borrow another thread's reviewer or rewrite its sandbox policy.
+        guard let atomState = root["electron-persisted-atom-state"] as? [String: Any],
+              let permissions = atomState["heartbeat-thread-permissions-by-id"] as? [String: Any],
+              let entry = permissions[threadId] as? [String: Any] else {
+            return (nil, nil)
+        }
+        return (
+            (entry["approvalPolicy"] as? String) ?? (entry["approval_policy"] as? String),
+            (entry["approvalsReviewer"] as? String) ?? (entry["approvals_reviewer"] as? String)
+        )
     }
 
     private func handleServerRequest(id: String, method: String, params: [String: Any]) async {
@@ -1258,12 +1352,7 @@ actor CodexAppServerMonitor {
             recoveredNotLoadedThreadVersions.removeValue(forKey: threadId)
         }
 
-        // Cache approvalMode from app-server data so approval-policy checks
-        // don't have to re-read the global state file on every request.
-        let rawMode = thread["approvalMode"] as? String ?? thread["approval_mode"] as? String
-        if let mode = rawMode {
-            threadApprovalModes[threadId] = mode
-        }
+        updateApprovalSettings(threadId: threadId, settings: thread)
         let name = thread["name"] as? String
         let preview = thread["preview"] as? String
         let cwd = thread["cwd"] as? String
@@ -1479,26 +1568,23 @@ actor CodexAppServerMonitor {
         return subagent["thread_spawn"] is [String: Any]
     }
 
-    private func parseThreadSnapshot(_ thread: [String: Any]) -> CodexThreadSnapshot? {
+    func parseThreadSnapshot(_ thread: [String: Any]) -> CodexThreadSnapshot? {
         guard let threadId = thread["id"] as? String else { return nil }
         guard !Self.shouldIgnoreAuxiliaryThread(thread) else { return nil }
 
-        // Keep the approval-mode cache fresh: thread/read and thread/list both
-        // call this path, so any policy change made in ChatGPT will be
-        // reflected within the next polling cycle (≤ 30 s).
-        if let mode = thread["approvalMode"] as? String ?? thread["approval_mode"] as? String {
-            threadApprovalModes[threadId] = mode
-        }
+        // thread/read and thread/list may carry updated review settings.
+        updateApprovalSettings(threadId: threadId, settings: thread)
 
         let lifecycleDates = Self.threadLifecycleDates(from: thread)
         let createdAt = lifecycleDates.createdAt ?? Date()
         let updatedAt = lifecycleDates.updatedAt ?? createdAt
         let status = thread["status"] as? [String: Any]
         let snapshotClientInfo = makeClientInfo(from: thread, threadId: threadId)
+        let pendingIntervention = pendingRequestsByThread[threadId]?.intervention
         let phase = phaseFromCodexStatus(
             status,
             threadId: threadId,
-            intervention: pendingRequestsByThread[threadId]?.intervention
+            intervention: pendingIntervention
         )
         let turns = thread["turns"] as? [[String: Any]] ?? []
 
@@ -1513,7 +1599,9 @@ actor CodexAppServerMonitor {
         var latestFinalText: String?
         var latestFinalPhase: String?
         var latestTurnId: String?
-        var inferredIntervention: SessionIntervention?
+        // A thread/read reply can arrive after the next real server request.
+        // Pending requests are authoritative; transcript inference is secondary.
+        var inferredIntervention = pendingIntervention
         var itemOffset: TimeInterval = 0
         let subagentMetadata = parseSubagentMetadata(from: thread)
 
@@ -1585,7 +1673,10 @@ actor CodexAppServerMonitor {
                         )),
                         timestamp: timestamp
                     ))
-                    if toolStatus == .running, snapshotClientInfo.kind == .codexCLI {
+                    if inferredIntervention == nil, toolStatus == .running,
+                       snapshotClientInfo.kind == .codexCLI,
+                       !isAutoApproveThread(threadId),
+                       !isAutomaticApprovalReviewThread(threadId) {
                         inferredIntervention = SessionIntervention(
                             id: "mcp-pending-\(server)-\(tool)",
                             kind: .question,
@@ -1633,7 +1724,7 @@ actor CodexAppServerMonitor {
             intervention: inferredIntervention,
             createdAt: createdAt,
             updatedAt: updatedAt,
-            phase: inferredIntervention != nil ? .waitingForInput : phase,
+            phase: pendingIntervention == nil && inferredIntervention != nil ? .waitingForInput : phase,
             historyItems: historyItems,
             conversationInfo: conversationInfo,
             latestTurnId: latestTurnId,

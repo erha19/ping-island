@@ -102,7 +102,7 @@ enum TestRuntime {
         var matches: [URL] = []
         for case let url as URL in enumerator {
             guard url.lastPathComponent == name else { continue }
-            guard url.path.contains("/debug/") else { continue }
+            guard url.path.lowercased().contains("/debug/") else { continue }
             guard FileManager.default.isExecutableFile(atPath: url.path) else { continue }
             matches.append(url)
         }

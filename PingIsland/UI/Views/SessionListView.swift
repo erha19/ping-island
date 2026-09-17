@@ -943,19 +943,29 @@ struct InstanceRow: View {
 
     @ViewBuilder
     private var avatarStatusBadge: some View {
-        switch session.phase {
-        case .processing, .compacting, .waitingForApproval:
-            animatedStatusBadge
-        case .waitingForInput:
-            Circle()
-                .fill(statusAccentColor)
-                .frame(width: 10, height: 10)
-                .overlay(
-                    Circle()
-                        .strokeBorder(Color.black.opacity(0.8), lineWidth: 2)
-                )
-        case .idle, .ended:
-            EmptyView()
+        if session.connectionState == .disconnected {
+            Image(systemName: "wifi.slash")
+                .font(.system(size: 7, weight: .bold))
+                .foregroundColor(Color.white.opacity(0.56))
+                .frame(width: 14, height: 14)
+                .background(Color.black.opacity(0.92))
+                .clipShape(Circle())
+                .help(AppLocalization.string("远程连接已断开"))
+        } else {
+            switch session.phase {
+            case .processing, .compacting, .waitingForApproval:
+                animatedStatusBadge
+            case .waitingForInput:
+                Circle()
+                    .fill(statusAccentColor)
+                    .frame(width: 10, height: 10)
+                    .overlay(
+                        Circle()
+                            .strokeBorder(Color.black.opacity(0.8), lineWidth: 2)
+                    )
+            case .idle, .ended:
+                EmptyView()
+            }
         }
     }
 
@@ -1109,7 +1119,7 @@ struct InstanceRow: View {
         if isWaitingForApproval {
             return TerminalColors.amber.opacity(isHovered ? 0.15 : 0.09)
         }
-        if session.phase.isActive {
+        if session.isExecutionActive {
             return Color.white.opacity(isHovered ? 0.08 : 0.04)
         }
         return isHovered ? Color.white.opacity(0.06) : Color.clear
@@ -1230,7 +1240,7 @@ struct InstanceRow: View {
     private var shouldReserveIncomingPreviewLineHeight: Bool {
         guard detailsEnabled else { return false }
         guard shouldShowExpandedDetails else { return false }
-        guard session.phase.isActive else { return false }
+        guard session.isExecutionActive else { return false }
         guard latestUserLine == nil else { return false }
         return previewLines.count == 1
     }
@@ -1298,7 +1308,7 @@ struct InstanceRow: View {
     }
 
     private var assistantPrefixColor: Color {
-        providerColor.opacity(session.phase.isActive ? 0.96 : 0.92)
+        providerColor.opacity(session.isExecutionActive ? 0.96 : 0.92)
     }
 
     private var assistantTextColor: Color {
@@ -1308,7 +1318,7 @@ struct InstanceRow: View {
         if isWaitingForApproval {
             return .white.opacity(0.74)
         }
-        if session.phase.isActive {
+        if session.isExecutionActive {
             return .white.opacity(0.66)
         }
         return .white.opacity(0.52)
@@ -1324,6 +1334,9 @@ struct InstanceRow: View {
     }
 
     private var latestAssistantLine: String? {
+        if session.connectionState == .disconnected {
+            return AppLocalization.string("远程连接已断开")
+        }
         if session.needsQuestionResponse {
             return sanitized(session.intervention?.summaryText) ?? AppLocalization.string("需要你的输入")
         }
@@ -1493,6 +1506,9 @@ struct InstanceRow: View {
     }
 
     private var compactDetailSummary: String? {
+        if session.connectionState == .disconnected {
+            return AppLocalization.string("远程连接已断开")
+        }
         switch session.phase {
         case .processing:
             return session.codexSubagentSummaryText(for: session.isNativeRuntimeSession

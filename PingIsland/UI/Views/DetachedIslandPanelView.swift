@@ -166,7 +166,7 @@ enum DetachedIslandContentModel {
     }
 
     static func activeCount(from sessions: [SessionState]) -> Int {
-        sessions.filter { $0.phase.isActive }.count
+        sessions.filter(\.isExecutionActive).count
     }
 
     static func canPresentBubble(
@@ -280,7 +280,7 @@ enum DetachedIslandContentModel {
         if session.needsQuestionResponse || session.needsApprovalResponse || session.needsManualAttention {
             return 86
         }
-        if session.phase.isActive {
+        if session.isExecutionActive {
             return 74
         }
         if session.shouldUseMinimalCompactPresentation || session.usesTitleOnlySubagentPresentation {
@@ -712,11 +712,10 @@ struct DetachedIslandPanelView: View {
         if isPetDragging {
             return .dragging
         }
-        return MascotStatus.closedNotchStatus(
-            representativePhase: representativeSession?.phase,
-            hasPendingPermission: sortedSessions.contains { $0.needsApprovalResponse },
-            hasHumanIntervention: sortedSessions.contains { $0.intervention != nil }
-        )
+        if let session = representativeSession {
+            return MascotStatus(session: session)
+        }
+        return .idle
     }
 
     var body: some View {

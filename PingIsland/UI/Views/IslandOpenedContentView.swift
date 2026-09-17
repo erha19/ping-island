@@ -64,7 +64,7 @@ struct IslandOpenedContentView: View {
             )
         case .completionNotification(let notification):
             SessionCompletionNotificationView(
-                notification: liveNotification(notification),
+                notification: notification,
                 presentationStyle: style == .detached ? .bubble : .panel,
                 onHoverChanged: onCompletionNotificationHoverChanged,
                 onDismiss: onDismissCompletionNotification
@@ -99,18 +99,6 @@ struct IslandOpenedContentView: View {
 
     private func liveSession(for session: SessionState) -> SessionState {
         sessionMonitor.instances.first(where: { $0.sessionId == session.sessionId }) ?? session
-    }
-
-    private func liveNotification(_ notification: SessionCompletionNotification) -> SessionCompletionNotification {
-        guard let latestSession = sessionMonitor.instances.first(where: {
-            $0.sessionId == notification.session.sessionId
-        }) else {
-            return notification
-        }
-
-        var updated = notification
-        updated.session = latestSession
-        return updated
     }
 
     private var contentWidth: CGFloat {

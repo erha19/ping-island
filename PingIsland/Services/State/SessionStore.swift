@@ -317,8 +317,12 @@ actor SessionStore {
             needsClearReconciliation: existing?.needsClearReconciliation ?? false,
             latestTurnId: existing?.latestTurnId,
             completionSequence: existing?.completionSequence ?? 0,
+            isCodexTurnInterrupted: existing?.isCodexTurnInterrupted ?? false,
+            hasRemoteCodexTurnCompletion: existing?.hasRemoteCodexTurnCompletion ?? false,
+            compactionSequence: existing?.compactionSequence ?? 0,
             lastActivity: Date(),
-            createdAt: existing?.createdAt ?? handle.createdAt
+            createdAt: existing?.createdAt ?? handle.createdAt,
+            lifecycleIncarnationID: existing?.lifecycleIncarnationID ?? UUID()
         )
 
         sessions[handle.sessionID] = session
@@ -453,39 +457,45 @@ actor SessionStore {
             }
         }
 
-        let tree = (event.pid != nil || event.tty != nil) ? ProcessTreeBuilder.shared.buildTree() : [:]
+        let canInspectProcessLocally = event.ingress.usesLocalProcessNamespace
+        let tree = canInspectProcessLocally && (event.pid != nil || event.tty != nil)
+            ? ProcessTreeBuilder.shared.buildTree()
+            : [:]
         let hadActiveClaudeQuestion = session.intervention?.kind == .question
             && session.clientInfo.isPlainClaudeCodeRouting
 
         session.provider = event.provider
         session.clientInfo = normalizedClientInfo(session.clientInfo, merging: event.clientInfo, provider: event.provider, sessionId: sessionId)
         session.ingress = event.ingress
+        session.connectionState = .connected
         applyHookWorkspace(event.cwd, to: &session)
         session.pid = event.pid
-        if let pid = event.pid {
+        if canInspectProcessLocally, let pid = event.pid {
             session.isInTmux = ProcessTreeBuilder.shared.isInTmux(pid: pid, tree: tree)
         }
         if let tty = event.tty {
             session.tty = tty.replacingOccurrences(of: "/dev/", with: "")
         }
-        if let runtimeClientInfo = await runtimeClientInfo(for: session, tree: tree) {
-            session.clientInfo = normalizedClientInfo(session.clientInfo, merging: runtimeClientInfo, provider: event.provider, sessionId: sessionId)
-        }
-        await TerminalAutomationPermissionCoordinator.shared.prepareIfNeeded(
-            provider: event.provider,
-            clientInfo: session.clientInfo,
-            sessionId: sessionId
-        )
-        if let enrichedGhosttyClientInfo = await enrichedGhosttyClientInfoIfNeeded(
-            current: session.clientInfo,
-            event: event,
-            workspacePath: session.cwd
-        ) {
-            session.clientInfo = normalizedClientInfo(
-                session.clientInfo.merged(with: enrichedGhosttyClientInfo),
+        if canInspectProcessLocally {
+            if let runtimeClientInfo = await runtimeClientInfo(for: session, tree: tree) {
+                session.clientInfo = normalizedClientInfo(session.clientInfo, merging: runtimeClientInfo, provider: event.provider, sessionId: sessionId)
+            }
+            await TerminalAutomationPermissionCoordinator.shared.prepareIfNeeded(
                 provider: event.provider,
+                clientInfo: session.clientInfo,
                 sessionId: sessionId
             )
+            if let enrichedGhosttyClientInfo = await enrichedGhosttyClientInfoIfNeeded(
+                current: session.clientInfo,
+                event: event,
+                workspacePath: session.cwd
+            ) {
+                session.clientInfo = normalizedClientInfo(
+                    session.clientInfo.merged(with: enrichedGhosttyClientInfo),
+                    provider: event.provider,
+                    sessionId: sessionId
+                )
+            }
         }
 
         // After the await points another event may have mutated the persisted
@@ -601,8 +611,29 @@ actor SessionStore {
         let newPhase: SessionPhase = preservesExistingPhase
             ? session.phase
             : inferredPhase
-        if wasCompletedReady, newPhase == .processing {
+        // Remote CLI resume moves a completed session to waitingForInput.
+        // Its retained Stop marks the boundary for the next prompt or tool activity.
+        let startsNextRemoteCodexTurn = event.provider == .codex
+            && event.ingress == .remoteBridge
+            && (event.event == "UserPromptSubmit" || event.isToolEvent)
+            && session.hasRemoteCodexTurnCompletion
+        if wasCompletedReady || startsNextRemoteCodexTurn, newPhase == .processing {
             session.completionSequence &+= 1
+            if event.provider == .codex, event.ingress == .remoteBridge,
+               event.event != "UserPromptSubmit" {
+                // Tool activity can start a turn whose prompt hook was lost.
+                // Retain history, but discard the previous turn's preview fields.
+                session.previewText = nil
+                session.latestHookMessage = Self.normalizedHookMessage(event.message)
+                session.conversationInfo = ConversationInfo(
+                    summary: session.conversationInfo.summary,
+                    lastMessage: nil,
+                    lastMessageRole: nil,
+                    lastToolName: nil,
+                    firstUserMessage: session.conversationInfo.firstUserMessage,
+                    lastUserMessageDate: nil
+                )
+            }
         }
         let intervention = codeBuddyCLINotificationIntervention ?? event.intervention
         let shouldPreserveQwenQuestionIntervention = shouldPreserveQwenQuestionIntervention(
@@ -742,6 +773,13 @@ actor SessionStore {
             preserveClaudeQuestion: hadActiveClaudeQuestion
         )
 
+        recordCompactionTransition(from: phaseBeforeHook, in: &session)
+        if session.provider == .codex, session.phase == .processing, !preservesExistingPhase {
+            session.isCodexTurnInterrupted = false
+            if session.ingress == .remoteBridge {
+                session.hasRemoteCodexTurnCompletion = false
+            }
+        }
         sessions[sessionId] = session
         IslandTrace.emit(
             "hook.applied",
@@ -992,6 +1030,10 @@ actor SessionStore {
         if event.event == "UserPromptSubmit" {
             let userMessage = SessionTextSanitizer.sanitizedMessageText(event.message)
             let timestamp = Date()
+            // A new turn invalidates every fallback to the previous reply,
+            // including when the prompt body is absent.
+            session.previewText = nil
+            session.latestHookMessage = userMessage
             if let userMessage {
                 session.chatItems.append(ChatHistoryItem(
                     id: "remote-codex-user-\(UUID().uuidString)",
@@ -1011,6 +1053,7 @@ actor SessionStore {
         }
 
         guard event.isRemoteCodexTurnCompletion else { return }
+        session.hasRemoteCodexTurnCompletion = true
         let assistantMessage = SessionTextSanitizer.sanitizedMessageText(event.message)
         let hasTurnActivity = session.phase != .idle && session.phase != .ended
         // An empty Stop invalidates an older reply only after new turn activity.
@@ -1671,7 +1714,9 @@ actor SessionStore {
             guard child.phase != mirroredPhase else { continue }
             guard child.phase.canTransition(to: mirroredPhase) else { continue }
 
+            let previousPhase = child.phase
             child.phase = mirroredPhase
+            recordCompactionTransition(from: previousPhase, in: &child)
             child.lastActivity = max(child.lastActivity, parent.lastActivity)
             sessions[sessionId] = child
         }
@@ -1691,6 +1736,12 @@ actor SessionStore {
             return .waitingForApproval(context)
         case .ended:
             return .ended
+        }
+    }
+
+    private func recordCompactionTransition(from previousPhase: SessionPhase, in session: inout SessionState) {
+        if session.phase == .compacting, previousPhase != .compacting {
+            session.compactionSequence &+= 1
         }
     }
 
@@ -2016,7 +2067,8 @@ actor SessionStore {
         _ payload: FileUpdatePayload,
         conversationInfoLoader: (@Sendable () async -> ConversationInfo)? = nil
     ) async {
-        guard let sourceSession = sessions[payload.sessionId] else { return }
+        guard let sourceSession = sessions[payload.sessionId],
+              sourceSession.ingress.usesLocalProcessNamespace else { return }
         let conversationInfo: ConversationInfo
         if let conversationInfoLoader {
             conversationInfo = await conversationInfoLoader()
@@ -2053,6 +2105,7 @@ actor SessionStore {
             //
             // `lastActivity` is read before the assignment below moves it to now.
             let previousLastActivity = session.lastActivity
+            let wasCompletedReady = SessionCompletionStateEvaluator.isCompletedReadySession(session)
             let hasNewUserActivity = payload.isIncremental
                 && payload.messages.contains { $0.role == .user && $0.timestamp > previousLastActivity }
             if session.phase != .ended || hasNewUserActivity {
@@ -2063,6 +2116,12 @@ actor SessionStore {
                 allowEndedResume: hasNewUserActivity,
                 hasUserActivity: hasNewUserActivity
             )
+            if wasCompletedReady && session.phase == .processing {
+                session.completionSequence &+= 1
+            }
+            if hasNewUserActivity, session.phase == .processing {
+                session.isCodexTurnInterrupted = false
+            }
         }
 
         session.conversationInfo = conversationInfo
@@ -2230,10 +2289,30 @@ actor SessionStore {
     func commitTranscriptUpdate(_ update: SessionState, basedOn original: SessionState) -> SessionState? {
         guard let latest = sessions[update.sessionId] else { return nil }
         var committed = update
-        if latest.phase == .ended,
-           original.phase != .ended || latest.lastActivity != original.lastActivity {
-            markSessionEnded(&committed, refreshActivity: false)
+        // Transcript enrichment never owns the user's approval setting, even
+        // when the toggle changes without a corresponding phase transition.
+        committed.autoApprovePermissions = latest.autoApprovePermissions
+        committed.compactionSequence = latest.compactionSequence
+        let lifecycleChangedWhileEnriching = latest.phase != original.phase
+            || latest.intervention != original.intervention
+            || latest.pendingInterventions != original.pendingInterventions
+            || latest.suppressInAppPromptControls != original.suppressInAppPromptControls
+            || latest.latestTurnId != original.latestTurnId
+            || latest.completionSequence != original.completionSequence
+            || latest.isCodexTurnInterrupted != original.isCodexTurnInterrupted
+            || latest.hasRemoteCodexTurnCompletion != original.hasRemoteCodexTurnCompletion
+            || latest.compactionSequence != original.compactionSequence
+
+        if lifecycleChangedWhileEnriching {
+            committed.phase = latest.phase
             committed.lastActivity = latest.lastActivity
+            committed.intervention = latest.intervention
+            committed.pendingInterventions = latest.pendingInterventions
+            committed.suppressInAppPromptControls = latest.suppressInAppPromptControls
+            committed.latestTurnId = latest.latestTurnId
+            committed.completionSequence = latest.completionSequence
+            committed.isCodexTurnInterrupted = latest.isCodexTurnInterrupted
+            committed.hasRemoteCodexTurnCompletion = latest.hasRemoteCodexTurnCompletion
         }
         sessions[update.sessionId] = committed
         return committed
@@ -2698,6 +2777,11 @@ actor SessionStore {
 
     private func processInterrupt(sessionId: String) async {
         guard var session = sessions[sessionId] else { return }
+        if session.provider == .codex {
+            session.isCodexTurnInterrupted = true
+            // Snapshots generated before this local interrupt are not resumed work.
+            session.lastActivity = max(session.lastActivity, Date())
+        }
 
         // Clear subagent state
         session.subagentState = SubagentState()
@@ -2835,9 +2919,10 @@ actor SessionStore {
 
         for (sessionId, var session) in sessions {
             guard session.provider == .claude else { continue }
-            guard session.ingress != .nativeRuntime else { continue }
+            guard session.ingress.usesLocalProcessNamespace,
+                  session.ingress != .nativeRuntime else { continue }
             guard session.phase != .ended else { continue }
-            guard !session.needsManualAttention else { continue }
+            guard !session.needsPromptNotification else { continue }
 
             let now = Date()
             let idleSeconds = now.timeIntervalSince(session.lastActivity)
@@ -2891,6 +2976,7 @@ actor SessionStore {
             guard session.ingress == .hookBridge else { continue }
             guard session.phase != .ended else { continue }
             guard session.pid == nil || session.pid == 0 else { continue }
+            guard !session.needsPromptNotification else { continue }
             guard pendingHookResponse(in: session) == nil else { continue }
             guard now.timeIntervalSince(session.lastActivity) >= Self.hookSessionIdleExpiry else {
                 continue
@@ -2955,8 +3041,10 @@ actor SessionStore {
         var removedAny = false
         for (sessionId, session) in Array(sessions) {
             let endedReap = session.phase == .ended
+            guard endedReap || !session.needsPromptNotification else { continue }
             let pidIsDead: Bool = {
-                guard let pid = session.pid, pid > 0 else { return false }
+                guard session.ingress.usesLocalProcessNamespace,
+                      let pid = session.pid, pid > 0 else { return false }
                 return !SessionProcessLiveness.isAlive(pid, lastSeenAlive: session.lastActivity)
             }()
             guard endedReap || pidIsDead else { continue }
@@ -2980,6 +3068,7 @@ actor SessionStore {
     }
 
     private func scheduleFinalSessionSync(for session: SessionState) {
+        guard session.ingress.usesLocalProcessNamespace else { return }
         if let sessionFilePath = session.clientInfo.sessionFilePath, !sessionFilePath.isEmpty {
             if session.provider == .codex {
                 scheduleCodexRolloutSync(
@@ -3615,10 +3704,34 @@ actor SessionStore {
         Array(sessions.values)
     }
 
+    /// A broken SSH attachment makes remote execution unknown, not running or
+    /// actionable. Preserve the last lifecycle until the bridge reconnects.
+    func markRemoteSessionsDisconnected(endpointID: UUID, legacyRemoteHost: String?) {
+        let normalizedHost = legacyRemoteHost?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased() ?? ""
+        var changed = false
+        for (sessionID, var session) in sessions {
+            guard session.ingress == .remoteBridge else { continue }
+            let matchesEndpoint = session.clientInfo.remoteEndpointID == endpointID
+            let matchesLegacyHost = session.clientInfo.remoteEndpointID == nil
+                && !normalizedHost.isEmpty
+                && session.clientInfo.remoteHost?
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .lowercased() == normalizedHost
+            guard (matchesEndpoint || matchesLegacyHost),
+                  session.connectionState != .disconnected else { continue }
+            session.connectionState = .disconnected
+            sessions[sessionID] = session
+            changed = true
+        }
+        if changed { publishState() }
+    }
+
     func requestFileSync(for sessionId: String) {
         let resolvedSessionId = resolveCodexSessionAlias(sessionId)
         guard let session = sessions[resolvedSessionId] else { return }
-        guard session.ingress != .remoteBridge else { return }
+        guard session.ingress.usesLocalProcessNamespace else { return }
 
         if session.provider == .codex {
             scheduleCodexRolloutSync(
@@ -3753,6 +3866,8 @@ actor SessionStore {
             lastActivity: incomingActivityAt,
             createdAt: initialCreatedAt
         )
+        let wasCompletedReady = SessionCompletionStateEvaluator.isCompletedReadySession(session)
+        let previousPhase = session.phase
         if let createdAt {
             session.createdAt = mergedCreatedAt(existing: session.createdAt, incoming: createdAt)
         }
@@ -3838,6 +3953,14 @@ actor SessionStore {
             }
         }
 
+        if wasCompletedReady && session.phase.isActive {
+            session.completionSequence &+= 1
+        }
+        recordCompactionTransition(from: previousPhase, in: &session)
+        if session.phase == .processing, incomingActivityAt > (existingLastActivity ?? .distantPast) {
+            session.isCodexTurnInterrupted = false
+        }
+
         let placeholderCandidate = isLikelyEmptyCodexPlaceholder(session)
         Self.logger.info(
             "Codex upsert session=\(resolvedSessionId, privacy: .public) sourceThread=\(sessionId, privacy: .public) phase=\(session.phase.description, privacy: .public) ingress=\(session.ingress.rawValue, privacy: .public) namePresent=\(name?.isEmpty == false, privacy: .public) previewPresent=\(preview?.isEmpty == false, privacy: .public) cwd=\(session.cwd, privacy: .public) filePathPresent=\(session.clientInfo.sessionFilePath?.isEmpty == false, privacy: .public) placeholderCandidate=\(placeholderCandidate, privacy: .public)"
@@ -3879,7 +4002,8 @@ actor SessionStore {
 
     func syncCodexThreadSnapshot(
         _ snapshot: CodexThreadSnapshot,
-        ingress: SessionIngress = .codexAppServer
+        ingress: SessionIngress = .codexAppServer,
+        readState: CodexThreadReadState? = nil
     ) {
         if case .none = snapshot.intervention,
            CodexAuxiliaryHookFilter.isCodexAuxiliaryThread(
@@ -3937,6 +4061,8 @@ actor SessionStore {
             lastActivity: snapshot.updatedAt,
             createdAt: snapshot.createdAt
         )
+        let wasCompletedReady = SessionCompletionStateEvaluator.isCompletedReadySession(session)
+        let previousPhase = session.phase
         session.createdAt = mergedCreatedAt(existing: session.createdAt, incoming: snapshot.createdAt)
         let snapshotPhase = snapshot.phase
         let hasCodexTurnCompletionEvidence = snapshotPhase == .idle
@@ -3964,6 +4090,16 @@ actor SessionStore {
         let shouldPreserveActiveTurnState = !snapshot.isTurnInterrupted
             && (shouldPreserveActivePhase || shouldPreserveStaleActivePhase)
         if !shouldPreserveActiveTurnState {
+            // An ordinary idle refresh or a late running snapshot is not
+            // evidence that the explicitly aborted turn resumed.
+            if snapshot.isTurnInterrupted {
+                session.isCodexTurnInterrupted = true
+            } else if (snapshotPhase == .processing && snapshot.updatedAt > (existingLastActivity ?? .distantPast))
+                || (snapshot.latestTurnId != nil
+                    && snapshot.latestTurnId != session.latestTurnId
+                    && snapshot.updatedAt >= (existingLastActivity ?? .distantPast)) {
+                session.isCodexTurnInterrupted = false
+            }
             if let name = snapshot.name, !name.isEmpty {
                 session.sessionName = name
             }
@@ -3980,16 +4116,19 @@ actor SessionStore {
         session.codexSubagentDepth = snapshot.subagentDepth
         session.codexSubagentNickname = snapshot.subagentNickname
         session.codexSubagentRole = snapshot.subagentRole
+        let interventionChangedDuringRead = readState.map { $0.intervention != session.intervention } ?? false
         let shouldPreserveExternalIntervention = !snapshot.isTurnInterrupted && shouldPreserveExternalCodexIntervention(
             current: session.intervention,
             incoming: snapshot.intervention,
             nextPhase: snapshotPhase,
             clientKind: session.clientInfo.kind
         )
-        if !shouldPreserveExternalIntervention {
+        if !shouldPreserveExternalIntervention && !interventionChangedDuringRead {
             session.intervention = snapshot.intervention
         }
-        if shouldPreserveExternalIntervention {
+        if interventionChangedDuringRead {
+            // A newer request or resolution owns both the card and its phase.
+        } else if shouldPreserveExternalIntervention {
             if let hookPermissionPhase = restoredCodexHookPermissionPhase(from: session.intervention) {
                 session.phase = hookPermissionPhase
             } else if !session.phase.needsAttention {
@@ -4029,6 +4168,11 @@ actor SessionStore {
                 incoming: snapshot.updatedAt
             )
         }
+
+        if wasCompletedReady && session.phase.isActive {
+            session.completionSequence &+= 1
+        }
+        recordCompactionTransition(from: previousPhase, in: &session)
 
         let placeholderCandidate = isLikelyEmptyCodexPlaceholder(session)
         Self.logger.debug(
@@ -4146,9 +4290,15 @@ actor SessionStore {
         return incomingActivityAt < currentLastActivity
     }
 
-    func resolveCodexIntervention(sessionId: String, nextPhase: SessionPhase = .processing) {
+    func resolveCodexIntervention(
+        sessionId: String,
+        nextPhase: SessionPhase = .processing,
+        requestId: String? = nil
+    ) {
         let resolvedSessionId = resolveCodexSessionAlias(sessionId)
         guard var session = sessions[resolvedSessionId] else { return }
+        // Delayed replies may not clear a newer approval request.
+        if let requestId, session.intervention?.id != requestId { return }
         session.intervention = nil
         session.phase = nextPhase
         session.lastActivity = Date()
@@ -4668,7 +4818,7 @@ actor SessionStore {
                 incoming: event.clientInfo,
                 sessionId: event.sessionId
             ),
-            ingress: .hookBridge,
+            ingress: event.ingress,
             latestHookMessage: Self.normalizedHookMessage(event.message),
             phase: event.sessionPhase,
             lastActivity: Date()
@@ -4807,6 +4957,9 @@ actor SessionStore {
             needsClearReconciliation: previousSession.needsClearReconciliation,
             latestTurnId: previousSession.latestTurnId,
             completionSequence: previousSession.completionSequence,
+            isCodexTurnInterrupted: previousSession.isCodexTurnInterrupted,
+            hasRemoteCodexTurnCompletion: previousSession.hasRemoteCodexTurnCompletion,
+            compactionSequence: previousSession.compactionSequence,
             lastActivity: previousSession.lastActivity,
             createdAt: previousSession.createdAt
         )

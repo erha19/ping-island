@@ -31,6 +31,11 @@ enum SessionScopedApprovalAction: Equatable, Sendable {
     }
 }
 
+enum SessionConnectionState: String, Codable, Equatable, Sendable {
+    case connected
+    case disconnected
+}
+
 /// Complete state for a single tracked session
 /// This is the single source of truth - all state reads and writes go through SessionStore
 struct SessionState: Equatable, Identifiable, Sendable {
@@ -43,11 +48,15 @@ struct SessionState: Equatable, Identifiable, Sendable {
     // MARK: - Identity
 
     let sessionId: String
+    /// In-memory row lifetime, independent of provider creation-time backfills.
+    /// Preserve when rebuilding this row; generate anew after actual removal.
+    let lifecycleIncarnationID: UUID
     var cwd: String
     var projectName: String
     var provider: SessionProvider
     var clientInfo: SessionClientInfo
     var ingress: SessionIngress
+    var connectionState: SessionConnectionState
     var sessionName: String?
     var previewText: String?
     var latestHookMessage: String?
@@ -60,6 +69,12 @@ struct SessionState: Equatable, Identifiable, Sendable {
     var codexSubagentRole: String?
     var latestTurnId: String?
     var completionSequence: UInt64
+    /// Explicit Codex abort evidence; an ordinary idle refresh cannot clear it.
+    var isCodexTurnInterrupted: Bool
+    /// A remote Stop completed this turn; idle thread metadata is not evidence.
+    var hasRemoteCodexTurnCompletion: Bool
+    /// In-memory compaction cycle, independent of completed assistant turns.
+    var compactionSequence: UInt64
     var linkedParentSessionId: String?
     var linkedSubagentDisplayTitle: String?
     var heuristicSubagentDisplayTitle: String?
@@ -123,6 +138,7 @@ struct SessionState: Equatable, Identifiable, Sendable {
         provider: SessionProvider = .claude,
         clientInfo: SessionClientInfo? = nil,
         ingress: SessionIngress = .hookBridge,
+        connectionState: SessionConnectionState = .connected,
         sessionName: String? = nil,
         previewText: String? = nil,
         latestHookMessage: String? = nil,
@@ -152,15 +168,21 @@ struct SessionState: Equatable, Identifiable, Sendable {
         needsClearReconciliation: Bool = false,
         latestTurnId: String? = nil,
         completionSequence: UInt64 = 0,
+        isCodexTurnInterrupted: Bool = false,
+        hasRemoteCodexTurnCompletion: Bool = false,
+        compactionSequence: UInt64 = 0,
         lastActivity: Date = Date(),
-        createdAt: Date = Date()
+        createdAt: Date = Date(),
+        lifecycleIncarnationID: UUID = UUID()
     ) {
         self.sessionId = sessionId
+        self.lifecycleIncarnationID = lifecycleIncarnationID
         self.cwd = cwd
         self.projectName = projectName ?? URL(fileURLWithPath: cwd).lastPathComponent
         self.provider = provider
         self.clientInfo = clientInfo ?? SessionClientInfo.default(for: provider)
         self.ingress = ingress
+        self.connectionState = connectionState
         self.sessionName = sessionName
         self.previewText = previewText
         self.latestHookMessage = latestHookMessage
@@ -173,6 +195,9 @@ struct SessionState: Equatable, Identifiable, Sendable {
         self.codexSubagentRole = codexSubagentRole
         self.latestTurnId = latestTurnId
         self.completionSequence = completionSequence
+        self.isCodexTurnInterrupted = isCodexTurnInterrupted
+        self.hasRemoteCodexTurnCompletion = hasRemoteCodexTurnCompletion
+        self.compactionSequence = compactionSequence
         self.linkedParentSessionId = linkedParentSessionId
         self.linkedSubagentDisplayTitle = linkedSubagentDisplayTitle
         self.heuristicSubagentDisplayTitle = heuristicSubagentDisplayTitle
@@ -193,20 +218,31 @@ struct SessionState: Equatable, Identifiable, Sendable {
 
     // MARK: - Derived Properties
 
-    /// Whether this session needs user attention
+    /// Legacy phase-level attention, including an ordinary completed turn.
+    /// Use needsManualAttention for actionable prompts and presentation priority.
     nonisolated var needsAttention: Bool {
         phase.needsAttention || intervention != nil
     }
 
     /// Whether this session should be surfaced before active/background work.
     nonisolated var needsManualAttention: Bool {
-        needsAttention
+        needsApprovalResponse || needsQuestionResponse
+    }
+
+    nonisolated var isExecutionActive: Bool {
+        connectionState == .connected && phase.isActive
+    }
+
+    nonisolated var contributesToProcessingSoundEdge: Bool {
+        connectionState == .connected && phase.contributesToProcessingSoundEdge
     }
 
     /// Whether this session should surface an attention notification for a prompt
     /// even when the prompt response itself must stay in the terminal/client.
     nonisolated var needsPromptNotification: Bool {
-        needsApprovalResponse || needsQuestionResponse || suppressInAppPromptControls
+        connectionState == .connected && (
+            needsApprovalResponse || needsQuestionResponse || suppressInAppPromptControls
+        )
     }
 
     /// How long a thinking block or running tool call keeps counting as proof that
@@ -467,6 +503,11 @@ struct SessionState: Equatable, Identifiable, Sendable {
 
     /// Safety net for ghost Codex sessions that have no rollout, no history, and no visible content.
     nonisolated var shouldHideFromPrimaryUI: Bool {
+        // A terminal-routed question can have neither inline controls nor chat
+        // content yet. It is still an unanswered prompt, not an empty restored row.
+        if needsPromptNotification {
+            return false
+        }
         if shouldAutoArchiveFromPrimaryUI {
             return true
         }
@@ -667,6 +708,7 @@ struct SessionState: Equatable, Identifiable, Sendable {
         comparedTo other: SessionState,
         maximumRecencyGap: TimeInterval
     ) -> Bool {
+        guard ingress.usesLocalProcessNamespace, other.ingress.usesLocalProcessNamespace else { return false }
         guard sessionId != other.sessionId else { return false }
         guard isLikelyTransientCodexContinuationPlaceholder else { return false }
         guard other.provider == .codex else { return false }
@@ -679,6 +721,7 @@ struct SessionState: Equatable, Identifiable, Sendable {
     }
 
     nonisolated func shouldHideAsDuplicateCodexPlaceholder(comparedTo other: SessionState) -> Bool {
+        guard ingress.usesLocalProcessNamespace, other.ingress.usesLocalProcessNamespace else { return false }
         guard sessionId != other.sessionId else { return false }
         guard isLikelyEmptyCodexPlaceholderForUI || isLikelyTransientCodexContinuationPlaceholder else { return false }
         guard other.provider == .codex else { return false }
@@ -700,6 +743,7 @@ struct SessionState: Equatable, Identifiable, Sendable {
     }
 
     nonisolated func shouldHideAsDuplicateOpenCodeChildSession(comparedTo other: SessionState) -> Bool {
+        guard ingress.usesLocalProcessNamespace, other.ingress.usesLocalProcessNamespace else { return false }
         guard sessionId != other.sessionId else { return false }
         guard isLikelyOpenCodeChildSessionPlaceholderForUI else { return false }
         guard other.clientInfo.brand == .opencode else { return false }
@@ -978,21 +1022,23 @@ struct SessionState: Equatable, Identifiable, Sendable {
 
     /// Whether the session can be interacted with
     nonisolated var canInteract: Bool {
-        phase.needsAttention || intervention != nil
+        needsManualAttention
     }
 
     /// Whether the session is waiting on a question-like intervention
     nonisolated var needsQuestionResponse: Bool {
-        intervention?.kind == .question
+        connectionState == .connected && intervention?.kind == .question
     }
 
     /// Whether the session is waiting on an approval-like decision.
     nonisolated var needsApprovalResponse: Bool {
-        phase.isWaitingForApproval || intervention?.kind == .approval
+        connectionState == .connected
+            && (phase.isWaitingForApproval || intervention?.kind == .approval)
     }
 
     /// Whether Island has a concrete response target for the active approval.
     nonisolated var canSubmitApprovalFromIsland: Bool {
+        guard connectionState == .connected else { return false }
         if let toolUseId = activePermission?.toolUseId,
            !toolUseId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return true
@@ -1122,15 +1168,13 @@ struct SessionState: Equatable, Identifiable, Sendable {
         isNativeRuntimeSession && phase != .ended
     }
 
-    /// Timestamp used when sorting sessions that need manual attention.
+    /// Timestamp used when sorting unanswered prompts, including terminal-routed ones.
     nonisolated var attentionRequestedAt: Date? {
+        guard needsPromptNotification else { return nil }
         if let permission = activePermission {
             return permission.receivedAt
         }
-        if needsAttention {
-            return lastActivity
-        }
-        return nil
+        return lastActivity
     }
 
     /// Timestamp used for recency ordering once attention-demanding sessions are handled.
@@ -1138,16 +1182,16 @@ struct SessionState: Equatable, Identifiable, Sendable {
     /// backfilled transcript timestamp from the first parsed user message cannot
     /// make the row jump backward during an in-flight update.
     nonisolated var queueSortActivityDate: Date {
-        if phase.isActive {
+        if isExecutionActive {
             return lastActivity
         }
         return lastUserMessageDate ?? lastActivity
     }
 
-    /// Sessions with no new activity for long enough should disappear from the primary list
-    /// until a new event or message refreshes `lastActivity`.
+    /// Quiet sessions auto-hide unless an unanswered prompt still needs to be
+    /// surfaced, even when its response must stay in the terminal/client.
     nonisolated var shouldAutoArchiveFromPrimaryUI: Bool {
-        if needsManualAttention {
+        if needsPromptNotification {
             return false
         }
         return Date().timeIntervalSince(lastActivity) >= Self.autoArchiveDelay
@@ -1167,7 +1211,7 @@ struct SessionState: Equatable, Identifiable, Sendable {
         if phase == .ended, shouldShowArchiveActionInPrimaryUI {
             return false
         }
-        if phase.isActive || needsManualAttention {
+        if isExecutionActive || needsPromptNotification {
             return false
         }
         return Date().timeIntervalSince(lastActivity) >= Self.minimalCompactDelay
@@ -1175,6 +1219,9 @@ struct SessionState: Equatable, Identifiable, Sendable {
 
     /// Whether the session list should offer a manual archive action for this row.
     nonisolated var shouldShowArchiveActionInPrimaryUI: Bool {
+        if connectionState == .disconnected {
+            return true
+        }
         switch phase {
         case .idle:
             return true
@@ -1188,15 +1235,15 @@ struct SessionState: Equatable, Identifiable, Sendable {
     }
 
     nonisolated func shouldSortBeforeInQueue(_ other: SessionState) -> Bool {
-        if phase.isActive != other.phase.isActive {
-            return phase.isActive
+        if isExecutionActive != other.isExecutionActive {
+            return isExecutionActive
         }
 
-        if needsManualAttention != other.needsManualAttention {
-            return needsManualAttention
+        if needsPromptNotification != other.needsPromptNotification {
+            return needsPromptNotification
         }
 
-        if needsManualAttention, other.needsManualAttention {
+        if needsPromptNotification, other.needsPromptNotification {
             let dateA = attentionRequestedAt ?? createdAt
             let dateB = other.attentionRequestedAt ?? other.createdAt
             if dateA != dateB {
@@ -1220,20 +1267,14 @@ struct SessionState: Equatable, Identifiable, Sendable {
     }
 
     private nonisolated var queuePhasePriority: Int {
-        if needsManualAttention {
+        if needsPromptNotification {
             return 0
         }
 
-        switch phase {
-        case .processing, .compacting:
+        if isExecutionActive {
             return 1
-        case .idle:
-            return 2
-        case .ended:
-            return 3
-        case .waitingForInput, .waitingForApproval:
-            return 0
         }
+        return phase == .ended ? 3 : 2
     }
 
     private nonisolated var normalizedWorkspacePath: String? {
