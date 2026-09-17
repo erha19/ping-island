@@ -149,6 +149,47 @@ final class SettingsWindowControllerTests: XCTestCase {
         XCTAssertFalse(window.isMovableByWindowBackground)
     }
 
+    func testThemeBackdropDoesNotCoverWindowContentOrTrafficLights() async throws {
+        let controller = SettingsWindowController()
+        let settings = AppSettings.shared
+        let originalTheme = settings.experienceThemeID
+        controller.present()
+        let window = try XCTUnwrap(controller.window)
+        let originalFrame = window.frame
+        defer {
+            settings.experienceThemeID = originalTheme
+            window.setFrame(originalFrame, display: false)
+            controller.dismiss()
+        }
+
+        // Check the fresh window before changing its theme or size.
+        for theme in [nil] + ExperienceThemeID.allCases.map({ Optional($0) }) {
+            if let theme {
+                settings.experienceThemeID = theme
+                window.setContentSize(NSSize(width: 1000, height: 600))
+            }
+            try await Task.sleep(for: .milliseconds(100))
+            let content = try XCTUnwrap(window.contentView)
+            let frame = try XCTUnwrap(content.superview)
+            window.displayIfNeeded()
+            let backdrops = frame.subviews.filter {
+                $0.identifier?.rawValue == "settings.window.theme-backdrop"
+            }
+            XCTAssertEqual(backdrops.count, 1, "Theme updates must reuse the backdrop")
+            let backdrop = try XCTUnwrap(backdrops.first)
+            XCTAssertIdentical(frame.subviews.first, backdrop, "Background must render below all window controls")
+            XCTAssertEqual(backdrop.frame, frame.bounds, "Background must follow window resizing")
+            let point = content.convert(NSPoint(x: 100, y: content.bounds.midY), to: frame)
+            XCTAssertNil(backdrop.hitTest(point))
+            let hit = try XCTUnwrap(frame.hitTest(point))
+            XCTAssertTrue(hit === content || hit.isDescendant(of: content), "Content hit intercepted by \(type(of: hit))")
+            let close = try XCTUnwrap(window.standardWindowButton(.closeButton))
+            let closePoint = close.convert(NSPoint(x: close.bounds.midX, y: close.bounds.midY), to: frame)
+            let closeHit = try XCTUnwrap(frame.hitTest(closePoint))
+            XCTAssertTrue(closeHit === close || closeHit.isDescendant(of: close), "Close button hit intercepted by \(type(of: closeHit))")
+        }
+    }
+
     func testMacOSSettingsSidebarUsesOutlineSystemSymbolsWithoutChangingPingIslandIcons() {
         for category in SettingsCategory.allCases {
             XCTAssertNotNil(NSImage(systemSymbolName: category.icon, accessibilityDescription: nil))
