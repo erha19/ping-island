@@ -429,6 +429,90 @@ final class SessionCompletionStateEvaluatorTests: XCTestCase {
         )
     }
 
+    func testRemoteCodexSnapshotDoesNotCompleteFromAssistantHistory() {
+        var session = makeCodexCompletedSession(now: Date())
+        session.ingress = .remoteBridge
+        session.conversationInfo = ConversationInfo(
+            summary: nil, lastMessage: "Done", lastMessageRole: "assistant",
+            lastToolName: nil, firstUserMessage: nil, lastUserMessageDate: nil
+        )
+
+        XCTAssertFalse(SessionCompletionStateEvaluator.isCompletedReadySession(session))
+        XCTAssertNil(SessionCompletionKey.make(for: session))
+    }
+
+    func testRemoteCodexEmptyStopDoesNotPreviewAnEarlierReply() {
+        for role in [nil, "user"] as [String?] {
+            var session = makeCodexCompletedSession(now: Date())
+            session.clientInfo = .codexCLI()
+            session.ingress = .remoteBridge
+            session.previewText = "Previous result"
+            session.hasRemoteCodexTurnCompletion = true
+            session.conversationInfo = ConversationInfo(
+                summary: nil, lastMessage: nil, lastMessageRole: role,
+                lastToolName: nil, firstUserMessage: nil, lastUserMessageDate: nil
+            )
+
+            XCTAssertTrue(SessionCompletionStateEvaluator.isCompletedReadySession(session))
+            XCTAssertNil(SessionCompletionPreviewBuilder.latestAssistantText(
+                for: session, notificationKind: .completed
+            ))
+        }
+    }
+
+    func testRemoteCodexCompletionDoesNotWaitForReplyOrRequeueAfterEnrichment() {
+        let now = Date()
+        var session = makeCodexCompletedSession(now: now)
+        session.ingress = .remoteBridge
+        session.hasRemoteCodexTurnCompletion = true
+        session.chatItems = [ChatHistoryItem(id: "prompt", type: .user("Do it"), timestamp: now)]
+        session.conversationInfo = ConversationInfo(
+            summary: nil, lastMessage: "Do it", lastMessageRole: "user",
+            lastToolName: nil, firstUserMessage: nil, lastUserMessageDate: nil
+        )
+
+        XCTAssertTrue(SessionCompletionStateEvaluator.isCompletedReadySession(session))
+        XCTAssertNil(SessionCompletionPreviewBuilder.latestAssistantText(for: session))
+        let completionKey = SessionCompletionKey.make(for: session)
+        XCTAssertNotNil(completionKey)
+        XCTAssertTrue(SessionCompletionNotificationPolicy.shouldQueueCompletedNotification(
+            for: session, previousPhase: .processing, isEnabled: true, now: now
+        ))
+        XCTAssertTrue(SessionCompletionNotificationPolicy.shouldQueueCompletedNotification(
+            for: session, previousPhase: .idle, isEnabled: true, now: now
+        ))
+        for previousPhase in [nil, .compacting, .ended] as [SessionPhase?] {
+            XCTAssertFalse(SessionCompletionNotificationPolicy.shouldQueueCompletedNotification(
+                for: session, previousPhase: previousPhase, isEnabled: true, now: now
+            ))
+        }
+        XCTAssertFalse(SessionCompletionNotificationPolicy.shouldQueueCompletedNotification(
+            for: session, previousPhase: .processing, isEnabled: false, now: now
+        ))
+
+        session.chatItems.append(ChatHistoryItem(id: "reply", type: .assistant("Done"), timestamp: now))
+        session.conversationInfo = ConversationInfo(
+            summary: nil, lastMessage: "Done", lastMessageRole: "assistant",
+            lastToolName: nil, firstUserMessage: nil, lastUserMessageDate: nil
+        )
+        XCTAssertEqual(SessionCompletionKey.make(for: session), completionKey)
+        XCTAssertFalse(SessionCompletionNotificationPolicy.shouldQueueCompletedNotification(
+            for: session, previousPhase: .idle, previousCompletionKey: completionKey,
+            isEnabled: true, now: now
+        ))
+
+        session.completionSequence += 1
+        XCTAssertTrue(SessionCompletionNotificationPolicy.shouldQueueCompletedNotification(
+            for: session, previousPhase: .idle, previousCompletionKey: completionKey,
+            isEnabled: true, now: now
+        ))
+
+        session.lastActivity = now.addingTimeInterval(-120)
+        XCTAssertFalse(SessionCompletionNotificationPolicy.shouldQueueCompletedNotification(
+            for: session, previousPhase: .processing, isEnabled: true, now: now
+        ))
+    }
+
     func testCodexWaitingForInputDoesNotQueueCompletionNotification() {
         let now = Date()
         let session = makeCodexCompletedSession(phase: .waitingForInput, now: now)

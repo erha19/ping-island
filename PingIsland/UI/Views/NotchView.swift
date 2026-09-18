@@ -64,7 +64,8 @@ struct NotchView: View {
     @State private var isVisible: Bool = false
     @State private var isHovering: Bool = false
     @State private var isBouncing: Bool = false
-    @State private var previousCompletionNotificationPhases: [String: SessionPhase] = [:]
+    @State private var previousCompletionNotificationStates:
+        [String: (phase: SessionPhase, completionKey: SessionCompletionKey?)] = [:]
     private let completionNotificationRegistry = SessionCompletionNotificationRegistry.shared
     private var completionNotificationQueue: [SessionCompletionNotification] {
         completionNotificationRegistry.pendingNotifications
@@ -1203,9 +1204,8 @@ struct NotchView: View {
     }
 
     private func primeCompletionNotificationTracking(_ instances: [SessionState]) {
-        previousCompletionNotificationPhases = Dictionary(
-            uniqueKeysWithValues: instances.map { ($0.stableId, $0.phase) }
-        )
+        previousCompletionNotificationStates =
+            SessionCompletionNotificationPolicy.trackingStates(for: instances)
         synchronizeCompletionNotifications()
     }
 
@@ -1217,21 +1217,20 @@ struct NotchView: View {
                 clearCompletionNotifications(keepPanelOpen: true)
             }
 
-            previousCompletionNotificationPhases = Dictionary(
-                uniqueKeysWithValues: instances.map { ($0.stableId, $0.phase) }
-            )
+            previousCompletionNotificationStates =
+                SessionCompletionNotificationPolicy.trackingStates(for: instances)
             return
         }
 
-        let currentPhases = Dictionary(
-            uniqueKeysWithValues: instances.map { ($0.stableId, $0.phase) }
-        )
+        let currentStates = SessionCompletionNotificationPolicy.trackingStates(for: instances)
 
         let newNotifications = instances
             .compactMap { session -> SessionCompletionNotification? in
                 completionNotificationCandidate(
                     for: session,
-                    previousPhase: previousCompletionNotificationPhases[session.stableId]
+                    previousPhase: previousCompletionNotificationStates[
+                        SessionCompletionNotificationPolicy.trackingID(for: session)
+                    ]?.phase
                 )
             }
             .sorted { $0.session.lastActivity < $1.session.lastActivity }
@@ -1240,7 +1239,7 @@ struct NotchView: View {
             enqueueCompletionNotification(notification)
         }
 
-        previousCompletionNotificationPhases = currentPhases
+        previousCompletionNotificationStates = currentStates
         maybePresentNextCompletionNotification()
     }
 
@@ -1270,6 +1269,9 @@ struct NotchView: View {
         SessionCompletionNotificationPolicy.shouldQueueCompletedNotification(
             for: session,
             previousPhase: previousPhase,
+            previousCompletionKey: previousCompletionNotificationStates[
+                SessionCompletionNotificationPolicy.trackingID(for: session)
+            ]?.completionKey,
             isEnabled: settings.autoOpenCompletionPanel
         )
     }

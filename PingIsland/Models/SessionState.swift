@@ -71,6 +71,8 @@ struct SessionState: Equatable, Identifiable, Sendable {
     var completionSequence: UInt64
     /// Explicit Codex abort evidence; an ordinary idle refresh cannot clear it.
     var isCodexTurnInterrupted: Bool
+    /// A remote Stop completed this turn; idle thread metadata is not evidence.
+    var hasRemoteCodexTurnCompletion: Bool
     /// In-memory compaction cycle, independent of completed assistant turns.
     var compactionSequence: UInt64
     var linkedParentSessionId: String?
@@ -167,6 +169,7 @@ struct SessionState: Equatable, Identifiable, Sendable {
         latestTurnId: String? = nil,
         completionSequence: UInt64 = 0,
         isCodexTurnInterrupted: Bool = false,
+        hasRemoteCodexTurnCompletion: Bool = false,
         compactionSequence: UInt64 = 0,
         lastActivity: Date = Date(),
         createdAt: Date = Date(),
@@ -193,6 +196,7 @@ struct SessionState: Equatable, Identifiable, Sendable {
         self.latestTurnId = latestTurnId
         self.completionSequence = completionSequence
         self.isCodexTurnInterrupted = isCodexTurnInterrupted
+        self.hasRemoteCodexTurnCompletion = hasRemoteCodexTurnCompletion
         self.compactionSequence = compactionSequence
         self.linkedParentSessionId = linkedParentSessionId
         self.linkedSubagentDisplayTitle = linkedSubagentDisplayTitle

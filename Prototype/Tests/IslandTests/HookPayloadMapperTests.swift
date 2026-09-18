@@ -2,6 +2,84 @@ import Foundation
 import IslandShared
 import Testing
 
+@Test(arguments: [
+    (body: "## Result\n\n```python\nif ready:\n    run()\n```", preview: "## Result ```python if ready: run() ```"),
+    (body: "    if ready:\n        run()", preview: "if ready: run()"),
+    (body: "\tif ready:\r\n\t\trun()", preview: "if ready: run()"),
+    (body: "\u{200B}\nresult\n\u{200B}", preview: "result")
+])
+func codexConversationHooksPreserveMessageFormatting(testCase: (body: String, preview: String)) throws {
+    let cases = [
+        ("UserPromptSubmit", "prompt"),
+        ("UserPromptSubmit", "message"),
+        ("Stop", "last_assistant_message"),
+        ("Stop", "message")
+    ]
+
+    for (event, field) in cases {
+        var payload = [
+            "hook_event_name": event,
+            "session_id": "codex-formatted-message",
+            "cwd": "/tmp/project"
+        ]
+        payload[field] = "<system-reminder>Client context</system-reminder>\n\(testCase.body)"
+        let envelope = HookPayloadMapper.makeEnvelope(
+            source: .codex,
+            arguments: [],
+            environment: [:],
+            stdinData: try JSONSerialization.data(withJSONObject: payload)
+        )
+
+        #expect(envelope.metadata["message"] == testCase.body)
+        #expect(envelope.preview == testCase.preview)
+    }
+}
+
+@Test
+func codexStopPrefersFinalReplyOverMessageSummary() throws {
+    let reply = "## Result\n\n- First change\n- Second change"
+    for finalReply in [reply, " \n\t"] {
+        let envelope = HookPayloadMapper.makeEnvelope(
+            source: .codex,
+            arguments: [],
+            environment: [:],
+            stdinData: try JSONSerialization.data(withJSONObject: [
+                "hook_event_name": "Stop",
+                "session_id": "codex-final-reply",
+                "last_assistant_message": finalReply,
+                "message": "Summary\n\nMore details"
+            ])
+        )
+
+        let expectedMessage = finalReply == reply ? reply : "Summary\n\nMore details"
+        #expect(envelope.metadata["message"] == expectedMessage)
+    }
+}
+
+@Test
+func codexStopPreservesLongInteriorWhitespaceWithoutStalling() throws {
+    let body = "    begin" + String(repeating: "\n ", count: 32_768) + "end  "
+    let payload = try JSONSerialization.data(withJSONObject: [
+        "hook_event_name": "Stop",
+        "session_id": "codex-long-whitespace",
+        "last_assistant_message": "\r\n\t\r\n\(body)\r\n \t"
+    ])
+
+    let start = ContinuousClock.now
+    let envelope = HookPayloadMapper.makeEnvelope(
+        source: .codex,
+        arguments: [],
+        environment: [:],
+        stdinData: payload
+    )
+    let elapsed = start.duration(to: .now)
+
+    #expect(envelope.metadata["message"] == body)
+    #expect(envelope.preview == "begin end")
+    // Leave ample headroom while detecting repeated scans of the interior blank lines.
+    #expect(elapsed < .seconds(2))
+}
+
 @Test
 func codexPermissionReviewerUsesOnlyTheMatchingTurn() async throws {
     try await withTemporaryDirectory { directory in

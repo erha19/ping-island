@@ -138,6 +138,10 @@ struct HookEvent: Sendable {
             return .processing
         }
 
+        if isRemoteCodexTurnCompletion {
+            return .idle
+        }
+
         switch status {
         case "waiting_for_approval":
             return .waitingForApproval(PermissionContext(
@@ -309,6 +313,14 @@ struct HookEvent: Sendable {
 }
 
 extension HookEvent {
+    /// A remote Codex Stop is authoritative turn-completion evidence because
+    /// the referenced rollout file remains on the SSH host.
+    nonisolated var isRemoteCodexTurnCompletion: Bool {
+        provider == .codex
+            && ingress == .remoteBridge
+            && event == "Stop"
+    }
+
     nonisolated func withToolUseId(_ toolUseId: String) -> HookEvent {
         HookEvent(
             sessionId: sessionId,

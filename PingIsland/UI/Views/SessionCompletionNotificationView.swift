@@ -89,15 +89,30 @@ nonisolated struct SessionCompletionNotification: Equatable, Identifiable {
 
 enum SessionCompletionPreviewBuilder {
     static func latestUserText(for session: SessionState) -> String? {
+        let isRemoteCodex = session.provider == .codex && session.ingress == .remoteBridge
         for item in session.chatItems.reversed() {
             if case .user(let text) = item.type {
+                // An empty prompt still advances this boundary without adding
+                // a chat item. Do not pair an older question with the new reply.
+                if isRemoteCodex {
+                    guard let submittedAt = session.conversationInfo.lastUserMessageDate,
+                          item.timestamp >= submittedAt else { return nil }
+                }
                 return sanitized(text)
             }
         }
-        return sanitized(session.firstUserMessage)
+        return isRemoteCodex ? nil : sanitized(session.firstUserMessage)
     }
 
     static func latestAssistantText(for session: SessionState) -> String? {
+        // A remote turn can complete without a prompt or reply body. Keep the
+        // notification, but do not present an earlier turn's text as its result.
+        if session.provider == .codex,
+           session.ingress == .remoteBridge,
+           session.lastMessageRole != "assistant" {
+            return nil
+        }
+
         var activityFallback: String?
         for item in session.chatItems.reversed() {
             switch item.type {
@@ -149,6 +164,10 @@ nonisolated enum SessionCompletionStateEvaluator {
         guard case nil = session.intervention else { return false }
         guard !session.needsPromptNotification else { return false }
         if session.provider == .codex {
+            // Remote discovery reports idle metadata before any Stop is observed.
+            if session.ingress == .remoteBridge, !session.hasRemoteCodexTurnCompletion {
+                return false
+            }
             return session.phase == .idle && !session.isCodexTurnInterrupted
         }
         return session.phase == .waitingForInput || isCompletedOpenCodeIdleSession(session)
@@ -235,9 +254,38 @@ final class SessionCompletionNotificationRegistry {
 enum SessionCompletionNotificationPolicy {
     private static let notificationRecencyWindow: TimeInterval = 60
 
+    static func trackingStates(
+        for sessions: [SessionState]
+    ) -> [String: (phase: SessionPhase, completionKey: SessionCompletionKey?)] {
+        Dictionary(uniqueKeysWithValues: sessions.map {
+            (trackingID(for: $0), trackingState(for: $0))
+        })
+    }
+
+    static func trackingState(
+        for session: SessionState
+    ) -> (phase: SessionPhase, completionKey: SessionCompletionKey?) {
+        var snapshot = session
+        if snapshot.provider == .codex, snapshot.ingress == .remoteBridge {
+            // Losing transport must not erase the observed turn identity.
+            // Notification eligibility still checks the actual connection state.
+            snapshot.connectionState = .connected
+        }
+        return (phase: session.phase, completionKey: SessionCompletionKey.make(for: snapshot))
+    }
+
+    static func trackingID(for session: SessionState) -> String {
+        // Remote discovery omits the PID that hooks may report or change.
+        if session.provider == .codex, session.ingress == .remoteBridge {
+            return session.sessionId
+        }
+        return session.stableId
+    }
+
     static func shouldQueueCompletedNotification(
         for session: SessionState,
         previousPhase: SessionPhase?,
+        previousCompletionKey: SessionCompletionKey? = nil,
         isEnabled: Bool,
         now: Date = Date()
     ) -> Bool {
@@ -245,8 +293,13 @@ enum SessionCompletionNotificationPolicy {
         guard SessionCompletionStateEvaluator.isCompletedReadySession(session) else { return false }
 
         if session.provider == .codex {
-            guard session.phase == .idle else { return false }
-            guard let previousPhase, isCodexCompletionSourcePhase(previousPhase) else {
+            guard session.phase == .idle, let previousPhase else { return false }
+            if session.ingress == .remoteBridge, previousPhase == .idle {
+                // Discovery and Stop can both be idle; only a new Stop key queues a popup.
+                guard SessionCompletionKey.make(for: session) != previousCompletionKey else {
+                    return false
+                }
+            } else if !isCodexCompletionSourcePhase(previousPhase) {
                 return false
             }
             return wasTrackedOrRecentlyCreated(session, previousPhase: previousPhase, now: now)
@@ -368,7 +421,11 @@ struct SessionCompletionNotificationView: View {
     }
 
     private var userText: String? {
-        SessionCompletionPreviewBuilder.latestUserText(for: session)
+        let text = SessionCompletionPreviewBuilder.latestUserText(for: session)
+        if session.provider == .codex, session.ingress == .remoteBridge {
+            return text
+        }
+        return text ?? session.titleOnlySubagentDisplayTitle
     }
 
     private var assistantText: String? {
@@ -460,15 +517,19 @@ struct SessionCompletionNotificationView: View {
     private var contentCard: some View {
         let content = VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Text(appLocalized: "你：")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(.white.opacity(0.48))
+                if let userText {
+                    Text(appLocalized: "你：")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.48))
 
-                Text(userText ?? session.titleOnlySubagentDisplayTitle)
-                    .font(.system(size: bodyFontSize, weight: .semibold))
-                    .foregroundColor(.white.opacity(0.88))
-                    .lineLimit(2)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    Text(userText)
+                        .font(.system(size: bodyFontSize, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.88))
+                        .lineLimit(2)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    Spacer(minLength: 0)
+                }
 
                 Text(AppLocalization.string(notification.kind.statusLabelKey))
                     .font(.system(size: 13, weight: .bold))

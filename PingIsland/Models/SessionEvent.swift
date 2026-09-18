@@ -652,6 +652,10 @@ extension HookEvent {
             return .idle
         }
 
+        if isRemoteCodexTurnCompletion {
+            return .idle
+        }
+
         switch status {
         case "waiting_for_approval":
             if shouldSuppressApprovalHandling {

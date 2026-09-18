@@ -318,6 +318,7 @@ actor SessionStore {
             latestTurnId: existing?.latestTurnId,
             completionSequence: existing?.completionSequence ?? 0,
             isCodexTurnInterrupted: existing?.isCodexTurnInterrupted ?? false,
+            hasRemoteCodexTurnCompletion: existing?.hasRemoteCodexTurnCompletion ?? false,
             compactionSequence: existing?.compactionSequence ?? 0,
             lastActivity: Date(),
             createdAt: existing?.createdAt ?? handle.createdAt,
@@ -536,6 +537,10 @@ actor SessionStore {
             processKimiHookCompletion(event: event, session: &session)
         }
 
+        // Remote Codex rollout files are not available on the Mac. Preserve
+        // hook-carried turn boundaries and final replies as conversation state.
+        processRemoteCodexHookConversation(event: event, session: &session)
+
         let shouldPreserveEndedStopForAnsweredQuestion =
             event.status == "ended"
             && event.event == "Stop"
@@ -606,8 +611,29 @@ actor SessionStore {
         let newPhase: SessionPhase = preservesExistingPhase
             ? session.phase
             : inferredPhase
-        if wasCompletedReady, newPhase == .processing {
+        // Remote CLI resume moves a completed session to waitingForInput.
+        // Its retained Stop marks the boundary for the next prompt or tool activity.
+        let startsNextRemoteCodexTurn = event.provider == .codex
+            && event.ingress == .remoteBridge
+            && (event.event == "UserPromptSubmit" || event.isToolEvent)
+            && session.hasRemoteCodexTurnCompletion
+        if wasCompletedReady || startsNextRemoteCodexTurn, newPhase == .processing {
             session.completionSequence &+= 1
+            if event.provider == .codex, event.ingress == .remoteBridge,
+               event.event != "UserPromptSubmit" {
+                // Tool activity can start a turn whose prompt hook was lost.
+                // Retain history, but discard the previous turn's preview fields.
+                session.previewText = nil
+                session.latestHookMessage = Self.normalizedHookMessage(event.message)
+                session.conversationInfo = ConversationInfo(
+                    summary: session.conversationInfo.summary,
+                    lastMessage: nil,
+                    lastMessageRole: nil,
+                    lastToolName: nil,
+                    firstUserMessage: session.conversationInfo.firstUserMessage,
+                    lastUserMessageDate: nil
+                )
+            }
         }
         let intervention = codeBuddyCLINotificationIntervention ?? event.intervention
         let shouldPreserveQwenQuestionIntervention = shouldPreserveQwenQuestionIntervention(
@@ -655,7 +681,8 @@ actor SessionStore {
             session: session,
             incomingPhase: newPhase,
             referenceDate: Date(),
-            previousLastActivity: previousLastActivity
+            previousLastActivity: previousLastActivity,
+            hasCodexTurnCompletionEvidence: event.isRemoteCodexTurnCompletion
         ) {
             session.lastActivity = previousLastActivity
         } else if let resumedPhase = resumedPhaseForFreshHookActivity(
@@ -749,6 +776,9 @@ actor SessionStore {
         recordCompactionTransition(from: phaseBeforeHook, in: &session)
         if session.provider == .codex, session.phase == .processing, !preservesExistingPhase {
             session.isCodexTurnInterrupted = false
+            if session.ingress == .remoteBridge {
+                session.hasRemoteCodexTurnCompletion = false
+            }
         }
         sessions[sessionId] = session
         IslandTrace.emit(
@@ -992,6 +1022,65 @@ actor SessionStore {
         default:
             break
         }
+    }
+
+    private func processRemoteCodexHookConversation(event: HookEvent, session: inout SessionState) {
+        guard event.provider == .codex, event.ingress == .remoteBridge else { return }
+
+        if event.event == "UserPromptSubmit" {
+            let userMessage = SessionTextSanitizer.sanitizedMessageText(event.message)
+            let timestamp = Date()
+            // A new turn invalidates every fallback to the previous reply,
+            // including when the prompt body is absent.
+            session.previewText = nil
+            session.latestHookMessage = userMessage
+            if let userMessage {
+                session.chatItems.append(ChatHistoryItem(
+                    id: "remote-codex-user-\(UUID().uuidString)",
+                    type: .user(userMessage),
+                    timestamp: timestamp
+                ))
+            }
+            session.conversationInfo = ConversationInfo(
+                summary: session.conversationInfo.summary,
+                lastMessage: userMessage,
+                lastMessageRole: "user",
+                lastToolName: nil,
+                firstUserMessage: session.conversationInfo.firstUserMessage ?? userMessage,
+                lastUserMessageDate: timestamp
+            )
+            return
+        }
+
+        guard event.isRemoteCodexTurnCompletion else { return }
+        session.hasRemoteCodexTurnCompletion = true
+        let assistantMessage = SessionTextSanitizer.sanitizedMessageText(event.message)
+        let hasTurnActivity = session.phase != .idle && session.phase != .ended
+        // An empty Stop invalidates an older reply only after new turn activity.
+        guard assistantMessage != nil || (hasTurnActivity && session.lastMessageRole == "assistant") else {
+            return
+        }
+
+        // Fresh tool activity can start a turn even if its prompt hook was lost.
+        let isReplay = !hasTurnActivity
+            && session.lastMessageRole == "assistant"
+            && session.conversationInfo.lastMessage == assistantMessage
+        if let assistantMessage, !isReplay {
+            session.chatItems.append(ChatHistoryItem(
+                id: "remote-codex-stop-\(UUID().uuidString)",
+                type: .assistant(assistantMessage),
+                timestamp: Date()
+            ))
+        }
+        session.previewText = assistantMessage
+        session.conversationInfo = ConversationInfo(
+            summary: session.conversationInfo.summary,
+            lastMessage: assistantMessage,
+            lastMessageRole: assistantMessage == nil ? nil : "assistant",
+            lastToolName: nil,
+            firstUserMessage: session.conversationInfo.firstUserMessage,
+            lastUserMessageDate: session.conversationInfo.lastUserMessageDate
+        )
     }
 
     /// Build chat history items from Hermes hook events so the conversation is
@@ -2211,6 +2300,7 @@ actor SessionStore {
             || latest.latestTurnId != original.latestTurnId
             || latest.completionSequence != original.completionSequence
             || latest.isCodexTurnInterrupted != original.isCodexTurnInterrupted
+            || latest.hasRemoteCodexTurnCompletion != original.hasRemoteCodexTurnCompletion
             || latest.compactionSequence != original.compactionSequence
 
         if lifecycleChangedWhileEnriching {
@@ -2222,6 +2312,7 @@ actor SessionStore {
             committed.latestTurnId = latest.latestTurnId
             committed.completionSequence = latest.completionSequence
             committed.isCodexTurnInterrupted = latest.isCodexTurnInterrupted
+            committed.hasRemoteCodexTurnCompletion = latest.hasRemoteCodexTurnCompletion
         }
         sessions[update.sessionId] = committed
         return committed
@@ -4867,6 +4958,7 @@ actor SessionStore {
             latestTurnId: previousSession.latestTurnId,
             completionSequence: previousSession.completionSequence,
             isCodexTurnInterrupted: previousSession.isCodexTurnInterrupted,
+            hasRemoteCodexTurnCompletion: previousSession.hasRemoteCodexTurnCompletion,
             compactionSequence: previousSession.compactionSequence,
             lastActivity: previousSession.lastActivity,
             createdAt: previousSession.createdAt
