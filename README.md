@@ -10,7 +10,7 @@
   <a href="#features">Features</a> •
   <a href="#supported-clients">Supported Clients</a> •
   <a href="#build-from-source">Build</a> •
-  <a href="#contributors">Contributors</a> •
+  <a href="#developers">Developers</a> •
   <a href="docs/privacy-policy.md">Privacy</a><br>
   English | <a href="README.zh-CN.md">简体中文</a>
 </p>
@@ -352,11 +352,17 @@ Implementation details worth knowing:
 - Best experience on MacBooks with a notch, but external displays are supported too
 - Install whichever CLI or desktop clients you want Ping Island to monitor
 
-## Contributors
+<a id="contributors"></a>
 
-Thanks to everyone who has helped shape Ping Island through code, issues, ideas, testing, docs, design feedback, and release validation.
+## Developers
 
-See the full contributor history on the [GitHub contributors graph](https://github.com/erha19/ping-island/graphs/contributors).
+Ping Island grows with the people who build it. From client integrations and interaction design to bug fixes and documentation, every contribution makes the island a little better. Thank you to everyone who shares code, tests a release, or brings a fresh idea. ❤️
+
+<a href="https://github.com/erha19/ping-island/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=erha19/ping-island" alt="Ping Island contributors" />
+</a>
+
+Explore [their contributions](https://github.com/erha19/ping-island/graphs/contributors) and give them a follow. Want to help shape Ping Island? Share an idea or report a bug in [Issues](https://github.com/erha19/ping-island/issues), or contribute a [Pull Request](https://github.com/erha19/ping-island/pulls).
 
 ## Acknowledgments
 

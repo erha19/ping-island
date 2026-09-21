@@ -10,6 +10,7 @@
   <a href="#features">功能</a> •
   <a href="#supported-clients">支持的客户端</a> •
   <a href="#build-from-source">构建</a> •
+  <a href="#developers">开发者</a> •
   <a href="docs/privacy-policy.md">隐私政策</a><br>
   <a href="README.md">English</a> | 简体中文
 </p>
@@ -314,6 +315,18 @@ Claude / Codex / Gemini CLI / Hermes Agent / Pi Agent / Oh My Pi (OMP) / Qwen Co
 - macOS 14.0 或更高
 - 在带刘海的 MacBook 上体验最好，但也支持外接显示器
 - 安装你希望 Ping Island 监控的 CLI 或桌面客户端
+
+<a id="developers"></a>
+
+## 开发者
+
+Ping Island 的成长，离不开每一位参与共建的朋友。从客户端接入、交互打磨，到问题修复、文档完善，每一份贡献都让这座小岛变得更好。感谢所有提交代码、参与测试、分享想法的你们。❤️
+
+<a href="https://github.com/erha19/ping-island/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=erha19/ping-island" alt="Ping Island 贡献者" />
+</a>
+
+欢迎看看[他们的贡献](https://github.com/erha19/ping-island/graphs/contributors)，也关注一下这些开发者。想一起建设 Ping Island？欢迎在 [Issues](https://github.com/erha19/ping-island/issues) 中分享想法、反馈问题，或提交 [Pull Request](https://github.com/erha19/ping-island/pulls)。
 
 ## 致谢
 
