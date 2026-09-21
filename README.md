@@ -11,6 +11,7 @@
   <a href="#supported-clients">Supported Clients</a> •
   <a href="#build-from-source">Build</a> •
   <a href="#developers">Developers</a> •
+  <a href="#sponsorship">Sponsor</a> •
   <a href="docs/privacy-policy.md">Privacy</a><br>
   English | <a href="README.zh-CN.md">简体中文</a>
 </p>
@@ -367,6 +368,31 @@ Explore [their contributions](https://github.com/erha19/ping-island/graphs/contr
 ## Acknowledgments
 
 Ping Island follows the lineage of notch-first agent monitors such as [claude-island](https://github.com/farouqaldori/claude-island), and adapts that idea into a broader multi-client session surface with hooks, app-server sync, and IDE routing.
+
+<a id="sponsorship"></a>
+
+## Support & Sponsoring
+
+If Ping Island helps you stay focused while your agents work, consider supporting its ongoing development and maintenance. Thank you for helping this little island grow. ❤️
+
+<p>
+  <a href="https://www.paypal.com/qrcodes/p2pqrc/K3DBZ5H7RZ596">
+    <img src="docs/images/sponsorship/paypal.svg" alt="Sponsor Ping Island with PayPal" height="28" />
+  </a>
+</p>
+
+You can also scan a QR code with Alipay or WeChat Pay:
+
+<table>
+  <tr>
+    <th align="center">Alipay</th>
+    <th align="center">WeChat Pay</th>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/images/sponsorship/alipay.svg" alt="Alipay support QR code" width="180" height="180" /></td>
+    <td align="center"><img src="docs/images/sponsorship/wechat.svg" alt="WeChat Pay support QR code" width="180" height="180" /></td>
+  </tr>
+</table>
 
 ## License
 

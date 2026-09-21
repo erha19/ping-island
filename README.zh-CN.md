@@ -11,6 +11,7 @@
   <a href="#supported-clients">支持的客户端</a> •
   <a href="#build-from-source">构建</a> •
   <a href="#developers">开发者</a> •
+  <a href="#sponsorship">赞助</a> •
   <a href="docs/privacy-policy.md">隐私政策</a><br>
   <a href="README.md">English</a> | 简体中文
 </p>
@@ -331,6 +332,31 @@ Ping Island 的成长，离不开每一位参与共建的朋友。从客户端�
 ## 致谢
 
 Ping Island 延续了 [claude-island](https://github.com/farouqaldori/claude-island) 这类刘海式 Agent 监视器的思路，并把它扩展到了多客户端 hooks、Codex app-server 同步和 IDE 路由能力上。
+
+<a id="sponsorship"></a>
+
+## 赞助支持
+
+如果 Ping Island 让你在与 AI 协作时更专注，欢迎赞助支持项目的持续开发与维护。感谢你为这座小岛添一份力量。❤️
+
+<p>
+  <a href="https://www.paypal.com/qrcodes/p2pqrc/K3DBZ5H7RZ596">
+    <img src="docs/images/sponsorship/paypal.svg" alt="通过 PayPal 赞助 Ping Island" height="28" />
+  </a>
+</p>
+
+也可以使用支付宝或微信扫描下方二维码：
+
+<table>
+  <tr>
+    <th align="center">支付宝</th>
+    <th align="center">微信支付</th>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/images/sponsorship/alipay.svg" alt="支付宝赞助二维码" width="180" height="180" /></td>
+    <td align="center"><img src="docs/images/sponsorship/wechat.svg" alt="微信支付赞助二维码" width="180" height="180" /></td>
+  </tr>
+</table>
 
 ## 许可证
 
