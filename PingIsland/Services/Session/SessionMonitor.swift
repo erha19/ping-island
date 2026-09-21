@@ -1083,7 +1083,8 @@ class SessionMonitor: ObservableObject {
         let profileID = normalizedClientInfo?.profileID?.lowercased()
         let bundleIdentifier = normalizedClientInfo?.bundleIdentifier?.lowercased()
 
-        if profileID == "qoder-cli" || profileID == "qoder-cn-cli" {
+        if profileID == "qoder-cli" || profileID == "qoder-cn-cli"
+            || normalizedClientInfo?.isQoderDesktopAppClient == true {
             return .qoderCLI
         }
 
@@ -1227,9 +1228,11 @@ class SessionMonitor: ObservableObject {
     nonisolated static func defaultQoderAutoAnswer(
         for event: HookEvent
     ) -> (toolUseId: String, answers: [String: [String]], updatedInput: [String: Any])? {
+        guard event.bridgeExpectsResponse != false else { return nil }
         let normalizedClientInfo = event.clientInfo.normalizedForClaudeRouting()
         let isManagedQuestion =
-            normalizedClientInfo.profileID == "qoder"
+            normalizedClientInfo.isQoderDesktopAppClient
+            || normalizedClientInfo.profileID == "qoder"
             || normalizedClientInfo.profileID == "qoder-cn"
             || normalizedClientInfo.profileID == "qoderwork"
             || normalizedClientInfo.profileID == "codebuddy"

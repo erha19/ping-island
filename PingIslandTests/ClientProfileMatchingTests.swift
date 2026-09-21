@@ -240,7 +240,7 @@ final class ClientProfileMatchingTests: XCTestCase {
         XCTAssertEqual(merged.kind, .codexCLI)
         XCTAssertEqual(merged.profileID, "codex-cli")
         XCTAssertEqual(merged.terminalSessionIdentifier, "terminal-123")
-        XCTAssertEqual(merged.ideHostBadgeLabel(for: .codex), "Qoder CN IDE 终端")
+        XCTAssertEqual(merged.ideHostBadgeLabel(for: .codex), "Qoder CN 终端")
         XCTAssertFalse(merged.prefersAppNavigation)
     }
 

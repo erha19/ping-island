@@ -384,6 +384,73 @@ func islandBridgeDeliversClaudeDesktopToolEventsThroughSocketServer() async thro
     }
 }
 
+@Test(arguments: ["qoder-cli", "qoder-cn-cli"])
+func islandBridgeRoundTripsQoderAppQuestionsAndApprovals(clientKind: String) async throws {
+    for isQuestion in [true, false] {
+        try await withTemporaryDirectory { directory in
+            let recorder = await MainActor.run { SnapshotRecorder() }
+            let store = SessionStore { recorder.snapshot = $0 }
+            let coordinator = ApprovalCoordinator()
+            let socketPath = directory.appending(path: "island.sock").path()
+            try await withRunningSocketServer(
+                socketPath: socketPath,
+                sessionStore: store,
+                approvalCoordinator: coordinator
+            ) { _ in
+                let payload: [String: Any] = [
+                    "hook_event_name": isQuestion ? "PreToolUse" : "PermissionRequest",
+                    "session_id": "qoder-app-e2e",
+                    "parent_business_info": ["product": "app"],
+                    "tool_name": isQuestion ? "AskUserQuestion" : "Bash",
+                    "tool_input": isQuestion
+                        ? ["questions": [["question": "Which option?", "options": [["label": "One"], ["label": "Two"]]]]]
+                        : ["command": "pwd"]
+                ]
+                let executable = try TestRuntime.executableURL(named: "PingIslandBridge")
+                let process = try RunningProcess(
+                    executableURL: executable,
+                    arguments: ["--source", "claude", "--client-kind", clientKind, "--client-origin", "cli"],
+                    environment: bridgeTestEnvironment([
+                        "HOME": directory.path(),
+                        "ISLAND_SOCKET_PATH": socketPath,
+                        "__CFBundleIdentifier": clientKind == "qoder-cli" ? "com.qoder.app" : "com.aliyun.lingma.ide"
+                    ]),
+                    stdin: String(decoding: try JSONSerialization.data(withJSONObject: payload), as: UTF8.self)
+                )
+                defer { process.terminate() }
+                try await waitUntil(description: "Qoder App should retain its blocking intervention") {
+                    await MainActor.run {
+                        recorder.snapshot.highlightedIntervention?.kind == (isQuestion ? .question : .approval)
+                    }
+                }
+                let intervention = try await MainActor.run {
+                    try #require(recorder.snapshot.highlightedIntervention)
+                }
+                #expect(process.isRunning)
+                await coordinator.resolve(
+                    requestID: intervention.id,
+                    decision: isQuestion ? .answer(["Which option?": "One"]) : .approve
+                )
+                let result = process.waitForExit()
+                #expect(result.terminationStatus == 0)
+                let output = try #require(JSONSerialization.jsonObject(with: Data(result.stdout.utf8)) as? [String: Any])
+                let specific = try #require(output["hookSpecificOutput"] as? [String: Any])
+                let decision = try #require(specific["decision"] as? [String: Any])
+                #expect(decision["behavior"] as? String == "allow")
+                if isQuestion {
+                    #expect(specific["permissionDecision"] as? String == "allow")
+                    let updatedInput = try #require(specific["updatedInput"] as? [String: Any])
+                    #expect(updatedInput["answers"] as? [String: String] == ["Which option?": "One"])
+                }
+                let session = try await MainActor.run {
+                    try #require(recorder.sessions.first { $0.id == "claude:qoder-app-e2e" })
+                }
+                #expect(session.metadata["client_kind"] == (clientKind == "qoder-cli" ? "qoder-app" : "qoder-cn-app"))
+            }
+        }
+    }
+}
+
 @Test
 func remoteAgentFailsOpenWhenNoControlClientIsAttached() async throws {
     let executable = try TestRuntime.executableURL(named: "PingIslandBridge")

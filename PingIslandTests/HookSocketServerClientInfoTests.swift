@@ -61,7 +61,7 @@ final class HookSocketServerClientInfoTests: XCTestCase {
             XCTAssertEqual(event.clientInfo.kind, .codexCLI)
             XCTAssertEqual(event.clientInfo.profileID, "codex-cli")
             XCTAssertEqual(event.clientInfo.terminalBundleIdentifier, "com.aliyun.lingma.ide")
-            XCTAssertEqual(event.clientInfo.ideHostBadgeLabel(for: .codex), "Qoder CN IDE 终端")
+            XCTAssertEqual(event.clientInfo.ideHostBadgeLabel(for: .codex), "Qoder CN 终端")
         }
     }
 
@@ -88,7 +88,8 @@ final class HookSocketServerClientInfoTests: XCTestCase {
             XCTAssertEqual(event.clientInfo.kind, .claudeCode, hostName)
             XCTAssertEqual(event.clientInfo.profileID, "claude-code", hostName)
             XCTAssertEqual(event.clientInfo.badgeLabel(for: .claude), "Claude Code", hostName)
-            XCTAssertEqual(event.clientInfo.ideHostBadgeLabel(for: .claude), "\(hostName) 终端")
+            let displayName = hostName == "Qoder CN IDE" ? "Qoder CN" : hostName
+            XCTAssertEqual(event.clientInfo.ideHostBadgeLabel(for: .claude), "\(displayName) 终端")
             XCTAssertFalse(event.clientInfo.isQoderNotifyOnlyIDEClient, hostName)
         }
     }
@@ -105,7 +106,7 @@ final class HookSocketServerClientInfoTests: XCTestCase {
         )
 
         XCTAssertEqual(event.clientInfo.profileID, "qoder-cn")
-        XCTAssertEqual(event.clientInfo.badgeLabel(for: .claude), "Qoder CN IDE")
+        XCTAssertEqual(event.clientInfo.badgeLabel(for: .claude), "Qoder CN")
         XCTAssertTrue(event.clientInfo.isQoderNotifyOnlyIDEClient)
     }
 

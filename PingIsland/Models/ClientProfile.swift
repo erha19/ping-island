@@ -909,11 +909,11 @@ enum ClientProfileRegistry {
         ),
         ManagedHookClientProfile(
             id: "qoder-hooks",
-            title: "Qoder IDE",
-            subtitle: "管理 ~/.qoder/settings.json，支持 Qoder IDE 会话、提问与权限提醒事件",
+            title: "Qoder / Qoder IDE",
+            subtitle: "管理 ~/.qoder/settings.json，支持 Qoder 应用和 Qoder IDE 会话、提问与权限提醒事件",
             logoAssetName: "QoderLogo",
             prefersBundledLogoOverAppIcon: true,
-            localAppBundleIdentifiers: ["com.qoder.ide"],
+            localAppBundleIdentifiers: ["com.qoder.app", "com.qoder.ide"],
             iconSymbolName: "bolt.horizontal.circle.fill",
             configurationRelativePath: ".qoder/settings.json",
             bridgeSource: "claude",
@@ -926,10 +926,10 @@ enum ClientProfileRegistry {
             brand: .qoder,
             events: [
                 HookInstallEventDescriptor(name: "UserPromptSubmit", templates: [.plain]),
-                HookInstallEventDescriptor(name: "PreToolUse", templates: [.matcher("*")]),
+                HookInstallEventDescriptor(name: "PreToolUse", templates: [.matcher("*")], timeout: 86_400),
                 HookInstallEventDescriptor(name: "PostToolUse", templates: [.matcher("*")]),
                 HookInstallEventDescriptor(name: "PostToolUseFailure", templates: [.matcher("*")]),
-                HookInstallEventDescriptor(name: "PermissionRequest", templates: [.matcher("*")]),
+                HookInstallEventDescriptor(name: "PermissionRequest", templates: [.matcher("*")], timeout: 86_400),
                 HookInstallEventDescriptor(name: "Notification", templates: [.matcher("*")]),
                 HookInstallEventDescriptor(name: "Stop", templates: [.plain]),
             ]
@@ -966,8 +966,8 @@ enum ClientProfileRegistry {
         ),
         ManagedHookClientProfile(
             id: "qoder-cn-hooks",
-            title: "Qoder CN IDE",
-            subtitle: "管理 ~/.qoder-cn/settings.json，支持 Qoder CN IDE 会话、提问与权限提醒事件",
+            title: "Qoder CN",
+            subtitle: "管理 ~/.qoder-cn/settings.json，支持 Qoder CN 会话、提问与权限提醒事件",
             logoAssetName: "QoderCNLogo",
             prefersBundledLogoOverAppIcon: true,
             localAppBundleIdentifiers: ["com.aliyun.lingma.ide"],
@@ -976,17 +976,17 @@ enum ClientProfileRegistry {
             bridgeSource: "claude",
             bridgeExtraArguments: [
                 "--client-kind", "qoder-cn",
-                "--client-name", "Qoder CN IDE",
-                "--client-originator", "Qoder CN IDE"
+                "--client-name", "Qoder CN",
+                "--client-originator", "Qoder CN"
             ],
             defaultEnabled: true,
             brand: .qoder,
             events: [
                 HookInstallEventDescriptor(name: "UserPromptSubmit", templates: [.plain]),
-                HookInstallEventDescriptor(name: "PreToolUse", templates: [.matcher("*")]),
+                HookInstallEventDescriptor(name: "PreToolUse", templates: [.matcher("*")], timeout: 86_400),
                 HookInstallEventDescriptor(name: "PostToolUse", templates: [.matcher("*")]),
                 HookInstallEventDescriptor(name: "PostToolUseFailure", templates: [.matcher("*")]),
-                HookInstallEventDescriptor(name: "PermissionRequest", templates: [.matcher("*")]),
+                HookInstallEventDescriptor(name: "PermissionRequest", templates: [.matcher("*")], timeout: 86_400),
                 HookInstallEventDescriptor(name: "Notification", templates: [.matcher("*")]),
                 HookInstallEventDescriptor(name: "Stop", templates: [.plain]),
             ]
@@ -1189,6 +1189,38 @@ enum ClientProfileRegistry {
             bundleIdentifiers: []
         ),
         SessionClientProfile(
+            id: "qoder-app",
+            provider: .claude,
+            family: .claudeHooks,
+            kind: .qoder,
+            displayName: "Qoder",
+            assistantLabelMode: .badgeLabel,
+            brand: .qoder,
+            defaultBundleIdentifier: "com.qoder.app",
+            defaultOrigin: "desktop",
+            recognizedKinds: ["qoder-app", "qoder_app", "qoder app"],
+            exactAliases: ["qoder-app", "qoder app"],
+            keywordAliases: ["qoder app"],
+            bundleIdentifiers: ["com.qoder.app"]
+        ),
+        SessionClientProfile(
+            id: "qoder-cn-app",
+            provider: .claude,
+            family: .claudeHooks,
+            kind: .qoder,
+            displayName: "Qoder CN",
+            assistantLabelMode: .badgeLabel,
+            brand: .qoder,
+            defaultBundleIdentifier: "com.aliyun.lingma.ide",
+            defaultOrigin: "desktop",
+            recognizedKinds: ["qoder-cn-app", "qoder_cn_app", "qoder cn app"],
+            exactAliases: ["qoder-cn-app", "qoder cn app"],
+            keywordAliases: ["qoder cn app"],
+            // CN currently shares a bundle with the IDE. The bridge must confirm
+            // parent_business_info.product=app before selecting this profile.
+            bundleIdentifiers: []
+        ),
+        SessionClientProfile(
             id: "qoder",
             provider: .claude,
             family: .claudeHooks,
@@ -1238,7 +1270,7 @@ enum ClientProfileRegistry {
             provider: .claude,
             family: .claudeHooks,
             kind: .qoder,
-            displayName: "Qoder CN IDE",
+            displayName: "Qoder CN",
             assistantLabelMode: .badgeLabel,
             brand: .qoder,
             defaultBundleIdentifier: "com.aliyun.lingma.ide",
@@ -1651,7 +1683,7 @@ enum ClientProfileRegistry {
         ),
         ManagedIDEExtensionProfile(
             id: "qoder-cn-extension",
-            title: "Qoder CN IDE",
+            title: "Qoder CN",
             subtitle: "安装 Ping Island，支持会话跳转与终端精准聚焦",
             logoAssetName: "QoderCNLogo",
             prefersBundledLogoOverAppIcon: true,
@@ -1698,7 +1730,11 @@ enum ClientProfileRegistry {
             .replacingOccurrences(of: " ", with: "")
             .replacingOccurrences(of: "-", with: "")
 
-        if normalizedBundle == "com.qoder.work" || collapsedName == "qoderwork" {
+        if normalizedBundle == "com.qoder.work"
+            || normalizedBundle == "com.qoder.app"
+            || collapsedName == "qoderwork"
+            || collapsedName == "qoderapp"
+            || collapsedName == "qodercnapp" {
             return nil
         }
 
@@ -1776,7 +1812,23 @@ enum ClientProfileRegistry {
         threadSource: String?,
         processName: String?
     ) -> SessionClientProfile? {
-        (
+        if provider == .claude, isQoderCLIProcess(processName) {
+            let isCN = processName?.lowercased().contains("qoderclicn") == true
+                || explicitKind?.lowercased().hasPrefix("qoder-cn") == true
+            return runtimeProfile(id: isCN ? "qoder-cn-cli" : "qoder-cli")
+        }
+
+        if provider == .claude,
+           let appProfileID = qoderDesktopAppProfileID(
+               explicitKind: explicitKind,
+               bundleIdentifier: explicitBundleIdentifier,
+               terminalBundleIdentifier: terminalBundleIdentifier,
+               processName: processName
+           ) {
+            return runtimeProfile(id: appProfileID)
+        }
+
+        return (
             runtimeProfiles
             .filter { $0.provider == provider }
             .map { profile in
@@ -1797,6 +1849,43 @@ enum ClientProfileRegistry {
             .filter { $0.score > 0 }
             .max { lhs, rhs in lhs.score < rhs.score }
         )?.profile
+    }
+
+    nonisolated static func qoderDesktopAppProfileID(
+        explicitKind: String?,
+        bundleIdentifier: String?,
+        terminalBundleIdentifier: String?,
+        processName: String?
+    ) -> String? {
+        // A CLI can inherit its launcher's bundle environment. Its executable
+        // is stronger evidence than that inherited desktop hint.
+        if isQoderCLIProcess(processName) { return nil }
+
+        let kind = explicitKind?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "_", with: "-")
+            .replacingOccurrences(of: " ", with: "-")
+            .lowercased()
+        if kind == "qoder-app" || kind == "qoder-cn-app" {
+            return kind
+        }
+
+        let hasAppBundle = [bundleIdentifier, terminalBundleIdentifier].contains {
+            $0?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "com.qoder.app"
+        }
+        let hasAppProcess = processName?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .hasSuffix("/qoder.app/contents/macos/qoder") == true
+        return hasAppBundle || hasAppProcess ? "qoder-app" : nil
+    }
+
+    nonisolated static func isQoderCLIProcess(_ processName: String?) -> Bool {
+        guard let processName else { return false }
+        let executable = URL(fileURLWithPath: processName.trimmingCharacters(in: .whitespacesAndNewlines))
+            .lastPathComponent.lowercased()
+        return executable == "qodercli" || executable == "qoderclicn"
+            || executable.hasPrefix("qodercli-") || executable.hasPrefix("qoderclicn-")
     }
 
     nonisolated static func canonicalDisplayName(

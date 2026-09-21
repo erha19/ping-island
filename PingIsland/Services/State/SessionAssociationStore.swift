@@ -48,9 +48,15 @@ enum SessionAssociationStore {
         _ associations: [String: PersistedSessionAssociation]
     ) -> [String: PersistedSessionAssociation] {
         associations.mapValues { association in
-            guard association.provider == .codex else { return association }
             var repaired = association
-            repaired.clientInfo = association.clientInfo.normalizedForCodexRouting(sessionId: association.sessionId)
+            switch association.provider {
+            case .codex:
+                repaired.clientInfo = association.clientInfo.normalizedForCodexRouting(sessionId: association.sessionId)
+            case .claude:
+                repaired.clientInfo = association.clientInfo.normalizedForClaudeRouting()
+            default:
+                break
+            }
             return repaired
         }
     }

@@ -5238,6 +5238,7 @@ actor SessionStore {
 
         if profileID == "qoder-cli"
             || profileID == "qoder-cn-cli"
+            || normalizedClientInfo.isQoderDesktopAppClient
             || profileID == "codebuddy-cli"
             || profileID == "qwen-code"
             || normalizedClientInfo.isQwenCodeClient {

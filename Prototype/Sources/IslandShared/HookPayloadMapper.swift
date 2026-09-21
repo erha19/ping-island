@@ -48,6 +48,12 @@ public enum HookPayloadMapper {
         let terminalContext = makeTerminalContext(environment: effectiveEnvironment, payload: payload)
         let sessionKey = detectSessionKey(payload: payload, environment: effectiveEnvironment, provider: source)
         var metadata = mergedMetadata(arguments: arguments, payload: payload, terminalContext: terminalContext)
+        canonicalizeQoderAppMetadata(
+            &metadata,
+            payload: payload,
+            eventType: eventType,
+            environment: effectiveEnvironment
+        )
         if source == .codex, eventType == "UserPromptSubmit" || eventType == "Stop" {
             // The remote bridge forwards this body separately from the compact
             // preview because the Mac cannot recover it from the remote rollout.
@@ -126,7 +132,7 @@ public enum HookPayloadMapper {
     }
 
     public static func shouldDeliverEnvelope(_ envelope: BridgeEnvelope) -> Bool {
-        if envelope.shouldFilterBeforeApprovalHandling {
+        if envelope.shouldFilterBeforeApprovalHandling || envelope.metadata["qoder_duplicate_hook"] == "true" {
             return false
         }
 
@@ -164,7 +170,7 @@ public enum HookPayloadMapper {
             if isAntigravityHookClient(clientKind) {
                 return antigravityStdoutPayload(response: response, decision: decision)
             }
-            if isQoderCLIClientKind(clientKind),
+            if usesQoderBlockingHookProtocol(clientKind),
                isQoderCLIPlanExitApproval(
                    eventType: eventType,
                    toolName: metadata["tool_name"]
@@ -197,7 +203,7 @@ public enum HookPayloadMapper {
                 {"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"deny","message":"Denied from Island"}}}
                 """#
             case .answer(let answers):
-                if isQoderCLIClientKind(clientKind) {
+                if usesQoderBlockingHookProtocol(clientKind) {
                     return qoderCLIAnswerPayload(
                         response: response,
                         eventType: eventType,
@@ -909,14 +915,12 @@ public enum HookPayloadMapper {
             return nil
         }
 
-        if isQoderCLIClientKind(clientKind),
+        if usesQoderBlockingHookProtocol(clientKind),
            isQoderCLIPlanExitApproval(eventType: eventType, payload: payload) {
             return InterventionRequest(
                 sessionID: sessionKey,
                 kind: .approval,
-                title: clientKind == "qoder-cn-cli"
-                    ? "Qoder CN CLI needs plan approval"
-                    : "Qoder CLI needs plan approval",
+                title: "\(qoderDisplayName(for: clientKind)) needs plan approval",
                 message: qoderCLIPlanApprovalMessage(from: payload),
                 options: [
                     InterventionOption(id: "approve", title: "Allow Once"),
@@ -1482,11 +1486,199 @@ public enum HookPayloadMapper {
         }
     }
 
+    private static func canonicalizeQoderAppMetadata(
+        _ metadata: inout [String: String],
+        payload: [String: Any],
+        eventType: String,
+        environment: [String: String]
+    ) {
+        guard let originalKind = metadata["client_kind"]?.lowercased(),
+              ["qoder", "qoder-cli", "qoder-app", "qoder-cn", "qoder-cn-cli", "qoder-cn-app"].contains(originalKind) else {
+            return
+        }
+        let product = (payload["parent_business_info"] as? [String: Any])?["product"] as? String
+        metadata["qoder_product"] = product?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let isCLI = metadataHasQoderCLIProcess(metadata) || metadata["qoder_product"] == "cli"
+        let rememberedCNApp = originalKind.hasPrefix("qoder-cn") && rememberedQoderCNApp(
+            payload: payload,
+            product: metadata["qoder_product"],
+            isCLI: isCLI,
+            eventType: eventType,
+            environment: environment
+        )
+
+        // Both installed profiles share settings. Their hardcoded CLI arguments
+        // describe the hook, not the process invoking it. A real CLI executable
+        // remains CLI even when it inherited a desktop bundle identifier.
+        guard !isCLI else {
+            if originalKind == "qoder-app" || originalKind == "qoder-cn-app" {
+                metadata["client_kind"] = originalKind == "qoder-app" ? "qoder-cli" : "qoder-cn-cli"
+                metadata["client_name"] = qoderDisplayName(for: metadata["client_kind"])
+                metadata["client_origin"] = "cli"
+            }
+            return
+        }
+        let sourceProcess = metadata["source_process_name"]?.lowercased() ?? ""
+        let bundleIDs = [metadata["client_bundle_id"], metadata["terminal_bundle_id"]]
+            .compactMap { $0?.lowercased() }
+        let isQoderApp = bundleIDs.contains("com.qoder.app")
+            || sourceProcess.hasSuffix("/qoder.app/contents/macos/qoder")
+        let isApp = isQoderApp || metadata["qoder_product"] == "app" || rememberedCNApp
+            || originalKind == "qoder-app" || originalKind == "qoder-cn-app"
+        guard isApp else { return }
+
+        // Qoder CN currently uses the same bundle identifier as its IDE. It
+        // becomes an App profile only with product=app (including earlier hooks
+        // in this exact session) or an explicit profile;
+        // an IDE-hosted CLI must retain its terminal and blocking hook behavior.
+        let isCN = !isQoderApp && originalKind.hasPrefix("qoder-cn")
+        let clientKind = isCN ? "qoder-cn-app" : "qoder-app"
+        metadata["hook_client_kind"] = originalKind
+        metadata["client_kind"] = clientKind
+        metadata["client_name"] = isCN ? "Qoder CN" : "Qoder"
+        metadata["client_origin"] = "app"
+        metadata["client_originator"] = metadata["client_name"]
+        metadata["client_bundle_id"] = isCN ? "com.aliyun.lingma.ide" : "com.qoder.app"
+
+        // Prefer the blocking CLI hook when both profiles have this exact event
+        // installed. Missing/unreadable settings or a single desktop hook must
+        // still deliver, so do not rely on an unconditional profile preference.
+        if originalKind == "qoder" || originalKind == "qoder-cn",
+           hasMatchingQoderCLIHook(
+               clientKind: isCN ? "qoder-cn-cli" : "qoder-cli",
+               eventType: eventType,
+               payload: payload,
+               environment: environment
+           ) {
+            metadata["qoder_duplicate_hook"] = "true"
+        }
+    }
+
+    private static func rememberedQoderCNApp(
+        payload: [String: Any],
+        product: String?,
+        isCLI: Bool,
+        eventType: String,
+        environment: [String: String]
+    ) -> Bool {
+        guard let sessionID = payload["session_id"] as? String,
+              nonEmpty(sessionID) != nil, sessionID.utf8.count <= 256,
+              let home = nonEmpty(environment["HOME"]) else { return false }
+        let directory = URL(fileURLWithPath: home).appendingPathComponent(".ping-island")
+        let cache = directory.appendingPathComponent("qoder-cn-app-sessions.json")
+        let shouldRemove = isCLI || eventType == "SessionEnd"
+        let shouldRemember = product == "app" && !shouldRemove
+
+        func readEntries() -> [String: TimeInterval] {
+            guard let data = try? Data(contentsOf: cache),
+                  let entries = try? JSONDecoder().decode([String: TimeInterval].self, from: data) else { return [:] }
+            let now = Date().timeIntervalSince1970
+            return entries.filter { $0.value <= now && now - $0.value < 86_400 }
+        }
+
+        // Atomic snapshots allow ordinary hooks to read without creating files
+        // or refreshing the expiry. Only explicit product=app is new evidence.
+        guard shouldRemember || shouldRemove else {
+            return product == nil && readEntries()[sessionID] != nil
+        }
+        if shouldRemember {
+            guard (try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)) != nil else {
+                return false
+            }
+        } else if !FileManager.default.fileExists(atPath: cache.path) {
+            return false
+        }
+
+        // Separate hook processes share this small ledger. Lock read/modify/
+        // write so concurrent IDE/CLI invocations cannot erase sibling sessions.
+        let descriptor = open(directory.appendingPathComponent("qoder-cn-app-sessions.lock").path, O_CREAT | O_RDWR, mode_t(0o600))
+        guard descriptor >= 0 else { return false }
+        defer { close(descriptor) }
+        guard flock(descriptor, LOCK_EX) == 0 else { return false }
+        defer { _ = flock(descriptor, LOCK_UN) }
+        var entries = readEntries()
+        let remembered = product == nil && !isCLI && entries[sessionID] != nil
+        if shouldRemove {
+            entries.removeValue(forKey: sessionID)
+        } else {
+            entries[sessionID] = Date().timeIntervalSince1970
+        }
+        if entries.count > 256 {
+            entries = Dictionary(uniqueKeysWithValues: entries.sorted {
+                $0.value == $1.value ? $0.key < $1.key : $0.value > $1.value
+            }.prefix(256).map { ($0.key, $0.value) })
+        }
+        guard let data = try? JSONEncoder().encode(entries),
+              (try? data.write(to: cache, options: .atomic)) != nil else { return false }
+        return remembered
+    }
+
+    private static func hasMatchingQoderCLIHook(
+        clientKind: String,
+        eventType: String,
+        payload: [String: Any],
+        environment: [String: String]
+    ) -> Bool {
+        guard let home = nonEmpty(environment["HOME"]) else { return false }
+        let settingsURL = URL(fileURLWithPath: home)
+            .appendingPathComponent(clientKind == "qoder-cn-cli" ? ".qoder-cn" : ".qoder")
+            .appendingPathComponent("settings.json")
+        guard let data = try? Data(contentsOf: settingsURL),
+              let settings = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let hooks = settings["hooks"] as? [String: Any],
+              let entries = hooks[eventType] as? [[String: Any]] else {
+            return false
+        }
+        return entries.contains { entry in
+            let matcher = (entry["matcher"] as? String) ?? ""
+            if !matcher.isEmpty, matcher != "*" {
+                let subject = (payload["tool_name"] as? String)
+                    ?? (payload["notification_type"] as? String) ?? ""
+                guard subject.range(of: matcher, options: .regularExpression) != nil else { return false }
+            }
+            guard let commands = entry["hooks"] as? [[String: Any]] else { return false }
+            return commands.contains { hook in
+                guard hook["type"] as? String == "command",
+                      let command = hook["command"] as? String,
+                      isAvailableDirectBridgeCommand(command) else {
+                    return false
+                }
+                let kindPattern = #"(?:^|\s)--client-kind\s+["']?"#
+                    + NSRegularExpression.escapedPattern(for: clientKind) + #"["']?(?:\s|$)"#
+                return command.range(of: kindPattern, options: .regularExpression) != nil
+            }
+        }
+    }
+
+    private static func isAvailableDirectBridgeCommand(_ command: String) -> Bool {
+        // Managed hooks directly invoke an absolute launcher path, optionally
+        // shell-quoted. A stale or disabled executable must not become the sole
+        // delivery owner. Unknown wrappers/PATH expansion remain fail-open.
+        guard let expression = try? NSRegularExpression(pattern: #"^\s*(?:'([^']+)'|"([^"$`\\]+)"|([^\s'"$`\\]+))(?=\s|$)"#),
+              let match = expression.firstMatch(in: command, range: NSRange(command.startIndex..., in: command)),
+              let pathRange = (1...3).compactMap({ Range(match.range(at: $0), in: command) }).first else {
+            return false
+        }
+        let path = String(command[pathRange])
+        guard path.hasPrefix("/"),
+              ["ping-island-bridge", "PingIslandBridge"].contains(URL(fileURLWithPath: path).lastPathComponent) else {
+            return false
+        }
+        var isDirectory: ObjCBool = false
+        return FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory)
+            && !isDirectory.boolValue
+            && FileManager.default.isExecutableFile(atPath: path)
+    }
+
     private static func normalizedClientKind(from metadata: [String: String]) -> String? {
         let explicitClientKind = metadata["client_kind"]?
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
         if let explicitClientKind, !explicitClientKind.isEmpty {
+            if isQoderCLIClientKind(explicitClientKind),
+               metadataHasQoderCLIProcess(metadata) || metadata["qoder_product"] == "cli" {
+                return explicitClientKind
+            }
             if explicitClientKind == "qoder-cli",
                metadataHasQoderIDEHost(metadata, bundleIdentifier: "com.qoder.ide") {
                 return "qoder"
@@ -1585,7 +1777,8 @@ public enum HookPayloadMapper {
         // in a standalone terminal. The explicit CLI profile must keep its
         // lifecycle events in that case so sessions and notifications remain
         // visible.
-        if isQoderCLIClientKind(clientKind), isQoderCLIProcess(envelope) {
+        if isQoderCLIClientKind(clientKind),
+           isQoderCLIProcess(envelope) || envelope.metadata["qoder_product"] == "cli" {
             return false
         }
 
@@ -1614,10 +1807,15 @@ public enum HookPayloadMapper {
     }
 
     private static func isQoderCLIProcess(_ envelope: BridgeEnvelope) -> Bool {
-        let processName = envelope.metadata["source_process_name"]?
+        metadataHasQoderCLIProcess(envelope.metadata)
+    }
+
+    private static func metadataHasQoderCLIProcess(_ metadata: [String: String]) -> Bool {
+        let processPath = metadata["source_process_name"]?
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
-        guard let processName else { return false }
+        guard let processPath else { return false }
+        let processName = URL(fileURLWithPath: processPath).lastPathComponent
         return processName == "qodercli"
             || processName == "qoderclicn"
             || processName.hasPrefix("qodercli-")
@@ -1750,6 +1948,19 @@ public enum HookPayloadMapper {
         clientKind == "qoder-cli" || clientKind == "qoder-cn-cli"
     }
 
+    private static func usesQoderBlockingHookProtocol(_ clientKind: String?) -> Bool {
+        isQoderCLIClientKind(clientKind) || clientKind == "qoder-app" || clientKind == "qoder-cn-app"
+    }
+
+    private static func qoderDisplayName(for clientKind: String?) -> String {
+        switch clientKind {
+        case "qoder-app": return "Qoder"
+        case "qoder-cn-app": return "Qoder CN"
+        case "qoder-cn-cli": return "Qoder CN CLI"
+        default: return "Qoder CLI"
+        }
+    }
+
     private static func isCodeBuddyFamilyHookClient(_ clientKind: String?) -> Bool {
         guard let clientKind else { return false }
         switch clientKind {
@@ -1775,6 +1986,8 @@ public enum HookPayloadMapper {
         switch clientKind {
         case "pi":
             return "Pi Agent"
+        case "qoder-app", "qoder-cn-app":
+            return qoderDisplayName(for: clientKind)
         default:
             return provider.displayName
         }
@@ -1911,7 +2124,7 @@ public enum HookPayloadMapper {
         explicitClientKind: String?
     ) -> Bool {
         eventType == "PermissionRequest"
-            && (isQoderCLIClientKind(clientKind) || isQoderCLIClientKind(explicitClientKind))
+            && (usesQoderBlockingHookProtocol(clientKind) || isQoderCLIClientKind(explicitClientKind))
             && normalizedToolName(from: payload) == "askuserquestion"
             && questionPayloads(from: payload)?.isEmpty == false
     }
@@ -1983,7 +2196,8 @@ public enum HookPayloadMapper {
             return false
         }
 
-        if clientKind == "qoderwork" || clientKind == "qwen-code" {
+        if clientKind == "qoderwork" || clientKind == "qwen-code"
+            || clientKind == "qoder-app" || clientKind == "qoder-cn-app" {
             return isQoderWorkPreToolQuestionEvent(eventType: eventType, payload: payload)
                 || isQoderWorkPermissionQuestionEvent(eventType: eventType, payload: payload)
         }

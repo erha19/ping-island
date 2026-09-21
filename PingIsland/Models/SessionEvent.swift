@@ -216,6 +216,7 @@ extension HookEvent {
 
     private nonisolated var isExternalClientQuestionEvent: Bool {
         (isQoderIDEQuestionNotificationClient
+            || clientInfo.isQoderDesktopAppClient
             || clientInfo.profileID == "qoderwork"
             || clientInfo.bundleIdentifier == "com.qoder.work"
             || clientInfo.profileID == "workbuddy"
@@ -250,6 +251,8 @@ extension HookEvent {
             prefix = "workbuddy-question"
         } else if isQoderIDEQuestionNotificationClient {
             prefix = "qoder-question"
+        } else if clientInfo.isQoderDesktopAppClient {
+            prefix = "qoder-app-question"
         } else {
             prefix = "qoderwork-question"
         }
@@ -338,7 +341,10 @@ extension HookEvent {
     }
 
     nonisolated var intervention: SessionIntervention? {
-        if suppressInAppPrompt || shouldSuppressApprovalHandling {
+        // Notify-only Qoder IDE hooks cannot accept a response, but their
+        // question metadata still owns an external-client attention card.
+        let isExternalQuestionNotice = isQoderIDEQuestionNotificationClient && isAskUserQuestionRequest
+        if suppressInAppPrompt || (shouldSuppressApprovalHandling && !isExternalQuestionNotice) {
             return nil
         }
         if let bridgeIntervention,
@@ -474,9 +480,16 @@ extension HookEvent {
             metadata["originalToolUseId"] = toolUseId
         }
         let message: String
-        if isExternalClientQuestionEvent {
+        let hasDefaultAnswers = parsedQuestions.allSatisfy {
+            $0.options.first?.title.isEmpty == false
+        }
+        if isExternalClientQuestionEvent && (!clientInfo.isQoderDesktopAppClient || hasDefaultAnswers) {
             metadata["responseMode"] = "external_only"
-            message = "\(actorName) 已在客户端内发起提问，请切回 \(actorName) 完成回答。Island 暂不支持直接提交这类回答。"
+            if clientInfo.isQoderDesktopAppClient {
+                message = "\(actorName) 已发起提问，可打开客户端查看回答并继续操作。"
+            } else {
+                message = "\(actorName) 已在客户端内发起提问，请切回 \(actorName) 完成回答。Island 暂不支持直接提交这类回答。"
+            }
         } else {
             message = "\(actorName) 需要你补充回答，提交后会继续执行当前会话。"
         }

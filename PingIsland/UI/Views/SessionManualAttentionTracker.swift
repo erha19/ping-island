@@ -8,7 +8,7 @@ struct SessionManualAttentionTracker {
     }
 
     private var previousApprovalIds = Set<String>()
-    private var previousApprovalToolUseIDs: [String: String] = [:]
+    private var previousApprovalRequestKeys: [String: String] = [:]
     private var previousQuestionIds = Set<String>()
     private var previousQuestionInterventionIDs: [String: String] = [:]
     private var previousTerminalRoutedPromptIds = Set<String>()
@@ -25,18 +25,17 @@ struct SessionManualAttentionTracker {
             uniqueKeysWithValues: approvalSessions.map { ($0.stableId, $0) }
         )
         let currentApprovalIds = Set(approvalSessions.map(\.stableId))
-        let currentApprovalToolUseIDs = Dictionary(
+        let currentApprovalRequestKeys = Dictionary(
             uniqueKeysWithValues: approvalSessions.map { session in
-                (session.stableId, session.activePermission?.toolUseId ?? "")
+                (session.stableId, approvalRequestKey(for: session) ?? "")
             }
         )
         let newApprovalIds = currentApprovalIds.subtracting(previousApprovalIds)
         let refreshedApprovalIds = Set<String>(
-            currentApprovalToolUseIDs.compactMap { sessionId, toolUseId in
-                guard let previousToolUseId = previousApprovalToolUseIDs[sessionId],
-                      !previousToolUseId.isEmpty,
-                      !toolUseId.isEmpty,
-                      previousToolUseId != toolUseId else {
+            currentApprovalRequestKeys.compactMap { sessionId, requestKey in
+                guard let previousRequestKey = previousApprovalRequestKeys[sessionId],
+                      !requestKey.isEmpty,
+                      previousRequestKey != requestKey else {
                     return nil
                 }
                 return sessionId
@@ -103,7 +102,7 @@ struct SessionManualAttentionTracker {
 
         defer {
             previousApprovalIds = currentApprovalIds
-            previousApprovalToolUseIDs = currentApprovalToolUseIDs
+            previousApprovalRequestKeys = currentApprovalRequestKeys
             previousQuestionIds = currentQuestionIds
             previousQuestionInterventionIDs = currentQuestionInterventionIDs
             previousTerminalRoutedPromptIds = currentTerminalRoutedPromptIds

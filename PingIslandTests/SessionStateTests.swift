@@ -1814,8 +1814,8 @@ final class SessionStateTests: XCTestCase {
         ).normalizedForClaudeRouting()
 
         XCTAssertEqual(desktop.profileID, "qoder-cn")
-        XCTAssertEqual(desktop.name, "Qoder CN IDE")
-        XCTAssertEqual(desktop.badgeLabel(for: .claude), "Qoder CN IDE")
+        XCTAssertEqual(desktop.name, "Qoder CN")
+        XCTAssertEqual(desktop.badgeLabel(for: .claude), "Qoder CN")
         XCTAssertEqual(desktop.ideHostProfile?.id, "qoder-cn-extension")
         XCTAssertTrue(desktop.isQoderNotifyOnlyIDEClient)
         XCTAssertFalse(desktop.isQoderCLIClient)
@@ -1832,7 +1832,7 @@ final class SessionStateTests: XCTestCase {
         ).normalizedForClaudeRouting()
 
         XCTAssertEqual(normalized.profileID, "qoder-cn")
-        XCTAssertEqual(normalized.name, "Qoder CN IDE")
+        XCTAssertEqual(normalized.name, "Qoder CN")
     }
 
     func testQoderWorkDoesNotResolveToIDEExtensionHost() {

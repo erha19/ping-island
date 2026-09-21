@@ -33,6 +33,15 @@ actor SessionLauncher {
         )
         let allowsAppFallback = allowsAppFallback(for: session)
 
+        if session.clientInfo.isQoderDesktopAppClient {
+            for bundleIdentifier in Self.clientApplicationBundleIdentifiers(for: session.clientInfo) {
+                if await activateClientFallbackApplication(bundleIdentifier: bundleIdentifier) {
+                    return true
+                }
+            }
+            return false
+        }
+
         if shouldPrioritizeAppNavigation(for: session),
            await activatePreferredAppNavigation(for: session) {
             return true
@@ -157,6 +166,9 @@ actor SessionLauncher {
     func activateClientApplication(_ session: SessionState) async -> Bool {
         guard !session.clientInfo.suppressesActivationNavigation else {
             return false
+        }
+        if session.clientInfo.isQoderDesktopAppClient {
+            return await activate(session)
         }
 
         let candidateBundleIdentifiers = Self.clientApplicationBundleIdentifiers(for: session.clientInfo)
@@ -444,6 +456,10 @@ actor SessionLauncher {
         clientInfo: SessionClientInfo
     ) -> Bool {
         guard provider == .claude else { return false }
+        guard !clientInfo.isQoderDesktopAppClient else { return false }
+        if clientInfo.kind == .qoder, ClientProfileRegistry.isQoderCLIProcess(clientInfo.processName) {
+            return true
+        }
 
         let isExplicitQoderCLI = Self.isExplicitQoderCLIClient(clientInfo)
         let normalizedClientInfo = clientInfo.normalizedForClaudeRouting()
@@ -1325,6 +1341,8 @@ actor SessionLauncher {
     }
 
     nonisolated static func shouldPrioritizeClientApplicationFallback(for clientInfo: SessionClientInfo) -> Bool {
+        if clientInfo.isQoderDesktopAppClient { return true }
+
         let normalizedProfileID = clientInfo.profileID?
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
@@ -1347,6 +1365,11 @@ actor SessionLauncher {
     }
 
     nonisolated static func clientApplicationBundleIdentifiers(for clientInfo: SessionClientInfo) -> [String] {
+        if let appProfileID = clientInfo.qoderDesktopAppProfileID,
+           let bundleIdentifier = ClientProfileRegistry.runtimeProfile(id: appProfileID)?.defaultBundleIdentifier {
+            return [bundleIdentifier]
+        }
+
         var candidates: [String] = []
 
         if shouldPrioritizeClientApplicationFallback(for: clientInfo) {

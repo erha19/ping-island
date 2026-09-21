@@ -2,6 +2,44 @@ import XCTest
 @testable import Ping_Island
 
 final class SessionManualAttentionTrackerTests: XCTestCase {
+    func testConsecutiveInterventionOnlyApprovalsTriggerAttention() {
+        var tracker = SessionManualAttentionTracker()
+        let first = makeInterventionApproval(id: "approval-1")
+        let second = makeInterventionApproval(id: "approval-2")
+
+        XCTAssertEqual(tracker.consumeNewAttentionSession(from: [first]), first)
+        XCTAssertNil(tracker.consumeNewAttentionSession(from: [first]))
+        XCTAssertEqual(tracker.consumeNewAttentionSession(from: [second]), second)
+    }
+
+    func testConsecutiveInterventionOnlyApprovalsHaveIndependentDelays() {
+        var tracker = SessionManualAttentionTracker()
+        let now = Date()
+        let first = makeInterventionApproval(id: "approval-1", autoApprove: true)
+        let second = makeInterventionApproval(id: "approval-2", autoApprove: true)
+        let delay = SessionManualAttentionTracker.autoApproveApprovalNotificationDelay
+
+        XCTAssertNil(tracker.consumeNewAttentionSession(from: [first], now: now))
+        XCTAssertEqual(tracker.consumeNewAttentionSession(from: [first], now: now.addingTimeInterval(delay)), first)
+        XCTAssertNil(tracker.consumeNewAttentionSession(from: [second], now: now.addingTimeInterval(delay + 1)))
+        XCTAssertEqual(
+            tracker.consumeNewAttentionSession(from: [second], now: now.addingTimeInterval(2 * delay + 1)),
+            second
+        )
+    }
+
+    private func makeInterventionApproval(id: String, autoApprove: Bool = false) -> SessionState {
+        var session = SessionState(
+            sessionId: "intervention-only-approval", cwd: "/tmp/project",
+            autoApprovePermissions: autoApprove, phase: .processing
+        )
+        session.intervention = SessionIntervention(
+            id: id, kind: .approval, title: "Approve command", message: "pwd",
+            options: [], questions: [], supportsSessionScope: false, metadata: [:]
+        )
+        return session
+    }
+
     func testSuppressedApprovalIsConsumedAndOnlyANewRequestCanAutoOpen() {
         var tracker = SessionManualAttentionTracker()
         let approval = makeApprovalSession(toolUseId: "tool-1")

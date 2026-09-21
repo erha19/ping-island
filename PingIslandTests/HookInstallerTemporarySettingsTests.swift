@@ -73,7 +73,7 @@ final class HookInstallerTemporarySettingsTests: XCTestCase {
         let preToolUse = try XCTUnwrap(hooks["PreToolUse"] as? [[String: Any]])
         let command = try XCTUnwrap((preToolUse.first?["hooks"] as? [[String: Any]])?.first?["command"] as? String)
 
-        XCTAssertTrue(command.contains("--client-name 'Qoder CN IDE'"), command)
-        XCTAssertTrue(command.contains("--client-originator 'Qoder CN IDE'"), command)
+        XCTAssertTrue(command.contains("--client-name 'Qoder CN'"), command)
+        XCTAssertTrue(command.contains("--client-originator 'Qoder CN'"), command)
     }
 }

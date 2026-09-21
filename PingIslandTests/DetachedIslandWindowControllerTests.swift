@@ -7,6 +7,7 @@ import XCTest
 @MainActor
 final class DetachedIslandWindowControllerTests: XCTestCase {
     private var originalSmartSuppression = true
+    private var completionRegistries: [SessionCompletionNotificationRegistry] = []
 
     override func setUp() async throws {
         try await super.setUp()
@@ -15,6 +16,7 @@ final class DetachedIslandWindowControllerTests: XCTestCase {
     }
 
     override func tearDown() async throws {
+        completionRegistries.removeAll()
         AppSettings.smartSuppression = originalSmartSuppression
         try await super.tearDown()
     }
@@ -1368,10 +1370,14 @@ final class DetachedIslandWindowControllerTests: XCTestCase {
 
         let sessionMonitor = makeSessionMonitor()
         sessionMonitor.instances = [initial]
+        // Keep actor-owned dependencies alive through AppKit autorelease pools;
+        // release them from asynchronous teardown with a Swift task context.
+        let registry = SessionCompletionNotificationRegistry()
+        completionRegistries.append(registry)
         let controller = DetachedIslandWindowController(
             viewModel: makeViewModel(),
             sessionMonitor: sessionMonitor,
-            completionNotificationRegistry: SessionCompletionNotificationRegistry(),
+            completionNotificationRegistry: registry,
             onClose: {}
         )
         controller.completionNotificationDismissDelay = 0.1

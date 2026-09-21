@@ -272,6 +272,8 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
     }
 
     nonisolated var supportsCustomAskUserQuestionInput: Bool {
+        if isQoderDesktopAppClient { return true }
+
         let normalized = normalizedForClaudeRouting()
         let profileIDs = [profileID, normalized.profileID]
             .compactMap { value -> String? in
@@ -424,6 +426,10 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
     }
 
     nonisolated func interactionLabel(for provider: SessionProvider) -> String {
+        if isQoderDesktopAppClient {
+            return badgeLabel(for: provider)
+        }
+
         if let interactionOriginDisplayName {
             return interactionOriginDisplayName
         }
@@ -448,7 +454,24 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
         brand == .qoder
     }
 
+    nonisolated var qoderDesktopAppProfileID: String? {
+        guard kind == .qoder else { return nil }
+        return ClientProfileRegistry.qoderDesktopAppProfileID(
+            explicitKind: profileID,
+            bundleIdentifier: bundleIdentifier,
+            terminalBundleIdentifier: terminalBundleIdentifier,
+            processName: processName
+        )
+    }
+
+    nonisolated var isQoderDesktopAppClient: Bool {
+        qoderDesktopAppProfileID != nil
+    }
+
     nonisolated var isQoderCLIClient: Bool {
+        guard !isQoderDesktopAppClient else { return false }
+        if kind == .qoder, ClientProfileRegistry.isQoderCLIProcess(processName) { return true }
+
         let rawProfileID = profileID?
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
@@ -490,6 +513,8 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
     }
 
     nonisolated var prefersAnsweredQuestionFollowupAction: Bool {
+        if isQoderDesktopAppClient { return true }
+
         let normalizedProfileID = profileID?
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
@@ -534,7 +559,7 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
     }
 
     nonisolated var ideHostProfile: ManagedIDEExtensionProfile? {
-        if inferredProfileID == "openclaw" {
+        if inferredProfileID == "openclaw" || isQoderDesktopAppClient {
             return nil
         }
 
@@ -590,7 +615,7 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
     }
 
     nonisolated var terminalSourceDisplayName: String? {
-        guard !isHostedInIDE else { return nil }
+        guard !isHostedInIDE, !isQoderDesktopAppClient else { return nil }
         return Self.canonicalTerminalDisplayName(
             bundleIdentifier: terminalBundleIdentifier,
             program: terminalProgram,
@@ -599,6 +624,8 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
     }
 
     nonisolated var prefersAppNavigation: Bool {
+        if isQoderDesktopAppClient { return true }
+
         if kind == .codexCLI {
             return false
         }
@@ -740,6 +767,10 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
     }
 
     private nonisolated var inferredProfileID: String? {
+        if let qoderDesktopAppProfileID {
+            return qoderDesktopAppProfileID
+        }
+
         let normalizedThreadSource = threadSource?
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
@@ -776,6 +807,36 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
         var normalized = self
 
         guard normalized.kind == .qoder else {
+            return normalized
+        }
+
+        let isActualQoderCLIProcess = ClientProfileRegistry.isQoderCLIProcess(normalized.processName)
+        if isActualQoderCLIProcess {
+            if normalized.bundleIdentifier?.lowercased() == "com.qoder.app" {
+                normalized.bundleIdentifier = nil
+            }
+            if normalized.terminalBundleIdentifier?.lowercased() == "com.qoder.app" {
+                normalized.terminalBundleIdentifier = nil
+            }
+        }
+
+        if let appProfileID = normalized.qoderDesktopAppProfileID,
+           let profile = ClientProfileRegistry.runtimeProfile(id: appProfileID) {
+            normalized.profileID = profile.id
+            normalized.name = profile.displayName
+            normalized.bundleIdentifier = profile.defaultBundleIdentifier
+            normalized.origin = profile.defaultOrigin
+            normalized.originator = profile.displayName
+            normalized.terminalBundleIdentifier = profile.defaultBundleIdentifier
+            // These sessions belong to the desktop product. Old shared CLI
+            // hooks may have cached an IDE file URL or terminal metadata.
+            normalized.launchURL = nil
+            normalized.terminalProgram = nil
+            normalized.terminalTTY = nil
+            normalized.terminalSessionIdentifier = nil
+            normalized.iTermSessionIdentifier = nil
+            normalized.tmuxSessionIdentifier = nil
+            normalized.tmuxPaneIdentifier = nil
             return normalized
         }
 
@@ -818,6 +879,8 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
         let isQoderCNClient =
             normalizedProfileID == "qoder-cn"
             || normalizedProfileID == "qoder-cn-cli"
+            || normalizedProfileID == "qoder-cn-app"
+            || (isActualQoderCLIProcess && normalized.processName?.lowercased().contains("qoderclicn") == true)
             || normalizedName == "qoder cn"
             || normalizedName == "qoder cn ide"
             || normalizedName == "qoder cn cli"
@@ -829,11 +892,19 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
             || normalizedName == "qoderclicn"
             || (isQoderCNClient && normalizedOrigin == "cli")
         let isExplicitQoderCLI =
-            normalizedProfileID == "qoder-cli"
+            isActualQoderCLIProcess
+            || normalizedProfileID == "qoder-cli"
             || normalizedProfileID == "qoder-cn-cli"
             || normalizedName == "qoder cli"
             || normalizedName == "qoder cn cli"
             || normalizedOrigin == "cli"
+        let hasInteractiveTerminalEvidence = [
+            normalized.terminalTTY,
+            normalized.terminalSessionIdentifier,
+            normalized.iTermSessionIdentifier,
+            normalized.tmuxSessionIdentifier,
+            normalized.tmuxPaneIdentifier
+        ].contains { $0?.nonEmpty != nil }
         let isIDEBundle = hostBundleIdentifier.map { TerminalAppRegistry.isIDEBundle($0) } ?? false
         let isTerminalHosted =
             (hostBundleIdentifier.map { TerminalAppRegistry.isTerminalBundle($0) } ?? false)
@@ -871,9 +942,14 @@ struct SessionClientInfo: Codable, Equatable, Sendable {
         } else if isQoderWorkHosted {
             normalized.profileID = "qoderwork"
             normalized.name = "QoderWork"
+        } else if isActualQoderCLIProcess
+            || (isExplicitQoderCLI && (hasInteractiveTerminalEvidence || hostBundleIdentifier == nil)) {
+            normalized.profileID = isQoderCNClient ? "qoder-cn-cli" : "qoder-cli"
+            normalized.name = isQoderCNClient ? "Qoder CN CLI" : "Qoder CLI"
+            normalized.origin = "cli"
         } else if isQoderCNIDEHosted {
             normalized.profileID = "qoder-cn"
-            normalized.name = "Qoder CN IDE"
+            normalized.name = "Qoder CN"
         } else if isQoderIDEHosted {
             normalized.profileID = "qoder"
         } else if isQoderCNCLI || (isTerminalHosted && isQoderCNClient) {

@@ -222,7 +222,8 @@ struct HookEvent: Sendable {
             || (
                 event == "PreToolUse"
                     && normalizedTool == "exitplanmode"
-                    && clientInfo.normalizedForClaudeRouting().isQoderCLIClient
+                    && (clientInfo.normalizedForClaudeRouting().isQoderCLIClient
+                        || clientInfo.isQoderDesktopAppClient)
             )
     }
 
@@ -285,30 +286,13 @@ struct HookEvent: Sendable {
             .replacingOccurrences(of: "_", with: "")
             .replacingOccurrences(of: "-", with: "")
         return event == "PermissionRequest"
-            && clientInfo.isQoderCLIClient
-            && normalizedTool == "askuserquestion"
+            && (clientInfo.isQoderCLIClient || clientInfo.isQoderDesktopAppClient)
+            && (normalizedTool == "askuserquestion" || normalizedTool == "askfollowupquestion")
             && toolInput?["questions"] != nil
     }
 
     private nonisolated var isQoderIDENotifyOnlyClient: Bool {
-        let normalizedClientInfo = clientInfo.normalizedForClaudeRouting()
-        if normalizedClientInfo.profileID == "qoder"
-            || normalizedClientInfo.profileID == "qoder-cn" {
-            return true
-        }
-
-        return [
-            normalizedClientInfo.terminalBundleIdentifier,
-            normalizedClientInfo.bundleIdentifier,
-            clientInfo.terminalBundleIdentifier,
-            clientInfo.bundleIdentifier
-        ].contains { value in
-            let normalizedBundleIdentifier = value?
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-                .lowercased()
-            return normalizedBundleIdentifier == "com.qoder.ide"
-                || normalizedBundleIdentifier == "com.aliyun.lingma.ide"
-        }
+        clientInfo.isQoderNotifyOnlyIDEClient
     }
 }
 
@@ -841,11 +825,11 @@ private extension BridgeEnvelope {
             metadata["client_title"],
             metadata["client"]
         )
-        let explicitBundleID = firstNonEmpty(
+        var explicitBundleID = firstNonEmpty(
             metadata["client_bundle_id"],
             metadata["source_bundle_id"]
         )
-        let terminalBundleID = HookSocketServer.resolvedTerminalHostBundleIdentifier(
+        var terminalBundleID = HookSocketServer.resolvedTerminalHostBundleIdentifier(
             terminalBundleID: terminalContext.terminalBundleID,
             ideBundleID: terminalContext.ideBundleID
         )
@@ -899,18 +883,45 @@ private extension BridgeEnvelope {
             metadata["source_process_name"],
             metadata["process_name"]
         )
+        let isQoderCLIProduct = provider == .claude
+            && metadata["qoder_product"] == "cli"
+            && explicitKind?.hasPrefix("qoder") == true
+        if isQoderCLIProduct {
+            // Product evidence may arrive without a process path. Do not let
+            // an inherited App bundle turn this real CLI back into an App.
+            if explicitBundleID?.lowercased() == "com.qoder.app" { explicitBundleID = nil }
+            if terminalBundleID?.lowercased() == "com.qoder.app" { terminalBundleID = nil }
+            let hasTerminalEvidence = [
+                terminalContext.tty, terminalContext.terminalProgram,
+                terminalContext.terminalSessionID, terminalContext.iTermSessionID,
+                terminalContext.tmuxSession, terminalContext.tmuxPane
+            ].contains { firstNonEmpty($0) != nil }
+            if !hasTerminalEvidence {
+                let inheritedIDEBundles = ["com.qoder.ide", "com.aliyun.lingma.ide"]
+                if inheritedIDEBundles.contains(explicitBundleID?.lowercased() ?? "") { explicitBundleID = nil }
+                if inheritedIDEBundles.contains(terminalBundleID?.lowercased() ?? "") { terminalBundleID = nil }
+            }
+        }
         let explicitClientBundleIdentifier = explicitBundleID?
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
         let effectiveExplicitKind: String?
         let effectiveExplicitName: String?
-        switch explicitClientBundleIdentifier {
+        switch isQoderCLIProduct ? "qoder-cli-product" :
+            (ClientProfileRegistry.isQoderCLIProcess(processName) ? nil : explicitClientBundleIdentifier) {
+        case "qoder-cli-product":
+            let isCN = explicitKind?.hasPrefix("qoder-cn") == true
+            effectiveExplicitKind = isCN ? "qoder-cn-cli" : "qoder-cli"
+            effectiveExplicitName = isCN ? "Qoder CN CLI" : "Qoder CLI"
+        case "com.qoder.app":
+            effectiveExplicitKind = "qoder-app"
+            effectiveExplicitName = "Qoder"
         case "com.qoder.ide":
             effectiveExplicitKind = "qoder"
             effectiveExplicitName = "Qoder IDE"
         case "com.aliyun.lingma.ide":
-            effectiveExplicitKind = "qoder-cn"
-            effectiveExplicitName = "Qoder CN IDE"
+            effectiveExplicitKind = explicitKind == "qoder-cn-app" ? "qoder-cn-app" : "qoder-cn"
+            effectiveExplicitName = "Qoder CN"
         case "com.qoder.work":
             effectiveExplicitKind = "qoderwork"
             effectiveExplicitName = "QoderWork"
@@ -1067,7 +1078,14 @@ private extension BridgeEnvelope {
             tmuxPaneIdentifier: terminalContext.tmuxPane,
             processName: processName
         )
-        return provider == .codex ? clientInfo.normalizedForCodexRouting(sessionId: sessionId) : clientInfo
+        switch provider {
+        case .codex:
+            return clientInfo.normalizedForCodexRouting(sessionId: sessionId)
+        case .claude:
+            return clientInfo.normalizedForClaudeRouting()
+        default:
+            return clientInfo
+        }
     }
 
     private static func resolvedCWD(
@@ -2262,6 +2280,12 @@ class HookSocketServer {
     }
 
     private static func shouldSkipQoderIDEEvent(_ envelope: BridgeEnvelope) -> Bool {
+        if envelope.metadata["qoder_duplicate_hook"] == "true" {
+            return true
+        }
+        if envelope.hookEvent.clientInfo.isQoderDesktopAppClient {
+            return false
+        }
         let rawClientKind = envelope.metadata["client_kind"]
         let clientKind = rawClientKind?
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -2326,14 +2350,7 @@ class HookSocketServer {
             return nil
         }
 
-        let normalizedProcessName = sourceProcessName?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
-        let isCLIProcess = normalizedProcessName == "qodercli"
-            || normalizedProcessName == "qoderclicn"
-            || normalizedProcessName?.hasPrefix("qodercli-") == true
-            || normalizedProcessName?.hasPrefix("qoderclicn-") == true
-        guard isCLIProcess else {
+        guard ClientProfileRegistry.isQoderCLIProcess(sourceProcessName) else {
             return nil
         }
 

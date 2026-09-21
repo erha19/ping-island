@@ -464,11 +464,11 @@ private enum BridgeDebugLogger {
             return "pi-hooks"
         case "openclaw":
             return "openclaw-hooks"
-        case "qoder", "qoderwork":
+        case "qoder", "qoder-app", "qoderwork":
             return "qoder-hooks"
         case "qoder-cli":
             return "qoder-cli-hooks"
-        case "qoder-cn":
+        case "qoder-cn", "qoder-cn-app":
             return "qoder-cn-hooks"
         case "qoder-cn-cli":
             return "qoder-cn-cli-hooks"

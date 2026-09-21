@@ -87,7 +87,9 @@ final class ClientProfileIconTests: XCTestCase {
 
         XCTAssertTrue(qoderEvents.contains("PostToolUseFailure"))
         XCTAssertFalse(qoderEvents.contains("SessionStart"))
-        XCTAssertNil(hookProfile.events.first { $0.name == "PermissionRequest" }?.timeout)
+        XCTAssertEqual(hookProfile.localAppBundleIdentifiers, ["com.qoder.app", "com.qoder.ide"])
+        XCTAssertEqual(hookProfile.events.first { $0.name == "PreToolUse" }?.timeout, 86_400)
+        XCTAssertEqual(hookProfile.events.first { $0.name == "PermissionRequest" }?.timeout, 86_400)
         XCTAssertEqual(
             hookProfile.bridgeExtraArguments,
             [
@@ -96,7 +98,7 @@ final class ClientProfileIconTests: XCTestCase {
                 "--client-originator", "Qoder IDE"
             ]
         )
-        XCTAssertEqual(hookProfile.title, "Qoder IDE")
+        XCTAssertEqual(hookProfile.title, "Qoder / Qoder IDE")
         XCTAssertEqual(runtimeProfile.displayName, "Qoder IDE")
         XCTAssertEqual(extensionProfile.title, "Qoder IDE")
         XCTAssertEqual(extensionProfile.uriScheme, "qoder")
@@ -113,17 +115,19 @@ final class ClientProfileIconTests: XCTestCase {
         XCTAssertEqual(cliProfile.configurationRelativePaths, desktopProfile.configurationRelativePaths)
         XCTAssertEqual(desktopProfile.localAppBundleIdentifiers, ["com.aliyun.lingma.ide"])
         XCTAssertEqual(extensionProfile.localAppBundleIdentifiers, ["com.aliyun.lingma.ide"])
-        XCTAssertEqual(desktopProfile.title, "Qoder CN IDE")
+        XCTAssertEqual(desktopProfile.title, "Qoder CN")
+        XCTAssertEqual(desktopProfile.events.first { $0.name == "PreToolUse" }?.timeout, 86_400)
+        XCTAssertEqual(desktopProfile.events.first { $0.name == "PermissionRequest" }?.timeout, 86_400)
         XCTAssertEqual(
             desktopProfile.bridgeExtraArguments,
             [
                 "--client-kind", "qoder-cn",
-                "--client-name", "Qoder CN IDE",
-                "--client-originator", "Qoder CN IDE"
+                "--client-name", "Qoder CN",
+                "--client-originator", "Qoder CN"
             ]
         )
-        XCTAssertEqual(runtimeProfile.displayName, "Qoder CN IDE")
-        XCTAssertEqual(extensionProfile.title, "Qoder CN IDE")
+        XCTAssertEqual(runtimeProfile.displayName, "Qoder CN")
+        XCTAssertEqual(extensionProfile.title, "Qoder CN")
         XCTAssertEqual(extensionProfile.uriScheme, "qoder-cn")
         XCTAssertEqual(extensionProfile.extensionRootRelativePaths, [".qoder-cn/extensions"])
         XCTAssertEqual(
