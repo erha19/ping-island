@@ -421,6 +421,7 @@ final class AppSettingsStore: ObservableObject {
         static let hideInFullscreen = "hideInFullscreen"
         static let autoHideWhenIdle = "autoHideWhenIdle"
         static let autoCollapseOnLeave = "autoCollapseOnLeave"
+        static let coexistWithOtherNotchApps = "coexistWithOtherNotchApps"
         static let smartSuppression = "smartSuppression"
         static let suppressAutoOpenWhileUserActive = "suppressAutoOpenWhileUserActive"
         static let autoOpenCompletionPanel = "autoOpenCompletionPanel"
@@ -738,6 +739,14 @@ final class AppSettingsStore: ObservableObject {
             guard !isBootstrapping else { return }
             defaults.set(autoCollapseOnLeave, forKey: Keys.autoCollapseOnLeave)
             recordTelemetrySettingChange(key: Keys.autoCollapseOnLeave, value: autoCollapseOnLeave.description)
+        }
+    }
+
+    @Published var coexistWithOtherNotchApps: Bool {
+        didSet {
+            guard !isBootstrapping else { return }
+            defaults.set(coexistWithOtherNotchApps, forKey: Keys.coexistWithOtherNotchApps)
+            recordTelemetrySettingChange(key: Keys.coexistWithOtherNotchApps, value: coexistWithOtherNotchApps.description)
         }
     }
 
@@ -1549,6 +1558,12 @@ final class AppSettingsStore: ObservableObject {
             exists: persistedKeys.contains(Keys.autoCollapseOnLeave),
             default: true
         ))
+        _coexistWithOtherNotchApps = Published(initialValue: Self.boolValue(
+            from: defaults,
+            key: Keys.coexistWithOtherNotchApps,
+            exists: persistedKeys.contains(Keys.coexistWithOtherNotchApps),
+            default: false
+        ))
         _smartSuppression = Published(initialValue: Self.boolValue(
             from: defaults,
             key: Keys.smartSuppression,
@@ -1845,6 +1860,11 @@ enum AppSettings {
     static var autoCollapseOnLeave: Bool {
         get { shared.autoCollapseOnLeave }
         set { shared.autoCollapseOnLeave = newValue }
+    }
+
+    static var coexistWithOtherNotchApps: Bool {
+        get { shared.coexistWithOtherNotchApps }
+        set { shared.coexistWithOtherNotchApps = newValue }
     }
 
     static var smartSuppression: Bool {
