@@ -1202,7 +1202,7 @@ struct HookInstaller {
         }
     }
 
-    private static func setInternalHookEnabled(_ enabled: Bool, for profile: ManagedHookClientProfile, customConfigURL: URL? = nil) {
+    static func setInternalHookEnabled(_ enabled: Bool, for profile: ManagedHookClientProfile, customConfigURL: URL? = nil) {
         guard let entryName = profile.activationEntryName else {
             return
         }
@@ -1213,6 +1213,7 @@ struct HookInstaller {
         }
 
         let existingData = try? Data(contentsOf: url)
+        guard enabled || existingData != nil else { return }
         let data = updatedInternalHookConfigurationData(
             existingData: existingData,
             entryName: entryName,
@@ -1221,7 +1222,7 @@ struct HookInstaller {
         writeData(data, to: url)
     }
 
-    private static func setManagedPluginEnabled(
+    static func setManagedPluginEnabled(
         _ enabled: Bool,
         for profile: ManagedHookClientProfile,
         customConfigURL: URL? = nil,
@@ -1239,6 +1240,7 @@ struct HookInstaller {
         let targetURLs = enabled ? [urls[0]] : urls
         for url in targetURLs {
             let existingData = try? Data(contentsOf: url)
+            guard enabled || existingData != nil else { continue }
             let data = updatedConfigurationData(
                 existingData: existingData,
                 profile: profile,
